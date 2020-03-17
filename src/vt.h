@@ -118,6 +118,8 @@ typedef struct VtLine_ {
     /* Can be merged into previous line */
     bool rejoinable;
 
+    bool was_reflown;
+
     Vector_VtRune data;
 
 } VtLine;

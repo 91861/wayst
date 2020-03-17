@@ -1175,6 +1175,8 @@ Vt_reflow_expand(Vt* self, uint32_t x)
 {
     size_t bottom_bound = self->active_line;
 
+    int removals = 0;
+
     while (bottom_bound > 0 && self->lines.buf[bottom_bound].rejoinable) {
         --bottom_bound;
     }
@@ -1184,37 +1186,51 @@ Vt_reflow_expand(Vt* self, uint32_t x)
         if (self->lines.buf[i].data.size < x && self->lines.buf[i].reflowable) {
             size_t chars_to_move = x - self->lines.buf[i].data.size;
 
-            if (i + 1 < bottom_bound && self->lines.buf[i + 1].rejoinable) {
+            if (i +1 < bottom_bound && self->lines.buf[i +1].rejoinable) {
                 chars_to_move = MIN(chars_to_move,
-                                    self->lines.buf[i + 1].data.size);
+                                    self->lines.buf[i +1].data.size);
 
                 Vector_pushv_VtRune(&self->lines.buf[i].data,
-                                    self->lines.buf[i + 1].data.buf,
+                                    self->lines.buf[i +1].data.buf,
                                     chars_to_move);
 
-                Vector_remove_at_VtRune(&self->lines.buf[i + 1].data,
+                Vector_remove_at_VtRune(&self->lines.buf[i +1].data,
                                         0, chars_to_move);
                 
                 self->lines.buf[i].damaged = true;
                 Vt_destroy_line_proxy(self->lines.buf[i].proxy.data);
 
-                self->lines.buf[i + 1].damaged = true;
-                Vt_destroy_line_proxy(self->lines.buf[i + 1].proxy.data);
+                self->lines.buf[i +1].damaged = true;
+                Vt_destroy_line_proxy(self->lines.buf[i +1].proxy.data);
 
-                if (!self->lines.buf[i + 1].data.size) {
-                    Vector_remove_at_VtLine(&self->lines, i + 1, 1);
+                if (!self->lines.buf[i +1].data.size) {
+                    self->lines.buf[i].was_reflown = false;
+                    Vector_remove_at_VtLine(&self->lines, i +1, 1);
                     --self->active_line;
                     --bottom_bound;
+                    ++removals;
                 }
             }
         }
     }
+
+
+    int underflow =  -((int64_t) self->lines.size - self->ws.ws_row);
+
+
+    if (underflow > 0) {
+        for (int i = 0; i < (int) MIN(underflow, removals); ++i)
+            Vector_push_VtLine(&self->lines, VtLine_new());
+    }
+    
 }
 
 
 static void
 Vt_reflow_shrink(Vt* self, uint32_t x)
 {
+    size_t insertions_made = 0;
+
     size_t bottom_bound = self->active_line;
 
     while (bottom_bound > 0 && self->lines.buf[bottom_bound].rejoinable) {
@@ -1226,30 +1242,45 @@ Vt_reflow_shrink(Vt* self, uint32_t x)
             size_t chars_to_move = self->lines.buf[i].data.size - x;
 
             // line below is a reflow already
-            if (i + 1 < bottom_bound && self->lines.buf[i + 1].rejoinable) {
+            if (i +1 < bottom_bound && self->lines.buf[i +1].rejoinable) {
                 for (size_t ii = 0; ii < chars_to_move; ++ii) {
-                    Vector_insert_VtRune(&self->lines.buf[i + 1].data,
-                                        self->lines.buf[i + 1].data.buf,
+                    Vector_insert_VtRune(&self->lines.buf[i +1].data,
+                                        self->lines.buf[i +1].data.buf,
                                         *(self->lines.buf[i].data.buf + x + ii));
                 }
 
-                self->lines.buf[i + 1].damaged = true;
-                Vt_destroy_line_proxy(self->lines.buf[i + 1].proxy.data);
+                self->lines.buf[i +1].damaged = true;
+                Vt_destroy_line_proxy(self->lines.buf[i +1].proxy.data);
                 
             } else if (i < bottom_bound) {
+                ++insertions_made;
+                
                 Vector_insert_VtLine(&self->lines,
-                                     (self->lines.buf) + (i + 1),
+                                     (self->lines.buf) + (i +1),
                                      VtLine_new());
                 ++self->active_line;
                 ++bottom_bound;
 
-                Vector_pushv_VtRune(&self->lines.buf[i + 1].data,
+                Vector_pushv_VtRune(&self->lines.buf[i +1].data,
                                     self->lines.buf[i].data.buf + x,
                                     chars_to_move);
 
-                self->lines.buf[i + 1].rejoinable = true;
+                self->lines.buf[i].was_reflown = true;
+                self->lines.buf[i +1].rejoinable = true;
             }
         }
+    }
+
+
+    if (self->lines.size -1 != self->active_line) {
+
+        size_t overflow = self->lines.size > self->ws.ws_row ? self->lines.size - self->ws.ws_row : 0;
+
+        size_t whitespace_below = self->lines.size -1 - self->active_line;
+        
+        Vector_pop_n_VtLine(&self->lines, MIN(overflow,
+                                              MIN(whitespace_below,
+                                                  insertions_made)));
     }
 }
 
@@ -1260,13 +1291,20 @@ static void
 Vt_trim_columns(Vt* self)
 {
     for (size_t i = 0; i < self->lines.size; ++i) {
-        if (self->lines.buf[i].data.size > (size_t) self->ws.ws_col) {
+        if (self->lines.buf[i].data.size > (size_t) self->ws.ws_col)
+        {
+            self->lines.buf[i].damaged = true;
+            Vt_destroy_line_proxy(self->lines.buf[i].proxy.data);
 
             size_t blanks = 0;
 
             size_t s = self->lines.buf[i].data.size;
             Vector_pop_n_VtRune(&self->lines.buf[i].data, s - self->ws.ws_col);
 
+
+            if (self->lines.buf[i].was_reflown)
+                continue;
+            
             s = self->lines.buf[i].data.size;
             
             for (blanks = 0; blanks < s; ++blanks) {
@@ -1279,10 +1317,6 @@ Vt_trim_columns(Vt* self)
             }
 
             Vector_pop_n_VtRune(&self->lines.buf[i].data, blanks);
-            
-
-            self->lines.buf[i].damaged = true;
-            Vt_destroy_line_proxy(self->lines.buf[i].proxy.data);
         }
     }
 }

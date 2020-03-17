@@ -1,4 +1,12 @@
+
+
+
+<p align="center">
+  <img src=".github/waystScrot.png" alt="screenshot" />
+</p>
+
 # About
+
 Simple terminal emulator for Wayland and X11 with OpenGL rendering and minimal dependencies.
 
 **Warning:** This project is work in progress, expect bugs and missing features!

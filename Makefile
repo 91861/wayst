@@ -55,6 +55,9 @@ all: $(OBJ)
 	$(CC) $(OBJ) $(LDLIBS) -o $(TGT_DIR)/$(EXEC) $(LDFLAGS) $(INCLUDES) $(CCWNO)
 
 $(BLD_DIR)/%.o: $(SRC_DIR)/%.c
+	@mkdir -p $(BLD_DIR)
+	@mkdir -p $(BLD_DIR)/wcwidth
+	@mkdir -p $(BLD_DIR)/wl_exts
 	$(CC) -c $< $(CFLAGS) $(CCWNO) $(INCLUDES) -o $@
 
 run:
