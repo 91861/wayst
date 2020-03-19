@@ -429,7 +429,7 @@ Cache_get_glyph(Cache* self, FT_Face face, Rune code)
     
     Vector_push_GlyphUnitCache(block, (GlyphUnitCache) {
         .code = code,
-        .left = (float) g->bitmap_left * glyph_width,
+        .left = (float) g->bitmap_left,
         .top  = (float) g->bitmap_top,
         .tex  = tex,
     });
@@ -1180,6 +1180,16 @@ gfx_rasterize_line(const Vt* const vt,
 
                             }// end if there are atlas chars to draw
 
+
+                            // if font is already bound change it's blend color
+                            // only once per block
+                            if (bound_resources == BOUND_RESOURCES_FONT) {
+                                glUniform3f(font_shader.uniforms[2].location,
+                                            ColorRGBA_get_float(bg_color, 0),
+                                            ColorRGBA_get_float(bg_color, 1),
+                                            ColorRGBA_get_float(bg_color, 2));
+                            }
+
                             for (const VtRune* z = r_begin; z != r; ++z) {
                                 if (unlikely(z->code > ATLAS_RENDERABLE_END)) {
                                     size_t column = z - vt_line->data.buf;
@@ -1206,7 +1216,7 @@ gfx_rasterize_line(const Vt* const vt,
                                         continue;
 
                                     float h = scaley * g->tex.h;
-                                    float w = scalex * g->tex.w;
+                                    float w = scalex * g->tex.w; 
                                     float t = scaley * g->top;
                                     float l = scalex * g->left;
 
