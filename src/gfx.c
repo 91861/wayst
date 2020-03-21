@@ -467,8 +467,6 @@ gl_set_size(uint32_t w, uint32_t h)
     pen_begin_pixels = (float)(height /64 /1.75)
         + (float) ((hber +184) /2 /64);
 
-    glPointSize((float) face->underline_thickness /64);
-    
     static uint32_t gw = 0;
     if (!gw) {
         gw = face->glyph->advance.x;
@@ -1180,16 +1178,6 @@ gfx_rasterize_line(const Vt* const vt,
 
                             }// end if there are atlas chars to draw
 
-
-                            // if font is already bound change it's blend color
-                            // only once per block
-                            if (bound_resources == BOUND_RESOURCES_FONT) {
-                                glUniform3f(font_shader.uniforms[2].location,
-                                            ColorRGBA_get_float(bg_color, 0),
-                                            ColorRGBA_get_float(bg_color, 1),
-                                            ColorRGBA_get_float(bg_color, 2));
-                            }
-
                             for (const VtRune* z = r_begin; z != r; ++z) {
                                 if (unlikely(z->code > ATLAS_RENDERABLE_END)) {
                                     size_t column = z - vt_line->data.buf;
@@ -1259,11 +1247,6 @@ gfx_rasterize_line(const Vt* const vt,
                                     if (bound_resources != BOUND_RESOURCES_FONT) {
                                         glUseProgram(font_shader.id);
 
-                                        glUniform3f(font_shader.uniforms[2].location,
-                                                    ColorRGBA_get_float(bg_color, 0),
-                                                    ColorRGBA_get_float(bg_color, 1),
-                                                    ColorRGBA_get_float(bg_color, 2));
-
                                         bound_resources = BOUND_RESOURCES_FONT;
                                     }
 
@@ -1271,6 +1254,11 @@ gfx_rasterize_line(const Vt* const vt,
                                                 ColorRGB_get_float(fg_color, 0),
                                                 ColorRGB_get_float(fg_color, 1),
                                                 ColorRGB_get_float(fg_color, 2));
+
+                                    glUniform3f(font_shader.uniforms[2].location,
+                                                ColorRGBA_get_float(bg_color, 0),
+                                                ColorRGBA_get_float(bg_color, 1),
+                                                ColorRGBA_get_float(bg_color, 2));
 
                                     glBindBuffer(GL_ARRAY_BUFFER, flex_vbo.vbo);
 
@@ -1341,29 +1329,26 @@ gfx_rasterize_line(const Vt* const vt,
             z->doubleunderline != drawing[1] ||
             z->strikethrough   != drawing[2] ||
             z->overline        != drawing[3] ||
-            z->curlyunderline  != drawing[4])
+            z->curlyunderline  != drawing[4] )
         {
-            if (z == vt_line->data.buf + vt_line->data.size) {
+            if (z == vt_line->data.buf + vt_line->data.size ) {
                 for (int_fast8_t tmp = 0; tmp < 5; tmp++) {
-                    end[tmp] = -1.0f + column * scalex *
-                        glyph_width_pixels;
+                    end[tmp] = -1.0f + (float) column * scalex *
+                        (float) glyph_width_pixels;
                 }
             } else {
-                #define SET_BOUNDS(what, index)                      \
-                    if (what != drawing[index]) {                    \
-                        if (what)                                    \
-                            begin[index] = -1.0f + column * scalex * \
-                                glyph_width_pixels;                  \
-                        else                                         \
-                            end[index] = -1.0f + column * scalex *   \
-                                glyph_width_pixels;                  \
+
+                #define SET_BOUNDS_END(what, index)                          \
+                    if (drawing[index]) {                                \
+                        end[index] = -1.0f + (float) column * scalex *   \
+                            (float) glyph_width_pixels;                  \
                     }
 
-                SET_BOUNDS(z->underlined,      0);
-                SET_BOUNDS(z->doubleunderline, 1);
-                SET_BOUNDS(z->strikethrough,   2);
-                SET_BOUNDS(z->overline,        3);
-                SET_BOUNDS(z->curlyunderline,  4);
+                SET_BOUNDS_END(z->underlined,      0);
+                SET_BOUNDS_END(z->doubleunderline, 1);
+                SET_BOUNDS_END(z->strikethrough,   2);
+                SET_BOUNDS_END(z->overline,        3);
+                SET_BOUNDS_END(z->curlyunderline,  4);
             }
 
             vec_vertex_buffer.size = 0;
@@ -1402,18 +1387,34 @@ gfx_rasterize_line(const Vt* const vt,
 
             if (drawing[4]) {
                 float cw = glyph_width_pixels * scalex;
-                for (float i = begin[4]; i < end[4]; i += cw) {
+
+                int n_cells = round((end[4] - begin[4]) / cw);
+                for (int i = 0; i < n_cells; ++i) {
+
                     Vector_push_vertex_t(&vec_vertex_buffer,
-                                     (vertex_t) { i,
-                                                 1.0f - 2 * scaley });
+                                     (vertex_t) { begin[4] + cw * i,
+                                                 1.0f - 2.0f * scaley });
                     Vector_push_vertex_t(&vec_vertex_buffer,
-                                     (vertex_t) { i + cw / 2.0f,
-                                                 1.0f - 2 * scaley });
+                                     (vertex_t) { begin[4] + cw * i + cw / 4.0f,
+                                                 1.0f - 2.0f * scaley });
                     Vector_push_vertex_t(&vec_vertex_buffer,
-                                     (vertex_t) { i + cw / 2.0f,
+                                     (vertex_t) { begin[4] + cw * i + cw / 4.0f,
                                                  1.0f - scaley });
                     Vector_push_vertex_t(&vec_vertex_buffer,
-                                     (vertex_t) { i + cw,
+                                     (vertex_t) { begin[4] + cw * i + cw * 0.5f,
+                                                 1.0f - scaley });
+
+                    Vector_push_vertex_t(&vec_vertex_buffer,
+                                     (vertex_t) { begin[4] + cw * i + cw * 0.5f,
+                                                 1.0f - 2.0f * scaley });
+                    Vector_push_vertex_t(&vec_vertex_buffer,
+                                     (vertex_t) { begin[4] + cw * i + cw / 4.0f * 3.0f,
+                                                 1.0f - 2.0f * scaley });
+                    Vector_push_vertex_t(&vec_vertex_buffer,
+                                     (vertex_t) { begin[4] + cw * i + cw / 4.0f * 3.0f,
+                                                 1.0f - scaley });
+                    Vector_push_vertex_t(&vec_vertex_buffer,
+                                     (vertex_t) { begin[4] + cw * (i +1),
                                                  1.0f - scaley });
                 }
             }
@@ -1449,6 +1450,18 @@ gfx_rasterize_line(const Vt* const vt,
                 
                 glDrawArrays(GL_LINES, 0, vec_vertex_buffer.size);
             }
+
+            #define SET_BOUNDS_BEGIN(what, index)                          \
+                if (what) {                                          \
+                    begin[index] = -1.0f + (float) column * scalex * \
+                        (float) glyph_width_pixels;                  \
+                }
+
+            SET_BOUNDS_BEGIN(z->underlined,      0);
+            SET_BOUNDS_BEGIN(z->doubleunderline, 1);
+            SET_BOUNDS_BEGIN(z->strikethrough,   2);
+            SET_BOUNDS_BEGIN(z->overline,        3);
+            SET_BOUNDS_BEGIN(z->curlyunderline,  4);
 
 
             if (z != vt_line->data.buf + vt_line->data.size) {
