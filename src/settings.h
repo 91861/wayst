@@ -95,6 +95,8 @@ typedef struct
     bool scroll_on_key;
     uint8_t scroll_discrete_lines;
 
+    bool allow_multiple_underlines;
+
 } Settings;
 
 

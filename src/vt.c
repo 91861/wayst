@@ -1985,6 +1985,13 @@ Vt_handle_simple_prop_cmd(Vt* self, char* command)
 {
     int cmd = *command ? strtol(command, NULL, 10) : 0;
 
+    #define MAYBE_DISABLE_ALL_UNDERLINES                     \
+        if (!settings.allow_multiple_underlines) {           \
+            self->parser.char_state.underlined = false;      \
+            self->parser.char_state.doubleunderline = false; \
+            self->parser.char_state.curlyunderline = false;  \
+        }
+
     switch (cmd) {
 
         /* Set property */
@@ -2005,6 +2012,7 @@ Vt_handle_simple_prop_cmd(Vt* self, char* command)
             break;
 
         case 4:
+            MAYBE_DISABLE_ALL_UNDERLINES
             self->parser.char_state.underlined = true;
             break;
 
@@ -2035,6 +2043,7 @@ Vt_handle_simple_prop_cmd(Vt* self, char* command)
             break;
 
         case 21:
+            MAYBE_DISABLE_ALL_UNDERLINES
             self->parser.char_state.doubleunderline = true;
             break;
 
@@ -2222,6 +2231,12 @@ Vt_handle_prop_seq(Vt* self, Vector_char seq)
 
                 // enable this only on "4:3" not "4;3"
                 if (!strcmp(args[1]->buf, ":3")) {
+
+                    if (!settings.allow_multiple_underlines) {
+                        self->parser.char_state.underlined = false;
+                        self->parser.char_state.doubleunderline = false;
+                    }
+                    
                     self->parser.char_state.curlyunderline = true;
                 } else {
                     Vt_handle_simple_prop_cmd(self, args[0]->buf +1);
@@ -2522,7 +2537,17 @@ __attribute__((always_inline))
 static inline void
 Vt_delete_chars(Vt* self, size_t n)
 {
+
+    printf("trimby %zu (%zu)\n", n, self->active_line);
+    printf("char count: %zu\n", self->lines.buf[self->active_line].data.size);
+    
     /* Trim if line is longer than screen area */
+    if (self->lines.buf[self->active_line].data.size > self->ws.ws_col) {
+        Vector_pop_n_VtRune(&self->lines.buf[self->active_line].data,
+                            self->lines.buf[self->active_line].data.size
+                            - self->ws.ws_col);
+    }
+    
     Vector_remove_at_VtRune(
         &self->lines.buf[self->active_line].data,
         self->cursor_pos,
@@ -2530,6 +2555,8 @@ Vt_delete_chars(Vt* self, size_t n)
             self->lines.buf[self->active_line].data.size - self->cursor_pos :
             self->lines.buf[self->active_line].data.size,
             n));
+
+    printf("trim 1 char count: %zu\n", self->lines.buf[self->active_line].data.size);
 
     /* Fill line to the cursor position with spaces with original propreties
      * before scolling so we get the expected result, when we... */
@@ -2570,13 +2597,21 @@ Vt_delete_chars(Vt* self, size_t n)
     }
 
     /* Trim to screen size again */
-    Vector_remove_at_VtRune(
-        &self->lines.buf[self->active_line].data,
-        self->cursor_pos,
-        MIN(self->lines.buf[self->active_line].data.size == self->cursor_pos ?
-            self->lines.buf[self->active_line].data.size - self->cursor_pos :
-            self->lines.buf[self->active_line].data.size,
-            n));
+    if (self->lines.buf[self->active_line].data.size > self->ws.ws_col) {
+        Vector_pop_n_VtRune(&self->lines.buf[self->active_line].data,
+                            self->lines.buf[self->active_line].data.size
+                            - self->ws.ws_col);
+    }
+
+
+
+    /* Vector_remove_at_VtRune( */
+    /*     &self->lines.buf[self->active_line].data, */
+    /*     self->cursor_pos, */
+    /*     MIN(self->lines.buf[self->active_line].data.size == self->cursor_pos ? */
+    /*         self->lines.buf[self->active_line].data.size - self->cursor_pos : */
+    /*         self->lines.buf[self->active_line].data.size, */
+    /*         n)); */
 
 
     self->lines.buf[self->active_line].damaged = true;

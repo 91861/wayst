@@ -494,6 +494,8 @@ settings_make_default()
         .scroll_on_output = false,
         .scroll_on_key = true,
         .scroll_discrete_lines = 3,
+
+        .allow_multiple_underlines = false,
     };
 }
 
