@@ -935,6 +935,8 @@ Vt_new(uint32_t cols, uint32_t rows)
 
         setenv("COLORTERM", "truecolor", 1);
 
+        setenv("VTE_VERSION", "5602", 1);
+
         setenv("TERM", settings.term, 1);
 
         if (execvp(settings.shell, (char* const*) settings.shell_argv)) {

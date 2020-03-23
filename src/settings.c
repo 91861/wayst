@@ -298,25 +298,35 @@ Settings
 settings;
 
 
-/** get default colorscheme  */
-static Colorscheme
-Colorscheme_default(int idx)
+/** set default colorscheme  */
+static void
+settings_colorscheme_default(int idx)
 {
     if (idx >= 8)
         idx = 0;
 
-    Colorscheme c;
-
-    for (uint32_t i = 0; i < 16; ++i)
-        c.color[i] = ColorRGB_from_hex(colors_default[idx][i], NULL);
+    for (uint32_t i = 0; i < 16; ++i) {
+        if (!(settings._explicit_colors_set &&
+              settings._explicit_colors_set[i+2]))
+        {
+            settings.colorscheme.color[i] =
+                ColorRGB_from_hex(colors_default[idx][i], NULL);
+        }
+    }
 
     if (colors_default[idx][16])
-        settings.bg = ColorGRBA_from_hex(colors_default[idx][16], NULL);
+        if (!(settings._explicit_colors_set &&
+              settings._explicit_colors_set[0]))
+        {
+            settings.bg = ColorGRBA_from_hex(colors_default[idx][16], NULL);
+        }
 
     if (colors_default[idx][17])
-        settings.fg = ColorRGB_from_hex(colors_default[idx][17], NULL);
-
-    return c;
+        if (!(settings._explicit_colors_set &&
+              settings._explicit_colors_set[1]))
+        {
+            settings.fg = ColorRGB_from_hex(colors_default[idx][17], NULL);
+        }
 }
 
 
@@ -485,6 +495,7 @@ settings_make_default()
         .rows = 24,
 
         .colorscheme_preset = 0,
+        ._explicit_colors_set = calloc(1, 21),
 
         .text_blink_interval = 750,
 
@@ -504,8 +515,10 @@ static void
 settings_complete_defaults()
 {
     setlocale(LC_ALL, settings.locale ? settings.locale : "");
-    settings.colorscheme =
-        Colorscheme_default(settings.colorscheme_preset);
+    settings_colorscheme_default(settings.colorscheme_preset);
+
+    free(settings._explicit_colors_set);
+    settings._explicit_colors_set = NULL;
 
     find_font();
 }
@@ -551,6 +564,7 @@ print_help(char* const* argv)
 
 static void
 handle_option(const char opt,
+              const int array_index,
               const char* value,
               const int argc,
               char* const* argv)
@@ -662,6 +676,18 @@ handle_option(const char opt,
     case '4':
         settings.fghl = ColorRGB_from_hex(value, NULL);
         break;
+
+    case '~': {
+        bool failed = false;
+        ColorRGB parsed = ColorRGB_from_hex(value, &failed);
+        if (!failed) {
+            settings.colorscheme.color[array_index - 12] = parsed;
+            if (settings._explicit_colors_set)
+                settings._explicit_colors_set[array_index -12 +2] = true;
+        } else
+            WRN("Failed to parse \"%s\" as color", value);
+    }
+        break;
     }
 }
 
@@ -690,8 +716,9 @@ settings_get_opts(const int argc,
                 settings.skip_config = true;
             else if (o == 'i')
                 settings.config_path = strdup(optarg);
-        } else
-            handle_option(o, optarg, argc, argv);
+        } else {
+            handle_option(o, opid, optarg, argc, argv);
+        }
     }
 
     /* get program name and args for it */
@@ -735,8 +762,16 @@ handle_config_option(const char* key,
         for (struct option* opt = long_options; opt->name; ++opt)
             if (!strcmp(key, opt->name))
                 if (opt->has_arg == required_argument ||
-                        !strcasecmp(val, "true"))
-                    handle_option(opt->val, val, argc, argv);
+                    !strcasecmp(val, "true"))
+                {
+                    int arrayindex = 0;
+                    if (streq_wildcard(key, "color-*")) {
+                        int parsed = strtol(key +6, NULL, 10);
+                        if (parsed <= 16)
+                            arrayindex = parsed +12;
+                    }
+                    handle_option(opt->val, arrayindex, val, argc, argv);
+                }
 }
 
 

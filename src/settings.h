@@ -84,6 +84,7 @@ typedef struct
 
     int colorscheme_preset;
     Colorscheme colorscheme;
+    bool* _explicit_colors_set;
 
     int text_blink_interval;
 
