@@ -1301,7 +1301,7 @@ gfx_rasterize_line(const Vt* const vt,
                             // Draw noramal characters
                             if (vec_glyph_buffer->size) {
                                 if (bound_resources != BOUND_RESOURCES_FONT) {
-                                    glUseProgram(image_shader.id);
+                                    glUseProgram(font_shader.id);
                                     bound_resources = BOUND_RESOURCES_FONT;
                                 }
 
