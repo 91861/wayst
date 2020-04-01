@@ -51,6 +51,7 @@ extern PFNGLBINDFRAMEBUFFERPROC glBindFramebuffer;
 extern PFNGLBINDRENDERBUFFERPROC glBindRenderbuffer;
 extern PFNGLGENRENDERBUFFERSPROC glGenRenderbuffers;
 extern PFNGLGENFRAMEBUFFERSPROC glGenFramebuffers;
+extern PFNGLGENERATEMIPMAPPROC glGenerateMipmap;
 #ifdef DEBUG
 extern PFNGLDEBUGMESSAGECALLBACKPROC glDebugMessageCallback;
 #endif

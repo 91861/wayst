@@ -240,7 +240,7 @@ WindowWl_clipboard_get(struct WindowBase* self)
         close(fds[0]);
 
     } else {
-        LOG("rejected");
+        LOG("rejected wl_clipboard offer");
     }
 }
 
@@ -1194,6 +1194,7 @@ WindowWl_new(uint32_t w, uint32_t h)
 
     win->w = w;
     win->h = h;
+    FLAG_SET(win->state_flags, WINDOW_IN_FOCUS);
 
     win->subclass_interface = &window_interface_wayland;
 
@@ -1436,7 +1437,7 @@ WindowWl_repeat_check(struct WindowBase* self)
     {
         globalWl->repeat_point = TimePoint_ms_from_now(
             globalWl->kbd_repeat_rate > self->repeat_count / 2 ?
-            globalWl->kbd_repeat_rate - self->repeat_count / 2 : 1);
+            globalWl->kbd_repeat_rate - self->repeat_count / 2 : 2);
         self->repeat_count = MIN(self->repeat_count +1, INT32_MAX -1 );
 
         if (self->key_handler)

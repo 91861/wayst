@@ -43,6 +43,7 @@ PFNGLBINDFRAMEBUFFERPROC glBindFramebuffer;
 PFNGLBINDRENDERBUFFERPROC glBindRenderbuffer;
 PFNGLGENRENDERBUFFERSPROC glGenRenderbuffers;
 PFNGLGENFRAMEBUFFERSPROC glGenFramebuffers;
+PFNGLGENERATEMIPMAPPROC glGenerateMipmap;
 #ifdef DEBUG
 PFNGLDEBUGMESSAGECALLBACKPROC glDebugMessageCallback;
 #endif
@@ -92,6 +93,7 @@ gl_load_exts()
     glBindRenderbuffer        = gl_load_ext("glBindRenderbuffer");
     glGenRenderbuffers        = gl_load_ext("glGenRenderbuffers");
     glGenFramebuffers         = gl_load_ext("glGenFramebuffers");
+    glGenerateMipmap          = gl_load_ext("glGenerateMipmap");
     #ifdef DEBUG
     glDebugMessageCallback    = gl_load_ext("glDebugMessageCallback");
     #endif

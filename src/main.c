@@ -107,8 +107,9 @@ main(int argc, char** argv)
     while (!Window_closed(win) && !terminal.is_done) {
         Window_events(win);
 
-        if (Vt_wait(&terminal) || Vt_read(&terminal))
-            continue;
+        while (Vt_wait(&terminal) || Vt_read(&terminal))
+            if (terminal.is_done)
+                break;
 
         Pair_uint32_t newres = Window_size(win);
         if (newres.first != res.first || newres.second != res.second) {

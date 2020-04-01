@@ -368,6 +368,8 @@ find_font()
     FcObjectSet* os = FcObjectSetBuild(FC_FAMILY, FC_STYLE, FC_FILE, NULL);
     FcFontSet* fs = FcFontList(cfg, pat, os);
 
+    char* regular_alternative = NULL;
+
     for (int_fast32_t i = 0; fs && i < fs->nfont; ++i) {
         FcPattern* font = fs->fonts[i];
         FcChar8 *file, *style;
@@ -375,14 +377,29 @@ find_font()
         if (FcPatternGetString(font, FC_FILE, 0, &file) == FcResultMatch &&
             FcPatternGetString(font, FC_STYLE, 0, &style) == FcResultMatch)
         {
-            if (!strcmp((const char*)style, "Regular"))
+            if (!strcmp((const char*)style, "Regular")) {
+                if (settings.font_name)
+                    free(settings.font_name);
                 settings.font_name = strdup((char*) file);
+            }
 
-            if (!strcmp((const char*)style, "Bold"))
+            if (!strcmp((const char*)style, "Text")) {
+                if (regular_alternative)
+                    free(regular_alternative);
+                regular_alternative = strdup((char*) file);
+            }
+
+            if (!strcmp((const char*)style, "Bold")) {
+                if (settings.font_name_bold)
+                    free(settings.font_name_bold);
                 settings.font_name_bold = strdup((char*) file);
+            }
 
-            if (!strcmp((const char*)style, "Italic"))
+            if (!strcmp((const char*)style, "Italic")) {
+                if (settings.font_name_italic)
+                    free(settings.font_name_italic);
                 settings.font_name_italic = strdup((char*) file);
+            }
         }
     }
 
@@ -432,9 +449,15 @@ find_font()
 
     FcConfigDestroy(cfg);
 
-
-    if (!settings.font_name)
-        ERR("Failed to locate font files for \"%s\"", settings.font);
+    if (!settings.font_name) {
+        if (regular_alternative) {
+            settings.font_name = regular_alternative;
+        } else {
+            ERR("Failed to locate font files for \"%s\"", settings.font);
+        }
+    } else if (regular_alternative) {
+        free(regular_alternative);
+    }
 
     if (!settings.font_name_bold)
         WRN("Selected font has no bold style\n");
