@@ -28,6 +28,7 @@
 #include "shaders.h"
 #include "util.h"
 #include "fterrors.h"
+#include "wcwidth/wcwidth.h"
 
 /* number of buckets in the non-ascii glyph map */
 #define NUM_BUCKETS 64
@@ -540,6 +541,10 @@ gl_init_font()
         LOG("Failed to set font size\n");
     }
 
+    if (!FT_IS_FIXED_WIDTH(face)) {
+        WRN("main font is not fixed width");
+    }
+
     if (settings.font_name_bold) {
         if (FT_New_Face(ft, settings.font_name_bold, 0, &face_bold))
             ERR("Font error, font file: %s", settings.font_name_bold);
@@ -554,6 +559,10 @@ gl_init_font()
         }
     }
 
+    if (!FT_IS_FIXED_WIDTH(face_bold)) {
+        WRN("bold font is not fixed width");
+    }
+
     if (settings.font_name_italic) {
         if (FT_New_Face(ft, settings.font_name_italic, 0, &face_italic))
             ERR("Font error, font file: %s", settings.font_name_italic);
@@ -566,6 +575,10 @@ gl_init_font()
         {
             LOG("Failed to set font size\n");
         }
+    }
+
+    if (!FT_IS_FIXED_WIDTH(face_italic)) {
+        WRN("italic font is not fixed width");
     }
 
     if (settings.font_name_fallback) {
@@ -967,9 +980,15 @@ gfx_rasterize_line(const Vt* const vt,
             !ColorRGBA_eq(Vt_selection_should_highlight_char(vt, i, line)?
                           settings.bghl : c->bg, bg_color))
         {
+            int extra_width = 0;
 
             if (!ColorRGBA_eq(bg_color, settings.bg)) {
-                buffer[4] = buffer[6] = -1.0f + i * scalex * glyph_width_pixels; // set buffer end 
+
+                if (i > 1)
+                    extra_width = wcwidth(vt_line->data.buf[i -1].code) -1;
+                
+                buffer[4] = buffer[6] = -1.0f + (i + extra_width)
+                    * scalex * glyph_width_pixels; // set buffer end 
 
                 if (bound_resources != BOUND_RESOURCES_BG) {
                     glBindBuffer(GL_ARRAY_BUFFER, line_bg_vao.vbo);
@@ -1023,7 +1042,8 @@ gfx_rasterize_line(const Vt* const vt,
                                     struct Atlas_char_info* g;
                                     int32_t atlas_offset = -1;
 
-                                    Vector_GlyphBufferData* target = vec_glyph_buffer;
+                                    Vector_GlyphBufferData* target =
+                                        vec_glyph_buffer;
                                     Atlas* source_atlas = atlas;
 
                                     switch (expect(z->state, VT_RUNE_NORMAL)) {
@@ -1040,18 +1060,22 @@ gfx_rasterize_line(const Vt* const vt,
                                     default:;
                                     }
 
-                                    atlas_offset = Atlas_select(source_atlas, z->code);
+                                    atlas_offset = Atlas_select(source_atlas,
+                                                                z->code);
 
                                     g = &source_atlas->char_info[atlas_offset];
                                     float h = (float) g->rows * scaley;
-                                    float w = (float) g->width / (lcd_filter ? 3.0f : 1.0f) * scalex;
+                                    float w = (float) g->width /
+                                        (lcd_filter ? 3.0f : 1.0f) * scalex;
                                     float t = (float) g->top * scaley;
                                     float l = (float) g->left * scalex;
 
                                     float x3 = -1.0f
-                                        + (float) column * glyph_width_pixels * scalex
+                                        + (float) column * glyph_width_pixels
+                                            * scalex
                                         + l;
-                                    float y3 = -1.0f + pen_begin_pixels * scaley -t;
+                                    float y3 = -1.0f + pen_begin_pixels *
+                                        scaley -t;
 
                                     Vector_push_GlyphBufferData(
                                         target,
@@ -1122,7 +1146,9 @@ gfx_rasterize_line(const Vt* const vt,
                                 }
 
                                 glBindTexture(GL_TEXTURE_2D, atlas->tex);
-                                glDrawArrays(GL_QUADS, 0, vec_glyph_buffer->size * 4);
+                                glDrawArrays(GL_QUADS,
+                                             0,
+                                             vec_glyph_buffer->size * 4);
 
                                 // italic
                                 if (vec_glyph_buffer_italic != vec_glyph_buffer) {
@@ -1147,7 +1173,9 @@ gfx_rasterize_line(const Vt* const vt,
                                                         vec_glyph_buffer_italic->buf);
                                     }
                                     glBindTexture(GL_TEXTURE_2D, atlas_italic->tex);
-                                    glDrawArrays(GL_QUADS, 0, vec_glyph_buffer_italic->size * 4);
+                                    glDrawArrays(GL_QUADS,
+                                                 0,
+                                                 vec_glyph_buffer_italic->size * 4);
                                 }
 
                                 //bold
@@ -1173,7 +1201,9 @@ gfx_rasterize_line(const Vt* const vt,
                                                         vec_glyph_buffer_bold->buf);
                                     }
                                     glBindTexture(GL_TEXTURE_2D, atlas_bold->tex);
-                                    glDrawArrays(GL_QUADS, 0, vec_glyph_buffer_bold->size * 4);
+                                    glDrawArrays(GL_QUADS,
+                                                 0,
+                                                 vec_glyph_buffer_bold->size * 4);
                                 }
 
                             }// end if there are atlas chars to draw
@@ -1292,7 +1322,7 @@ gfx_rasterize_line(const Vt* const vt,
                 } // END for each char
             } // END for each block with the same bg
 
-            buffer[0] = buffer[2] = -1.0f + i * scalex * glyph_width_pixels; // set background buffer start
+            buffer[0] = buffer[2] = -1.0f + (i+extra_width) * scalex * glyph_width_pixels; // set background buffer start
 
             if (i != vt_line->data.size) {
                 c_begin = c;
@@ -1451,7 +1481,7 @@ gfx_rasterize_line(const Vt* const vt,
                 glDrawArrays(GL_LINES, 0, vec_vertex_buffer.size);
             }
 
-            #define SET_BOUNDS_BEGIN(what, index)                          \
+            #define SET_BOUNDS_BEGIN(what, index)                    \
                 if (what) {                                          \
                     begin[index] = -1.0f + (float) column * scalex * \
                         (float) glyph_width_pixels;                  \
