@@ -820,6 +820,7 @@ WindowX11_destroy(struct WindowBase* self)
     XFreeColormap(globalX11->display, windowX11(self)->colormap);
 
     XDestroyIC(globalX11->ic);
+    XCloseIM(globalX11->im);
 
     free(windowX11(self)->class_hint->res_class);
     XFree(windowX11(self)->class_hint);

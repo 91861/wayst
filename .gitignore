@@ -6,3 +6,5 @@ build/*.o
 build/wcwidth/*.o
 build/wl_exts/*.o
 wayst
+TAGS
+src/TAGS

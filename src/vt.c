@@ -2539,10 +2539,6 @@ __attribute__((always_inline))
 static inline void
 Vt_delete_chars(Vt* self, size_t n)
 {
-
-    printf("trimby %zu (%zu)\n", n, self->active_line);
-    printf("char count: %zu\n", self->lines.buf[self->active_line].data.size);
-    
     /* Trim if line is longer than screen area */
     if (self->lines.buf[self->active_line].data.size > self->ws.ws_col) {
         Vector_pop_n_VtRune(&self->lines.buf[self->active_line].data,
@@ -2557,8 +2553,6 @@ Vt_delete_chars(Vt* self, size_t n)
             self->lines.buf[self->active_line].data.size - self->cursor_pos :
             self->lines.buf[self->active_line].data.size,
             n));
-
-    printf("trim 1 char count: %zu\n", self->lines.buf[self->active_line].data.size);
 
     /* Fill line to the cursor position with spaces with original propreties
      * before scolling so we get the expected result, when we... */
@@ -2604,17 +2598,6 @@ Vt_delete_chars(Vt* self, size_t n)
                             self->lines.buf[self->active_line].data.size
                             - self->ws.ws_col);
     }
-
-
-
-    /* Vector_remove_at_VtRune( */
-    /*     &self->lines.buf[self->active_line].data, */
-    /*     self->cursor_pos, */
-    /*     MIN(self->lines.buf[self->active_line].data.size == self->cursor_pos ? */
-    /*         self->lines.buf[self->active_line].data.size - self->cursor_pos : */
-    /*         self->lines.buf[self->active_line].data.size, */
-    /*         n)); */
-
 
     self->lines.buf[self->active_line].damaged = true;
     Vt_destroy_line_proxy(self->lines.buf[self->active_line].proxy.data);

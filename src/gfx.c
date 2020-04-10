@@ -113,6 +113,7 @@ DEF_VECTOR(GlyphBufferData, NULL);
 DEF_VECTOR(vertex_t, NULL);
 
 Vector_vertex_t vec_vertex_buffer;
+Vector_vertex_t vec_vertex_buffer2;
 
 Vector_GlyphBufferData _vec_glyph_buffer;
 Vector_GlyphBufferData _vec_glyph_buffer_italic;
@@ -160,6 +161,7 @@ static Shader font_shader;
 static Shader bg_shader;
 static Shader line_shader;
 static Shader image_shader;
+static Shader image_tint_shader;
 
 static ColorRGB color;
 static ColorRGBA bg_color;
@@ -178,6 +180,8 @@ static Atlas _atlas_italic;
 static Atlas* atlas;
 static Atlas* atlas_bold;
 static Atlas* atlas_italic;
+
+static Texture squiggle_texture;
 
 static bool has_blinking_text;
 static TimePoint blink_switch;
@@ -274,7 +278,7 @@ Atlas_new(FT_Face face_)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
     glTexImage2D(
-      GL_TEXTURE_2D, 0, GL_RGB, self.w, self.h, 0, GL_BGR, GL_UNSIGNED_BYTE, 0);
+      GL_TEXTURE_2D, 0, GL_RGBA, self.w, self.h, 0, GL_BGR, GL_UNSIGNED_BYTE, 0);
 
     hline = 0;
     uint32_t ox = 0, oy = 0;
@@ -430,7 +434,7 @@ Cache_get_glyph(Cache* self, FT_Face face, Rune code)
                  (tex.w = g->bitmap.width / (lcd_filter && !color ? 3 : 1)),
                  (tex.h = g->bitmap.rows),
                  0,
-                 color ? GL_BGRA : GL_RGB,
+                 color ? GL_RGBA : GL_RGB,
                  GL_UNSIGNED_BYTE,
                  g->bitmap.buffer);
 
@@ -447,6 +451,82 @@ Cache_get_glyph(Cache* self, FT_Face face, Rune code)
     });
 
     return Vector_at_GlyphUnitCache(block, block->size - 1);
+}
+
+
+// Generate a sinewave image and store it as an OpenGL texture
+__attribute__((cold))
+Texture
+create_squiggle_texture(uint32_t w, uint32_t h, uint32_t thickness)
+{
+    GLuint tex;
+    glEnable(GL_TEXTURE_2D);
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    uint8_t* fragments = calloc(w * h * 4, 1);
+
+    double pixel_size = 2.0 / h;
+    double stroke_width = thickness * pixel_size;
+    double stroke_fade = pixel_size * 2.0;
+    double distance_limit_full_alpha = stroke_width / 2.0;
+    double distance_limit_zero_alpha = stroke_width / 2.0 + stroke_fade;
+    
+    for (int_fast32_t x = 0; x < w; ++x) for (int_fast32_t y = 0; y < h; ++y) {
+        uint8_t* fragment = &fragments[(y * w + x) * 4];
+
+        #define DISTANCE(_x, _y, _x2, _y2)\
+            (sqrt(pow((_x2) - (_x), 2) + pow((_y2) - (_y), 2)))
+
+        double x_frag = (double) x / (double) w * 2.0 * M_PI;
+        double y_frag = (double) y / (double) h *
+            (2.0 + stroke_width * 2.0 + stroke_fade * 2.0)
+            - 1.0 - stroke_width - stroke_fade;
+
+        double y_curve = sin(x_frag);
+        double dx_frag = cos(x_frag); // x/xd -> in what dir is closest point
+        double y_dist = y_frag - y_curve;
+        double closest_distance = DISTANCE(x_frag, y_frag, x_frag, y_curve);
+
+        double step = dx_frag * y_dist < 0.0 ? 0.001 : -0.001;
+
+        for (double i = x_frag + step;; i += step) {
+            double i_distance = DISTANCE(x_frag, y_frag, i, sin(i));
+            if (likely(i_distance <= closest_distance)) {
+                closest_distance = i_distance;
+            } else {
+                break;
+            }
+        }
+
+        fragments[3] = 0;
+        if (closest_distance <= distance_limit_full_alpha) {
+            fragment[0] = fragment[1] = fragment[2] = fragment[3] = UINT8_MAX;
+        } else if (closest_distance < distance_limit_zero_alpha) {
+            double alpha = 1.0 - (closest_distance - distance_limit_full_alpha) /
+                (distance_limit_zero_alpha - distance_limit_full_alpha);
+
+            fragment[0] = fragment[1] = fragment[2] = UINT8_MAX;
+            fragment[3] = CLAMP(alpha * UINT8_MAX , 0, UINT8_MAX);
+        }
+    }
+
+
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, fragments);
+
+    free(fragments);
+
+    return (Texture) {
+        .id = tex,
+        .has_alpha = true,
+        .w = w,
+        .h = h
+    };
 }
 
 
@@ -666,13 +746,18 @@ gl_init_renderer()
                  ColorRGBA_get_float(settings.bg, 3));
 
     font_shader =
-      Shader_new(font_vs_src, font_fs_src, "coord", "tex", "clr", "bclr", NULL);
+      Shader_new(font_vs_src, font_fs_src,
+                 "coord", "tex", "clr", "bclr", NULL);
 
     bg_shader = Shader_new(bg_vs_src, bg_fs_src, "pos", "mv", "clr", NULL);
 
     line_shader = Shader_new(line_vs_src, line_fs_src, "pos", "clr", NULL);
 
-    image_shader = Shader_new(image_rgb_vs_src, image_rgb_fs_src, "coord", "tex", NULL);
+    image_shader = Shader_new(image_rgb_vs_src, image_rgb_fs_src,
+                              "coord", "tex", NULL);
+
+    image_tint_shader = Shader_new(image_rgb_vs_src, image_tint_rgb_fs_src,
+                                   "coord", "tex", "tint", NULL);
 
     bg_vao = VBO_new(2, 1, bg_shader.attribs);
 
@@ -680,16 +765,13 @@ gl_init_renderer()
     glBindBuffer(GL_ARRAY_BUFFER, line_bg_vao.vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(float) *4 *4, NULL, GL_STREAM_DRAW);
 
-
     font_vao = VBO_new(4, 1, font_shader.attribs);
     glBindBuffer(GL_ARRAY_BUFFER, font_vao.vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(float) *4 *4, NULL, GL_STREAM_DRAW);
 
-
     line_vao = VBO_new(2, 1, line_shader.attribs);
     glBindBuffer(GL_ARRAY_BUFFER, line_vao.vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(float) *8, NULL, GL_STREAM_DRAW);
-
 
     flex_vbo = VBO_new(4, 1, font_shader.attribs);
     glBindBuffer(GL_ARRAY_BUFFER, flex_vbo.vbo);
@@ -769,8 +851,19 @@ gl_init_renderer()
     }
 
     vec_vertex_buffer = Vector_new_vertex_t();
+    vec_vertex_buffer2 = Vector_new_vertex_t();
+
 
     gl_reset_action_timer();
+
+    float height = face->size->metrics.height +64;
+    line_height_pixels = height / 64.0;
+
+    uint32_t t_height = CLAMP(line_height_pixels /8.0 +2, 4, UINT8_MAX);
+
+    squiggle_texture = create_squiggle_texture(t_height * M_PI / 2.0,
+                                               t_height,
+                                               CLAMP(t_height / 5,1,10));
 }
 
 
@@ -952,7 +1045,6 @@ gfx_rasterize_line(const Vt* const vt,
     #define BOUND_RESOURCES_LINES 3
     #define BOUND_RESOURCES_IMAGE 4
     int_fast8_t bound_resources = BOUND_RESOURCES_NONE;
-
 
     float texture_width = vt_line->data.size * glyph_width_pixels;
     float texture_height = line_height_pixels;
@@ -1407,6 +1499,7 @@ gfx_rasterize_line(const Vt* const vt,
         if (z != vt_line->data.buf + vt_line->data.size)
              nc = z->linecolornotdefault ? z->line : z->fg;
 
+        // State has changed
         if (!ColorRGB_eq(line_color, nc) ||
             z == vt_line->data.buf + vt_line->data.size ||
             z->underlined      != drawing[0] ||
@@ -1422,10 +1515,10 @@ gfx_rasterize_line(const Vt* const vt,
                 }
             } else {
 
-                #define SET_BOUNDS_END(what, index)                          \
-                    if (drawing[index]) {                                \
-                        end[index] = -1.0f + (float) column * scalex *   \
-                            (float) glyph_width_pixels;                  \
+                #define SET_BOUNDS_END(what, index)                     \
+                    if (drawing[index]) {                               \
+                        end[index] = -1.0f + (float) column * scalex *  \
+                            (float) glyph_width_pixels;                 \
                     }
 
                 SET_BOUNDS_END(z->underlined,      0);
@@ -1435,7 +1528,8 @@ gfx_rasterize_line(const Vt* const vt,
                 SET_BOUNDS_END(z->curlyunderline,  4);
             }
 
-            vec_vertex_buffer.size = 0;
+            vec_vertex_buffer.size  = 0;
+            vec_vertex_buffer2.size = 0;
 
             if (drawing[0]) {
                 Vector_push_vertex_t(&vec_vertex_buffer,
@@ -1470,6 +1564,31 @@ gfx_rasterize_line(const Vt* const vt,
             }
 
             if (drawing[4]) {
+
+                float cw = glyph_width_pixels * scalex;
+                int n_cells = round((end[4] - begin[4]) / cw);
+                float t_y = 1.0f - squiggle_texture.h * scaley;
+
+                Vector_push_vertex_t(&vec_vertex_buffer2,
+                                     (vertex_t) { begin[4], t_y });
+                Vector_push_vertex_t(&vec_vertex_buffer2,
+                                     (vertex_t) { 0.0f, 0.0f });
+
+                Vector_push_vertex_t(&vec_vertex_buffer2,
+                                     (vertex_t) { begin[4], 1.0f });
+                Vector_push_vertex_t(&vec_vertex_buffer2,
+                                     (vertex_t) { 0.0f, 1.0f });
+
+                Vector_push_vertex_t(&vec_vertex_buffer2,
+                                     (vertex_t) { end[4], 1.0f });
+                Vector_push_vertex_t(&vec_vertex_buffer2,
+                                     (vertex_t) { 1.0f * n_cells, 1.0f });
+
+                Vector_push_vertex_t(&vec_vertex_buffer2,
+                                     (vertex_t) { end[4], t_y });
+                Vector_push_vertex_t(&vec_vertex_buffer2,
+                                     (vertex_t) { 1.0f * n_cells, 0.0f });
+            /*
                 float cw = glyph_width_pixels * scalex;
 
                 int n_cells = round((end[4] - begin[4]) / cw);
@@ -1501,6 +1620,7 @@ gfx_rasterize_line(const Vt* const vt,
                                      (vertex_t) { begin[4] + cw * (i +1),
                                                  1.0f - scaley });
                 }
+            */
             }
 
             if (vec_vertex_buffer.size) {
@@ -1531,8 +1651,41 @@ gfx_rasterize_line(const Vt* const vt,
                                     new_size,
                                     vec_vertex_buffer.buf);
                 }
-                
+
                 glDrawArrays(GL_LINES, 0, vec_vertex_buffer.size);
+            }
+
+            if (vec_vertex_buffer2.size) {
+                bound_resources = BOUND_RESOURCES_NONE;
+                Shader_use(&image_tint_shader);
+                glBindTexture(GL_TEXTURE_2D, squiggle_texture.id);
+
+                glUniform3f(font_shader.uniforms[2].location,
+                            ColorRGB_get_float(line_color, 0),
+                            ColorRGB_get_float(line_color, 1),
+                            ColorRGB_get_float(line_color, 2));
+
+                glBindBuffer(GL_ARRAY_BUFFER, flex_vbo.vbo);
+
+                glVertexAttribPointer(
+                    font_shader.attribs->location,
+                    4, GL_FLOAT, GL_FALSE, 0, 0);
+
+                size_t new_size = sizeof(vertex_t) * vec_vertex_buffer2.size; 
+                if (flex_vbo.size < new_size) {
+                    flex_vbo.size = new_size;
+                    glBufferData(GL_ARRAY_BUFFER,
+                                new_size,
+                                vec_vertex_buffer2.buf,
+                                GL_STREAM_DRAW);
+                } else {
+                    glBufferSubData(GL_ARRAY_BUFFER,
+                                    0,
+                                    new_size,
+                                    vec_vertex_buffer2.buf);
+                }
+
+                glDrawArrays(GL_QUADS, 0, vec_vertex_buffer2.size /2);
             }
 
             #define SET_BOUNDS_BEGIN(what, index)                    \
@@ -1581,6 +1734,7 @@ gfx_rasterize_line(const Vt* const vt,
     glViewport(0, 0, win_w, win_h);
 
     if (unlikely(has_blinking_chars && !is_for_blinking)) {
+        // render version with blinking chars hidden
         gfx_rasterize_line(vt, vt_line, line, true);
     }
 }
@@ -1598,6 +1752,7 @@ gfx_draw_cursor(Vt* vt)
         bool filled_block = false;
 
         vec_vertex_buffer.size = 0;
+
         switch (vt->cursor.type) {
         case CURSOR_BEAM:
             Vector_pushv_vertex_t(&vec_vertex_buffer, (vertex_t[2]) {{
