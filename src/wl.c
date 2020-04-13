@@ -547,6 +547,7 @@ keyboard_handle_key(void* data,
     case KEY_ENTER:
     case KEY_KPENTER:
     case KEY_SPACE:
+    case KEY_DELETE:
         no_consume = 1;
         break;
     case KEY_LEFTALT:

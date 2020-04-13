@@ -3242,13 +3242,14 @@ static inline const char*
 normal_keypad_response(const uint32_t key)
 {
     switch (key) {
-    case XKB_KEY_Up   : return "\e[A";
-    case XKB_KEY_Down : return "\e[B";
-    case XKB_KEY_Right: return "\e[C";
-    case XKB_KEY_Left : return "\e[D";
-    case XKB_KEY_End  : return "\e[F";
-    case XKB_KEY_Home : return "\e[H";
-    default           : return NULL;
+    case XKB_KEY_Up    : return "\e[A";
+    case XKB_KEY_Down  : return "\e[B";
+    case XKB_KEY_Right : return "\e[C";
+    case XKB_KEY_Left  : return "\e[D";
+    case XKB_KEY_End   : return "\e[F";
+    case XKB_KEY_Home  : return "\e[H";
+    case 127           : return "\e[P";
+    default            : return NULL;
     }
 }
 
@@ -3258,18 +3259,19 @@ static inline const char*
 application_keypad_response(const uint32_t key)
 {
     switch (key) {
-    case XKB_KEY_Up          : return "\eOA";
-    case XKB_KEY_Down        : return "\eOB";
-    case XKB_KEY_Right       : return "\eOC";
-    case XKB_KEY_Left        : return "\eOD";
-    case XKB_KEY_End         : return "\eOF";
-    case XKB_KEY_Home        : return "\eOH";
-    case XKB_KEY_KP_Enter    : return "\eOM";
-    case XKB_KEY_KP_Multiply : return "\eOj";
-    case XKB_KEY_KP_Add      : return "\eOk";
-    case XKB_KEY_KP_Separator: return "\eOl";
-    case XKB_KEY_KP_Subtract : return "\eOm";
-    case XKB_KEY_KP_Divide   : return "\eOo";
+    case XKB_KEY_Up          : return "\eOA\0";
+    case XKB_KEY_Down        : return "\eOB\0";
+    case XKB_KEY_Right       : return "\eOC\0";
+    case XKB_KEY_Left        : return "\eOD\0";
+    case XKB_KEY_End         : return "\eOF\0";
+    case XKB_KEY_Home        : return "\eOH\0";
+    case XKB_KEY_KP_Enter    : return "\eOM\0";
+    case XKB_KEY_KP_Multiply : return "\eOj\0";
+    case XKB_KEY_KP_Add      : return "\eOk\0";
+    case XKB_KEY_KP_Separator: return "\eOl\0";
+    case XKB_KEY_KP_Subtract : return "\eOm\0";
+    case XKB_KEY_KP_Divide   : return "\eOo\0";
+    case 127                 : return "\e[3~";
     default                  : return NULL;
     }
 }
@@ -3377,7 +3379,7 @@ Vt_maybe_handle_keypad_key(Vt* self, uint32_t key, uint32_t mods)
             normal_keypad_response(key);
 
         if (resp) {
-            memcpy(self->out_buf, resp, 4);
+            memcpy(self->out_buf, resp, 5);
             Vt_write(self);
             return true;
         }
