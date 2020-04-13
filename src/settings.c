@@ -300,10 +300,12 @@ settings;
 
 /** set default colorscheme  */
 static void
-settings_colorscheme_default(int idx)
+settings_colorscheme_default(uint8_t idx)
 {
-    if (idx >= 8)
+    if (idx >= ARRAY_SIZE(colors_default)) {
         idx = 0;
+        ASSERT_UNREACHABLE
+    }
 
     for (uint32_t i = 0; i < 16; ++i) {
         if (!(settings._explicit_colors_set &&
@@ -503,7 +505,7 @@ settings_make_default()
         .font_size = 10,
         .font_dpi = 96,
 
-        .bg =     { .r = 0,   .g = 0,   .b = 0,   .a = 240 },
+        .bg =     { .r =   0, .g =   0, .b =   0, .a = 240 },
         .bghl =   { .r =  50, .g =  50, .b =  50, .a = 240 },
         .fg =     { .r = 255, .g = 255, .b = 255 },
         .fghl =   { .r = 255, .g = 255, .b = 255 },
@@ -530,6 +532,8 @@ settings_make_default()
         .scroll_discrete_lines = 3,
 
         .allow_multiple_underlines = false,
+
+        .scrollback = 2000,
     };
 }
 

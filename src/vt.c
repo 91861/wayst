@@ -74,7 +74,7 @@ static void
 Vt_clear_left(Vt* self);
 
 static inline void
-Vt_scroll_out_all_conten(Vt* self);
+Vt_scroll_out_all_content(Vt* self);
 
 static void
 Vt_empty_line_fill_bg(Vt* self, size_t idx);
@@ -286,7 +286,7 @@ Vt_scrollbar_consume_click(Vt* self,
                 self->scrollbar.drag_position = dp - self->scrollbar.top;
             }
         } else {
-            // autside of scrollbar
+            // outside of scrollbar
             if (state && button == MOUSE_BTN_LEFT) {
                 /* jump to that position and start dragging in the middle */
                 self->scrollbar.dragging = true;
@@ -482,23 +482,38 @@ Vt_select_init_line(Vt* self, int32_t y)
 }
 
 
+__attribute__((always_inline))
 static inline void
-Vt_destroy_proxies_in_select_region(Vt* self)
+Vt_clear_proxy(Vt* self, size_t idx)
 {
-    for (size_t i = self->selection.begin_line;
-         i <= self->selection.end_line;
-         ++i)
-    {
-        if (!self->lines.buf[i].damaged) {
-            self->lines.buf[i].damaged = true;
-            Vt_destroy_line_proxy(self->lines.buf[i].proxy.data);
-        }
+    if (!self->lines.buf[idx].damaged) {
+        self->lines.buf[idx].damaged = true;
+        Vt_destroy_line_proxy(self->lines.buf[idx].proxy.data);
     }
 }
 
 
+static inline void
+Vt_clear_proxies_in_region(Vt* self, size_t begin, size_t end)
+{
+    for (size_t i = begin; i <= end; ++i)
+        Vt_clear_proxy(self, i);
+}
+
+
+__attribute__((always_inline))
+static inline void
+Vt_clear_proxies_in_select_region(Vt* self)
+{
+    Vt_clear_proxies_in_region(self,
+                               self->selection.begin_line,
+                               self->selection.end_line);
+}
+
+
 /**
- * start selection */
+ * start selection
+ */
 static void
 Vt_select_commit(Vt* self)
 {
@@ -510,7 +525,7 @@ Vt_select_commit(Vt* self)
         self->selection.begin_char_idx = self->selection.end_char_idx =
             self->selection.click_begin_char_idx;
 
-        Vt_destroy_proxies_in_select_region(self);
+        Vt_clear_proxies_in_select_region(self);
     }
 }
 
@@ -548,7 +563,7 @@ static void
 Vt_select_end(Vt* self)
 {
     self->selection.mode = SELECT_MODE_NONE;
-    Vt_destroy_proxies_in_select_region(self);
+    Vt_clear_proxies_in_select_region(self);
 }
 
 
@@ -645,56 +660,61 @@ Vt_select_consume_click(Vt* self,
 }
 
 
-static Rune
+static inline Rune
 char_sub_uk(char original)
 {
     return original == '#' ? 0xa3/* £ */ : original;
 }
 
 
-static Rune
+static inline Rune
 char_sub_gfx(char original)
 {
-    switch (original) {
-    case 'a': return 0x2592; // ▒
-    case 'b': return 0x2409; // ␉
-    case 'c': return 0x240c; // ␌
-    case 'd': return 0x240d; // ␍
-    case 'e': return 0x240a; // ␊
-    case 'f': return 0x00b0; // °
-    case 'g': return 0x00b1; // ±
-    case 'h': return 0x2424; // ␤
-    case 'i': return 0x240b; // ␋
-    case 'j': return 0x2518; // ┘
-    case 'k': return 0x2510; // ┐
-    case 'l': return 0x250c; // ┌
-    case 'm': return 0x2514; // └
-    case 'n': return 0x253c; // ┼
-    case 'o': return 0x23ba; // ⎺
-    case 'p': return 0x23bb; // ⎻
-    case 'q': return 0x2500; // ─
-    case 'r': return 0x23BC; // ⎼
-    case 's': return 0x23BD; // ⎽
-    case 't': return 0x251C; // ├
-    case 'u': return 0x2524; // ┤
-    case 'v': return 0x2534; // ┴
-    case 'w': return 0x252C; // ┬
-    case 'x': return 0x2502; // │
-    case 'y': return 0x2264; // ≤
-    case 'z': return 0x2265; // ≥
-    case '{': return 0x03C0; // π
-    case '}': return 0x00A3; // £
-    case '|': return 0x2260; // ≠
-    case '~': return 0x22C5; // ⋅
-    case '`': return 0x2666; // ♦
-    default : return original;
-    }
+    const Rune substitutes[] = {
+        0x2592,  // ▒
+        0x2409,  // ␉
+        0x240c,  // ␌
+        0x240d,  // ␍
+        0x240a,  // ␊
+        0x00b0,  // °
+        0x00b1,  // ±
+        0x2424,  // ␤
+        0x240b,  // ␋
+        0x2518,  // ┘
+        0x2510,  // ┐
+        0x250c,  // ┌
+        0x2514,  // └
+        0x253c,  // ┼
+        0x23ba,  // ⎺
+        0x23bb,  // ⎻
+        0x2500,  // ─
+        0x23BC,  // ⎼
+        0x23BD,  // ⎽
+        0x251C,  // ├
+        0x2524,  // ┤
+        0x2534,  // ┴
+        0x252C,  // ┬
+        0x2502,  // │
+        0x2264,  // ≤
+        0x2265,  // ≥
+        0x03C0,  // π
+        0x00A3,  // £
+        0x2260,  // ≠
+        0x22C5,  // ⋅
+        0x2666,  // ♦
+    };
+    
+    if (unlikely(original >= 'a' && original <= '~')) {
+        return substitutes[original - 'a'];
+    } else
+        return original;
 }
 
 
 /**
  * substitute invisible characters with readable string
  */
+__attribute__((cold))
 static char*
 control_char_get_pretty_string(const char c)
 {
@@ -718,6 +738,7 @@ control_char_get_pretty_string(const char c)
 /**
  * make pty messages more readable
  */
+__attribute__((cold))
 static char*
 pty_string_prettyfy(const char* str)
 {
@@ -1658,7 +1679,7 @@ Vt_handle_cs(Vt* self, char c)
                                 Vt_clear_above(self);
                                 Vt_erase_to_end(self);
                             } else {
-                                Vt_scroll_out_all_conten(self);
+                                Vt_scroll_out_all_content(self);
                             }
                         }
                         break;
@@ -2607,7 +2628,7 @@ Vt_delete_chars(Vt* self, size_t n)
 
 __attribute__((always_inline))
 static inline void
-Vt_scroll_out_all_conten(Vt* self)
+Vt_scroll_out_all_content(Vt* self)
 {
     size_t to_add = 0;
     for (size_t i = Vt_visual_bottom_line(self) -1;

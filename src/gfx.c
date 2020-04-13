@@ -1357,13 +1357,19 @@ gfx_rasterize_line(const Vt* const vt,
                                     }
 
                                     float x3 = -1.0f
-                                        + (double) column * glyph_width_pixels * scalex 
+                                        + (double) column *
+                                            glyph_width_pixels * scalex 
                                         + l;
-                                    float y3 = -1.0f + pen_begin_pixels * scaley -t;
+                                    float y3 = -1.0f + pen_begin_pixels *
+                                        scaley -t;
 
+                                    // Very often characters like this are used
+                                    // to draw tables and borders. Render all
+                                    // repeating characters in one call.
                                     Vector_push_GlyphBufferData(
                                         unlikely(g->is_color) ?
-                                        vec_glyph_buffer_bold : vec_glyph_buffer,
+                                        vec_glyph_buffer_bold :
+                                        vec_glyph_buffer,
                                         (GlyphBufferData) {{
                                             {
                                                 x3,
@@ -1387,77 +1393,86 @@ gfx_rasterize_line(const Vt* const vt,
                                                 1.0f
                                             }
                                         }});
-                                }
+
+
+                                    // needs to change texture on next iteration
+                                    if (z+1 != r && z->code != (z+1)->code) {
+
+                                        // Draw noramal characters
+                                        if (vec_glyph_buffer->size) {
+                                            if (bound_resources != BOUND_RESOURCES_FONT) {
+                                                glUseProgram(font_shader.id);
+                                                bound_resources = BOUND_RESOURCES_FONT;
+                                            }
+
+                                            glUniform3f(font_shader.uniforms[1].location,
+                                                        ColorRGB_get_float(fg_color, 0),
+                                                        ColorRGB_get_float(fg_color, 1),
+                                                        ColorRGB_get_float(fg_color, 2));
+
+                                            glUniform3f(font_shader.uniforms[2].location,
+                                                        ColorRGBA_get_float(bg_color, 0),
+                                                        ColorRGBA_get_float(bg_color, 1),
+                                                        ColorRGBA_get_float(bg_color, 2));
+
+                                            glBindBuffer(GL_ARRAY_BUFFER, flex_vbo.vbo);
+
+                                            glVertexAttribPointer(
+                                                font_shader.attribs->location,
+                                                4, GL_FLOAT, GL_FALSE, 0, 0);
+
+                                            size_t newsize = vec_glyph_buffer->size * sizeof(GlyphBufferData);
+                                            if (flex_vbo.size < newsize) {
+                                                flex_vbo.size = newsize;
+                                                glBufferData(GL_ARRAY_BUFFER,
+                                                            newsize,
+                                                            vec_glyph_buffer->buf,
+                                                            GL_STREAM_DRAW);
+                                            } else {
+                                                glBufferSubData(GL_ARRAY_BUFFER,
+                                                                0,
+                                                                newsize,
+                                                                vec_glyph_buffer->buf);
+                                            }
+
+                                            glDrawArrays(GL_QUADS, 0, vec_glyph_buffer->size *4);
+
+                                            vec_glyph_buffer->size = 0;
+                                        }
+
+                                        // Draw color characters
+                                        if (vec_glyph_buffer_bold->size) {
+                                            if (likely(bound_resources != BOUND_RESOURCES_IMAGE)) {
+                                                glUseProgram(image_shader.id);
+                                                bound_resources = BOUND_RESOURCES_IMAGE;
+                                            }
+
+                                            glBindBuffer(GL_ARRAY_BUFFER, flex_vbo.vbo);
+
+                                            glVertexAttribPointer(image_shader.attribs->location,
+                                                                4, GL_FLOAT, GL_FALSE, 0, 0);
+
+                                            size_t newsize = vec_glyph_buffer_bold->size * sizeof(GlyphBufferData);
+                                            if (flex_vbo.size < newsize) {
+                                                flex_vbo.size = newsize;
+                                                glBufferData(GL_ARRAY_BUFFER,
+                                                            newsize,
+                                                            vec_glyph_buffer_bold->buf,
+                                                            GL_STREAM_DRAW);
+                                            } else {
+                                                glBufferSubData(GL_ARRAY_BUFFER,
+                                                                0,
+                                                                newsize,
+                                                                vec_glyph_buffer_bold->buf);
+                                            }
+
+                                            glDrawArrays(GL_QUADS, 0, vec_glyph_buffer_bold->size *4);
+
+                                            vec_glyph_buffer_bold->size = 0;
+                                        }
+                                    }
+                                } // end if out of atlas range
                             } // end for each separate texture glyph 
-
-                            // Draw noramal characters
-                            if (vec_glyph_buffer->size) {
-                                if (bound_resources != BOUND_RESOURCES_FONT) {
-                                    glUseProgram(font_shader.id);
-                                    bound_resources = BOUND_RESOURCES_FONT;
-                                }
-
-                                glUniform3f(font_shader.uniforms[1].location,
-                                            ColorRGB_get_float(fg_color, 0),
-                                            ColorRGB_get_float(fg_color, 1),
-                                            ColorRGB_get_float(fg_color, 2));
-
-                                glUniform3f(font_shader.uniforms[2].location,
-                                            ColorRGBA_get_float(bg_color, 0),
-                                            ColorRGBA_get_float(bg_color, 1),
-                                            ColorRGBA_get_float(bg_color, 2));
-
-                                glBindBuffer(GL_ARRAY_BUFFER, flex_vbo.vbo);
-
-                                glVertexAttribPointer(
-                                    font_shader.attribs->location,
-                                    4, GL_FLOAT, GL_FALSE, 0, 0);
-
-                                size_t newsize = vec_glyph_buffer->size * sizeof(GlyphBufferData);
-                                if (flex_vbo.size < newsize) {
-                                    flex_vbo.size = newsize;
-                                    glBufferData(GL_ARRAY_BUFFER,
-                                                newsize,
-                                                vec_glyph_buffer->buf,
-                                                GL_STREAM_DRAW);
-                                } else {
-                                    glBufferSubData(GL_ARRAY_BUFFER,
-                                                    0,
-                                                    newsize,
-                                                    vec_glyph_buffer->buf);
-                                }
-
-                                glDrawArrays(GL_QUADS, 0, vec_glyph_buffer->size *4);
-                            }
-
-                            // Draw color characters
-                            if (vec_glyph_buffer_bold->size) {
-                                if (likely(bound_resources != BOUND_RESOURCES_IMAGE)) {
-                                    glUseProgram(image_shader.id);
-                                    bound_resources = BOUND_RESOURCES_IMAGE;
-                                }
-
-                                glBindBuffer(GL_ARRAY_BUFFER, flex_vbo.vbo);
-
-                                glVertexAttribPointer(image_shader.attribs->location,
-                                                    4, GL_FLOAT, GL_FALSE, 0, 0);
-
-                                size_t newsize = vec_glyph_buffer_bold->size * sizeof(GlyphBufferData);
-                                if (flex_vbo.size < newsize) {
-                                    flex_vbo.size = newsize;
-                                    glBufferData(GL_ARRAY_BUFFER,
-                                                newsize,
-                                                vec_glyph_buffer_bold->buf,
-                                                GL_STREAM_DRAW);
-                                } else {
-                                    glBufferSubData(GL_ARRAY_BUFFER,
-                                                    0,
-                                                    newsize,
-                                                    vec_glyph_buffer_bold->buf);
-                                }
-
-                                glDrawArrays(GL_QUADS, 0, vec_glyph_buffer_bold->size *4);
-                            }
                         } // end for each block with the same bg and fg
 
                         if (r != c) {
@@ -1627,11 +1642,12 @@ gfx_rasterize_line(const Vt* const vt,
                 if (bound_resources != BOUND_RESOURCES_LINES) {
                     bound_resources = BOUND_RESOURCES_LINES;
                     Shader_use(&line_shader);
-                    glBindTexture(GL_TEXTURE_2D, 0);
                     glBindBuffer(GL_ARRAY_BUFFER, flex_vbo.vbo);
                     glVertexAttribPointer(line_shader.attribs->location,
                                         2, GL_FLOAT, GL_FALSE, 0, 0);
                 }
+
+                //glBindTexture(GL_TEXTURE_2D, 0);
 
                 glUniform3f(line_shader.uniforms[1].location,
                             ColorRGB_get_float(line_color, 0),

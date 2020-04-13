@@ -98,6 +98,8 @@ typedef struct
 
     bool allow_multiple_underlines;
 
+    uint32_t scrollback;
+
 } Settings;
 
 

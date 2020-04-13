@@ -54,13 +54,15 @@
 #define TERMCOLOR_BG_CYAN_LIGHT "\e[106m"
 #define TERMCOLOR_BG_WHITE "\e[107m"
 
-#define likely(x)   __builtin_expect((bool)(x), 1)
+#define likely(x) __builtin_expect((bool)(x), 1)
 #define unlikely(x) __builtin_expect((x), 0)
 #define expect(x, y) __builtin_expect((x), (y))
 
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define CLAMP(v, lo, hi) ((v) > (hi) ? (hi) : (v) < (lo) ? (lo) : (v))
+
+#define ARRAY_SIZE(array) (sizeof((array)) / sizeof((array[0])))
 
 #define STATIC_ASSERT(cond, msg)                                               \
     typedef char static_assertion_##msg[(cond) ? 1 : -1]
@@ -157,7 +159,7 @@ scalloc(size_t nmemb, size_t size)
     if (unlikely(!res)) {
         usleep(1);
         if (!(res = calloc(nmemb, size))) {
-            usleep(1);
+            usleep(5);
             if (!(res = calloc(nmemb, size)))
                 ERR("bad alloc");
         }
