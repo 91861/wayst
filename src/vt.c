@@ -3100,6 +3100,37 @@ Vt_handle_char(Vt* self, char c)
 }
 
 
+static inline void
+Vt_shrink_scrollback(Vt* self)
+{
+    // alt buffer is active
+    if (self->alt_lines.buf)
+        return;
+
+    size_t ln_cnt = self->lines.size;
+    if (unlikely(ln_cnt > MAX(settings.scrollback * 1.1, self->ws.ws_row))) {
+        size_t to_remove = ln_cnt - settings.scrollback;
+        Vector_remove_at_VtLine(&self->lines, 0, to_remove);
+        self->active_line -= to_remove;
+    }
+}
+
+
+static inline void
+Vt_clear_proxies(Vt* self)
+{
+    if (self->scrolling) {
+        if (self->visual_scroll_top > self->ws.ws_row * 5) {
+            Vt_clear_proxies_in_region(self,
+                                       Vt_visual_bottom_line(self) + 3 * self->ws.ws_row,
+                                       self->lines.size -1);
+        }
+    } else if (self->lines.size > self->ws.ws_row) {
+        Vt_clear_proxies_in_region(self, 0, Vt_visual_top_line(self));
+    }
+}
+
+
 __attribute__((hot))
 inline bool
 Vt_read(Vt* self)
@@ -3144,6 +3175,9 @@ Vt_read(Vt* self)
                     if (ioctl(self->master, TIOCSWINSZ, &self->ws) < 0)
                         WRN("IO operation failed %s\n", strerror(errno));
                 }
+
+                Vt_shrink_scrollback(self);
+                Vt_clear_proxies(self);
                 return false;
             }
         }
@@ -3214,6 +3248,8 @@ Vt_show_lines(Vt* self,
                      int32_t))
 {
     size_t start = Vt_visual_top_line(self);
+
+    // if scrolling the last line may be partially visible
     size_t end = self->ws.ws_row + start + (self->scrolling ? 1 : 0);
     
     for (size_t i = start; i < end; ++i) {
@@ -3242,13 +3278,13 @@ static inline const char*
 normal_keypad_response(const uint32_t key)
 {
     switch (key) {
-    case XKB_KEY_Up    : return "\e[A";
-    case XKB_KEY_Down  : return "\e[B";
-    case XKB_KEY_Right : return "\e[C";
-    case XKB_KEY_Left  : return "\e[D";
-    case XKB_KEY_End   : return "\e[F";
-    case XKB_KEY_Home  : return "\e[H";
-    case 127           : return "\e[P";
+    case XKB_KEY_Up    : return "\e[A\0";
+    case XKB_KEY_Down  : return "\e[B\0";
+    case XKB_KEY_Right : return "\e[C\0";
+    case XKB_KEY_Left  : return "\e[D\0";
+    case XKB_KEY_End   : return "\e[F\0";
+    case XKB_KEY_Home  : return "\e[H\0";
+    case 127           : return "\e[P\0";
     default            : return NULL;
     }
 }
@@ -3347,7 +3383,7 @@ Vt_maybe_handle_application_key(Vt* self, uint32_t key, uint32_t mods)
             return true;
 
         default:
-            printf("%u key\n", key);
+            LOG("application key %u\n", key);
             return false;
         }
     }

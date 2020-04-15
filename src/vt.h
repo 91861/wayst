@@ -434,6 +434,7 @@ void
 Vt_get_visible_lines(const Vt* self, VtLine** out_begin, VtLine** out_end);
 
 
+__attribute__((always_inline, hot))
 static inline bool
 Vt_selection_should_highlight_char(const Vt* const self, size_t x, size_t y)
 {
