@@ -1396,7 +1396,7 @@ gfx_rasterize_line(const Vt* const vt,
 
 
                                     // needs to change texture on next iteration
-                                    if (z+1 != r && z->code != (z+1)->code) {
+                                    if ((z+1 != r && z->code != (z+1)->code) || z+1 == r) {
 
                                         // Draw noramal characters
                                         if (vec_glyph_buffer->size) {
@@ -1958,7 +1958,9 @@ gfx_draw_cursor(Vt* vt)
                         },
                     }});
 
-                size_t newsize = vec_glyph_buffer->size * sizeof(GlyphBufferData);
+                size_t newsize = vec_glyph_buffer->size *
+                    sizeof(GlyphBufferData);
+
                 if (newsize > flex_vbo.size) {
                     flex_vbo.size = newsize;
                     glBufferData(GL_ARRAY_BUFFER,
@@ -1976,6 +1978,190 @@ gfx_draw_cursor(Vt* vt)
             }
             glDisable(GL_SCISSOR_TEST);
         }
+    }
+}
+
+
+__attribute__((always_inline))
+static inline void
+gfx_draw_text_overlays(Vt* vt)
+{
+    if (vt->unicode_input.active) {
+        size_t begin = MIN(vt->cursor_pos, vt->ws.ws_col -
+                           vt->unicode_input.buffer.size -1);
+
+        size_t row = vt->active_line - Vt_visual_top_line(vt),
+               col = begin;
+
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(col * glyph_width_pixels,
+                  win_h - (row + 1) * line_height_pixels,
+                  glyph_width_pixels * (vt->unicode_input.buffer.size +1),
+                  line_height_pixels);
+
+        glClearColor(ColorRGBA_get_float(settings.bg, 0),
+                     ColorRGBA_get_float(settings.bg, 1),
+                     ColorRGBA_get_float(settings.bg, 2),
+                     ColorRGBA_get_float(settings.bg, 3));
+
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        glUseProgram(font_shader.id);
+        glUniform3f(font_shader.uniforms[1].location,
+                    ColorRGB_get_float(settings.fg, 0),
+                    ColorRGB_get_float(settings.fg, 1),
+                    ColorRGB_get_float(settings.fg, 2));
+
+        glUniform3f(font_shader.uniforms[2].location,
+                    ColorRGBA_get_float(settings.bg, 0),
+                    ColorRGBA_get_float(settings.bg, 1),
+                    ColorRGBA_get_float(settings.bg, 2));
+
+        glBindBuffer(GL_ARRAY_BUFFER, flex_vbo.vbo);
+        glVertexAttribPointer(
+            font_shader.attribs->location,
+            4, GL_FLOAT, GL_FALSE, 0, 0);
+
+        float tc[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
+        float h, w, t, l;
+        vec_glyph_buffer->size = 0;
+
+        int32_t atlas_offset = Atlas_select(atlas, 'u');
+        struct Atlas_char_info* g = &atlas->char_info[atlas_offset];
+        h = (float) g->rows * sy;
+        w = (float) g->width / (lcd_filter ? 3.0f : 1.0f) * sx;
+        t = (float) g->top * sy;
+        l = (float) g->left * sx;
+        memcpy(tc, g->tex_coords, sizeof tc);
+
+        float x3 = -1.0f + (float) col * glyph_width_pixels *sx +l;
+        float y3 = + 1.0f - pen_begin_pixels * sy - (float) row *
+            line_height_pixels * sy +t;
+
+        Vector_push_GlyphBufferData(
+            vec_glyph_buffer,
+            (GlyphBufferData) {{{
+                    x3,
+                    y3,
+                    tc[0],
+                    tc[1]
+                }, {
+                    x3 + w,
+                    y3,
+                    tc[2],
+                    tc[1]
+                }, {
+                    x3 + w,
+                    y3 - h,
+                    tc[2],
+                    tc[3]
+                }, {
+                    x3,
+                    y3 - h,
+                    tc[0],
+                    tc[3]
+                },
+            }});
+
+
+        vertex_t lnbuf[] = {
+            {
+                -1.0f + (float) col * glyph_width_pixels *sx,
+                + 1.0f - pen_begin_pixels *sy -(float) row *line_height_pixels *sy
+            }, {
+                -1.0f + (float) (col +1) * glyph_width_pixels *sx,
+                + 1.0f - pen_begin_pixels *sy -(float) row *line_height_pixels *sy
+            },
+        };
+
+        for (size_t i = 0; i < vt->unicode_input.buffer.size; ++i) {
+            atlas_offset = Atlas_select(atlas, vt->unicode_input.buffer.buf[i]);
+            g = &atlas->char_info[atlas_offset];
+            h = (float) g->rows * sy;
+            w = (float) g->width / (lcd_filter ? 3.0f : 1.0f) * sx;
+            t = (float) g->top * sy;
+            l = (float) g->left * sx;
+            memcpy(tc, g->tex_coords, sizeof tc);
+
+            x3 = -1.0f + (float) (col+i+1) * glyph_width_pixels * sx + l;
+            y3 = + 1.0f - pen_begin_pixels * sy - (float) row *
+                line_height_pixels * sy +t;
+
+            Vector_push_GlyphBufferData(
+                vec_glyph_buffer,
+                (GlyphBufferData) {{{
+                        x3,
+                        y3,
+                        tc[0],
+                        tc[1]
+                    }, {
+                        x3 + w,
+                        y3,
+                        tc[2],
+                        tc[1]
+                    }, {
+                        x3 + w,
+                        y3 - h,
+                        tc[2],
+                        tc[3]
+                    }, {
+                        x3,
+                        y3 - h,
+                        tc[0],
+                        tc[3]
+                    },
+                }});
+        }
+
+        size_t newsize = vec_glyph_buffer->size *
+            sizeof(GlyphBufferData);
+
+        if (newsize > flex_vbo.size) {
+            flex_vbo.size = newsize;
+            glBufferData(GL_ARRAY_BUFFER,
+                            newsize,
+                            vec_glyph_buffer->buf,
+                            GL_STREAM_DRAW);
+        } else {
+            glBufferSubData(GL_ARRAY_BUFFER,
+                            0,
+                            newsize,
+                            vec_glyph_buffer->buf);
+        }
+
+        glDrawArrays(GL_QUADS, 0, 4 * (vt->unicode_input.buffer.size +1));
+
+
+        glVertexAttribPointer(line_shader.attribs->location,
+                              2, GL_FLOAT, GL_FALSE, 0, 0);
+
+        newsize = sizeof(lnbuf);
+        if (newsize > flex_vbo.size) {
+            flex_vbo.size = newsize;
+            glBufferData(GL_ARRAY_BUFFER,
+                            newsize,
+                            lnbuf,
+                            GL_STREAM_DRAW);
+        } else {
+            glBufferSubData(GL_ARRAY_BUFFER,
+                            0,
+                            newsize,
+                            lnbuf);
+        }
+
+        glUseProgram(line_shader.id);
+
+        glUniform3f(line_shader.uniforms[1].location,
+                    ColorRGB_get_float(settings.fg, 0),
+                    ColorRGB_get_float(settings.fg, 1),
+                    ColorRGB_get_float(settings.fg, 2));
+
+        glDrawArrays(GL_LINES, 0, 2);
+
+        glDisable(GL_SCISSOR_TEST);
+
+    } else {
+        gfx_draw_cursor(vt);
     }
 }
 
@@ -2044,7 +2230,7 @@ gfx_draw_vt(Vt* vt)
     glDisable(GL_SCISSOR_TEST);
 
     glEnable(GL_BLEND);
-    gfx_draw_cursor(vt);
+    gfx_draw_text_overlays(vt);
 
     // TODO: use vbo
     if (vt->scrollbar.visible ||

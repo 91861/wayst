@@ -171,6 +171,13 @@ typedef struct _Vt
     bool scrolling;
     size_t visual_scroll_top;
 
+    struct UnicodeInput
+    {
+        bool active;
+        Vector_char buffer;
+
+    } unicode_input;
+
     struct Scrollbar
     {
         bool visible, dragging;

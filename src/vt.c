@@ -1015,6 +1015,8 @@ Vt_new(uint32_t cols, uint32_t rows)
     self.title = NULL;
     self.title_stack = Vector_new_size_t();
 
+    self.unicode_input.buffer = Vector_new_char();
+
     self.scrollbar.width = 10;
 
     return self;
@@ -2740,8 +2742,8 @@ __attribute__((always_inline, hot))
 static inline void
 Vt_insert_char_at_cursor(Vt* self, VtRune c)
 {
-    if (self->cursor_pos >= (size_t)self->ws.ws_col) {
-        if (self->modes.no_auto_wrap) {
+    if (unlikely(self->cursor_pos >= (size_t)self->ws.ws_col)) {
+        if (unlikely(self->modes.no_auto_wrap)) {
             --self->cursor_pos;
         } else {
             self->cursor_pos = 0;
@@ -2753,20 +2755,19 @@ Vt_insert_char_at_cursor(Vt* self, VtRune c)
     while (self->lines.buf[self->active_line].data.size <= self->cursor_pos)
         Vector_push_VtRune(&self->lines.buf[self->active_line].data, space);
 
-    if (self->parser.color_inverted) {
+    if (unlikely(self->parser.color_inverted)) {
         ColorRGB tmp = c.fg;
         c.fg = ColorRGB_from_RGBA(c.bg);
         c.bg = ColorRGBA_from_RGB(tmp);
     }
 
-    self->lines.buf[self->active_line].damaged = true;
-    Vt_destroy_line_proxy(self->lines.buf[self->active_line].proxy.data);
+    Vt_clear_proxy(self, self->active_line);
 
     self->lines.buf[self->active_line].data.buf[self->cursor_pos] = c;
 
     ++self->cursor_pos;
 
-    if (wcwidth(c.code) == 2) {
+    if (unlikely(wcwidth(c.code) == 2)) {
         if (self->lines.buf[self->active_line].data.size <= self->cursor_pos) {
             Vector_push_VtRune(&self->lines.buf[self->active_line].data,
                                space);
@@ -3346,45 +3347,104 @@ application_mod_keypad_response(const uint32_t key)
 
 
 /**
+ * key commands used by the terminal itself
  * @return keypress was consumed */
 __attribute__((always_inline))
 static inline bool
 Vt_maybe_handle_application_key(Vt* self, uint32_t key, uint32_t mods)
 {
-    if (FLAG_IS_SET(mods, MODIFIER_CONTROL) &&
-        FLAG_IS_SET(mods, MODIFIER_SHIFT))
-    {
-        switch (key) {
-        case 3:    // ^C
-        case 25: { // ^Y
-            Vector_char txt = Vt_select_region_to_string(self);
-            self->window_itable->clipboard_send(self->window_data, txt.buf);
-            // clipboard_send should free
+    if (self->unicode_input.active) {
+        if (key == 13) {
+            // Enter
+            Vector_push_char(&self->unicode_input.buffer, 0);
+            self->unicode_input.buffer.size = 0;
+            self->unicode_input.active = false;
 
-            return true;
+            Rune result = strtol(self->unicode_input.buffer.buf, NULL, 16);
+            if (result) {
+                LOG("unicode input \'%s\' -> %d\n",
+                    self->unicode_input.buffer.buf, result);
+
+                size_t seq_len = utf8_len(result);
+                if (seq_len != 1) {
+                    utf8_encode2(result, Vt_buffer(self));
+
+                    Vt_buffer(self)[seq_len] = '\0';
+                } else {
+                    Vt_buffer(self)[0] = (char)result;
+                    Vt_buffer(self)[1] = '\0';
+                }
+
+                Vt_write(self);
+            } else {
+                WRN("Failed to parse \'%s\'\n", self->unicode_input.buffer.buf);
+            }
+        } else if (key == 27 || key == 32) {
+            // Escape
+            self->unicode_input.buffer.size = 0;
+            self->unicode_input.active = false;
+            self->repaint_required_notify(self->window_data);
+        } else if (key == 8) {
+            // Backspace
+            if (self->unicode_input.buffer.size) {
+                Vector_pop_char(&self->unicode_input.buffer);
+            } else {
+                self->unicode_input.buffer.size = 0;
+                self->unicode_input.active = false;
+            }
+            self->repaint_required_notify(self->window_data);
+        } else if (isxdigit(key)) {
+            if (self->unicode_input.buffer.size > 8) {
+                gl_flash();
+            } else {
+                Vector_push_char(&self->unicode_input.buffer, key);
+                self->repaint_required_notify(self->window_data);
+            }
+        } else {
+            gl_flash();
         }
+        return true;
+    } else {
+        if (FLAG_IS_SET(mods, MODIFIER_CONTROL) &&
+            FLAG_IS_SET(mods, MODIFIER_SHIFT))
+        {
+            switch (key) {
+            case 3:    // ^C
+            case 25: { // ^Y
+                Vector_char txt = Vt_select_region_to_string(self);
+                self->window_itable->clipboard_send(self->window_data, txt.buf);
+                // clipboard_send should free
 
-        case 22:   // ^V
-        case 16: { // ^P
-            self->window_itable->clipboard_get(self->window_data);
-            return true;
-        }
+                return true;
+            }
 
-        case 31: // ^_
-            LOG("should decrease font size");
-            return true;
+            case 22:   // ^V
+            case 16: { // ^P
+                self->window_itable->clipboard_get(self->window_data);
+                return true;
+            }
 
-        case 43: // ^+
-            LOG("should enlarge font");
-            return true;
+            case 31: // ^_
+                LOG("should decrease font size");
+                return true;
 
-        case 13:
-            Vt_dump_info(self);
-            return true;
+            case 43: // ^+
+                LOG("should enlarge font");
+                return true;
 
-        default:
-            LOG("application key %u\n", key);
-            return false;
+            case 13:
+                Vt_dump_info(self);
+                return true;
+
+            case 21: // ^U
+                self->unicode_input.active = true;
+                self->repaint_required_notify(self->window_data);
+                return true;
+
+            default:
+                LOG("application key %u\n", key);
+                return false;
+            }
         }
     }
 
