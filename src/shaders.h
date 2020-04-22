@@ -46,7 +46,7 @@ const char*
 font_fs_src =
 "#version 120\n"
 "uniform vec3 clr;"
-"uniform vec3 bclr;"
+"uniform vec4 bclr;"
 "uniform sampler2D tex;"
 "varying vec2 tex_coord;"
 "void main(){"
@@ -54,7 +54,7 @@ font_fs_src =
 "gl_FragData[0]=vec4(mix(bclr.r,clr.r,c.r),"
 "mix(bclr.g,clr.g,c.g),"
 "mix(bclr.b,clr.b,c.b),"
-"length(c)*10000);"
+"bclr.a+length(c));"
 "}";
 
 

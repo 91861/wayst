@@ -1226,10 +1226,11 @@ gfx_rasterize_line(const Vt* const vt,
                                             ColorRGB_get_float(fg_color, 1),
                                             ColorRGB_get_float(fg_color, 2));
 
-                                glUniform3f(font_shader.uniforms[2].location,
+                                glUniform4f(font_shader.uniforms[2].location,
                                             ColorRGBA_get_float(bg_color, 0),
                                             ColorRGBA_get_float(bg_color, 1),
-                                            ColorRGBA_get_float(bg_color, 2));
+                                            ColorRGBA_get_float(bg_color, 2),
+                                            ColorRGBA_get_float(bg_color, 3));
 
                                 // normal
                                 glBindBuffer(GL_ARRAY_BUFFER, flex_vbo.vbo);
@@ -1410,10 +1411,11 @@ gfx_rasterize_line(const Vt* const vt,
                                                         ColorRGB_get_float(fg_color, 1),
                                                         ColorRGB_get_float(fg_color, 2));
 
-                                            glUniform3f(font_shader.uniforms[2].location,
+                                            glUniform4f(font_shader.uniforms[2].location,
                                                         ColorRGBA_get_float(bg_color, 0),
                                                         ColorRGBA_get_float(bg_color, 1),
-                                                        ColorRGBA_get_float(bg_color, 2));
+                                                        ColorRGBA_get_float(bg_color, 2),
+                                                        ColorRGBA_get_float(bg_color, 3));
 
                                             glBindBuffer(GL_ARRAY_BUFFER, flex_vbo.vbo);
 
@@ -1676,7 +1678,7 @@ gfx_rasterize_line(const Vt* const vt,
                 Shader_use(&image_tint_shader);
                 glBindTexture(GL_TEXTURE_2D, squiggle_texture.id);
 
-                glUniform3f(font_shader.uniforms[2].location,
+                glUniform3f(image_tint_shader.uniforms[1].location,
                             ColorRGB_get_float(line_color, 0),
                             ColorRGB_get_float(line_color, 1),
                             ColorRGB_get_float(line_color, 2));
@@ -1873,10 +1875,11 @@ gfx_draw_cursor(Vt* vt)
                             ColorRGB_get_float(*clr_bg, 1),
                             ColorRGB_get_float(*clr_bg, 2));
 
-                glUniform3f(font_shader.uniforms[2].location,
+                glUniform4f(font_shader.uniforms[2].location,
                             ColorRGB_get_float(*clr, 0),
                             ColorRGB_get_float(*clr, 1),
-                            ColorRGB_get_float(*clr, 2));
+                            ColorRGB_get_float(*clr, 2),
+                            ColorRGB_get_float(*clr, 3));
 
                 glBindBuffer(GL_ARRAY_BUFFER, flex_vbo.vbo);
                 glVertexAttribPointer(
@@ -2012,10 +2015,11 @@ gfx_draw_text_overlays(Vt* vt)
                     ColorRGB_get_float(settings.fg, 1),
                     ColorRGB_get_float(settings.fg, 2));
 
-        glUniform3f(font_shader.uniforms[2].location,
+        glUniform4f(font_shader.uniforms[2].location,
                     ColorRGBA_get_float(settings.bg, 0),
                     ColorRGBA_get_float(settings.bg, 1),
-                    ColorRGBA_get_float(settings.bg, 2));
+                    ColorRGBA_get_float(settings.bg, 2),
+                    ColorRGBA_get_float(settings.bg, 3));
 
         glBindBuffer(GL_ARRAY_BUFFER, flex_vbo.vbo);
         glVertexAttribPointer(
@@ -2302,6 +2306,9 @@ gfx_cleanup()
 
     Shader_destroy(&font_shader);
     Shader_destroy(&bg_shader);
+    Shader_destroy(&line_shader);
+    Shader_destroy(&image_shader);
+    Shader_destroy(&image_tint_shader);
 
     FT_Done_Face(face);
 
