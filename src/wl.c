@@ -5,7 +5,6 @@
 #define _GNU_SOURCE
 
 #include "wl.h"
-#include "gfx.h"
 #include "timing.h"
 
 #include <assert.h>
@@ -37,11 +36,11 @@
 
 
 
-static GuiGlobal* global;
+static WindowStatic* global;
 
 
 #define globalWl ((GlobalWl*)&global->subclass_data)
-#define windowWl(base) ((WindowWl*)&base->subclass_data)
+#define windowWl(base) ((WindowWl*)&base->extend_data)
 
 PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC eglSwapBuffersWithDamageKHR;
 
@@ -96,7 +95,7 @@ void*
 WindowWl_get_gl_ext_proc_adress(struct WindowBase* self, const char* name);
 
 
-static struct IWindowSubclass
+static struct IWindow
 window_interface_wayland =
 {
     .set_fullscreen         = WindowWl_set_fullscreen,
@@ -207,11 +206,14 @@ WindowWl_clipboard_send(struct WindowBase* self, const char* text)
 void
 WindowWl_clipboard_get(struct WindowBase* self)
 {
-    //LOG("last recorded wl_data_offer mime: \"%s\" ",
-    //    windowWl(self)->data_offer_mime);
+    if (windowWl(self)->data_offer_mime) {
+        LOG("last recorded wl_data_offer mime: \"%s\" \n",
+            windowWl(self)->data_offer_mime);
+    }
 
+    // FIXME: crashes on wl_roots??
     if (windowWl(self)->data_offer && false) {
-        //LOG("accepting\n");
+        LOG("accepting\n");
 
         
         int fds[2];
@@ -222,10 +224,15 @@ WindowWl_clipboard_get(struct WindowBase* self)
             errno = 0;
             return;
         }
-        
+
+        wl_data_offer_accept(windowWl(self)->data_offer, 0, windowWl(self)->data_offer_mime);
         wl_data_offer_receive(windowWl(self)->data_offer, windowWl(self)->data_offer_mime, fds[1]);
-        close(fds[1]);
         wl_display_roundtrip(globalWl->display);
+
+        close(fds[1]);
+
+        wl_display_roundtrip(globalWl->display);
+
         int rd = read(fds[0], buf, 1023);
         if (rd < 0) {
             WRN("IO error: %s\n", strerror(errno));
@@ -233,10 +240,10 @@ WindowWl_clipboard_get(struct WindowBase* self)
         } else if (rd == 0) {
             LOG("data_offer empty, did offering client exit?\n");
             close(fds[0]);
-            return;
+            return ;
         }
         buf[rd < 0 ? 0 : rd] = 0;
-        self->clipboard_handler(self->user_data, buf);
+        self->callbacks.clipboard_handler(self->callbacks.user_data, buf);
         close(fds[0]);
 
     } else {
@@ -259,8 +266,10 @@ pointer_handle_enter(void* data,
     ((struct WindowBase*)data)->pointer_x = wl_fixed_to_int(x);
     ((struct WindowBase*)data)->pointer_y = wl_fixed_to_int(y);
 
-    gl_reset_action_timer();
-    Window_notify_content_change2(data);
+    ((struct WindowBase*)data)->callbacks.activity_notify_handler(
+        ((struct WindowBase*)data)->callbacks.user_data);
+
+    Window_notify_content_change(data);
 }
 
 
@@ -291,8 +300,8 @@ pointer_handle_motion(void* data,
     ((struct WindowBase*)data)->pointer_y = wl_fixed_to_int(y);
 
     if (globalWl->last_button_pressed) {
-        ((struct WindowBase*)data)->motion_handler(
-            ((struct WindowBase*)data)->user_data,
+        ((struct WindowBase*)data)->callbacks.motion_handler(
+            ((struct WindowBase*)data)->callbacks.user_data,
             globalWl->last_button_pressed,
             ((struct WindowBase*)data)->pointer_x,
             ((struct WindowBase*)data)->pointer_y);
@@ -325,8 +334,8 @@ pointer_handle_button(void* data,
     button = button == 2 +271 ? 3 : button == 3 +271 ? 2 : button -271;
     globalWl->last_button_pressed = state ? button : 0;
 
-    ((struct WindowBase*)data)->button_handler(
-        ((struct WindowBase*)data)->user_data,
+    ((struct WindowBase*)data)->callbacks.button_handler(
+        ((struct WindowBase*)data)->callbacks.user_data,
         button,
         state,
         ((struct WindowBase*)data)->pointer_x,
@@ -347,8 +356,8 @@ pointer_handle_axis(void* data,
     bool gd = windowWl(((struct WindowBase*)data))->got_discrete_axis_event;
 
     if (v && !gd)
-        ((struct WindowBase*)data)->button_handler(
-            ((struct WindowBase*)data)->user_data,
+        ((struct WindowBase*)data)->callbacks.button_handler(
+            ((struct WindowBase*)data)->callbacks.user_data,
             v < 0 ? 65 : 66,
             1,
             ((struct WindowBase*)data)->pointer_x,
@@ -389,8 +398,8 @@ pointer_handle_axis_discrete(void* data,
     /* this is sent before a coresponding axis event, tell it to do nothing */
     windowWl(((struct WindowBase*)data))->got_discrete_axis_event = true;
 
-    ((struct WindowBase*)data)->button_handler(
-        ((struct WindowBase*)data)->user_data,
+    ((struct WindowBase*)data)->callbacks.button_handler(
+        ((struct WindowBase*)data)->callbacks.user_data,
         discrete < 0 ? 65 : 66,
         1,
         ((struct WindowBase*)data)->pointer_x,
@@ -469,6 +478,8 @@ keyboard_handle_enter(void* data,
                       struct wl_surface* surface,
                       struct wl_array* keys)
 {
+    ((struct WindowBase*)data)->callbacks.activity_notify_handler(
+        ((struct WindowBase*)data)->callbacks.user_data);
     FLAG_SET(((struct WindowBase*)data)->state_flags, WINDOW_IN_FOCUS);
 }
 
@@ -573,8 +584,8 @@ keyboard_handle_key(void* data,
             globalWl->keycode_to_repeat = 0;
         }
 
-        if (win->key_handler)
-            win->key_handler(win->user_data, final, final_mods);
+        if (win->callbacks.key_handler)
+            win->callbacks.key_handler(win->callbacks.user_data, final, final_mods);
     } else {
         globalWl->keycode_to_repeat = 0;
     }
@@ -849,12 +860,12 @@ data_offer_handle_offer(void* data,
                         struct wl_data_offer* wl_data_offer,
                         const char* mime_type)
 {
-    /* LOG("wl.data_offer::offer {mime_type: %s}\n", mime_type); */
+    LOG("wl.data_offer::offer {mime_type: %s}\n", mime_type);
     
     if (!strcmp(mime_type, "text/plain;charset=utf-8") ||
         !strcmp(mime_type, "text/plain"))
     {
-        /* LOG("  > handling offer for: %s\n", mime_type); */
+        LOG("accepting offer for MIME: %s\n", mime_type);
 
         windowWl(((struct WindowBase*)data))->data_offer = wl_data_offer;
 
@@ -871,7 +882,7 @@ data_offer_handle_source_actions(void *data,
                                  struct wl_data_offer *wl_data_offer,
                                  uint32_t source_actions)
 {
-    /* LOG("wl.data_offer::source_actions\n"); */
+    LOG("wl.data_offer::source_actions\n");
 }
 
 
@@ -880,7 +891,7 @@ data_offer_handle_action(void *data,
                          struct wl_data_offer *wl_data_offer,
                          uint32_t dnd_action)
 {
-    /* LOG("wl.data_offer::action\n"); */
+    LOG("wl.data_offer::action\n");
 }
 
 
@@ -899,7 +910,7 @@ data_device_handle_data_offer(void* data,
                               struct wl_data_offer* id)
 {
 
-    /* LOG("wl.data_device::offer\n"); */
+    LOG("wl.data_device::offer\n");
     wl_data_offer_add_listener(id, &data_offer_listener, data);
 }
 
@@ -913,7 +924,7 @@ data_device_handle_enter(void *data,
                          wl_fixed_t y,
                          struct wl_data_offer *id)
 {
-    /* LOG("wl.data_device::enter\n"); */
+    LOG("wl.data_device::enter\n");
 }
 
 
@@ -921,7 +932,7 @@ static void
 data_device_handle_leave(void *data,
                          struct wl_data_device *wl_data_device)
 {
-    /* LOG("wl.data_device::leave\n"); */
+    LOG("wl.data_device::leave\n");
 }
 
 
@@ -932,7 +943,7 @@ data_device_handle_motion(void *data,
                           wl_fixed_t x,
                           wl_fixed_t y)
 {
-    /* LOG("wl.data_device::motion\n"); */
+    LOG("wl.data_device::motion\n");
 }
 
 
@@ -940,7 +951,7 @@ static void
 data_device_handle_drop(void *data,
                         struct wl_data_device *wl_data_device)
 {
-    /* LOG("wl.data_device::drop\n"); */
+    LOG("wl.data_device::drop\n");
 }
 
 
@@ -955,7 +966,7 @@ data_device_handle_selection(void* data,
      */
     if (id)
         wl_data_offer_destroy(id);
-    /* LOG("wl.data_device::selection\n"); */
+    LOG("wl.data_device::selection\n");
 }
 
 
@@ -976,7 +987,7 @@ data_source_handle_target(void *data,
                           struct wl_data_source *wl_data_source,
                           const char *mime_type)
 {
-    /* LOG("wl.data_source::target\n"); */
+    LOG("wl.data_source::target\n");
 }
 
 static void
@@ -985,14 +996,16 @@ data_source_handle_send(void* data,
                         const char* mime_type,
                         int32_t fd)
 {
-    /* LOG("wl.data_source::send mime_type: %s\n", mime_type); */
+    LOG("wl.data_source::send mime_type: %s\n", mime_type);
 
     if (windowWl(((struct WindowBase*)data))->data_source_text &&
         (!strcmp(mime_type, "text/plain")               ||
          !strcmp(mime_type, "text/plain;charset=utf-8") ||
-         !strcmp(mime_type, "TEXT") ||
+         !strcmp(mime_type, "TEXT")                     ||
          !strcmp(mime_type, "UTF8_STRING")))
     {
+        LOG("writing \'%s\' to fd\n", windowWl(((struct WindowBase*)data))->data_source_text);
+
         write(fd,
               windowWl(((struct WindowBase*)data))->data_source_text,
               strlen(windowWl(((struct WindowBase*)data))->data_source_text));
@@ -1005,7 +1018,7 @@ static void
 data_source_handle_cancelled(void* data,
                              struct wl_data_source* wl_data_source)
 {
-    /* LOG("wl.data_source::canceled\n"); */
+     LOG("wl.data_source::canceled\n");
 }
 
 
@@ -1013,7 +1026,7 @@ static void
 data_source_handle_dnd_drop_performed(void *data,
                                       struct wl_data_source *wl_data_source)
 {
-    /* LOG("wl.data_source::dnd_drop_performed\n"); */
+    LOG("wl.data_source::dnd_drop_performed\n");
 }
 
 
@@ -1021,7 +1034,7 @@ static void
 data_source_handle_dnd_finished(void *data,
                                 struct wl_data_source *wl_data_source)
 {
-    /* LOG("wl.data_source::dnd_finished\n"); */
+    LOG("wl.data_source::dnd_finished\n");
 }
 
 
@@ -1030,7 +1043,7 @@ data_source_handle_action(void *data,
                           struct wl_data_source *wl_data_source,
                           uint32_t dnd_action)
 {
-    /* LOG("wl.data_source::action\n"); */
+    LOG("wl.data_source::action\n");
 }
 
 
@@ -1177,7 +1190,7 @@ cursor_set(struct wl_cursor* what, uint32_t serial)
 struct WindowBase*
 WindowWl_new(uint32_t w, uint32_t h)
 {
-    global = calloc(1, sizeof(GuiGlobal) + sizeof(GlobalWl) - sizeof(uint8_t));
+    global = calloc(1, sizeof(WindowStatic) + sizeof(GlobalWl) - sizeof(uint8_t));
 
     /* passing NULL grabs WAYLAND_DISPLAY from env */
     globalWl->display = wl_display_connect(NULL);
@@ -1197,7 +1210,7 @@ WindowWl_new(uint32_t w, uint32_t h)
     win->h = h;
     FLAG_SET(win->state_flags, WINDOW_IN_FOCUS);
 
-    win->subclass_interface = &window_interface_wayland;
+    win->interface = &window_interface_wayland;
 
     globalWl->registry = wl_display_get_registry(globalWl->display);
     wl_registry_add_listener(globalWl->registry, &registry_listener, win);
@@ -1337,18 +1350,7 @@ WindowWl_new(uint32_t w, uint32_t h)
 
 
 struct WindowBase*
-Window_new_wayland(Pair_uint32_t res,
-                   void* user_data,
-                   void (*key_handler)(void*, uint32_t, uint32_t),
-                   void (*button_handler)(void*,
-                                          uint32_t,
-                                          bool,
-                                          int32_t,
-                                          int32_t,
-                                          int32_t,
-                                          uint32_t),
-                   void (*motion_handler)(void*, uint32_t, int32_t, int32_t),
-                   void (*clipboard_handler)(void*, const char*))
+Window_new_wayland(Pair_uint32_t res)
 {
 
     struct WindowBase* win = WindowWl_new(res.first, res.second);
@@ -1359,12 +1361,6 @@ Window_new_wayland(Pair_uint32_t res,
     win->title = NULL;
     WindowWl_set_title(win, settings.title);
     WindowWl_set_wm_name(win, settings.title);
-
-    win->user_data = user_data;
-    win->key_handler = key_handler;
-    win->button_handler = button_handler;
-    win->motion_handler = motion_handler;
-    win->clipboard_handler = clipboard_handler;
 
     WindowWl_dont_swap_buffers(win);
     WindowWl_events(win);
@@ -1439,12 +1435,12 @@ WindowWl_repeat_check(struct WindowBase* self)
         globalWl->repeat_point = TimePoint_ms_from_now(
             globalWl->kbd_repeat_rate > self->repeat_count / 2 ?
             globalWl->kbd_repeat_rate - self->repeat_count / 2 : 2);
-        self->repeat_count = MIN(self->repeat_count +1, INT32_MAX -1 );
+        self->repeat_count = MIN(self->repeat_count +1, INT32_MAX -1);
 
-        if (self->key_handler)
-            self->key_handler(self->user_data,
-                              globalWl->keycode_to_repeat,
-                              globalWl->modstate_to_repeat);
+        if (self->callbacks.key_handler)
+            self->callbacks.key_handler(self->callbacks.user_data,
+                                        globalWl->keycode_to_repeat,
+                                        globalWl->modstate_to_repeat);
     }
 }
 

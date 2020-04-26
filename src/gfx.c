@@ -200,15 +200,25 @@ static int scrollbar_fade = SCROLLBAR_FADE_MIN; // start with scrollbar hidden
 static Timer flash_timer = {{0,0}, {0,0}};
 static float flash_fraction = 1.0f;
 
+
+#define ARRAY_BUFFER_SUB_OR_SWAP(_buf, _size, _newsize)                  \
+    if ((_newsize) > _size) {                                            \
+        _size = (_newsize);                                              \
+        glBufferData(GL_ARRAY_BUFFER, (_newsize), _buf, GL_STREAM_DRAW); \
+    } else {                                                             \
+        glBufferSubData(GL_ARRAY_BUFFER, 0, (_newsize), (_buf));         \
+    }
+
+
 void
-gl_flash()
+gfx_flash()
 {
     if (!settings.no_flash)
         flash_timer = Timer_from_now_to_ms_from_now(300);
 }
 
 
-void
+static void
 Atlas_destroy(Atlas* self)
 {
     glDeleteTextures(1, &self->tex);
@@ -230,7 +240,7 @@ Atlas_select(Atlas* self, uint32_t code)
 }
 
 
-Atlas
+static Atlas
 Atlas_new(FT_Face face_)
 {
 
@@ -278,7 +288,7 @@ Atlas_new(FT_Face face_)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
     glTexImage2D(
-      GL_TEXTURE_2D, 0, GL_RGBA, self.w, self.h, 0, GL_BGR, GL_UNSIGNED_BYTE, 0);
+      GL_TEXTURE_2D, 0, GL_RGBA, self.w, self.h, 0, GL_RGB, GL_UNSIGNED_BYTE, 0);
 
     hline = 0;
     uint32_t ox = 0, oy = 0;
@@ -380,12 +390,13 @@ Cache_get_glyph(Cache* self, FT_Face face, Rune code)
     bool color = false;
     int32_t index = FT_Get_Char_Index(face, code);
 
-    if (FT_Load_Char(face, code, FT_LOAD_TARGET_LCD) ||
+    if (FT_Load_Glyph(face, index, FT_LOAD_TARGET_LCD) ||
         FT_Render_Glyph(face->glyph, FT_RENDER_MODE_LCD))
     {
         WRN("Glyph error in main font %d \n", code);
     } else if (face->glyph->glyph_index == 0) {
         /* Glyph is missing im main font */
+
         index = FT_Get_Char_Index(face_fallback, code);
         if (FT_Load_Glyph(face_fallback, index, FT_LOAD_TARGET_LCD) ||
             FT_Render_Glyph(face_fallback->glyph, FT_RENDER_MODE_LCD))
@@ -410,7 +421,10 @@ Cache_get_glyph(Cache* self, FT_Face face, Rune code)
         g = face->glyph;
 
     // In general color characters don't scale
-    if (g->bitmap.rows > line_height_pixels) {
+    // exclude box drawing characters
+    if (g->bitmap.rows > line_height_pixels &&
+        (code < 0x2500 || code > 0x257f))
+    {
         color = true;
     }
 
@@ -434,7 +448,11 @@ Cache_get_glyph(Cache* self, FT_Face face, Rune code)
                  (tex.w = g->bitmap.width / (lcd_filter && !color ? 3 : 1)),
                  (tex.h = g->bitmap.rows),
                  0,
-                 color ? GL_RGBA : GL_RGB,
+
+                 // FT always renders in BGR,
+                 // TODO: we can use RGB to flip subpixel order
+                 color ? GL_BGRA : GL_RGB,
+
                  GL_UNSIGNED_BYTE,
                  g->bitmap.buffer);
 
@@ -445,7 +463,10 @@ Cache_get_glyph(Cache* self, FT_Face face, Rune code)
     Vector_push_GlyphUnitCache(block, (GlyphUnitCache) {
         .code = code,
         .is_color = color,
-        .left = (float) g->bitmap_left,
+
+        // for whatever reason this fixes some alignment problems
+        .left = (float) g->bitmap_left * 1.15,
+
         .top  = (float) g->bitmap_top,
         .tex  = tex,
     });
@@ -456,7 +477,7 @@ Cache_get_glyph(Cache* self, FT_Face face, Rune code)
 
 // Generate a sinewave image and store it as an OpenGL texture
 __attribute__((cold))
-Texture
+static Texture
 create_squiggle_texture(uint32_t w, uint32_t h, uint32_t thickness)
 {
     GLuint tex;
@@ -472,7 +493,7 @@ create_squiggle_texture(uint32_t w, uint32_t h, uint32_t thickness)
 
     double pixel_size = 2.0 / h;
     double stroke_width = thickness * pixel_size;
-    double stroke_fade = pixel_size * 2.0;
+    double stroke_fade = pixel_size * 2.8;
     double distance_limit_full_alpha = stroke_width / 2.0;
     double distance_limit_zero_alpha = stroke_width / 2.0 + stroke_fade;
     
@@ -488,7 +509,7 @@ create_squiggle_texture(uint32_t w, uint32_t h, uint32_t thickness)
             - 1.0 - stroke_width - stroke_fade;
 
         double y_curve = sin(x_frag);
-        double dx_frag = cos(x_frag); // x/xd -> in what dir is closest point
+        double dx_frag = cos(x_frag); // d/dx -> in what dir is closest point
         double y_dist = y_frag - y_curve;
         double closest_distance = DISTANCE(x_frag, y_frag, x_frag, y_curve);
 
@@ -517,7 +538,8 @@ create_squiggle_texture(uint32_t w, uint32_t h, uint32_t thickness)
 
 
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, fragments);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0,
+                 GL_RGBA, GL_UNSIGNED_BYTE, fragments);
 
     free(fragments);
 
@@ -531,7 +553,7 @@ create_squiggle_texture(uint32_t w, uint32_t h, uint32_t thickness)
 
 
 void
-gl_set_size(uint32_t w, uint32_t h)
+gfx_resize(uint32_t w, uint32_t h)
 {
     win_w = w;
     win_h = h;
@@ -544,8 +566,7 @@ gl_set_size(uint32_t w, uint32_t h)
     static uint32_t height = 0, hber;
 
     if (!height) {
-        // add one pixel to hide lcd filter artefacting
-        height = face->size->metrics.height +64;
+        height = face->size->metrics.height;
         hber = face->glyph->metrics.horiBearingY;
     }
 
@@ -554,10 +575,10 @@ gl_set_size(uint32_t w, uint32_t h)
 
     line_height = (float) height *sy /64.0 ;
 
-    pen_begin = +sy * (height /64 /1.75)
-        +sy * ((hber +184) /2 /64);
-    pen_begin_pixels = (float)(height /64 /1.75)
-        + (float) ((hber +184) /2 /64);
+    pen_begin = +sy * (height /64.0 /1.75)
+        +sy * ((hber) /2.0 /64.0);
+    pen_begin_pixels = (float)(height /64.0 /1.75)
+        + (float) ((hber) /2.0 /64.0);
 
     static uint32_t gw = 0;
     if (!gw) {
@@ -590,7 +611,7 @@ gl_set_size(uint32_t w, uint32_t h)
 
 __attribute__((always_inline))
 inline Pair_uint32_t
-gl_get_char_size()
+gfx_get_char_size(void* self)
 {
     return (Pair_uint32_t) { .first = 2.0f / glyph_width,
                              .second = 2.0f / line_height };
@@ -598,7 +619,7 @@ gl_get_char_size()
 
 
 Pair_uint32_t
-gl_pixels(uint32_t c, uint32_t r)
+gfx_pixels(void* self, uint32_t c, uint32_t r)
 {
     static uint32_t gw = 0;
     if (!gw) {
@@ -615,7 +636,7 @@ gl_pixels(uint32_t c, uint32_t r)
 
 
 void
-gl_init_font()
+gfx_load_font()
 {
     if (FT_Init_FreeType(&ft) ||
         FT_New_Face(ft, settings.font_name, 0, &face))
@@ -720,7 +741,7 @@ gl_init_font()
 
 
 void
-gl_init_renderer()
+gfx_init()
 {
     gl_load_exts();
 
@@ -854,7 +875,7 @@ gl_init_renderer()
     vec_vertex_buffer2 = Vector_new_vertex_t();
 
 
-    gl_reset_action_timer();
+    gfx_notify_action(NULL);
 
     float height = face->size->metrics.height +64;
     line_height_pixels = height / 64.0;
@@ -863,12 +884,12 @@ gl_init_renderer()
 
     squiggle_texture = create_squiggle_texture(t_height * M_PI / 2.0,
                                                t_height,
-                                               CLAMP(t_height / 5,1,10));
+                                               CLAMP(t_height / 7, 1, 10));
 }
 
 
 bool
-gl_set_focus(const bool focus)
+gfx_set_focus(const bool focus)
 {
     bool ret = false;
     if (in_focus && !focus)
@@ -879,7 +900,7 @@ gl_set_focus(const bool focus)
 
 
 void
-gl_reset_action_timer()
+gfx_notify_action(void* self)
 {
     blink_switch = TimePoint_ms_from_now(settings.text_blink_interval);
     draw_blinking = true;
@@ -892,7 +913,7 @@ gl_reset_action_timer()
 
 
 bool
-gl_check_timers(Vt* vt)
+gfx_update_timers(Vt* vt)
 {
     bool repaint = false;
 
@@ -1241,18 +1262,9 @@ gfx_rasterize_line(const Vt* const vt,
                                 size_t newsize = vec_glyph_buffer->size *
                                     sizeof(GlyphBufferData);
 
-                                if (newsize > flex_vbo.size) {
-                                    flex_vbo.size = newsize;
-                                    glBufferData(GL_ARRAY_BUFFER,
-                                                 newsize,
-                                                 vec_glyph_buffer->buf,
-                                                 GL_STREAM_DRAW);
-                                } else {
-                                    glBufferSubData(GL_ARRAY_BUFFER,
-                                                    0,
-                                                    newsize,
-                                                    vec_glyph_buffer->buf);
-                                }
+                                ARRAY_BUFFER_SUB_OR_SWAP(vec_glyph_buffer->buf,
+                                                         flex_vbo.size,
+                                                         newsize);
 
                                 glBindTexture(GL_TEXTURE_2D, atlas->tex);
                                 glDrawArrays(GL_QUADS,
@@ -1269,18 +1281,10 @@ gfx_rasterize_line(const Vt* const vt,
                                     size_t newsize = vec_glyph_buffer_italic->size *
                                         sizeof(GlyphBufferData);
 
-                                    if (newsize > flex_vbo_italic.size) {
-                                        flex_vbo_italic.size = newsize;
-                                        glBufferData(GL_ARRAY_BUFFER,
-                                                    newsize,
-                                                    vec_glyph_buffer_italic->buf,
-                                                    GL_STREAM_DRAW);
-                                    } else {
-                                        glBufferSubData(GL_ARRAY_BUFFER,
-                                                        0,
-                                                        newsize,
-                                                        vec_glyph_buffer_italic->buf);
-                                    }
+                                    ARRAY_BUFFER_SUB_OR_SWAP(vec_glyph_buffer_italic->buf,
+                                                             flex_vbo_italic.size,
+                                                             newsize);
+
                                     glBindTexture(GL_TEXTURE_2D, atlas_italic->tex);
                                     glDrawArrays(GL_QUADS,
                                                  0,
@@ -1297,18 +1301,10 @@ gfx_rasterize_line(const Vt* const vt,
                                     size_t newsize = vec_glyph_buffer_bold->size *
                                         sizeof(GlyphBufferData);
 
-                                    if (newsize > flex_vbo_bold.size) {
-                                        flex_vbo_bold.size = newsize;
-                                        glBufferData(GL_ARRAY_BUFFER,
-                                                    newsize,
-                                                    vec_glyph_buffer_bold->buf,
-                                                    GL_STREAM_DRAW);
-                                    } else {
-                                        glBufferSubData(GL_ARRAY_BUFFER,
-                                                        0,
-                                                        newsize,
-                                                        vec_glyph_buffer_bold->buf);
-                                    }
+                                    ARRAY_BUFFER_SUB_OR_SWAP(vec_glyph_buffer_bold->buf,
+                                                             flex_vbo_bold.size,
+                                                             newsize);
+
                                     glBindTexture(GL_TEXTURE_2D, atlas_bold->tex);
                                     glDrawArrays(GL_QUADS,
                                                  0,
@@ -1424,18 +1420,10 @@ gfx_rasterize_line(const Vt* const vt,
                                                 4, GL_FLOAT, GL_FALSE, 0, 0);
 
                                             size_t newsize = vec_glyph_buffer->size * sizeof(GlyphBufferData);
-                                            if (flex_vbo.size < newsize) {
-                                                flex_vbo.size = newsize;
-                                                glBufferData(GL_ARRAY_BUFFER,
-                                                            newsize,
-                                                            vec_glyph_buffer->buf,
-                                                            GL_STREAM_DRAW);
-                                            } else {
-                                                glBufferSubData(GL_ARRAY_BUFFER,
-                                                                0,
-                                                                newsize,
-                                                                vec_glyph_buffer->buf);
-                                            }
+
+                                            ARRAY_BUFFER_SUB_OR_SWAP(vec_glyph_buffer->buf,
+                                                                     flex_vbo.size,
+                                                                     newsize);
 
                                             glDrawArrays(GL_QUADS, 0, vec_glyph_buffer->size *4);
 
@@ -1455,18 +1443,8 @@ gfx_rasterize_line(const Vt* const vt,
                                                                 4, GL_FLOAT, GL_FALSE, 0, 0);
 
                                             size_t newsize = vec_glyph_buffer_bold->size * sizeof(GlyphBufferData);
-                                            if (flex_vbo.size < newsize) {
-                                                flex_vbo.size = newsize;
-                                                glBufferData(GL_ARRAY_BUFFER,
-                                                            newsize,
-                                                            vec_glyph_buffer_bold->buf,
-                                                            GL_STREAM_DRAW);
-                                            } else {
-                                                glBufferSubData(GL_ARRAY_BUFFER,
-                                                                0,
-                                                                newsize,
-                                                                vec_glyph_buffer_bold->buf);
-                                            }
+
+                                            ARRAY_BUFFER_SUB_OR_SWAP(vec_glyph_buffer_bold->buf, flex_vbo.size, newsize);
 
                                             glDrawArrays(GL_QUADS, 0, vec_glyph_buffer_bold->size *4);
 
@@ -1605,39 +1583,6 @@ gfx_rasterize_line(const Vt* const vt,
                                      (vertex_t) { end[4], t_y });
                 Vector_push_vertex_t(&vec_vertex_buffer2,
                                      (vertex_t) { 1.0f * n_cells, 0.0f });
-            /*
-                float cw = glyph_width_pixels * scalex;
-
-                int n_cells = round((end[4] - begin[4]) / cw);
-                for (int i = 0; i < n_cells; ++i) {
-
-                    Vector_push_vertex_t(&vec_vertex_buffer,
-                                     (vertex_t) { begin[4] + cw * i,
-                                                 1.0f - 2.0f * scaley });
-                    Vector_push_vertex_t(&vec_vertex_buffer,
-                                     (vertex_t) { begin[4] + cw * i + cw / 4.0f,
-                                                 1.0f - 2.0f * scaley });
-                    Vector_push_vertex_t(&vec_vertex_buffer,
-                                     (vertex_t) { begin[4] + cw * i + cw / 4.0f,
-                                                 1.0f - scaley });
-                    Vector_push_vertex_t(&vec_vertex_buffer,
-                                     (vertex_t) { begin[4] + cw * i + cw * 0.5f,
-                                                 1.0f - scaley });
-
-                    Vector_push_vertex_t(&vec_vertex_buffer,
-                                     (vertex_t) { begin[4] + cw * i + cw * 0.5f,
-                                                 1.0f - 2.0f * scaley });
-                    Vector_push_vertex_t(&vec_vertex_buffer,
-                                     (vertex_t) { begin[4] + cw * i + cw / 4.0f * 3.0f,
-                                                 1.0f - 2.0f * scaley });
-                    Vector_push_vertex_t(&vec_vertex_buffer,
-                                     (vertex_t) { begin[4] + cw * i + cw / 4.0f * 3.0f,
-                                                 1.0f - scaley });
-                    Vector_push_vertex_t(&vec_vertex_buffer,
-                                     (vertex_t) { begin[4] + cw * (i +1),
-                                                 1.0f - scaley });
-                }
-            */
             }
 
             if (vec_vertex_buffer.size) {
@@ -1649,26 +1594,16 @@ gfx_rasterize_line(const Vt* const vt,
                                         2, GL_FLOAT, GL_FALSE, 0, 0);
                 }
 
-                //glBindTexture(GL_TEXTURE_2D, 0);
-
                 glUniform3f(line_shader.uniforms[1].location,
                             ColorRGB_get_float(line_color, 0),
                             ColorRGB_get_float(line_color, 1),
                             ColorRGB_get_float(line_color, 2));
 
                 size_t new_size = sizeof(vertex_t) * vec_vertex_buffer.size; 
-                if (flex_vbo.size < new_size) {
-                    flex_vbo.size = new_size;
-                    glBufferData(GL_ARRAY_BUFFER,
-                                new_size,
-                                vec_vertex_buffer.buf,
-                                GL_STREAM_DRAW);
-                } else {
-                    glBufferSubData(GL_ARRAY_BUFFER,
-                                    0,
-                                    new_size,
-                                    vec_vertex_buffer.buf);
-                }
+
+                ARRAY_BUFFER_SUB_OR_SWAP(vec_vertex_buffer.buf,
+                                         flex_vbo.size,
+                                         new_size);
 
                 glDrawArrays(GL_LINES, 0, vec_vertex_buffer.size);
             }
@@ -1689,19 +1624,11 @@ gfx_rasterize_line(const Vt* const vt,
                     font_shader.attribs->location,
                     4, GL_FLOAT, GL_FALSE, 0, 0);
 
-                size_t new_size = sizeof(vertex_t) * vec_vertex_buffer2.size; 
-                if (flex_vbo.size < new_size) {
-                    flex_vbo.size = new_size;
-                    glBufferData(GL_ARRAY_BUFFER,
-                                new_size,
-                                vec_vertex_buffer2.buf,
-                                GL_STREAM_DRAW);
-                } else {
-                    glBufferSubData(GL_ARRAY_BUFFER,
-                                    0,
-                                    new_size,
-                                    vec_vertex_buffer2.buf);
-                }
+                size_t new_size = sizeof(vertex_t) * vec_vertex_buffer2.size;
+
+                ARRAY_BUFFER_SUB_OR_SWAP(vec_vertex_buffer2.buf,
+                                         flex_vbo.size,
+                                         new_size);
 
                 glDrawArrays(GL_QUADS, 0, vec_vertex_buffer2.size /2);
             }
@@ -1841,18 +1768,11 @@ gfx_draw_cursor(Vt* vt)
                         ColorRGB_get_float(*clr, 2));
 
             size_t newsize = vec_vertex_buffer.size * sizeof(vertex_t);
-            if (newsize > flex_vbo.size) {
-                flex_vbo.size = newsize;
-                glBufferData(GL_ARRAY_BUFFER,
-                                newsize,
-                                vec_vertex_buffer.buf,
-                                GL_STREAM_DRAW);
-            } else {
-                glBufferSubData(GL_ARRAY_BUFFER,
-                                0,
-                                newsize,
-                                vec_vertex_buffer.buf);
-            }
+
+            ARRAY_BUFFER_SUB_OR_SWAP(vec_vertex_buffer.buf,
+                                     flex_vbo.size,
+                                     newsize);
+
             glDrawArrays(vec_vertex_buffer.size == 2 ? GL_LINES : GL_LINE_LOOP,
                          0,
                          vec_vertex_buffer.size);
@@ -1879,7 +1799,7 @@ gfx_draw_cursor(Vt* vt)
                             ColorRGB_get_float(*clr, 0),
                             ColorRGB_get_float(*clr, 1),
                             ColorRGB_get_float(*clr, 2),
-                            ColorRGB_get_float(*clr, 3));
+                            1.0f);
 
                 glBindBuffer(GL_ARRAY_BUFFER, flex_vbo.vbo);
                 glVertexAttribPointer(
@@ -1964,18 +1884,9 @@ gfx_draw_cursor(Vt* vt)
                 size_t newsize = vec_glyph_buffer->size *
                     sizeof(GlyphBufferData);
 
-                if (newsize > flex_vbo.size) {
-                    flex_vbo.size = newsize;
-                    glBufferData(GL_ARRAY_BUFFER,
-                                 newsize,
-                                 vec_glyph_buffer->buf,
-                                 GL_STREAM_DRAW);
-                } else {
-                    glBufferSubData(GL_ARRAY_BUFFER,
-                                    0,
-                                    newsize,
-                                    vec_glyph_buffer->buf);
-                }
+                ARRAY_BUFFER_SUB_OR_SWAP(vec_glyph_buffer->buf,
+                                         flex_vbo.size,
+                                         newsize);
 
                 glDrawArrays(GL_QUADS, 0, 4);
             }
@@ -2191,9 +2102,9 @@ gfx_draw_vt(Vt* vt)
 
     glEnable(GL_SCISSOR_TEST);
     glScissor(0,
-              win_h - gl_get_char_size().second * line_height_pixels,
-              gl_get_char_size().first * glyph_width_pixels,
-              gl_get_char_size().second * line_height_pixels);
+              win_h - gfx_get_char_size(NULL).second * line_height_pixels,
+              gfx_get_char_size(NULL).first * glyph_width_pixels,
+              gfx_get_char_size(NULL).second * line_height_pixels);
     
     quad_index = 0;
     glLoadIdentity();

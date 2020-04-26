@@ -14,8 +14,6 @@
 #include <termios.h>
 #include <utmp.h>
 
-#include "gfx.h"
-#include "gui.h"
 #include "wcwidth/wcwidth.h"
 
 #define SCROLLBAR_HIDE_DELAY_MS 1500
@@ -242,7 +240,9 @@ Vt_update_scrollbar_vis(Vt* self)
         } else if (TimePoint_passed(self->scrollbar.hide_time)) {
             if (self->scrollbar.visible) {
                 self->scrollbar.visible = false;
-                self->repaint_required_notify(self->window_data);
+
+                ASSERT(self->callbacks.on_repaint_required);
+                self->callbacks.on_repaint_required(self->callbacks.user_data);
             }
         }
     }
@@ -266,7 +266,8 @@ Vt_scrollbar_consume_click(Vt* self,
 
     if (self->scrollbar.dragging && !state) {
         self->scrollbar.dragging = false;
-        self->repaint_required_notify(self->window_data);
+        ASSERT(self->callbacks.on_repaint_required);
+        self->callbacks.on_repaint_required(self->callbacks.user_data);
         return false;
     }
 
@@ -326,7 +327,8 @@ Vt_scrollbar_consume_click(Vt* self,
     }
 
     Vt_update_scrollbar_dims(self);
-    self->repaint_required_notify(self->window_data);
+    ASSERT(self->callbacks.on_repaint_required);
+    self->callbacks.on_repaint_required(self->callbacks.user_data);
     
     return true;
 }
@@ -347,7 +349,9 @@ Vt_scrollbar_consume_drag(Vt* self, uint32_t button, int32_t x, int32_t y)
     if (target_line != Vt_visual_top_line(self)) {
         Vt_visual_scroll_to(self, target_line);
         Vt_update_scrollbar_dims(self);
-        self->repaint_required_notify(self->window_data);
+
+        ASSERT(self->callbacks.on_repaint_required);
+        self->callbacks.on_repaint_required(self->callbacks.user_data);
     }
 
     return true;
@@ -544,7 +548,9 @@ Vt_select_set_end(Vt* self, int32_t x, int32_t y)
         size_t click_y = (double) y / self->pixels_per_cell_y;
         self->selection.end_line = Vt_visual_top_line(self) + click_y;
         self->selection.end_char_idx = click_x;
-        self->repaint_required_notify(self->window_data);
+
+        ASSERT(self->callbacks.on_repaint_required);
+        self->callbacks.on_repaint_required(self->callbacks.user_data);
 
         for (size_t i = MIN(old_end, self->selection.end_line);
              i <= MAX(old_end, self->selection.end_line);
@@ -626,11 +632,14 @@ Vt_select_consume_click(Vt* self,
             } else if (self->selection.click_count == 1) {
                 Vt_select_end(self);
                 Vt_select_init_word(self, x, y);
-                self->repaint_required_notify(self->window_data);
+
+                ASSERT(self->callbacks.on_repaint_required);
+                self->callbacks.on_repaint_required(self->callbacks.user_data);
             } else if (self->selection.click_count == 2) {
                 Vt_select_end(self);
                 Vt_select_init_line(self, y);
-                self->repaint_required_notify(self->window_data);
+                ASSERT(self->callbacks.on_repaint_required);
+                self->callbacks.on_repaint_required(self->callbacks.user_data);
             }
 
         }
@@ -1401,7 +1410,13 @@ Vt_resize(Vt* self, uint32_t x, uint32_t y)
 
         ox = x;
         oy = y;
-        Pair_uint32_t px = gl_pixels(x, y);
+
+
+        ASSERT(self->callbacks.on_window_size_from_cells_requested, "callback is NULL");
+        Pair_uint32_t px = self->callbacks.on_window_size_from_cells_requested(
+            self->callbacks.user_data, x, y);
+
+        // gfx_pixels(x, y);
         self->ws = (struct winsize) { .ws_col = x,
                                       .ws_row = y,
                                       .ws_xpixel = px.first,
@@ -1415,7 +1430,12 @@ Vt_resize(Vt* self, uint32_t x, uint32_t y)
             WRN("IO operation failed %s\n", strerror(errno));
 
         self->scroll_region_top = 0;
-        self->scroll_region_bottom = gl_get_char_size().second;
+
+
+        ASSERT(self->callbacks.on_number_of_cells_requested, "callback is NULL");
+        self->scroll_region_bottom = self->callbacks.on_number_of_cells_requested(self->callbacks.user_data).second;
+
+            //gfx_get_char_size().second;
 
         Vt_update_scrollbar_dims(self);
     }
@@ -1704,7 +1724,9 @@ Vt_handle_cs(Vt* self, char c)
             /* <ESC>[ Ps ; Ps r - Set scroll region (top;bottom) (DECSTBM)
              * default: full window */
             case 'r': {
-                uint32_t top = 0, bottom = gl_get_char_size().second;
+
+                ASSERT(self->callbacks.on_number_of_cells_requested, "callback is NULL");
+                uint32_t top = 0, bottom = self->callbacks.on_number_of_cells_requested(self->callbacks.user_data).second;
                 if (*seq != 'r') {
                     sscanf(seq, "%u;%u", &top, &bottom);
                     --top;
@@ -1911,7 +1933,9 @@ Vt_handle_cs(Vt* self, char c)
 
                 /* Report window position */
                 case 13: {
-                    Pair_uint32_t pos = self->get_position(self->window_data);
+
+                    ASSERT(self->callbacks.on_window_position_requested);
+                    Pair_uint32_t pos = self->callbacks.on_window_position_requested(self->callbacks.user_data);
                     snprintf(self->out_buf, sizeof self->out_buf, "\e[3;%d;%d;t",
                              pos.first, pos.second);
                     Vt_write(self);
@@ -1962,8 +1986,8 @@ Vt_handle_cs(Vt* self, char c)
 
                 /* Resize window to args[1] lines (DECSLPP) */
                 default: {
-                    int arg = short_sequence_get_int_argument(seq);
-                    uint32_t ypixels = gl_pixels(arg, 0).first;
+                    //int arg = short_sequence_get_int_argument(seq);
+                    //uint32_t ypixels = gfx_pixels(arg, 0).first;
                 }
 
                 }
@@ -2308,7 +2332,8 @@ void Pty_handle_OSC(Vt* self, char c)
                 if (self->title)
                     free(self->title);
                 self->title = strdup(tokens.buf[1].buf +1);
-                self->on_title_update(self->window_data, tokens.buf[1].buf +1);
+                ASSERT(self->callbacks.on_title_changed, "callback is NULL");
+                self->callbacks.on_title_changed(self->callbacks.user_data, tokens.buf[1].buf +1);
             }
             break;
 
@@ -2854,7 +2879,9 @@ Vt_handle_literal(Vt* self, char c)
         switch (c) {
         case '\a':
             if (!settings.no_flash)
-                gl_flash();
+
+                ASSERT(self->callbacks.on_bell_flash, "callback is NULL");
+                self->callbacks.on_bell_flash(self->callbacks.user_data);
             break;
 
         case '\b':
@@ -2974,7 +3001,8 @@ Vt_handle_char(Vt* self, char c)
 
         case 'g':
             if (!settings.no_flash)
-                gl_flash();
+                ASSERT(self->callbacks.on_bell_flash, "callback is NULL");
+                self->callbacks.on_bell_flash(self->callbacks.user_data);
             break;
 
         /* Application Keypad (DECPAM) */
@@ -2997,7 +3025,10 @@ Vt_handle_char(Vt* self, char c)
             self->tabstop = 8;
             self->parser.state = PARSER_STATE_LITERAL;
             self->scroll_region_top = 0;
-            self->scroll_region_bottom = gl_get_char_size().second;
+
+            ASSERT(self->callbacks.on_number_of_cells_requested, "callback is NULL");
+            self->scroll_region_bottom = self->callbacks.on_number_of_cells_requested(self->callbacks.user_data).second;
+
             for (size_t* i = NULL; Vector_iter_size_t(&self->title_stack, i);)
                 free((char*)*i);
             Vector_destroy_size_t(&self->title_stack);
@@ -3162,15 +3193,22 @@ Vt_read(Vt* self)
         } else {
             for (int i = 0; i < rd; ++i)
                 Vt_handle_char(self, self->buf[i]);
-            self->repaint_required_notify(self->window_data);
+            ASSERT(self->callbacks.on_repaint_required);
+            self->callbacks.on_repaint_required(self->callbacks.user_data);
             Vt_update_scrollbar_dims(self);
             if ((uint32_t) rd < (sizeof self->buf -2)) {
                 /* nothing more to read */
                 static bool first = true;
                 if (first) {
                     first = false;
-                    Pair_uint32_t px = gl_pixels(self->ws.ws_col,
-                                                 self->ws.ws_row);
+
+                    ASSERT(self->callbacks.on_window_size_from_cells_requested, "callback is NULL");
+                    Pair_uint32_t px = self->callbacks.on_window_size_from_cells_requested(
+                        self->callbacks.user_data, self->ws.ws_col, self->ws.ws_row);
+
+                    /* Pair_uint32_t px = gfx_pixels(self->ws.ws_col, */
+                    /*                              self->ws.ws_row); */
+
                     self->ws.ws_xpixel = px.first;
                     self->ws.ws_ypixel = px.second;
                     if (ioctl(self->master, TIOCSWINSZ, &self->ws) < 0)
@@ -3194,7 +3232,8 @@ Vt_read(Vt* self)
             self->scrollbar.autoscroll_next_step =
                 TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS);
             Vt_update_scrollbar_dims(self);
-            self->repaint_required_notify(self->window_data);
+            ASSERT(self->callbacks.on_repaint_required);
+            self->callbacks.on_repaint_required(self->callbacks.user_data);
         } else if (self->scrollbar.autoscroll == AUTOSCROLL_DN &&
             TimePoint_passed(self->scrollbar.autoscroll_next_step))
         {
@@ -3202,7 +3241,8 @@ Vt_read(Vt* self)
             self->scrollbar.autoscroll_next_step =
                 TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS);
             Vt_update_scrollbar_dims(self);
-            self->repaint_required_notify(self->window_data);
+            ASSERT(self->callbacks.on_repaint_required);
+            self->callbacks.on_repaint_required(self->callbacks.user_data);
         }
     }
     return false;
@@ -3383,7 +3423,8 @@ Vt_maybe_handle_application_key(Vt* self, uint32_t key, uint32_t mods)
             // Escape
             self->unicode_input.buffer.size = 0;
             self->unicode_input.active = false;
-            self->repaint_required_notify(self->window_data);
+            ASSERT(self->callbacks.on_repaint_required);
+            self->callbacks.on_repaint_required(self->callbacks.user_data);
         } else if (key == 8) {
             // Backspace
             if (self->unicode_input.buffer.size) {
@@ -3392,16 +3433,20 @@ Vt_maybe_handle_application_key(Vt* self, uint32_t key, uint32_t mods)
                 self->unicode_input.buffer.size = 0;
                 self->unicode_input.active = false;
             }
-            self->repaint_required_notify(self->window_data);
+            ASSERT(self->callbacks.on_repaint_required);
+            self->callbacks.on_repaint_required(self->callbacks.user_data);
         } else if (isxdigit(key)) {
             if (self->unicode_input.buffer.size > 8) {
-                gl_flash();
+                ASSERT(self->callbacks.on_bell_flash, "callback is NULL");
+                self->callbacks.on_bell_flash(self->callbacks.user_data);
             } else {
                 Vector_push_char(&self->unicode_input.buffer, key);
-                self->repaint_required_notify(self->window_data);
+                ASSERT(self->callbacks.on_repaint_required);
+                self->callbacks.on_repaint_required(self->callbacks.user_data);
             }
         } else {
-            gl_flash();
+            ASSERT(self->callbacks.on_bell_flash, "callback is NULL");
+            self->callbacks.on_bell_flash(self->callbacks.user_data);
         }
         return true;
     } else {
@@ -3411,8 +3456,10 @@ Vt_maybe_handle_application_key(Vt* self, uint32_t key, uint32_t mods)
             switch (key) {
             case 3:    // ^C
             case 25: { // ^Y
+                ASSERT(self->callbacks.on_clipboard_sent, "callback is NULL");
+
                 Vector_char txt = Vt_select_region_to_string(self);
-                self->window_itable->clipboard_send(self->window_data, txt.buf);
+                self->callbacks.on_clipboard_sent(self->callbacks.user_data, txt.buf);
                 // clipboard_send should free
 
                 return true;
@@ -3420,7 +3467,9 @@ Vt_maybe_handle_application_key(Vt* self, uint32_t key, uint32_t mods)
 
             case 22:   // ^V
             case 16: { // ^P
-                self->window_itable->clipboard_get(self->window_data);
+
+                ASSERT(self->callbacks.on_clipboard_requested, "callback is NULL");
+                self->callbacks.on_clipboard_requested(self->callbacks.user_data);
                 return true;
             }
 
@@ -3438,7 +3487,8 @@ Vt_maybe_handle_application_key(Vt* self, uint32_t key, uint32_t mods)
 
             case 21: // ^U
                 self->unicode_input.active = true;
-                self->repaint_required_notify(self->window_data);
+                ASSERT(self->callbacks.on_repaint_required);
+                self->callbacks.on_repaint_required(self->callbacks.user_data);
                 return true;
 
             default:
@@ -3618,7 +3668,10 @@ Vt_handle_key(void* _self, uint32_t key, uint32_t mods)
         Vt_visual_scroll_reset(self);
     }
 
-    gl_reset_action_timer();
+    ASSERT(self->callbacks.on_action_performed, "callback is NULL");
+    self->callbacks.on_action_performed(self->callbacks.user_data);
+
+    //gfx_notify_action();
 }
 
 
@@ -3693,7 +3746,8 @@ Vt_handle_button(void* _self,
         Vt_update_scrollbar_dims(self);
     }
     
-    self->repaint_required_notify(self->window_data);
+    ASSERT(self->callbacks.on_repaint_required);
+    self->callbacks.on_repaint_required(self->callbacks.user_data);
 }
 
 

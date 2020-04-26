@@ -5,7 +5,6 @@
 
 #define _GNU_SOURCE
 
-#include "gfx.h"
 #include "x.h"
 
 #include <GL/glx.h>
@@ -42,10 +41,10 @@ glXSwapIntervalARBProc glXSwapIntervalEXT = NULL;
 
 
 
-static GuiGlobal* global;
+static WindowStatic* global;
 
 #define globalX11 ((GlobalX11*)&global->subclass_data)
-#define windowX11(base) ((WindowX11*)&base->subclass_data)
+#define windowX11(base) ((WindowX11*)&base->extend_data)
 
 struct WindowBase*
 WindowX11_new(uint32_t w, uint32_t h);
@@ -88,7 +87,7 @@ void*
 WindowX11_get_gl_ext_proc_adress(struct WindowBase* self, const char* name);
 
 
-static struct IWindowSubclass window_interface_x11 = {
+static struct IWindow window_interface_x11 = {
     .set_fullscreen         = WindowX11_set_fullscreen,
     .resize                 = WindowX11_resize,
     .events                 = WindowX11_events,
@@ -210,7 +209,7 @@ WindowX11_get_gl_ext_proc_adress(struct WindowBase* self, const char* name)
 struct WindowBase*
 WindowX11_new(uint32_t w, uint32_t h)
 {
-    global = calloc(1, sizeof(GuiGlobal) + sizeof(GlobalX11) - sizeof(uint8_t));
+    global = calloc(1, sizeof(WindowStatic) + sizeof(GlobalX11) - sizeof(uint8_t));
 
     globalX11->display = XOpenDisplay(NULL);
 
@@ -253,7 +252,7 @@ WindowX11_new(uint32_t w, uint32_t h)
 
     win->w = w;
     win->h = h;
-    win->subclass_interface = &window_interface_x11;
+    win->interface = &window_interface_x11;
 
     static const int visual_attribs[] = {
         GLX_RENDER_TYPE,        GLX_RGBA_BIT,
@@ -389,29 +388,12 @@ WindowX11_new(uint32_t w, uint32_t h)
 
 
 struct WindowBase*
-Window_new_x11(Pair_uint32_t res,
-               void* user_data,
-               void (*key_handler)(void*, uint32_t, uint32_t),
-               void (*button_handler)(void*,
-                                      uint32_t,
-                                      bool,
-                                      int32_t,
-                                      int32_t,
-                                      int32_t,
-                                      uint32_t),
-               void (*motion_handler)(void*, uint32_t, int32_t, int32_t),
-               void (*clipboard_handler)(void *self, const char *text))
+Window_new_x11(Pair_uint32_t res)
 {
     struct WindowBase* win = WindowX11_new(res.first, res.second);
 
     if (!win)
         return NULL;
-
-    win->user_data = user_data;
-    win->key_handler = key_handler;
-    win->button_handler = button_handler;
-    win->motion_handler = motion_handler;
-    win->clipboard_handler = clipboard_handler;
 
     win->title = NULL;
     WindowX11_set_title(win, settings.title);
@@ -497,8 +479,7 @@ WindowX11_events(struct WindowBase* self)
 
         case FocusIn:
             FLAG_SET(self->state_flags, WINDOW_IN_FOCUS);
-
-            gl_reset_action_timer();
+            self->callbacks.activity_notify_handler(self->callbacks.user_data);
             Window_notify_content_change(self);
             break;
 
@@ -580,9 +561,9 @@ WindowX11_events(struct WindowBase* self)
             }
                 
             if (no_consume)
-                self->key_handler(self->user_data,
-                                  stat == 4 ? code : ret,
-                                  windowX11(self)->mods);
+                self->callbacks.key_handler(self->callbacks.user_data,
+                                            stat == 4 ? code : ret,
+                                            windowX11(self)->mods);
 
             WindowX11_pointer(self, true);
             break;
@@ -609,13 +590,13 @@ WindowX11_events(struct WindowBase* self)
 
         case ButtonRelease:
             if (e->xbutton.button != 4 && e->xbutton.button) {
-                self->button_handler(self->user_data,
-                                     e->xbutton.button,
-                                     false,
-                                     e->xbutton.x,
-                                     e->xbutton.y,
-                                     0,
-                                     0);
+                self->callbacks.button_handler(self->callbacks.user_data,
+                                               e->xbutton.button,
+                                               false,
+                                               e->xbutton.x,
+                                               e->xbutton.y,
+                                               0,
+                                               0);
             }
             windowX11(self)->last_button_pressed = 0;
             WindowX11_pointer(self, false);
@@ -624,41 +605,42 @@ WindowX11_events(struct WindowBase* self)
         case ButtonPress:
             if (e->xbutton.button == 4) {
                 windowX11(self)->last_button_pressed = 0;
-                self->button_handler(self->user_data,
-                                     65,
-                                     true,
-                                     e->xbutton.x,
-                                     e->xbutton.y,
-                                     0,
-                                     windowX11(self)->mods);
+                self->callbacks.button_handler(self->callbacks.user_data,
+                                               65,
+                                               true,
+                                               e->xbutton.x,
+                                               e->xbutton.y,
+                                               0,
+                                               windowX11(self)->mods);
             } else if (e->xbutton.button == 5) {
                 windowX11(self)->last_button_pressed = 0;
-                self->button_handler(self->user_data,
-                                     66,
-                                     true,
-                                     e->xbutton.x,
-                                     e->xbutton.y,
-                                     0,
-                                     windowX11(self)->mods);
+                self->callbacks.button_handler(self->callbacks.user_data,
+                                               66,
+                                               true,
+                                               e->xbutton.x,
+                                               e->xbutton.y,
+                                               0,
+                                               windowX11(self)->mods);
             } else {
                 windowX11(self)->last_button_pressed = e->xbutton.button;
-                self->button_handler(self->user_data,
-                                     e->xbutton.button,
-                                     true,
-                                     e->xbutton.x,
-                                     e->xbutton.y,
-                                     0,
-                                     windowX11(self)->mods);
+                self->callbacks.button_handler(self->callbacks.user_data,
+                                               e->xbutton.button,
+                                               true,
+                                               e->xbutton.x,
+                                               e->xbutton.y,
+                                               0,
+                                               windowX11(self)->mods);
             }
             WindowX11_pointer(self, false);
             break;
 
         case MotionNotify:
             if (windowX11(self)->last_button_pressed) {
-                self->motion_handler(self->user_data,
-                                     windowX11(self)->last_button_pressed,
-                                     e->xmotion.x,
-                                     e->xmotion.y);
+                self->callbacks.motion_handler(
+                    self->callbacks.user_data,
+                    windowX11(self)->last_button_pressed,
+                    e->xmotion.x,
+                    e->xmotion.y);
             }
             WindowX11_pointer(self, false);
             break;
@@ -749,8 +731,8 @@ WindowX11_events(struct WindowBase* self)
                                     &dul,
                                     &pret);
 
-                    self->clipboard_handler(self->user_data,
-                                            (char*) pret);
+                    self->callbacks.clipboard_handler(self->callbacks.user_data,
+                                                      (char*) pret);
                     XFree(pret);
                 }
                 XDeleteProperty(globalX11->display,

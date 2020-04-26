@@ -29,9 +29,12 @@
 
 
 typedef uint32_t Rune;
+
+
 typedef struct {
     int32_t data[4];
 } VtLineProxy;
+
 
 extern void
 (*Vt_destroy_line_proxy)(int32_t proxy[static 4]);
@@ -46,10 +49,10 @@ enum CursorType
 
 enum MouseButton
 {
-    MOUSE_BTN_LEFT = 1,
-    MOUSE_BTN_RIGHT = 3,
-    MOUSE_BTN_MIDDLE = 2,
-    MOUSE_BTN_WHEEL_UP = 65,
+    MOUSE_BTN_LEFT       = 1,
+    MOUSE_BTN_RIGHT      = 3,
+    MOUSE_BTN_MIDDLE     = 2,
+    MOUSE_BTN_WHEEL_UP   = 65,
     MOUSE_BTN_WHEEL_DOWN = 66,
 };
 
@@ -59,6 +62,7 @@ typedef struct
     enum CursorType type:2;
     uint8_t blinking    :1;
     uint8_t hidden      :1;
+
 } Cursor;
 
 
@@ -151,18 +155,32 @@ DEF_VECTOR(VtLine, VtLine_destroy)
 
 typedef struct _Vt
 {
+    struct VtCallbacks
+    {
+        void* user_data;
+        Pair_uint32_t (*on_window_size_requested)           (void*);
+        Pair_uint32_t (*on_window_size_from_cells_requested)(void*, uint32_t r, uint32_t c);
+        Pair_uint32_t (*on_number_of_cells_requested)       (void*);
+
+        void          (*on_window_resize_requested)         (void*, uint32_t w, uint32_t h);
+
+        Pair_uint32_t (*on_window_position_requested)       (void*);
+
+        void          (*on_action_performed)                (void*);
+        void          (*on_repaint_required)                (void*);
+        void          (*on_bell_flash)                      (void*);
+
+        void          (*on_title_changed)                   (void*, const char*);
+
+        void          (*on_clipboard_requested)             (void*);
+        void          (*on_clipboard_sent)                  (void*, const char*);
+
+    } callbacks;
+
     /* Related to window interaction and gui */
 
     /* Controlled program has quit */
     bool is_done;
-
-    Pair_uint32_t (*get_pixels)(void*);
-    Pair_uint32_t (*get_position)(void*);
-
-    void (*repaint_required_notify)(void*);
-    void (*on_title_update)(void*, const char*);
-    struct IWindowSubclass* window_itable;
-    void* window_data;
 
     size_t last_click_x;
     size_t last_click_y;
@@ -402,6 +420,7 @@ Vt_handle_key(void* self, uint32_t key, uint32_t mods);
 void
 Vt_handle_clipboard(void* self, const char* text);
 
+
 void
 Vt_handle_button(void* self,
                  uint32_t button,
@@ -422,6 +441,7 @@ Vt_top_line(const Vt* const self)
     return self->lines.size <= self->ws.ws_row ? 0 :
         self->lines.size - self->ws.ws_row;
 }
+
 
 static inline size_t
 Vt_visual_top_line(const Vt* const self)

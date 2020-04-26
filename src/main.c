@@ -8,7 +8,6 @@
 
 #include "gfx.h"
 
-
 #ifndef NOWL
 #include "wl.h"
 #endif
@@ -43,16 +42,28 @@ on_terminate()
 
 
 static inline void
-assign_vt_to_window(Vt* self, const struct WindowBase* const win)
+assign_vt_to_window(Vt* vt, struct WindowBase* win)
 {
-    self->window_data = (void*) win;
-    self->window_itable = win->subclass_interface;
-    self->on_title_update = Window_update_title;
-    self->repaint_required_notify = Window_notify_content_change2;
+    vt->callbacks.user_data                           = win;
+    vt->callbacks.on_repaint_required                 = Window_notify_content_change;
+    vt->callbacks.on_clipboard_sent                   = Window_clipboard_send;
+    vt->callbacks.on_clipboard_requested              = Window_clipboard_get;
+    vt->callbacks.on_window_size_requested            = Window_size;
+    vt->callbacks.on_window_position_requested        = Window_position;
+    vt->callbacks.on_window_size_from_cells_requested = gfx_pixels;
+    vt->callbacks.on_number_of_cells_requested        = gfx_get_char_size;
+    vt->callbacks.on_title_changed                    = Window_update_title;
+    vt->callbacks.on_bell_flash                       = gfx_flash;
+    vt->callbacks.on_action_performed                 = gfx_notify_action;
 
-    self->get_position = Window_position2;
-    self->get_pixels = Window_size2;
+    win->callbacks.user_data               = vt;
+    win->callbacks.key_handler             = Vt_handle_key;
+    win->callbacks.button_handler          = Vt_handle_button;
+    win->callbacks.motion_handler          = Vt_handle_motion;
+    win->callbacks.clipboard_handler       = Vt_handle_clipboard;
+    win->callbacks.activity_notify_handler = gfx_notify_action;
 }
+
 
 void*
 load_gl_ext_app(const char* name)
@@ -68,30 +79,24 @@ load_gl_ext_app(const char* name)
     return retval;
 }
 
+
 int
 main(int argc, char** argv)
 {
     settings_init(argc, argv);
+
     Vt_destroy_line_proxy = gfx_destroy_line_proxy;
     terminal = Vt_new(settings.cols, settings.rows);
-    gl_init_font();
+
+    gfx_load_font();
+
     if (!settings.x11_is_default)
         #ifndef NOWL
-        win = Window_new_wayland(gl_pixels(settings.cols, settings.rows),
-                                 &terminal,
-                                 &Vt_handle_key,
-                                 &Vt_handle_button,
-                                 &Vt_handle_motion,
-                                 &Vt_handle_clipboard);
+        win = Window_new_wayland(gfx_pixels(NULL, settings.cols, settings.rows));
         #endif
     if (!win) {
         #ifndef NOX
-        win = Window_new_x11(gl_pixels(settings.cols, settings.rows),
-                             &terminal,
-                             &Vt_handle_key,
-                             &Vt_handle_button,
-                             &Vt_handle_motion,
-                             &Vt_handle_clipboard);
+        win = Window_new_x11(gfx_pixels(NULL, settings.cols, settings.rows));
         #endif
     }
 
@@ -99,11 +104,14 @@ main(int argc, char** argv)
         ERR("Failed to create window");
     }
 
-    Window_set_swap_interval(win, 0);
     assign_vt_to_window(&terminal, win);
+
+    Window_set_swap_interval(win, 0);
     gl_load_ext = load_gl_ext_app;
-    gl_init_renderer_with_size(Window_size(win));
+
+    gfx_init_with_size(Window_size(win));
     Pair_uint32_t res = (Pair_uint32_t) { 0, 0 };
+
     while (!Window_closed(win) && !terminal.is_done) {
         Window_events(win);
 
@@ -114,14 +122,14 @@ main(int argc, char** argv)
         Pair_uint32_t newres = Window_size(win);
         if (newres.first != res.first || newres.second != res.second) {
             res = newres;
-            gl_set_size(res.first, res.second);
-            Pair_uint32_t chars = gl_get_char_size();
+            gfx_resize(res.first, res.second);
+            Pair_uint32_t chars = gfx_get_char_size(NULL);
             Window_notify_content_change(win);
             Vt_resize(&terminal, chars.first, chars.second);
         }
 
-        if (!!gl_check_timers(&terminal) +
-            !!gl_set_focus(FLAG_IS_SET(win->state_flags, WINDOW_IN_FOCUS)))
+        if (!!gfx_update_timers(&terminal) +
+            !!gfx_set_focus(FLAG_IS_SET(win->state_flags, WINDOW_IN_FOCUS)))
         {
             Window_notify_content_change(win);
         }

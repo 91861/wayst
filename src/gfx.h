@@ -18,56 +18,56 @@ typedef struct _IRendererBase {
 /**
  * set renderer viewport size and recalculate transformations */
 void
-gl_set_size(uint32_t w, uint32_t h);
+gfx_resize(uint32_t w, uint32_t h);
 
 /**
  * @return number of rows and columns */
 Pair_uint32_t
-gl_get_char_size();
+gfx_get_char_size(void*);
 
 
 /**
  * Load font */
 void
-gl_init_font();
+gfx_load_font();
 
 
 /**
  * Load OpenGL resources, needs a gl context */
 void
-gl_init_renderer();
+gfx_init();
 
 
 /**
  * Check animation timers */
 bool
-gl_check_timers();
+gfx_update_timers();
 
 /**
  * Notify the renderer that there was some activity */
 void
-gl_reset_action_timer();
+gfx_notify_action(void*);
 
 bool
-gl_set_focus(bool focus);
+gfx_set_focus(bool focus);
 
 /**
  * Flash bell */
 void
-gl_flash();
+gfx_flash();
 
 static inline void
-gl_init_renderer_with_size(const Pair_uint32_t res)
+gfx_init_with_size(const Pair_uint32_t res)
 {
-    gl_init_renderer();
+    gfx_init();
 
-    gl_set_size(res.first, res.second);
+    gfx_resize(res.first, res.second);
 }
 
 /**
  * size of viewport in pixels required to fit given number of character cells */
 Pair_uint32_t
-gl_pixels(uint32_t r, uint32_t c);
+gfx_pixels(void*, uint32_t r, uint32_t c);
 
 
 struct _Vt;
