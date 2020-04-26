@@ -1,13 +1,12 @@
 /* See LICENSE for license information. */
 
-
 #pragma once
 
-#include "util.h"
 #include "colors.h"
+#include "util.h"
 
 #ifndef VERSION
-    #define VERSION "unknown"
+#define VERSION "unknown"
 #endif
 
 typedef struct
@@ -19,14 +18,14 @@ typedef struct
 typedef struct
 {
     const char* config_path;
-    bool skip_config;
+    bool        skip_config;
 
     /* Prefer x11 over wayland */
     bool x11_is_default;
 
     /* Shell */
-    char* shell;
-    int shell_argc;
+    char*        shell;
+    int          shell_argc;
     const char** shell_argv;
 
     /* TERM value */
@@ -59,41 +58,40 @@ typedef struct
     /* font family */
     char* font;
 
-
     /* font family for symbol font */
     char* font_fallback;
     char* font_fallback2;
 
     /* font files */
-    char* font_name;
-    char* font_name_bold;
-    char* font_name_italic;
-    char* font_name_fallback;
-    char* font_name_fallback2;
+    char*    font_name;
+    char*    font_name_bold;
+    char*    font_name_italic;
+    char*    font_name_fallback;
+    char*    font_name_fallback2;
     uint16_t font_size;
     uint16_t font_dpi;
 
     /* colors - normal, highlight */
     ColorRGBA bg, bghl;
-    ColorRGB fg, fghl;
+    ColorRGB  fg, fghl;
 
     /* color for 'dim' text */
     ColorRGB fg_dim;
 
     bool highlight_change_fg;
 
-    int colorscheme_preset;
+    int         colorscheme_preset;
     Colorscheme colorscheme;
-    bool* _explicit_colors_set;
+    bool*       _explicit_colors_set;
 
     int text_blink_interval;
 
     ColorRGBA bell_flash;
-    bool  no_flash;
+    bool      no_flash;
 
-    bool allow_scrollback_clear;
-    bool scroll_on_output;
-    bool scroll_on_key;
+    bool    allow_scrollback_clear;
+    bool    scroll_on_output;
+    bool    scroll_on_key;
     uint8_t scroll_discrete_lines;
 
     bool allow_multiple_underlines;
@@ -102,13 +100,9 @@ typedef struct
 
 } Settings;
 
-
 extern ColorRGB color_palette_256[257];
 extern Settings settings;
 
-void
-settings_init(const int argc, char* const* argv);
+void settings_init(const int argc, char* const* argv);
 
-
-void
-settings_cleanup();
+void settings_cleanup();

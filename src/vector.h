@@ -1,13 +1,11 @@
 /* See LICENSE for license information. */
 
-
 #pragma once
 
 #define _GNU_SOURCE
 
-#include <stdint.h>
 #include <stdbool.h>
-
+#include <stdint.h>
 
 /**
  * Generic dynamic array with iterators
@@ -31,17 +29,17 @@
     typedef struct                                                             \
     {                                                                          \
         size_t cap, size;                                                      \
-        t* buf;                                                                \
+        t*     buf;                                                            \
     } Vector_##t;                                                              \
                                                                                \
     static inline Vector_##t Vector_new_##t()                                  \
     {                                                                          \
-        return (Vector_##t) { 4, 0, malloc(sizeof(t) << 2) };                  \
+        return (Vector_##t){ 4, 0, malloc(sizeof(t) << 2) };                   \
     }                                                                          \
                                                                                \
     static inline Vector_##t Vector_new_with_capacity_##t(size_t init_cap)     \
     {                                                                          \
-        return (Vector_##t) { init_cap, 0, malloc(sizeof(t) * init_cap) };     \
+        return (Vector_##t){ init_cap, 0, malloc(sizeof(t) * init_cap) };      \
     }                                                                          \
                                                                                \
     static void Vector_push_##t(Vector_##t* self, t arg)                       \
@@ -53,18 +51,18 @@
         self->buf[self->size++] = arg;                                         \
     }                                                                          \
                                                                                \
-    static inline void                                                         \
-    Vector_remove_at_##t(Vector_##t* self, size_t idx, size_t n) {             \
+    static inline void Vector_remove_at_##t(Vector_##t* self, size_t idx,      \
+                                            size_t n)                          \
+    {                                                                          \
         if (dtor)                                                              \
             for (size_t i = idx; i < n + idx; ++i)                             \
-                ((void (*)(t*)) dtor)(self->buf + i);                          \
+                ((void (*)(t*))dtor)(self->buf + i);                           \
         memmove(self->buf + idx, self->buf + idx + n,                          \
                 sizeof(t) * ((self->size -= n) - idx));                        \
     }                                                                          \
                                                                                \
-    static inline void Vector_pushv_##t(Vector_##t* self,                      \
-                                 const t* const argv,                          \
-                                 size_t n)                                     \
+    static inline void Vector_pushv_##t(Vector_##t* self, const t* const argv, \
+                                        size_t n)                              \
     {                                                                          \
         for (size_t i = 0; i < n; ++i)                                         \
             Vector_push_##t(self, argv[i]);                                    \
@@ -103,8 +101,8 @@
     static inline size_t Vector_index_##t(Vector_##t* self, t* i)              \
     {                                                                          \
         ASSERT(i >= self->buf && (size_t)(i - self->buf) <= self->size,        \
-                "Vector iterator out of range");                               \
-        return i - self->buf ;                                                 \
+               "Vector iterator out of range");                                \
+        return i - self->buf;                                                  \
     }                                                                          \
                                                                                \
     static inline t* Vector_at_##t(Vector_##t* self, size_t idx)               \
@@ -115,16 +113,18 @@
                                                                                \
     static inline t* Vector_iter_##t(Vector_##t* self, t* i)                   \
     {                                                                          \
-        return  unlikely(!self->size) ? NULL                                   \
-            : !i ? self->buf                                                   \
-                : (size_t)(i -self->buf) +1 < self->size ? i +1 : NULL;        \
+        return unlikely(!self->size)                                           \
+                 ? NULL                                                        \
+                 : !i ? self->buf                                              \
+                      : (size_t)(i - self->buf) + 1 < self->size ? i + 1       \
+                                                                 : NULL;       \
     }                                                                          \
                                                                                \
     static inline t* Vector_iter_back_##t(Vector_##t* self, t* i)              \
     {                                                                          \
         return unlikely(!self->size) ? NULL                                    \
-            : !i ? &self->buf[self->size -1]                                   \
-                  : (i == self->buf) ? NULL : i -1;                            \
+                                     : !i ? &self->buf[self->size - 1]         \
+                                          : (i == self->buf) ? NULL : i - 1;   \
     }                                                                          \
                                                                                \
     static inline t* Vector_insert_##t(Vector_##t* self, t* i, t arg)          \
@@ -132,19 +132,17 @@
         if (unlikely(!self->size)) {                                           \
             ASSERT(i == self->buf, "Vector iterator out of range");            \
             Vector_push_##t(self, arg);                                        \
-            return i +1;                                                       \
+            return i + 1;                                                      \
         } else if (unlikely(self->cap == self->size)) {                        \
             size_t idx = i - self->buf;                                        \
-            self->buf = realloc(self->buf, (self->cap <<= 1) * sizeof(t));     \
-            memmove(self->buf +idx +1,                                         \
-                    self->buf +idx,                                            \
-                    (self->size++ -idx) *sizeof(t));                           \
+            self->buf  = realloc(self->buf, (self->cap <<= 1) * sizeof(t));    \
+            memmove(self->buf + idx + 1, self->buf + idx,                      \
+                    (self->size++ - idx) * sizeof(t));                         \
             self->buf[idx] = arg;                                              \
             return self->buf + idx;                                            \
         } else {                                                               \
-            memmove(i + 1, i, (self->size++ -(i -self->buf)) *sizeof(t));      \
+            memmove(i + 1, i, (self->size++ - (i - self->buf)) * sizeof(t));   \
             *i = arg;                                                          \
             return i;                                                          \
         }                                                                      \
     }
-

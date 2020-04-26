@@ -1,70 +1,64 @@
 /* See LICENSE for license information. */
 
-
 #pragma once
-
 
 #define _GNU_SOURCE
 
-#include <stdarg.h>
 #include <GL/gl.h>
+#include <stdarg.h>
 
 #include "gl_exts/glext.h"
- 
+
 #include "util.h"
 
-extern PFNGLBUFFERSUBDATAARBPROC glBufferSubData;
-extern PFNGLUNIFORM4FPROC glUniform4f;
-extern PFNGLUNIFORM3FPROC glUniform3f;
-extern PFNGLUNIFORM2FPROC glUniform2f;
-extern PFNGLBUFFERDATAPROC glBufferData;
-extern PFNGLDELETEPROGRAMPROC glDeleteProgram;
-extern PFNGLUSEPROGRAMPROC glUseProgram;
-extern PFNGLGETUNIFORMLOCATIONPROC glGetUniformLocation;
-extern PFNGLGETATTRIBLOCATIONPROC glGetAttribLocation;
-extern PFNGLDELETESHADERPROC glDeleteShader;
-extern PFNGLDETACHSHADERPROC glDetachShader;
-extern PFNGLGETPROGRAMINFOLOGPROC glGetProgramInfoLog;
-extern PFNGLGETPROGRAMIVPROC glGetProgramiv;
-extern PFNGLLINKPROGRAMPROC glLinkProgram;
-extern PFNGLATTACHSHADERPROC glAttachShader;
-extern PFNGLCOMPILESHADERPROC glCompileShader;
-extern PFNGLSHADERSOURCEPROC glShaderSource;
-extern PFNGLCREATESHADERPROC glCreateShader;
-extern PFNGLCREATEPROGRAMPROC glCreateProgram;
-extern PFNGLGETSHADERINFOLOGPROC glGetShaderInfoLog;
-extern PFNGLGETSHADERIVPROC glGetShaderiv;
-extern PFNGLDELETEBUFFERSPROC glDeleteBuffers;
-extern PFNGLVERTEXATTRIBPOINTERPROC glVertexAttribPointer;
+extern PFNGLBUFFERSUBDATAARBPROC        glBufferSubData;
+extern PFNGLUNIFORM4FPROC               glUniform4f;
+extern PFNGLUNIFORM3FPROC               glUniform3f;
+extern PFNGLUNIFORM2FPROC               glUniform2f;
+extern PFNGLBUFFERDATAPROC              glBufferData;
+extern PFNGLDELETEPROGRAMPROC           glDeleteProgram;
+extern PFNGLUSEPROGRAMPROC              glUseProgram;
+extern PFNGLGETUNIFORMLOCATIONPROC      glGetUniformLocation;
+extern PFNGLGETATTRIBLOCATIONPROC       glGetAttribLocation;
+extern PFNGLDELETESHADERPROC            glDeleteShader;
+extern PFNGLDETACHSHADERPROC            glDetachShader;
+extern PFNGLGETPROGRAMINFOLOGPROC       glGetProgramInfoLog;
+extern PFNGLGETPROGRAMIVPROC            glGetProgramiv;
+extern PFNGLLINKPROGRAMPROC             glLinkProgram;
+extern PFNGLATTACHSHADERPROC            glAttachShader;
+extern PFNGLCOMPILESHADERPROC           glCompileShader;
+extern PFNGLSHADERSOURCEPROC            glShaderSource;
+extern PFNGLCREATESHADERPROC            glCreateShader;
+extern PFNGLCREATEPROGRAMPROC           glCreateProgram;
+extern PFNGLGETSHADERINFOLOGPROC        glGetShaderInfoLog;
+extern PFNGLGETSHADERIVPROC             glGetShaderiv;
+extern PFNGLDELETEBUFFERSPROC           glDeleteBuffers;
+extern PFNGLVERTEXATTRIBPOINTERPROC     glVertexAttribPointer;
 extern PFNGLENABLEVERTEXATTRIBARRAYPROC glEnableVertexAttribArray;
-extern PFNGLBINDBUFFERPROC glBindBuffer;
-extern PFNGLGENBUFFERSPROC glGenBuffers;
-extern PFNGLDELETEFRAMEBUFFERSPROC glDeleteFramebuffers;
+extern PFNGLBINDBUFFERPROC              glBindBuffer;
+extern PFNGLGENBUFFERSPROC              glGenBuffers;
+extern PFNGLDELETEFRAMEBUFFERSPROC      glDeleteFramebuffers;
 extern PFNGLFRAMEBUFFERRENDERBUFFERPROC glFramebufferRenderbuffer;
-extern PFNGLRENDERBUFFERSTORAGEPROC glRenderbufferStorage;
-extern PFNGLBINDBUFFERPROC glBindBuffer;
-extern PFNGLGENBUFFERSPROC glGenBuffers;
-extern PFNGLDELETEFRAMEBUFFERSPROC glDeleteFramebuffers;
-extern PFNGLCHECKFRAMEBUFFERSTATUSPROC glCheckFramebufferStatus;
-extern PFNGLFRAMEBUFFERTEXTURE2DPROC glFramebufferTexture2D;
-extern PFNGLBINDFRAMEBUFFERPROC glBindFramebuffer;
-extern PFNGLBINDRENDERBUFFERPROC glBindRenderbuffer;
-extern PFNGLGENRENDERBUFFERSPROC glGenRenderbuffers;
-extern PFNGLGENFRAMEBUFFERSPROC glGenFramebuffers;
-extern PFNGLGENERATEMIPMAPPROC glGenerateMipmap;
+extern PFNGLRENDERBUFFERSTORAGEPROC     glRenderbufferStorage;
+extern PFNGLBINDBUFFERPROC              glBindBuffer;
+extern PFNGLGENBUFFERSPROC              glGenBuffers;
+extern PFNGLDELETEFRAMEBUFFERSPROC      glDeleteFramebuffers;
+extern PFNGLCHECKFRAMEBUFFERSTATUSPROC  glCheckFramebufferStatus;
+extern PFNGLFRAMEBUFFERTEXTURE2DPROC    glFramebufferTexture2D;
+extern PFNGLBINDFRAMEBUFFERPROC         glBindFramebuffer;
+extern PFNGLBINDRENDERBUFFERPROC        glBindRenderbuffer;
+extern PFNGLGENRENDERBUFFERSPROC        glGenRenderbuffers;
+extern PFNGLGENFRAMEBUFFERSPROC         glGenFramebuffers;
+extern PFNGLGENERATEMIPMAPPROC          glGenerateMipmap;
 #ifdef DEBUG
 extern PFNGLDEBUGMESSAGECALLBACKPROC glDebugMessageCallback;
 #endif
 
 void* (*gl_load_ext)(const char* procname);
 
-void
-gl_load_exts();
+void gl_load_exts();
 
-__attribute__((always_inline))
-static inline void
-gl_check_error();
-
+__attribute__((always_inline)) static inline void gl_check_error();
 
 typedef struct
 {
@@ -79,18 +73,18 @@ typedef struct
 } Attribute;
 
 #define SHADER_MAX_NUM_VERT_ATTRIBS 1
-#define SHADER_MAX_NUM_UNIFORMS 3
+#define SHADER_MAX_NUM_UNIFORMS     3
 typedef struct
 {
-    GLuint id;
+    GLuint    id;
     Attribute attribs[SHADER_MAX_NUM_VERT_ATTRIBS];
-    Uniform uniforms[SHADER_MAX_NUM_UNIFORMS];
+    Uniform   uniforms[SHADER_MAX_NUM_UNIFORMS];
 } Shader;
 
 typedef struct
 {
-    GLuint id;
-    bool has_alpha;
+    GLuint   id;
+    bool     has_alpha;
     uint32_t w, h;
 } Texture;
 
@@ -100,13 +94,9 @@ typedef struct
     size_t size;
 } VBO;
 
-
-
-
 /* Texture */
 
-static Texture
-Texture_new_with_alignment(uint8_t alignment)
+static Texture Texture_new_with_alignment(uint8_t alignment)
 {
     GLuint id = 0;
 
@@ -120,130 +110,112 @@ Texture_new_with_alignment(uint8_t alignment)
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
-    return (Texture) { id, false, 0, 0 };
+    return (Texture){ id, false, 0, 0 };
 }
 
-static Texture
-Texture_new()
+static Texture Texture_new()
 {
     return Texture_new_with_alignment(4);
 }
 
-static inline void
-Texture_image_with_format(Texture* self, GLuint w, GLuint h, const void* data, int format)
+static inline void Texture_image_with_format(Texture*    self,
+                                             GLuint      w,
+                                             GLuint      h,
+                                             const void* data,
+                                             int         format)
 {
     glBindTexture(GL_TEXTURE_2D, self->id);
     self->has_alpha = (format == GL_RGBA || format == GL_BGRA);
 
-    glTexImage2D(GL_TEXTURE_2D,
-                 0,
-                 format,
-                 (self->w = w),
-                 (self->h = h),
-                 0,
-                 format,
-                 GL_UNSIGNED_BYTE,
-                 data);
+    glTexImage2D(GL_TEXTURE_2D, 0, format, (self->w = w), (self->h = h), 0,
+                 format, GL_UNSIGNED_BYTE, data);
 }
 
-static inline void
-Texture_image(Texture* self, bool alpha, GLuint w, GLuint h, const void* data)
+static inline void Texture_image(Texture*    self,
+                                 bool        alpha,
+                                 GLuint      w,
+                                 GLuint      h,
+                                 const void* data)
 {
     Texture_image_with_format(self, w, h, data, alpha ? GL_RGBA : GL_RGB);
 }
 
-static void
-Texture_sub_image(Texture* self,
-                  GLuint x,
-                  GLuint y,
-                  GLuint w,
-                  GLuint h,
-                  const void* data)
+static void Texture_sub_image(Texture*    self,
+                              GLuint      x,
+                              GLuint      y,
+                              GLuint      w,
+                              GLuint      h,
+                              const void* data)
 {
 
     glBindTexture(GL_TEXTURE_2D, self->id);
 
-    glTexSubImage2D(GL_TEXTURE_2D,
-                    0,
-                    x, y,
-                    w, h,
-                    self->has_alpha ? GL_RGBA : GL_RGB,
-                    GL_UNSIGNED_BYTE,
-                    data);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h,
+                    self->has_alpha ? GL_RGBA : GL_RGB, GL_UNSIGNED_BYTE, data);
 }
 
-
-static inline void
-Texture_destroy(Texture* self)
+static inline void Texture_destroy(Texture* self)
 {
     glDeleteTextures(1, &self->id);
     self->id = 0;
 }
 
-
 /* FRAMEBUFFER */
 
 typedef struct
 {
-    GLuint id;
-    Texture color_tex;
-    GLuint depth_renderbuffer;
+    GLuint   id;
+    Texture  color_tex;
+    GLuint   depth_renderbuffer;
     uint32_t rb_w;
 } Framebuffer;
 
-static Framebuffer
-Framebuffer_new()
+static Framebuffer Framebuffer_new()
 {
     Framebuffer ret = {
-        .id = 0,
-        .color_tex = { 0 },
+        .id                 = 0,
+        .color_tex          = { 0 },
         .depth_renderbuffer = 0,
     };
 
     glGenFramebuffers(1, &ret.id);
     glGenRenderbuffers(1, &ret.depth_renderbuffer);
     glBindRenderbuffer(GL_RENDERBUFFER, ret.depth_renderbuffer);
-    
+
     return ret;
 }
 
-
-static inline void
-Framebuffer_attach_texture(Framebuffer* self, Texture* tex)
+static inline void Framebuffer_attach_texture(Framebuffer* self, Texture* tex)
 {
     glBindFramebuffer(GL_FRAMEBUFFER, self->id);
-    glFramebufferTexture2D(GL_FRAMEBUFFER,
-                           GL_COLOR_ATTACHMENT0,
-                           GL_TEXTURE_2D,
-                           tex->id,
-                           0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                           tex->id, 0);
 }
 
-static inline void
-Framebuffer_assert_complete(Framebuffer* self)
+static inline void Framebuffer_assert_complete(Framebuffer* self)
 {
     GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
 
     if (status != GL_FRAMEBUFFER_COMPLETE) {
         const char* ss;
         switch (status) {
-        case GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT:
-            ss = "GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT";
-            break;
-        case GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT:
-            ss = "GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT";
-            break;
-        case GL_FRAMEBUFFER_UNSUPPORTED:
-            ss = "GL_FRAMEBUFFER_UNSUPPORTED";
-            break;
+            case GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT:
+                ss = "GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT";
+                break;
+            case GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT:
+                ss = "GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT";
+                break;
+            case GL_FRAMEBUFFER_UNSUPPORTED:
+                ss = "GL_FRAMEBUFFER_UNSUPPORTED";
+                break;
         }
         ERR("Framebuffer error, status %s", ss);
     }
 }
 
-
-static inline void
-Framebuffer_generate_texture_attachment(Framebuffer* self, uint32_t w, int32_t h)
+static inline void Framebuffer_generate_texture_attachment(Framebuffer* self,
+                                                           uint32_t     w,
+                                                           int32_t      h)
 {
     glBindFramebuffer(GL_FRAMEBUFFER, self->id);
 
@@ -251,63 +223,56 @@ Framebuffer_generate_texture_attachment(Framebuffer* self, uint32_t w, int32_t h
     glBindTexture(GL_TEXTURE_2D, self->color_tex.id);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
-    glFramebufferTexture2D(GL_FRAMEBUFFER,
-                           GL_COLOR_ATTACHMENT0,
-                           GL_TEXTURE_2D,
-                           self->color_tex.id,
-                           0);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                           self->color_tex.id, 0);
 
     glBindRenderbuffer(GL_RENDERBUFFER, self->depth_renderbuffer);
     if (w != self->rb_w) {
         glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, w, h);
         self->rb_w = w;
     }
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, self->depth_renderbuffer);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                              GL_RENDERBUFFER, self->depth_renderbuffer);
 
     glViewport(0, 0, w, h);
     gl_check_error();
 }
 
-
-static inline Texture
-Framebuffer_get_color_texture(Framebuffer* self)
+static inline Texture Framebuffer_get_color_texture(Framebuffer* self)
 {
-    Texture tmp = self->color_tex;
+    Texture tmp        = self->color_tex;
     self->color_tex.id = 0;
     return tmp;
 }
 
-
 /**
  * @param self - NULL - unbind framebuffer
  */
-static inline void
-Framebuffer_use(Framebuffer* self)
+static inline void Framebuffer_use(Framebuffer* self)
 {
     if (self) {
         ASSERT(self->color_tex.id, "no color attachment");
 
         glBindFramebuffer(GL_FRAMEBUFFER, self->id);
-        glViewport(0, 0, self->color_tex.w ,self->color_tex.h);
+        glViewport(0, 0, self->color_tex.w, self->color_tex.h);
     } else {
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
     }
 }
 
-
-static inline void
-Framebuffer_destroy(Framebuffer* self)
+static inline void Framebuffer_destroy(Framebuffer* self)
 {
     ASSERT(self->id, "framebuffer double delete");
     glDeleteFramebuffers(1, &self->id);
     self->id = 0;
 }
 
-
 /* VBO */
-static VBO
-VBO_new(const uint32_t vertices , uint32_t nattribs, const Attribute* attr)
+static VBO VBO_new(const uint32_t   vertices,
+                   uint32_t         nattribs,
+                   const Attribute* attr)
 {
     GLuint id = 0;
 
@@ -318,28 +283,19 @@ VBO_new(const uint32_t vertices , uint32_t nattribs, const Attribute* attr)
         glEnableVertexAttribArray(attr[i].location);
 
         if (attr)
-            glVertexAttribPointer(
-                    attr[i].location, vertices, GL_FLOAT, GL_FALSE, 0, 0);
+            glVertexAttribPointer(attr[i].location, vertices, GL_FLOAT,
+                                  GL_FALSE, 0, 0);
     }
 
-    return (VBO) {
-        .vbo = id,
-        .size = 0
-    };
+    return (VBO){ .vbo = id, .size = 0 };
 }
 
-
-__attribute__((always_inline))
-static inline void
-VBO_destroy(VBO* self)
+__attribute__((always_inline)) static inline void VBO_destroy(VBO* self)
 {
     glDeleteBuffers(1, &self->vbo);
 }
 
-
-__attribute__((cold))
-static void
-check_compile_error(GLuint id)
+__attribute__((cold)) static void check_compile_error(GLuint id)
 {
     int result = 0;
     glGetShaderiv(id, GL_COMPILE_STATUS, &result);
@@ -354,14 +310,14 @@ check_compile_error(GLuint id)
     }
 }
 
-
 /**
  * Create a shader program from sources
  * @param vars - vertex attribute and uniform names
  */
-__attribute__((sentinel, cold))
-static Shader
-Shader_new(const char* vs_src, const char* fs_src, const char* vars, ...)
+__attribute__((sentinel, cold)) static Shader Shader_new(const char* vs_src,
+                                                         const char* fs_src,
+                                                         const char* vars,
+                                                         ...)
 {
     GLuint id = glCreateProgram();
 
@@ -395,29 +351,21 @@ Shader_new(const char* vs_src, const char* fs_src, const char* vars, ...)
     glDetachShader(id, fs);
     glDeleteShader(fs);
 
-    Shader ret = {
-        .id = id,
-        .attribs  = {{ 0 }},
-        .uniforms = {{ 0 }}
-    };
+    Shader ret = { .id = id, .attribs = { { 0 } }, .uniforms = { { 0 } } };
 
     uint32_t attr_idx = 0, uni_idx = 0;
-    va_list ap;
+    va_list  ap;
     va_start(ap, vars);
     for (char* name = NULL; (name = va_arg(ap, char*));) {
         GLint res = glGetAttribLocation(id, name);
         if (res != -1) {
-            ret.attribs[attr_idx++] = (Attribute) {
-                .location = res,
-                .name = name
-            };
+            ret.attribs[attr_idx++] =
+              (Attribute){ .location = res, .name = name };
         } else {
             res = glGetUniformLocation(id, name);
             if (res != -1) {
-                ret.uniforms[uni_idx++] = (Uniform) {
-                    .location = res,
-                    .name = name
-                };
+                ret.uniforms[uni_idx++] =
+                  (Uniform){ .location = res, .name = name };
             } else {
                 ERR("Failed to bind shader variable \'%s\' location", name);
             }
@@ -428,10 +376,7 @@ Shader_new(const char* vs_src, const char* fs_src, const char* vars, ...)
     return ret;
 }
 
-
-__attribute__((always_inline))
-static inline void
-Shader_use(Shader* s)
+__attribute__((always_inline)) static inline void Shader_use(Shader* s)
 {
     if (s) {
         ASSERT(s->id, "use of uninitialized shader");
@@ -440,20 +385,14 @@ Shader_use(Shader* s)
         glUseProgram(0);
 }
 
-
-__attribute__((always_inline))
-static inline void
-Shader_destroy(Shader* s)
+__attribute__((always_inline)) static inline void Shader_destroy(Shader* s)
 {
     ASSERT(s->id, "deleted uninitialized/deleted shader program");
     glDeleteProgram(s->id);
     s->id = 0;
 }
 
-
-__attribute__((cold))
-static const char*
-gl_severity_to_str(GLenum severity)
+__attribute__((cold)) static const char* gl_severity_to_str(GLenum severity)
 {
     switch (severity) {
         case GL_DEBUG_SEVERITY_NOTIFICATION:
@@ -469,10 +408,7 @@ gl_severity_to_str(GLenum severity)
     }
 }
 
-
-__attribute__((cold))
-static const char*
-gl_source_to_str(GLenum source)
+__attribute__((cold)) static const char* gl_source_to_str(GLenum source)
 {
     switch (source) {
         case GL_DEBUG_SOURCE_API:
@@ -492,10 +428,7 @@ gl_source_to_str(GLenum source)
     }
 }
 
-
-__attribute__((cold))
-static const char*
-gl_type_to_str(GLenum type)
+__attribute__((cold)) static const char* gl_type_to_str(GLenum type)
 {
     switch (type) {
         case GL_DEBUG_TYPE_ERROR:
@@ -521,15 +454,13 @@ gl_type_to_str(GLenum type)
     }
 }
 
-__attribute__((cold))
-static void
-on_gl_error(GLenum source,
-            GLenum type,
-            GLuint id,
-            GLenum severity,
-            GLsizei length,
-            const GLchar* message,
-            const void* user_param)
+__attribute__((cold)) static void on_gl_error(GLenum        source,
+                                              GLenum        type,
+                                              GLuint        id,
+                                              GLenum        severity,
+                                              GLsizei       length,
+                                              const GLchar* message,
+                                              const void*   user_param)
 {
     if (severity == GL_DEBUG_SEVERITY_HIGH) {
         ERR("OpenGL error\n"
@@ -538,49 +469,39 @@ on_gl_error(GLenum source,
             "  type:     %s\n"
             "  id:       %d\n"
             "  message:\n%s",
-            gl_severity_to_str(severity),
-            gl_source_to_str(source),
-            gl_type_to_str(type),
-            id,
-            message);
-    }
-    else if (severity == GL_DEBUG_SEVERITY_MEDIUM) {
+            gl_severity_to_str(severity), gl_source_to_str(source),
+            gl_type_to_str(type), id, message);
+    } else if (severity == GL_DEBUG_SEVERITY_MEDIUM) {
         WRN("OpenGL warning\n"
             "  severity: %s\n"
             "  source:   %s\n"
             "  type:     %s\n"
             "  id:       %d\n"
             "  message:\n%s\n",
-            gl_severity_to_str(severity),
-            gl_source_to_str(source),
-            gl_type_to_str(type),
-            id,
-            message);
-    }/*
-    else {
-        LOG("OpenGL info\n"
-            "  severity: %s\n"
-            "  source:   %s\n"
-            "  type:     %s\n"
-            "  id:       %d\n"
-            "  message:\n%s\n",
-            gl_severity_to_str(severity),
-            gl_source_to_str(source),
-            gl_type_to_str(type),
-            id,
-            message);
-    }*/
+            gl_severity_to_str(severity), gl_source_to_str(source),
+            gl_type_to_str(type), id, message);
+    } /*
+     else {
+         LOG("OpenGL info\n"
+             "  severity: %s\n"
+             "  source:   %s\n"
+             "  type:     %s\n"
+             "  id:       %d\n"
+             "  message:\n%s\n",
+             gl_severity_to_str(severity),
+             gl_source_to_str(source),
+             gl_type_to_str(type),
+             id,
+             message);
+     }*/
 }
 
-
-__attribute__((always_inline))
-static inline void
-gl_check_error()
+__attribute__((always_inline)) static inline void gl_check_error()
 {
-    #ifdef DEBUG
+#ifdef DEBUG
     GLenum e = glGetError();
     if (e != GL_NO_ERROR) {
         WRN("OpenGL error: %d\n", e);
     }
-    #endif
+#endif
 }

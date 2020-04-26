@@ -1,55 +1,54 @@
 #include "gl.h"
-#include <GL/gl.h>
 #include "util.h"
+#include <GL/gl.h>
 #include <unistd.h>
 
 void* (*gl_load_ext)(const char* procname) = NULL;
 
-PFNGLBUFFERSUBDATAARBPROC glBufferSubData;
-PFNGLUNIFORM4FPROC glUniform4f;
-PFNGLUNIFORM3FPROC glUniform3f;
-PFNGLUNIFORM2FPROC glUniform2f;
-PFNGLBUFFERDATAPROC glBufferData;
-PFNGLDELETEPROGRAMPROC glDeleteProgram;
-PFNGLUSEPROGRAMPROC glUseProgram;
-PFNGLGETUNIFORMLOCATIONPROC glGetUniformLocation;
-PFNGLGETATTRIBLOCATIONPROC glGetAttribLocation;
-PFNGLDELETESHADERPROC glDeleteShader;
-PFNGLDETACHSHADERPROC glDetachShader;
-PFNGLGETPROGRAMINFOLOGPROC glGetProgramInfoLog;
-PFNGLGETPROGRAMIVPROC glGetProgramiv;
-PFNGLLINKPROGRAMPROC glLinkProgram;
-PFNGLATTACHSHADERPROC glAttachShader;
-PFNGLCOMPILESHADERPROC glCompileShader;
-PFNGLSHADERSOURCEPROC glShaderSource;
-PFNGLCREATESHADERPROC glCreateShader;
-PFNGLCREATEPROGRAMPROC glCreateProgram;
-PFNGLGETSHADERINFOLOGPROC glGetShaderInfoLog;
-PFNGLGETSHADERIVPROC glGetShaderiv;
-PFNGLDELETEBUFFERSPROC glDeleteBuffers;
-PFNGLVERTEXATTRIBPOINTERPROC glVertexAttribPointer;
+PFNGLBUFFERSUBDATAARBPROC        glBufferSubData;
+PFNGLUNIFORM4FPROC               glUniform4f;
+PFNGLUNIFORM3FPROC               glUniform3f;
+PFNGLUNIFORM2FPROC               glUniform2f;
+PFNGLBUFFERDATAPROC              glBufferData;
+PFNGLDELETEPROGRAMPROC           glDeleteProgram;
+PFNGLUSEPROGRAMPROC              glUseProgram;
+PFNGLGETUNIFORMLOCATIONPROC      glGetUniformLocation;
+PFNGLGETATTRIBLOCATIONPROC       glGetAttribLocation;
+PFNGLDELETESHADERPROC            glDeleteShader;
+PFNGLDETACHSHADERPROC            glDetachShader;
+PFNGLGETPROGRAMINFOLOGPROC       glGetProgramInfoLog;
+PFNGLGETPROGRAMIVPROC            glGetProgramiv;
+PFNGLLINKPROGRAMPROC             glLinkProgram;
+PFNGLATTACHSHADERPROC            glAttachShader;
+PFNGLCOMPILESHADERPROC           glCompileShader;
+PFNGLSHADERSOURCEPROC            glShaderSource;
+PFNGLCREATESHADERPROC            glCreateShader;
+PFNGLCREATEPROGRAMPROC           glCreateProgram;
+PFNGLGETSHADERINFOLOGPROC        glGetShaderInfoLog;
+PFNGLGETSHADERIVPROC             glGetShaderiv;
+PFNGLDELETEBUFFERSPROC           glDeleteBuffers;
+PFNGLVERTEXATTRIBPOINTERPROC     glVertexAttribPointer;
 PFNGLENABLEVERTEXATTRIBARRAYPROC glEnableVertexAttribArray;
-PFNGLBINDBUFFERPROC glBindBuffer;
-PFNGLGENBUFFERSPROC glGenBuffers;
-PFNGLDELETEFRAMEBUFFERSPROC glDeleteFramebuffers;
+PFNGLBINDBUFFERPROC              glBindBuffer;
+PFNGLGENBUFFERSPROC              glGenBuffers;
+PFNGLDELETEFRAMEBUFFERSPROC      glDeleteFramebuffers;
 PFNGLFRAMEBUFFERRENDERBUFFERPROC glFramebufferRenderbuffer;
-PFNGLRENDERBUFFERSTORAGEPROC glRenderbufferStorage;
-PFNGLBINDBUFFERPROC glBindBuffer;
-PFNGLGENBUFFERSPROC glGenBuffers;
-PFNGLDELETEFRAMEBUFFERSPROC glDeleteFramebuffers;
-PFNGLCHECKFRAMEBUFFERSTATUSPROC glCheckFramebufferStatus;
-PFNGLFRAMEBUFFERTEXTURE2DPROC glFramebufferTexture2D;
-PFNGLBINDFRAMEBUFFERPROC glBindFramebuffer;
-PFNGLBINDRENDERBUFFERPROC glBindRenderbuffer;
-PFNGLGENRENDERBUFFERSPROC glGenRenderbuffers;
-PFNGLGENFRAMEBUFFERSPROC glGenFramebuffers;
-PFNGLGENERATEMIPMAPPROC glGenerateMipmap;
+PFNGLRENDERBUFFERSTORAGEPROC     glRenderbufferStorage;
+PFNGLBINDBUFFERPROC              glBindBuffer;
+PFNGLGENBUFFERSPROC              glGenBuffers;
+PFNGLDELETEFRAMEBUFFERSPROC      glDeleteFramebuffers;
+PFNGLCHECKFRAMEBUFFERSTATUSPROC  glCheckFramebufferStatus;
+PFNGLFRAMEBUFFERTEXTURE2DPROC    glFramebufferTexture2D;
+PFNGLBINDFRAMEBUFFERPROC         glBindFramebuffer;
+PFNGLBINDRENDERBUFFERPROC        glBindRenderbuffer;
+PFNGLGENRENDERBUFFERSPROC        glGenRenderbuffers;
+PFNGLGENFRAMEBUFFERSPROC         glGenFramebuffers;
+PFNGLGENERATEMIPMAPPROC          glGenerateMipmap;
 #ifdef DEBUG
 PFNGLDEBUGMESSAGECALLBACKPROC glDebugMessageCallback;
 #endif
 
-void
-gl_load_exts()
+void gl_load_exts()
 {
     if (!gl_load_ext) {
         ERR("gl extension loader not set");
@@ -94,8 +93,8 @@ gl_load_exts()
     glGenRenderbuffers        = gl_load_ext("glGenRenderbuffers");
     glGenFramebuffers         = gl_load_ext("glGenFramebuffers");
     glGenerateMipmap          = gl_load_ext("glGenerateMipmap");
-    #ifdef DEBUG
-    glDebugMessageCallback    = gl_load_ext("glDebugMessageCallback");
-    #endif
+#ifdef DEBUG
+    glDebugMessageCallback = gl_load_ext("glDebugMessageCallback");
+#endif
     LOG("all gl extensions loaded succesfully\n");
 }

@@ -7,7 +7,6 @@
 #include "gui.h"
 #include "util.h"
 
-struct WindowBase*
-Window_new_wayland(Pair_uint32_t res);
+struct WindowBase* Window_new_wayland(Pair_uint32_t res);
 
 #endif

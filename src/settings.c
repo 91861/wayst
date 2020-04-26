@@ -1,14 +1,13 @@
 /* See LICENSE for license information. */
 
-
 #define _GNU_SOURCE
 
-#include <getopt.h>
 #include <errno.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <string.h>
+#include <getopt.h>
 #include <locale.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
 
 #include <fontconfig/fontconfig.h>
 
@@ -24,19 +23,16 @@
 #define CFG_FNAME "config"
 #endif
 
-
 ColorRGB color_palette_256[257];
 
-static const char* const arg_path = "path";
-static const char* const arg_int = "number";
-static const char* const arg_color = "#RRGGBB";
+static const char* const arg_path    = "path";
+static const char* const arg_int     = "number";
+static const char* const arg_color   = "#RRGGBB";
 static const char* const arg_color_a = "#RRGGBBAA";
-static const char* const arg_string = "string";
+static const char* const arg_string  = "string";
 
 // -e and -x are reserved
-static struct option
-long_options[] =
-{
+static struct option long_options[] = {
     { "config-file",                 required_argument, 0, 'i' },
     { "skip-config",                 no_argument,       0, 'C' },
     { "xorg-only",                   no_argument,       0, 'X' },
@@ -270,8 +266,8 @@ colors_default[8][18] =
         "EDEDEB",
         "303030",
         "EFEFEF",
-    },  /* solarized */
-    {
+    },
+    {   /* solarized */
         "073642",
         "DC322F",
         "859900",
@@ -293,14 +289,10 @@ colors_default[8][18] =
     }
 };
 
-
-Settings
-settings;
-
+Settings settings;
 
 /** set default colorscheme  */
-static void
-settings_colorscheme_default(uint8_t idx)
+static void settings_colorscheme_default(uint8_t idx)
 {
     if (idx >= ARRAY_SIZE(colors_default)) {
         idx = 0;
@@ -309,32 +301,27 @@ settings_colorscheme_default(uint8_t idx)
 
     for (uint32_t i = 0; i < 16; ++i) {
         if (!(settings._explicit_colors_set &&
-              settings._explicit_colors_set[i+2]))
-        {
+              settings._explicit_colors_set[i + 2])) {
             settings.colorscheme.color[i] =
-                ColorRGB_from_hex(colors_default[idx][i], NULL);
+              ColorRGB_from_hex(colors_default[idx][i], NULL);
         }
     }
 
     if (colors_default[idx][16])
         if (!(settings._explicit_colors_set &&
-              settings._explicit_colors_set[0]))
-        {
+              settings._explicit_colors_set[0])) {
             settings.bg = ColorGRBA_from_hex(colors_default[idx][16], NULL);
         }
 
     if (colors_default[idx][17])
         if (!(settings._explicit_colors_set &&
-              settings._explicit_colors_set[1]))
-        {
+              settings._explicit_colors_set[1])) {
             settings.fg = ColorRGB_from_hex(colors_default[idx][17], NULL);
         }
 }
 
-
 /** Initialize 256color colorpallete */
-static void
-init_color_palette()
+static void init_color_palette()
 {
     for (int_fast16_t i = 0; i < 257; ++i) {
         if (i < 16) {
@@ -342,14 +329,14 @@ init_color_palette()
             color_palette_256[i] = settings.colorscheme.color[i];
         } else if (i < 232) {
             /* Extended */
-            int_fast16_t tmp = i -16;
-            color_palette_256[i].b = (double) (( tmp       % 6) *255) /5.0;
-            color_palette_256[i].g = (double) (((tmp /= 6) % 6) *255) /5.0;
-            color_palette_256[i].r = (double) (((tmp / 6)  % 6) *255) /5.0;
+            int_fast16_t tmp       = i - 16;
+            color_palette_256[i].b = (double)((tmp % 6) * 255) / 5.0;
+            color_palette_256[i].g = (double)(((tmp /= 6) % 6) * 255) / 5.0;
+            color_palette_256[i].r = (double)(((tmp / 6) % 6) * 255) / 5.0;
         } else {
             /* Grayscale */
-            double tmp = (double) ((i -232) *10 +8) /256.0 *255.0;
-            color_palette_256[i] = (ColorRGB) {
+            double tmp           = (double)((i - 232) * 10 + 8) / 256.0 * 255.0;
+            color_palette_256[i] = (ColorRGB){
                 .r = tmp,
                 .g = tmp,
                 .b = tmp,
@@ -358,49 +345,46 @@ init_color_palette()
     }
 }
 
-
 /** Use fontconfig to get font files */
-static void
-find_font()
+static void find_font()
 {
     FcConfig* cfg = FcInitLoadConfigAndFonts();
 
-    FcPattern* pat = FcNameParse((const FcChar8*) settings.font);
+    FcPattern* pat = FcNameParse((const FcChar8*)settings.font);
 
     FcObjectSet* os = FcObjectSetBuild(FC_FAMILY, FC_STYLE, FC_FILE, NULL);
-    FcFontSet* fs = FcFontList(cfg, pat, os);
+    FcFontSet*   fs = FcFontList(cfg, pat, os);
 
     char* regular_alternative = NULL;
 
     for (int_fast32_t i = 0; fs && i < fs->nfont; ++i) {
         FcPattern* font = fs->fonts[i];
-        FcChar8 *file, *style;
+        FcChar8 *  file, *style;
 
         if (FcPatternGetString(font, FC_FILE, 0, &file) == FcResultMatch &&
-            FcPatternGetString(font, FC_STYLE, 0, &style) == FcResultMatch)
-        {
+            FcPatternGetString(font, FC_STYLE, 0, &style) == FcResultMatch) {
             if (!strcmp((const char*)style, "Regular")) {
                 if (settings.font_name)
                     free(settings.font_name);
-                settings.font_name = strdup((char*) file);
+                settings.font_name = strdup((char*)file);
             }
 
             if (!strcmp((const char*)style, "Text")) {
                 if (regular_alternative)
                     free(regular_alternative);
-                regular_alternative = strdup((char*) file);
+                regular_alternative = strdup((char*)file);
             }
 
             if (!strcmp((const char*)style, "Bold")) {
                 if (settings.font_name_bold)
                     free(settings.font_name_bold);
-                settings.font_name_bold = strdup((char*) file);
+                settings.font_name_bold = strdup((char*)file);
             }
 
             if (!strcmp((const char*)style, "Italic")) {
                 if (settings.font_name_italic)
                     free(settings.font_name_italic);
-                settings.font_name_italic = strdup((char*) file);
+                settings.font_name_italic = strdup((char*)file);
             }
         }
     }
@@ -409,19 +393,18 @@ find_font()
     FcObjectSetDestroy(os);
     FcPatternDestroy(pat);
 
-    pat = FcNameParse((const FcChar8*) settings.font_fallback);
-    os = FcObjectSetBuild(FC_FAMILY, FC_STYLE, FC_FILE, NULL);
-    fs = FcFontList(cfg, pat, os);
+    pat = FcNameParse((const FcChar8*)settings.font_fallback);
+    os  = FcObjectSetBuild(FC_FAMILY, FC_STYLE, FC_FILE, NULL);
+    fs  = FcFontList(cfg, pat, os);
 
     for (int_fast32_t i = 0; fs && i < fs->nfont; ++i) {
         FcPattern* font = fs->fonts[i];
-        FcChar8 *file, *style;
+        FcChar8 *  file, *style;
 
         if (FcPatternGetString(font, FC_FILE, 0, &file) == FcResultMatch &&
-            FcPatternGetString(font, FC_STYLE, 0, &style) == FcResultMatch)
-        {
+            FcPatternGetString(font, FC_STYLE, 0, &style) == FcResultMatch) {
             free(settings.font_name_fallback);
-            settings.font_name_fallback = strdup((char*) file);
+            settings.font_name_fallback = strdup((char*)file);
         }
     }
 
@@ -429,19 +412,17 @@ find_font()
     FcObjectSetDestroy(os);
     FcPatternDestroy(pat);
 
-
-    pat = FcNameParse((const FcChar8*) settings.font_fallback2);
-    os = FcObjectSetBuild(FC_FAMILY, FC_STYLE, FC_FILE, NULL);
-    fs = FcFontList(cfg, pat, os);
+    pat = FcNameParse((const FcChar8*)settings.font_fallback2);
+    os  = FcObjectSetBuild(FC_FAMILY, FC_STYLE, FC_FILE, NULL);
+    fs  = FcFontList(cfg, pat, os);
 
     for (int_fast32_t i = 0; fs && i < fs->nfont; ++i) {
         FcPattern* font = fs->fonts[i];
-        FcChar8 *file, *style;
+        FcChar8 *  file, *style;
 
         if (FcPatternGetString(font, FC_FILE, 0, &file) == FcResultMatch &&
-            FcPatternGetString(font, FC_STYLE, 0, &style) == FcResultMatch)
-        {
-            settings.font_name_fallback2 = strdup((char*) file);
+            FcPatternGetString(font, FC_STYLE, 0, &style) == FcResultMatch) {
+            settings.font_name_fallback2 = strdup((char*)file);
         }
     }
 
@@ -480,46 +461,42 @@ find_font()
         settings.font_name_italic ? settings.font_name_italic : "(none)",
         settings.font_name_fallback ? settings.font_name_fallback : "(none)",
         settings.font_name_fallback2 ? settings.font_name_fallback2 : "(none)");
-
 }
 
-
-static void
-settings_make_default()
+static void settings_make_default()
 {
-    settings = (Settings)
-    {
-        .config_path = NULL,
-        .skip_config = false,
+    settings = (Settings){
+        .config_path    = NULL,
+        .skip_config    = false,
         .x11_is_default = false,
-        .shell = NULL,
-        .shell_argc = 0,
-        .shell_argv = NULL,
-        .term = "xterm-256color",
-        .locale = NULL,
-        .bsp_sends_del = true,
+        .shell          = NULL,
+        .shell_argc     = 0,
+        .shell_argv     = NULL,
+        .term           = "xterm-256color",
+        .locale         = NULL,
+        .bsp_sends_del  = true,
 
-        .font = "Noto Sans Mono",
-        .font_fallback = "FontAwesome",
+        .font           = "Noto Sans Mono",
+        .font_fallback  = "FontAwesome",
         .font_fallback2 = "NotoColorEmoji",
-        .font_size = 10,
-        .font_dpi = 96,
+        .font_size      = 10,
+        .font_dpi       = 96,
 
-        .bg =     { .r =   0, .g =   0, .b =   0, .a = 240 },
-        .bghl =   { .r =  50, .g =  50, .b =  50, .a = 240 },
-        .fg =     { .r = 255, .g = 255, .b = 255 },
-        .fghl =   { .r = 255, .g = 255, .b = 255 },
+        .bg     = { .r = 0, .g = 0, .b = 0, .a = 240 },
+        .bghl   = { .r = 50, .g = 50, .b = 50, .a = 240 },
+        .fg     = { .r = 255, .g = 255, .b = 255 },
+        .fghl   = { .r = 255, .g = 255, .b = 255 },
         .fg_dim = { .r = 150, .g = 150, .b = 150 },
 
         .highlight_change_fg = false,
-        .title = "Wayst",
-        .dynamic_title = true,
-        .title_format = "%2$s - %1$s",
+        .title               = "Wayst",
+        .dynamic_title       = true,
+        .title_format        = "%2$s - %1$s",
 
         .cols = 80,
         .rows = 24,
 
-        .colorscheme_preset = 0,
+        .colorscheme_preset   = 0,
         ._explicit_colors_set = calloc(1, 21),
 
         .text_blink_interval = 750,
@@ -527,9 +504,9 @@ settings_make_default()
         .bell_flash = { .r = 20, .g = 20, .b = 20, .a = 240 },
 
         .allow_scrollback_clear = false,
-        .scroll_on_output = false,
-        .scroll_on_key = true,
-        .scroll_discrete_lines = 3,
+        .scroll_on_output       = false,
+        .scroll_on_key          = true,
+        .scroll_discrete_lines  = 3,
 
         .allow_multiple_underlines = false,
 
@@ -537,9 +514,7 @@ settings_make_default()
     };
 }
 
-
-static void
-settings_complete_defaults()
+static void settings_complete_defaults()
 {
     setlocale(LC_ALL, settings.locale ? settings.locale : "");
     settings_colorscheme_default(settings.colorscheme_preset);
@@ -550,36 +525,27 @@ settings_complete_defaults()
     find_font();
 }
 
-
-static void
-print_help(char* const* argv)
+static void print_help(char* const* argv)
 {
-    printf("Usage: %s [options...] [-e/x command args...]\n", argv[0] +2);
+    printf("Usage: %s [options...] [-e/x command args...]\n", argv[0] + 2);
 
-    for (uint32_t i = 0;
-         i < sizeof(long_options) / sizeof(long_options[0]) -1;
-         ++i)
-    {
-        if (long_options[i].has_arg == no_argument &&
-            long_options[i].val)
-        {
+    for (uint32_t i = 0; i < sizeof(long_options) / sizeof(long_options[0]) - 1;
+         ++i) {
+        if (long_options[i].has_arg == no_argument && long_options[i].val) {
             printf(" -%c, ", long_options[i].val);
         } else {
             printf("     ");
         }
 
         if (long_options[i].has_arg == required_argument) {
-            printf(" --%-s <%s>%-*s",
-                    long_options[i].name,
-                    long_options_descriptions[i][0],
-                    (int)(20 - strlen(long_options[i].name)
-                          - strlen(long_options_descriptions[i][0])),
-                    "");
+            printf(" --%-s <%s>%-*s", long_options[i].name,
+                   long_options_descriptions[i][0],
+                   (int)(20 - strlen(long_options[i].name) -
+                         strlen(long_options_descriptions[i][0])),
+                   "");
         } else {
-            printf(" --%s %*s",
-                    long_options[i].name,
-                    (int)(22 - strlen(long_options[i].name)),
-                    "");
+            printf(" --%s %*s", long_options[i].name,
+                   (int)(22 - strlen(long_options[i].name)), "");
         }
 
         puts(long_options_descriptions[i][1]);
@@ -588,152 +554,147 @@ print_help(char* const* argv)
     exit(0);
 }
 
-
-static void
-handle_option(const char opt,
-              const int array_index,
-              const char* value,
-              const int argc,
-              char* const* argv)
+static void handle_option(const char   opt,
+                          const int    array_index,
+                          const char*  value,
+                          const int    argc,
+                          char* const* argv)
 {
     switch (opt) {
 
-    case 'X':
-        settings.x11_is_default = true;
-        break;
+        case 'X':
+            settings.x11_is_default = true;
+            break;
 
-    case 'v':
-        printf("version: "VERSION"\n");
-        break;
+        case 'v':
+            printf("version: " VERSION "\n");
+            break;
 
-    case 'h':
-        print_help(argv);
-        break;
+        case 'h':
+            print_help(argv);
+            break;
 
-    case 'T':
-        settings.dynamic_title = false;
-        break;
+        case 'T':
+            settings.dynamic_title = false;
+            break;
 
-    case 'f':
-        settings.highlight_change_fg = true;
-        break;
+        case 'f':
+            settings.highlight_change_fg = true;
+            break;
 
-    case 'F':
-        settings.no_flash = true;
-        break;
-                    
-    case 'Y':
-        settings.font = strdup(value);
-        break;
-                
-    case 'S':
-        settings.font_size = strtoul(value, NULL, 10);
-        break;
+        case 'F':
+            settings.no_flash = true;
+            break;
 
-    case 'D':
-        settings.font_dpi = strtoul(value, NULL, 10);
-        break;
+        case 'Y':
+            settings.font = strdup(value);
+            break;
 
-    case 's':
-        if (!strcasecmp(value, "wayst"))
-            settings.colorscheme_preset = 0;
-        else if (!strcasecmp(value, "linux"))
-            settings.colorscheme_preset = 1;
-        else if (!strcasecmp(value, "xterm"))
-            settings.colorscheme_preset = 2;
-        else if (!strcasecmp(value, "rxvt"))
-            settings.colorscheme_preset = 3;
-        else if (!strcasecmp(value, "yaru"))
-            settings.colorscheme_preset = 4;
-        else if (!strcasecmp(value, "tango"))
-            settings.colorscheme_preset = 5;
-        else if (!strcasecmp(value, "orchis"))
-            settings.colorscheme_preset = 6;
-        else if (!strcasecmp(value, "solarized"))
-            settings.colorscheme_preset = 7;
-        else
-            settings.colorscheme_preset = MIN(strtoul(value, NULL, 10),
-                                              sizeof(colors_default) -1);
-        break;
+        case 'S':
+            settings.font_size = strtoul(value, NULL, 10);
+            break;
 
-    case 't':
-        settings.title = strdup(value);
-        break;
+        case 'D':
+            settings.font_dpi = strtoul(value, NULL, 10);
+            break;
 
-    case 'c':
-        settings.cols = strtol(value, NULL, 10);
-        break;
+        case 's':
+            if (!strcasecmp(value, "wayst"))
+                settings.colorscheme_preset = 0;
+            else if (!strcasecmp(value, "linux"))
+                settings.colorscheme_preset = 1;
+            else if (!strcasecmp(value, "xterm"))
+                settings.colorscheme_preset = 2;
+            else if (!strcasecmp(value, "rxvt"))
+                settings.colorscheme_preset = 3;
+            else if (!strcasecmp(value, "yaru"))
+                settings.colorscheme_preset = 4;
+            else if (!strcasecmp(value, "tango"))
+                settings.colorscheme_preset = 5;
+            else if (!strcasecmp(value, "orchis"))
+                settings.colorscheme_preset = 6;
+            else if (!strcasecmp(value, "solarized"))
+                settings.colorscheme_preset = 7;
+            else
+                settings.colorscheme_preset =
+                  MIN(strtoul(value, NULL, 10), sizeof(colors_default) - 1);
+            break;
 
-    case 'R':
-        settings.rows = strtol(value, NULL, 10);
-        break;
+        case 't':
+            settings.title = strdup(value);
+            break;
 
-    case 'r':
-        settings.term = strdup(value);
-        break;
+        case 'c':
+            settings.cols = strtol(value, NULL, 10);
+            break;
 
-    case 'l':
-        settings.locale = strdup(value);
-        break;
+        case 'R':
+            settings.rows = strtol(value, NULL, 10);
+            break;
 
-    case 'y':
-        settings.scroll_discrete_lines = MIN(strtod(value, NULL), UINT8_MAX);
-        break;
+        case 'r':
+            settings.term = strdup(value);
+            break;
 
-    case 'o':
-        settings.title_format = strdup(value);
-        break;
+        case 'l':
+            settings.locale = strdup(value);
+            break;
 
-    case '0':
-        settings.bg = ColorGRBA_from_hex(value, NULL);
-        break;
+        case 'y':
+            settings.scroll_discrete_lines =
+              MIN(strtod(value, NULL), UINT8_MAX);
+            break;
 
-    case '1':
-        settings.fg = ColorRGB_from_hex(value, NULL);
-        break;
+        case 'o':
+            settings.title_format = strdup(value);
+            break;
 
-    case '2':
-        settings.fg_dim = ColorRGB_from_hex(value, NULL);
-        break;
+        case '0':
+            settings.bg = ColorGRBA_from_hex(value, NULL);
+            break;
 
-    case '3':
-        settings.bghl = ColorGRBA_from_hex(value, NULL);
-        break;
+        case '1':
+            settings.fg = ColorRGB_from_hex(value, NULL);
+            break;
 
-    case '4':
-        settings.fghl = ColorRGB_from_hex(value, NULL);
-        break;
+        case '2':
+            settings.fg_dim = ColorRGB_from_hex(value, NULL);
+            break;
 
-    case '~': {
-        bool failed = false;
-        ColorRGB parsed = ColorRGB_from_hex(value, &failed);
-        if (!failed) {
-            settings.colorscheme.color[array_index - 12] = parsed;
-            if (settings._explicit_colors_set)
-                settings._explicit_colors_set[array_index -12 +2] = true;
-        } else
-            WRN("Failed to parse \"%s\" as color", value);
-    }
-        break;
+        case '3':
+            settings.bghl = ColorGRBA_from_hex(value, NULL);
+            break;
+
+        case '4':
+            settings.fghl = ColorRGB_from_hex(value, NULL);
+            break;
+
+        case '~': {
+            bool     failed = false;
+            ColorRGB parsed = ColorRGB_from_hex(value, &failed);
+            if (!failed) {
+                settings.colorscheme.color[array_index - 12] = parsed;
+                if (settings._explicit_colors_set)
+                    settings._explicit_colors_set[array_index - 12 + 2] = true;
+            } else
+                WRN("Failed to parse \"%s\" as color", value);
+        } break;
     }
 }
 
-static void
-settings_get_opts(const int argc,
-                  char* const* argv,
-                  const bool cfg_file_check)
+static void settings_get_opts(const int    argc,
+                              char* const* argv,
+                              const bool   cfg_file_check)
 {
 
     optind = 1;
-    for (int o; (optind < argc && optind >= 0 &&
-                 strcmp(argv[optind], "-e") &&
-                 strcmp(argv[optind], "-x"));)
-    {
+    for (int o; (optind < argc && optind >= 0 && strcmp(argv[optind], "-e") &&
+                 strcmp(argv[optind], "-x"));) {
         /* print 'invalid option' error message only once */
         opterr = cfg_file_check;
 
         int opid = 0;
-        o = getopt_long(argc, argv, "XCTfFhv", long_options, &opid);
+        o        = getopt_long(argc, argv, "XCTfFhv", long_options, &opid);
 
         if (o == -1)
             break;
@@ -752,11 +713,11 @@ settings_get_opts(const int argc,
     if (!cfg_file_check) {
         for (int i = 0; i < argc; ++i) {
             if (!strcmp(argv[i], "-e") || !strcmp(argv[i], "-x")) {
-                if (argc > (i++ +1)) {
-                    settings.shell = strdup(argv[i]);
+                if (argc > (i++ + 1)) {
+                    settings.shell      = strdup(argv[i]);
                     settings.shell_argc = argc - i;
                     settings.shell_argv =
-                        calloc((settings.shell_argc +1), sizeof(char*));
+                      calloc((settings.shell_argc + 1), sizeof(char*));
 
                     for (int i2 = 0; i2 < settings.shell_argc; ++i2) {
                         settings.shell_argv[i2] = strdup(argv[i + i2]);
@@ -771,69 +732,64 @@ settings_get_opts(const int argc,
             settings.shell = getenv("SHELL");
             if (!settings.shell)
                 settings.shell = "/bin/sh";
-            settings.shell_argv = calloc(2, sizeof(char*));
+            settings.shell_argv    = calloc(2, sizeof(char*));
             settings.shell_argv[0] = strdup(settings.shell);
-            settings.shell_argc = 1;
+            settings.shell_argc    = 1;
         }
     }
 }
 
-
-static void
-handle_config_option(const char* key,
-                     const char* val,
-                     const int argc,
-                     char* const* argv)
+static void handle_config_option(const char*  key,
+                                 const char*  val,
+                                 const int    argc,
+                                 char* const* argv)
 {
     if (val && key)
         for (struct option* opt = long_options; opt->name; ++opt)
             if (!strcmp(key, opt->name))
                 if (opt->has_arg == required_argument ||
-                    !strcasecmp(val, "true"))
-                {
+                    !strcasecmp(val, "true")) {
                     int arrayindex = 0;
                     if (streq_wildcard(key, "color-*")) {
-                        int parsed = strtol(key +6, NULL, 10);
+                        int parsed = strtol(key + 6, NULL, 10);
                         if (parsed <= 16)
-                            arrayindex = parsed +12;
+                            arrayindex = parsed + 12;
                     }
                     handle_option(opt->val, arrayindex, val, argc, argv);
                 }
 }
 
-
 DEF_VECTOR(char, NULL);
-static void
-settings_file_parse(FILE* f, const int argc, char* const* argv)
+static void settings_file_parse(FILE* f, const int argc, char* const* argv)
 {
     if (!f)
         return;
 
     bool in_comment = false;
-    bool in_value = false;
-    bool in_string = false;
-    bool escaped = false;
+    bool in_value   = false;
+    bool in_string  = false;
+    bool escaped    = false;
 
     char buf[512] = { 0 };
-    int rd;
+    int  rd;
 
-    Vector_char key = Vector_new_with_capacity_char(30);
+    Vector_char key   = Vector_new_with_capacity_char(30);
     Vector_char value = Vector_new_with_capacity_char(30);
 
-    while ((rd = fread(buf, sizeof(char), sizeof buf -1, f))) {
+    while ((rd = fread(buf, sizeof(char), sizeof buf - 1, f))) {
 
         for (int i = 0; i < rd; ++i) {
             if (in_comment) {
                 if (buf[i] == '\n') {
                     in_comment = false;
-                    in_string = false;
+                    in_string  = false;
                 }
                 continue;
             } else if (in_value) {
 
                 if (!in_string && buf[i] == '#') {
                     in_comment = true;
-                    in_value = false;
+                    in_value   = false;
                     Vector_push_char(&value, 0);
                     handle_config_option(key.buf, value.buf, argc, argv);
                     value.size = 0;
@@ -847,7 +803,7 @@ settings_file_parse(FILE* f, const int argc, char* const* argv)
                 if (buf[i] == '\"' && !escaped) {
                     in_string = !in_string;
                 } else if (buf[i] == '\n' && !escaped) {
-                    in_value = false;
+                    in_value  = false;
                     in_string = false;
                     Vector_push_char(&value, 0);
                     handle_config_option(key.buf, value.buf, argc, argv);
@@ -855,8 +811,7 @@ settings_file_parse(FILE* f, const int argc, char* const* argv)
                 } else {
                     if (!isblank(buf[i]) || in_string || escaped) {
                         Vector_push_char(
-                            &value,
-                            (buf[i] == 'n' && escaped) ? '\n' : buf[i]);
+                          &value, (buf[i] == 'n' && escaped) ? '\n' : buf[i]);
                     }
                 }
 
@@ -865,7 +820,7 @@ settings_file_parse(FILE* f, const int argc, char* const* argv)
                     Vector_push_char(&key, 0);
                     key.size = 0;
                     in_value = true;
-                } else if(buf[i] == '\n' && !escaped) {
+                } else if (buf[i] == '\n' && !escaped) {
                     key.size = 0;
                 } else {
                     if (buf[i] == '#' && !escaped) {
@@ -883,9 +838,7 @@ settings_file_parse(FILE* f, const int argc, char* const* argv)
     Vector_destroy_char(&value);
 }
 
-
-static const char*
-find_config_path()
+static const char* find_config_path()
 {
     if (settings.config_path)
         return settings.config_path;
@@ -894,16 +847,15 @@ find_config_path()
     if ((tmp = getenv("XDG_CONFIG_HOME"))) {
         return asprintf("%s/%s/%s", tmp, CFG_SDIR_NAME, CFG_FNAME);
     } else if ((tmp = getenv("HOME"))) {
-        return asprintf("%s/.config/%s/%s", tmp, CFG_SDIR_NAME, CFG_FNAME);;
+        return asprintf("%s/.config/%s/%s", tmp, CFG_SDIR_NAME, CFG_FNAME);
+        ;
     } else {
         WRN("Could not find config directory\n");
         return NULL;
     }
 }
 
-
-static FILE*
-open_config(const char* path)
+static FILE* open_config(const char* path)
 {
     if (path) {
         FILE* f = fopen(path, "r");
@@ -917,15 +869,13 @@ open_config(const char* path)
     return NULL;
 }
 
-
-void
-settings_init(const int argc, char* const* argv)
+void settings_init(const int argc, char* const* argv)
 {
     settings_make_default();
     settings_get_opts(argc, argv, true);
     if (!settings.skip_config) {
         const char* cfg_path = find_config_path();
-        FILE* cfg = open_config(cfg_path);
+        FILE*       cfg      = open_config(cfg_path);
         settings_file_parse(cfg, argc, argv);
         if (cfg)
             fclose(cfg);
@@ -937,9 +887,7 @@ settings_init(const int argc, char* const* argv)
     init_color_palette();
 }
 
-
-void
-settings_cleanup()
+void settings_cleanup()
 {
     if (settings.font_name)
         free(settings.font_name);
@@ -956,4 +904,3 @@ settings_cleanup()
     if (settings.font_name_fallback2)
         free(settings.font_name_fallback2);
 }
-
