@@ -195,7 +195,7 @@ static void Vt_update_scrollbar_vis(Vt* self)
             if (self->scrollbar.visible) {
                 self->scrollbar.visible = false;
 
-                ASSERT(self->callbacks.on_repaint_required);
+                ASSERT(self->callbacks.on_repaint_required, "callback is NULL");
                 self->callbacks.on_repaint_required(self->callbacks.user_data);
             }
         }
@@ -218,7 +218,7 @@ static bool Vt_scrollbar_consume_click(Vt*      self,
 
     if (self->scrollbar.dragging && !state) {
         self->scrollbar.dragging = false;
-        ASSERT(self->callbacks.on_repaint_required);
+        ASSERT(self->callbacks.on_repaint_required, "callback is NULL");
         self->callbacks.on_repaint_required(self->callbacks.user_data);
         return false;
     }
@@ -278,7 +278,7 @@ static bool Vt_scrollbar_consume_click(Vt*      self,
     }
 
     Vt_update_scrollbar_dims(self);
-    ASSERT(self->callbacks.on_repaint_required);
+    ASSERT(self->callbacks.on_repaint_required, "callback is NULL");
     self->callbacks.on_repaint_required(self->callbacks.user_data);
 
     return true;
@@ -302,7 +302,7 @@ static bool Vt_scrollbar_consume_drag(Vt*      self,
         Vt_visual_scroll_to(self, target_line);
         Vt_update_scrollbar_dims(self);
 
-        ASSERT(self->callbacks.on_repaint_required);
+        ASSERT(self->callbacks.on_repaint_required, "callback is NULL");
         self->callbacks.on_repaint_required(self->callbacks.user_data);
     }
 
@@ -472,7 +472,7 @@ static void Vt_select_set_end(Vt* self, int32_t x, int32_t y)
         self->selection.end_line     = Vt_visual_top_line(self) + click_y;
         self->selection.end_char_idx = click_x;
 
-        ASSERT(self->callbacks.on_repaint_required);
+        ASSERT(self->callbacks.on_repaint_required, "callback is NULL");
         self->callbacks.on_repaint_required(self->callbacks.user_data);
 
         for (size_t i = MIN(old_end, self->selection.end_line);
@@ -547,12 +547,12 @@ static bool Vt_select_consume_click(Vt*      self,
                 Vt_select_end(self);
                 Vt_select_init_word(self, x, y);
 
-                ASSERT(self->callbacks.on_repaint_required);
+                ASSERT(self->callbacks.on_repaint_required, "callback is NULL");
                 self->callbacks.on_repaint_required(self->callbacks.user_data);
             } else if (self->selection.click_count == 2) {
                 Vt_select_end(self);
                 Vt_select_init_line(self, y);
-                ASSERT(self->callbacks.on_repaint_required);
+                ASSERT(self->callbacks.on_repaint_required, "callback is NULL");
                 self->callbacks.on_repaint_required(self->callbacks.user_data);
             }
         }
@@ -1766,8 +1766,8 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
                         /* Report window position */
                         case 13: {
 
-                            ASSERT(
-                              self->callbacks.on_window_position_requested);
+                            ASSERT(self->callbacks.on_window_position_requested,
+                                   "callback is NULL");
                             Pair_uint32_t pos =
                               self->callbacks.on_window_position_requested(
                                 self->callbacks.user_data);
@@ -2912,7 +2912,7 @@ __attribute__((hot)) inline bool Vt_read(Vt* self)
         } else {
             for (int i = 0; i < rd; ++i)
                 Vt_handle_char(self, self->buf[i]);
-            ASSERT(self->callbacks.on_repaint_required);
+            ASSERT(self->callbacks.on_repaint_required, "callback is NULL");
             self->callbacks.on_repaint_required(self->callbacks.user_data);
             Vt_update_scrollbar_dims(self);
             if ((uint32_t)rd < (sizeof self->buf - 2)) {
@@ -2953,7 +2953,7 @@ __attribute__((hot)) inline bool Vt_read(Vt* self)
             self->scrollbar.autoscroll_next_step =
               TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS);
             Vt_update_scrollbar_dims(self);
-            ASSERT(self->callbacks.on_repaint_required);
+            ASSERT(self->callbacks.on_repaint_required, "callback is NULL");
             self->callbacks.on_repaint_required(self->callbacks.user_data);
         } else if (self->scrollbar.autoscroll == AUTOSCROLL_DN &&
                    TimePoint_passed(self->scrollbar.autoscroll_next_step)) {
@@ -2961,7 +2961,7 @@ __attribute__((hot)) inline bool Vt_read(Vt* self)
             self->scrollbar.autoscroll_next_step =
               TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS);
             Vt_update_scrollbar_dims(self);
-            ASSERT(self->callbacks.on_repaint_required);
+            ASSERT(self->callbacks.on_repaint_required, "callback is NULL");
             self->callbacks.on_repaint_required(self->callbacks.user_data);
         }
     }
@@ -3152,7 +3152,7 @@ Vt_maybe_handle_application_key(Vt* self, uint32_t key, uint32_t mods)
             // Escape
             self->unicode_input.buffer.size = 0;
             self->unicode_input.active      = false;
-            ASSERT(self->callbacks.on_repaint_required);
+            ASSERT(self->callbacks.on_repaint_required, "callback is NULL");
             self->callbacks.on_repaint_required(self->callbacks.user_data);
         } else if (key == 8) {
             // Backspace
@@ -3162,7 +3162,7 @@ Vt_maybe_handle_application_key(Vt* self, uint32_t key, uint32_t mods)
                 self->unicode_input.buffer.size = 0;
                 self->unicode_input.active      = false;
             }
-            ASSERT(self->callbacks.on_repaint_required);
+            ASSERT(self->callbacks.on_repaint_required, "callback is NULL");
             self->callbacks.on_repaint_required(self->callbacks.user_data);
         } else if (isxdigit(key)) {
             if (self->unicode_input.buffer.size > 8) {
@@ -3170,7 +3170,7 @@ Vt_maybe_handle_application_key(Vt* self, uint32_t key, uint32_t mods)
                 self->callbacks.on_bell_flash(self->callbacks.user_data);
             } else {
                 Vector_push_char(&self->unicode_input.buffer, key);
-                ASSERT(self->callbacks.on_repaint_required);
+                ASSERT(self->callbacks.on_repaint_required, "callback is NULL");
                 self->callbacks.on_repaint_required(self->callbacks.user_data);
             }
         } else {
@@ -3219,7 +3219,8 @@ Vt_maybe_handle_application_key(Vt* self, uint32_t key, uint32_t mods)
 
                 case 21: // ^U
                     self->unicode_input.active = true;
-                    ASSERT(self->callbacks.on_repaint_required);
+                    ASSERT(self->callbacks.on_repaint_required,
+                           "callback is NULL");
                     self->callbacks.on_repaint_required(
                       self->callbacks.user_data);
                     return true;
@@ -3460,7 +3461,7 @@ void Vt_handle_button(void*    _self,
         Vt_update_scrollbar_dims(self);
     }
 
-    ASSERT(self->callbacks.on_repaint_required);
+    ASSERT(self->callbacks.on_repaint_required, "callback is NULL");
     self->callbacks.on_repaint_required(self->callbacks.user_data);
 }
 

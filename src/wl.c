@@ -134,6 +134,8 @@ typedef struct
     uint32_t  last_button_pressed;
     TimePoint repeat_point;
 
+    uint32_t serial;
+
     Xkb xkb;
 
 } GlobalWl;
@@ -154,8 +156,8 @@ typedef struct
     struct wl_data_offer*  data_offer;
     struct wl_data_source* data_source;
 
-    const char* data_offer_mime;
-    const char* data_source_text;
+    char* data_offer_mime;
+    char* data_source_text;
 
     bool got_discrete_axis_event;
 
@@ -163,22 +165,20 @@ typedef struct
 
 void WindowWl_clipboard_send(struct WindowBase* self, const char* text)
 {
-    LOG("making data offer\n");
+    WindowWl* w = windowWl(self);
 
-    if (windowWl(self)->data_source_text)
-        free((void*)windowWl(self)->data_source_text);
+    LOG("making a data source\n");
+
+    if (w->data_source_text)
+        free((void*) w->data_source_text);
+
     windowWl(self)->data_source_text = text;
+    windowWl(self)->data_source = wl_data_device_manager_create_data_source(globalWl->data_device_manager);
+    wl_data_source_add_listener(w->data_source, &data_source_listener, self);
 
-    windowWl(self)->data_source =
-      wl_data_device_manager_create_data_source(globalWl->data_device_manager);
-    wl_data_source_add_listener(windowWl(self)->data_source,
-                                &data_source_listener, self);
-    wl_data_source_offer(windowWl(self)->data_source, "text/plain");
-    wl_data_source_offer(windowWl(self)->data_source,
-                         "text/plain;charset=utf-8");
-    wl_data_source_offer(windowWl(self)->data_source, "TEXT");
-    wl_data_device_set_selection(globalWl->data_device,
-                                 windowWl(self)->data_source, 0);
+    wl_data_source_offer(w->data_source, "text/plain;charset=utf-8");
+
+    wl_data_device_set_selection(globalWl->data_device, w->data_source, globalWl->serial);
 }
 
 void WindowWl_clipboard_get(struct WindowBase* self)
@@ -188,12 +188,9 @@ void WindowWl_clipboard_get(struct WindowBase* self)
             windowWl(self)->data_offer_mime);
     }
 
-    // FIXME: crashes on wl_roots??
-    if (windowWl(self)->data_offer && false) {
-        LOG("accepting\n");
-
+    if (windowWl(self)->data_offer) {
         int  fds[2];
-        char buf[1024] = { 0 };
+        char buf[4024] = { 0 };
 
         if (pipe(fds)) {
             WRN("IO error: %s\n", strerror(errno));
@@ -201,17 +198,14 @@ void WindowWl_clipboard_get(struct WindowBase* self)
             return;
         }
 
-        wl_data_offer_accept(windowWl(self)->data_offer, 0,
-                             windowWl(self)->data_offer_mime);
         wl_data_offer_receive(windowWl(self)->data_offer,
                               windowWl(self)->data_offer_mime, fds[1]);
-        wl_display_roundtrip(globalWl->display);
 
         close(fds[1]);
 
         wl_display_roundtrip(globalWl->display);
 
-        int rd = read(fds[0], buf, 1023);
+        int rd = read(fds[0], buf, 4023);
         if (rd < 0) {
             WRN("IO error: %s\n", strerror(errno));
             errno = 0;
@@ -223,9 +217,6 @@ void WindowWl_clipboard_get(struct WindowBase* self)
         buf[rd < 0 ? 0 : rd] = 0;
         self->callbacks.clipboard_handler(self->callbacks.user_data, buf);
         close(fds[0]);
-
-    } else {
-        LOG("rejected wl_clipboard offer");
     }
 }
 
@@ -247,6 +238,8 @@ static void pointer_handle_enter(void*              data,
       ->callbacks.activity_notify_handler(
         ((struct WindowBase*)data)->callbacks.user_data);
 
+    globalWl->serial = serial;
+
     Window_notify_content_change(data);
 }
 
@@ -254,19 +247,23 @@ static void pointer_handle_leave(void*              data,
                                  struct wl_pointer* pointer,
                                  uint32_t           serial,
                                  struct wl_surface* surface)
-{}
+{
+    globalWl->serial = serial;
+}
 
 static void pointer_handle_motion(void*              data,
                                   struct wl_pointer* pointer,
-                                  uint32_t           time,
+                                  uint32_t           serial,
                                   wl_fixed_t         x,
                                   wl_fixed_t         y)
 {
+    globalWl->serial = serial;
+
     if (FLAG_IS_SET(((struct WindowBase*)data)->state_flags,
                     WINDOW_POINTER_HIDDEN)) {
         FLAG_UNSET(((struct WindowBase*)data)->state_flags,
                    WINDOW_POINTER_HIDDEN);
-        cursor_set(globalWl->cursor_arrow, time);
+        cursor_set(globalWl->cursor_arrow, serial);
     }
 
     ((struct WindowBase*)data)->pointer_x = wl_fixed_to_int(x);
@@ -289,6 +286,8 @@ static void pointer_handle_button(void*              data,
                                   uint32_t           button,
                                   uint32_t           state)
 {
+    globalWl->serial = serial;
+
     uint32_t final_mods = 0;
     uint32_t mods =
       xkb_state_serialize_mods(globalWl->xkb.state, XKB_STATE_MODS_EFFECTIVE);
@@ -432,6 +431,7 @@ static void keyboard_handle_leave(void*               data,
                                   uint32_t            serial,
                                   struct wl_surface*  surface)
 {
+    globalWl->serial = serial;
     FLAG_UNSET(((struct WindowBase*)data)->state_flags, WINDOW_IN_FOCUS);
     globalWl->keycode_to_repeat = 0;
 }
@@ -443,6 +443,7 @@ static void keyboard_handle_key(void*               data,
                                 uint32_t            key,
                                 uint32_t            state)
 {
+    globalWl->serial = serial;
     FLAG_SET(((struct WindowBase*)data)->state_flags, WINDOW_NEEDS_SWAP);
 
     if (!FLAG_IS_SET(((struct WindowBase*)data)->state_flags,
@@ -539,6 +540,7 @@ static void keyboard_handle_modifiers(void*               data,
                                       uint32_t            mods_locked,
                                       uint32_t            group)
 {
+    globalWl->serial = serial;
     xkb_state_update_mask(globalWl->xkb.state, mods_depressed, mods_latched,
                           mods_locked, 0, 0, group);
 }
@@ -611,6 +613,7 @@ static void xdg_wm_base_ping(void*               data,
                              struct xdg_wm_base* shell,
                              uint32_t            serial)
 {
+    globalWl->serial = serial;
     xdg_wm_base_pong(shell, serial);
 }
 
@@ -623,6 +626,7 @@ static void xdg_surface_handle_configure(void*               data,
                                          struct xdg_surface* xdg_surface,
                                          uint32_t            serial)
 {
+    globalWl->serial = serial;
     xdg_surface_ack_configure(xdg_surface, serial);
 }
 
@@ -670,6 +674,7 @@ static void shell_surface_ping(void*                    data,
                                struct wl_shell_surface* shell_surface,
                                uint32_t                 serial)
 {
+    globalWl->serial = serial;
     wl_shell_surface_pong(shell_surface, serial);
 }
 
@@ -757,19 +762,24 @@ static void data_offer_handle_offer(void*                 data,
                                     struct wl_data_offer* wl_data_offer,
                                     const char*           mime_type)
 {
+    WindowWl* w = windowWl(((struct WindowBase*)data));
+    
     LOG("wl.data_offer::offer {mime_type: %s}\n", mime_type);
 
     if (!strcmp(mime_type, "text/plain;charset=utf-8") ||
         !strcmp(mime_type, "text/plain")) {
+
         LOG("accepting offer for MIME: %s\n", mime_type);
 
-        windowWl(((struct WindowBase*)data))->data_offer = wl_data_offer;
+        w->data_offer = wl_data_offer;
 
-        if (windowWl(((struct WindowBase*)data))->data_offer_mime)
-            free((void*)windowWl(((struct WindowBase*)data))->data_offer_mime);
+        if (w->data_offer_mime)
+            free(w->data_offer_mime);
+        w->data_offer_mime = strdup(mime_type);
 
-        windowWl(((struct WindowBase*)data))->data_offer_mime =
-          strdup(mime_type);
+        wl_data_offer_accept(wl_data_offer, 0, mime_type);
+    } else {
+        wl_data_offer_accept(wl_data_offer, 0, NULL);
     }
 }
 
@@ -798,7 +808,6 @@ static void data_device_handle_data_offer(void*                  data,
                                           struct wl_data_device* wl_data_device,
                                           struct wl_data_offer*  id)
 {
-
     LOG("wl.data_device::offer\n");
     wl_data_offer_add_listener(id, &data_offer_listener, data);
 }
@@ -811,6 +820,7 @@ static void data_device_handle_enter(void*                  data,
                                      wl_fixed_t             y,
                                      struct wl_data_offer*  id)
 {
+    globalWl->serial = serial;
     LOG("wl.data_device::enter\n");
 }
 
@@ -839,12 +849,6 @@ static void data_device_handle_selection(void*                  data,
                                          struct wl_data_device* wl_data_device,
                                          struct wl_data_offer*  id)
 {
-    /**
-     * "The client must destroy the previous selection data_offer, if any, upon
-     * receiving this event."
-     */
-    if (id)
-        wl_data_offer_destroy(id);
     LOG("wl.data_device::selection\n");
 }
 
@@ -874,7 +878,9 @@ static void data_source_handle_send(void*                  data,
     if (windowWl(((struct WindowBase*)data))->data_source_text &&
         (!strcmp(mime_type, "text/plain") ||
          !strcmp(mime_type, "text/plain;charset=utf-8") ||
-         !strcmp(mime_type, "TEXT") || !strcmp(mime_type, "UTF8_STRING"))) {
+         !strcmp(mime_type, "TEXT") ||
+         !strcmp(mime_type, "STRING") ||
+         !strcmp(mime_type, "UTF8_STRING"))) {
         LOG("writing \'%s\' to fd\n",
             windowWl(((struct WindowBase*)data))->data_source_text);
 
@@ -887,6 +893,9 @@ static void data_source_handle_send(void*                  data,
 static void data_source_handle_cancelled(void*                  data,
                                          struct wl_data_source* wl_data_source)
 {
+    WindowWl* w = data;
+    w->data_source = NULL;
+    wl_data_source_destroy(wl_data_source);
     LOG("wl.data_source::canceled\n");
 }
 
@@ -929,7 +938,7 @@ static void registry_add(void*               data,
                          const char*         interface,
                          uint32_t            version)
 {
-    LOG("wl.registry name: %-40s ver: %2u", interface, version);
+    LOG("wl_registry.name: %-40s ver: %2u", interface, version);
 
     if (!strcmp(interface, wl_compositor_interface.name)) {
         globalWl->compositor =
@@ -968,7 +977,6 @@ static void registry_remove(void*               data,
                             struct wl_registry* registry,
                             uint32_t            name)
 {
-    puts("called remove");
 }
 
 static struct wl_registry_listener registry_listener = {
@@ -1007,6 +1015,7 @@ static void setup_cursor(struct WindowBase* self)
  */
 static void cursor_set(struct wl_cursor* what, uint32_t serial)
 {
+    globalWl->serial = serial;
     struct wl_buffer*       b;
     struct wl_cursor_image* img =
       (what ? what : globalWl->cursor_arrow)->images[0];

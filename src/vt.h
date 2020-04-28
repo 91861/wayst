@@ -26,6 +26,8 @@
 #include "util.h"
 #include "vector.h"
 
+#include "util.h"
+
 typedef uint32_t Rune;
 
 typedef struct
