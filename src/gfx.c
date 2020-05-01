@@ -349,7 +349,7 @@ static inline void Cache_destroy(Cache* self)
 }
 
 __attribute__((hot, flatten)) static GlyphUnitCache*
-Cache_get_glyph(Cache* self, FT_Face face, Rune code)
+Cache_get_glyph(Cache* self, FT_Face face, char32_t code)
 {
     Vector_GlyphUnitCache* block = Cache_select_bucket(self, code);
 

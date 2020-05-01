@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <uchar.h>
 
 #include <fcntl.h>
 #include <pty.h>
@@ -28,7 +29,6 @@
 
 #include "util.h"
 
-typedef uint32_t Rune;
 
 typedef struct
 {
@@ -70,7 +70,7 @@ enum __attribute__((packed)) VtRuneStyle
 
 typedef struct __attribute__((packed))
 {
-    Rune code;
+    char32_t code;
 
     ColorRGB  fg;
     ColorRGB  line;
@@ -266,10 +266,10 @@ typedef struct _Vt
             PARSER_STATE_CHARSET_G3  = '+',
         } state;
 
-        bool     utf8_in_seq;
-        uint32_t utf8_cur_seq_len;
-        uint32_t utf8_bur_buf_off;
-        char     utf8_buf[4];
+
+        bool in_mb_seq;
+        mbstate_t input_mbstate;
+        
 
         VtRune char_state; // records character properties
         bool   color_inverted;
@@ -282,10 +282,10 @@ typedef struct _Vt
     char*         title;
     Vector_size_t title_stack;
 
-    Rune (*charset_g0)(char);
-    Rune (*charset_g1)(char);
-    Rune (*charset_g2)(char);
-    Rune (*charset_g3)(char);
+    char32_t (*charset_g0)(char);
+    char32_t (*charset_g1)(char);
+    char32_t (*charset_g2)(char);
+    char32_t (*charset_g3)(char);
 
     uint8_t tabstop;
 

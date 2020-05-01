@@ -12,6 +12,7 @@
 #include <sys/time.h>
 #include <termios.h>
 #include <utmp.h>
+#include <uchar.h>
 
 #include "wcwidth/wcwidth.h"
 
@@ -100,75 +101,6 @@ static Vector_char line_to_string(Vector_VtRune* line,
                                   size_t         end,
                                   const char*    tail);
 
-#define UTF8_CHAR_INCOMPLETE    (-1)
-#define UTF8_CHAR_INVALID       (-2)
-#define UTF8_CHAR_INVALID_INPUT (-3)
-
-static inline int64_t utf8_decode_validated(char* buf, uint8_t size)
-{
-    switch (size) {
-        case 1:
-            if ((*buf & 0b10000000))
-                return UTF8_CHAR_INCOMPLETE;
-            else
-                return *buf;
-            break;
-        case 2:
-            if ((*buf & 0b11000000) && !(*buf & 0b00100000)) {
-                return (buf[1] & 0b00111111) |
-                       (((uint64_t)(buf[0] & 0b00011111)) << 6);
-            } else
-                return (*buf & 0b11100000) ? UTF8_CHAR_INCOMPLETE
-                                           : UTF8_CHAR_INVALID;
-            break;
-        case 3:
-            if ((*buf & 0b11100000) && !(*buf & 0b00010000)) {
-                return (buf[2] & 0b00111111) |
-                       (((uint64_t)(buf[1] & 0b00111111)) << 6) |
-                       (((uint64_t)(buf[0] & 0b00001111)) << 12);
-            } else
-                return (*buf & 0b11110000) ? UTF8_CHAR_INCOMPLETE
-                                           : UTF8_CHAR_INVALID;
-            break;
-        case 4:
-            if ((*buf & 0b11110000) && !(*buf & 0b00001000)) {
-                return (buf[3] & 0b00111111) |
-                       (((uint64_t)(buf[2] & 0b00111111)) << 6) |
-                       (((uint64_t)(buf[1] & 0b00111111)) << 12) |
-                       (((uint64_t)(buf[0] & 0b00000111)) << 18);
-            } else
-                return UTF8_CHAR_INVALID;
-            break;
-        default:
-            return UTF8_CHAR_INVALID_INPUT;
-    }
-    return UTF8_CHAR_INVALID_INPUT;
-}
-
-static inline uint8_t utf8_encode2(uint32_t codepoint, char* buf)
-{
-    if (codepoint > 1114111)
-        return 0;
-    else if (codepoint > 65536) {
-        buf[0] = 0b11110000 | ((codepoint >> 18) & 0b00000111);
-        buf[1] = 0b10000000 | ((codepoint >> 12) & 0b00111111);
-        buf[2] = 0b10000000 | ((codepoint >> 6) & 0b00111111);
-        buf[3] = 0b10000000 | ((codepoint)&0b00111111);
-        return 4;
-    } else if (codepoint > 2047) {
-        buf[0] = 0b11100000 | ((codepoint >> 12) & 0b00001111);
-        buf[1] = 0b10000000 | ((codepoint >> 6) & 0b00111111);
-        buf[2] = 0b10000000 | ((codepoint)&0b00111111);
-        return 3;
-    } else if (codepoint > 127) {
-        buf[0] = 0b11000000 | ((codepoint >> 6) & 0b00011111);
-        buf[1] = 0b10000000 | ((codepoint)&0b00111111);
-        return 2;
-    } else {
-        *buf = (char)codepoint;
-        return 1;
-    }
-}
 
 /**
  * Update gui scrollbar dimensions */
@@ -579,14 +511,14 @@ static bool Vt_select_consume_click(Vt*      self,
     return false;
 }
 
-static inline Rune char_sub_uk(char original)
+static inline char32_t char_sub_uk(char original)
 {
     return original == '#' ? 0xa3 /* £ */ : original;
 }
 
-static inline Rune char_sub_gfx(char original)
+static inline char32_t char_sub_gfx(char original)
 {
-    const Rune substitutes[] = {
+    const char32_t substitutes[] = {
         0x2592, // ▒
         0x2409, // ␉
         0x240c, // ␌
@@ -753,16 +685,31 @@ static Vector_char line_to_string(Vector_VtRune* line,
     }
     res = Vector_new_with_capacity_char(end - begin);
     char utfbuf[4];
+
+    // previous character was wide, skip the following space
+    bool prev_wide = false;
     for (uint32_t i = begin; i < end; ++i) {
+        if (prev_wide && line->buf[i].code == ' ') {
+            prev_wide = false;
+            continue;
+        }
+        
         if (line->buf[i].code > CHAR_MAX) {
-            int bytes = utf8_encode2(line->buf[i].code, utfbuf);
-            Vector_pushv_char(&res, utfbuf, bytes);
-        } else
+            static mbstate_t mbstate;
+            size_t bytes = c32rtomb(utfbuf, line->buf[i].code, &mbstate);
+            if (bytes > 0) {
+                Vector_pushv_char(&res, utfbuf, bytes);
+            }
+            prev_wide =  wcwidth(line->buf[i].code) > 1;
+        } else {
             Vector_push_char(&res, line->buf[i].code);
+            prev_wide = false;
+        }
     }
 
     if (tail)
         Vector_pushv_char(&res, tail, strlen(tail) + 1);
+
     return res;
 }
 
@@ -890,10 +837,9 @@ Vt Vt_new(uint32_t cols, uint32_t rows)
 
     self.is_done                 = false;
     self.parser.state            = PARSER_STATE_LITERAL;
-    self.parser.utf8_cur_seq_len = 1;
-    self.parser.utf8_in_seq      = false;
+    self.parser.in_mb_seq      = false;
 
-    self.parser.char_state = space = (VtRune){
+    self.parser.char_state = space = (VtRune) {
         .code          = ' ',
         .bg            = settings.bg,
         .fg            = settings.fg,
@@ -2590,17 +2536,22 @@ Vt_move_cursor(Vt* self, uint32_t columns, uint32_t rows)
 __attribute__((always_inline, hot, flatten)) static inline void
 Vt_handle_literal(Vt* self, char c)
 {
-    if (unlikely(self->parser.utf8_in_seq)) {
-        self->parser.utf8_buf[self->parser.utf8_cur_seq_len++] = c;
-        int64_t res = utf8_decode_validated(self->parser.utf8_buf,
-                                            self->parser.utf8_cur_seq_len);
-        if (unlikely(res == UTF8_CHAR_INVALID)) {
-            WRN("Invalid UTF-8 sequence");
-        } else if (res != UTF8_CHAR_INCOMPLETE) {
-            VtRune new_char = self->parser.char_state;
-            new_char.code   = res;
-            Vt_insert_char_at_cursor(self, new_char);
-            self->parser.utf8_in_seq = false;
+    if (unlikely(self->parser.in_mb_seq)) {
+
+        char32_t res;
+        size_t rd = mbrtoc32(&res, &c, 1, &self->parser.input_mbstate);
+
+        // encoding error
+        if (unlikely(rd == (size_t) -1)) {
+            WRN("%s\n", strerror(errno));
+            errno = 0;
+
+        // sequence is complete
+        } else if (rd != (size_t) -2) {
+            VtRune new_rune = self->parser.char_state;
+            new_rune.code = res;
+            Vt_insert_char_at_cursor(self, new_rune);
+            self->parser.in_mb_seq = false;
         }
     } else {
         switch (c) {
@@ -2640,14 +2591,11 @@ Vt_handle_literal(Vt* self, char c)
 
             default: {
 
-                int64_t res = utf8_decode_validated(&c, 1);
-                if (unlikely(res == UTF8_CHAR_INCOMPLETE)) {
-                    self->parser.utf8_in_seq      = true;
-                    self->parser.utf8_cur_seq_len = 1;
-                    self->parser.utf8_buf[0]      = c;
+                if (c & (1 << 7)) {
+                    mbrtoc32(NULL, &c, 1, &self->parser.input_mbstate);
+                    self->parser.in_mb_seq = true;
                     break;
-                } else if (res == UTF8_CHAR_INVALID)
-                    break;
+                }
 
                 VtRune new_char = self->parser.char_state;
                 new_char.code   = c;
@@ -3129,22 +3077,19 @@ Vt_maybe_handle_application_key(Vt* self, uint32_t key, uint32_t mods)
             self->unicode_input.buffer.size = 0;
             self->unicode_input.active      = false;
 
-            Rune result = strtol(self->unicode_input.buffer.buf, NULL, 16);
+            char32_t result = strtol(self->unicode_input.buffer.buf, NULL, 16);
             if (result) {
                 LOG("unicode input \'%s\' -> %d\n",
                     self->unicode_input.buffer.buf, result);
 
-                size_t seq_len = utf8_len(result);
-                if (seq_len != 1) {
-                    utf8_encode2(result, Vt_buffer(self));
-
+                static mbstate_t mbstate;
+                size_t seq_len = c32rtomb(Vt_buffer(self),
+                                          result,
+                                          &mbstate);
+                if (seq_len) {
                     Vt_buffer(self)[seq_len] = '\0';
-                } else {
-                    Vt_buffer(self)[0] = (char)result;
-                    Vt_buffer(self)[1] = '\0';
+                    Vt_write(self);
                 }
-
-                Vt_write(self);
             } else {
                 WRN("Failed to parse \'%s\'\n", self->unicode_input.buffer.buf);
             }
@@ -3365,7 +3310,7 @@ void Vt_handle_key(void* _self, uint32_t key, uint32_t mods)
         !Vt_maybe_handle_keypad_key(self, key, mods) &&
         !Vt_maybe_handle_function_key(self, key, mods)) {
         key = numpad_key_convert(key);
-        uint32_t seq_len;
+
         uint8_t  offset = 0;
         if (FLAG_IS_SET(mods, MODIFIER_ALT) && !self->modes.no_alt_sends_esc) {
             Vt_buffer(self)[0] = '\e';
@@ -3375,16 +3320,13 @@ void Vt_handle_key(void* _self, uint32_t key, uint32_t mods)
         if (unlikely(key == '\b') && settings.bsp_sends_del)
             key = 127;
 
-        if ((seq_len = utf8_len(key)) != 1) {
-            utf8_encode2(key, Vt_buffer(self) + offset);
+        static mbstate_t mbstate;
+        size_t mb_len = c32rtomb(Vt_buffer(self) + offset, key, &mbstate);
 
-            Vt_buffer(self)[seq_len + offset] = '\0';
-        } else {
-            Vt_buffer(self)[0 + offset] = (char)key;
-            Vt_buffer(self)[1 + offset] = '\0';
+        if (mb_len) {
+            Vt_buffer(self)[mb_len] = '\0';
+            Vt_write(self);
         }
-
-        Vt_write(self);
     }
 
     if (settings.scroll_on_key) {
