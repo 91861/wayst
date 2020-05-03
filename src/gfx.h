@@ -1,65 +1,90 @@
-/* See LICENSE for license information. */
-
 #pragma once
 
-//#include <GL/glew.h>
 
-#include "colors.h"
-#include "gl.h"
+#include <stdbool.h>
+#include <stdint.h>
+
 #include "util.h"
-#include "vector.h"
+#include "vt.h"
 
-typedef struct _IRendererBase
+typedef struct
 {
+    struct IGfx* interface;
 
-} RendererBase;
+    __attribute__((aligned(8))) uint8_t extend_data;
 
-/**
- * set renderer viewport size and recalculate transformations */
-void gfx_resize(uint32_t w, uint32_t h);
+} Gfx;
 
-/**
- * @return number of rows and columns */
-Pair_uint32_t gfx_get_char_size(void*);
-
-/**
- * Load font */
-void gfx_load_font();
-
-/**
- * Load OpenGL resources, needs a gl context */
-void gfx_init();
-
-/**
- * Check animation timers */
-bool gfx_update_timers();
-
-/**
- * Notify the renderer that there was some activity */
-void gfx_notify_action(void*);
-
-bool gfx_set_focus(bool focus);
-
-/**
- * Flash bell */
-void gfx_flash();
-
-static inline void gfx_init_with_size(const Pair_uint32_t res)
+struct IGfx
 {
-    gfx_init();
+    void (*draw_vt)                     (Gfx* self, const Vt*);
+    void (*resize)                      (Gfx* self, uint32_t w, uint32_t h);
+    Pair_uint32_t (*get_char_size)      (Gfx* self);
+    void (*init_with_context_activated) (Gfx* self);
+    bool (*update_timers)               (Gfx* self, Vt* vt);
+    void (*notify_action)               (Gfx* self);
+    bool (*set_focus)                   (Gfx* self, bool in_focus);
+    void (*flash)                       (Gfx* self);
+    Pair_uint32_t (*pixels)             (Gfx* self, uint32_t rows, uint32_t columns);
+    void (*destroy)                     (Gfx* self);
+    void (*destroy_proxy)               (Gfx* self, int32_t proxy[static 4]);
+};
 
-    gfx_resize(res.first, res.second);
+static void Gfx_draw_vt(Gfx* self, const Vt* vt)
+{
+    self->interface->draw_vt(self, vt);
 }
 
-/**
- * size of viewport in pixels required to fit given number of character cells */
-Pair_uint32_t gfx_pixels(void*, uint32_t r, uint32_t c);
+static void Gfx_resize(Gfx* self, uint32_t w, uint32_t h)
+{
+    LOG("gfx here %p\ngfx->iface %p\n", self, self->interface);
 
-struct _Vt;
-/**
- * draw vt state */
-void gfx_draw_vt(struct _Vt* pty);
+    self->interface->resize(self, w, h);
+}
 
-void gfx_cleanup();
+static Pair_uint32_t Gfx_get_char_size(Gfx* self)
+{
+    return self->interface->get_char_size(self);
+}
 
-void gfx_destroy_line_proxy(int32_t proxy[static 4]);
+static void Gfx_init_with_context_activated(Gfx* self)
+{
+    self->interface->init_with_context_activated(self);
+}
+
+static bool Gfx_update_timers(Gfx* self, Vt* vt)
+{
+    return self->interface->update_timers(self, vt);
+}
+
+static void Gfx_notify_action(Gfx* self)
+{
+    self->interface->notify_action(self);
+}
+
+static bool Gfx_set_focus(Gfx* self, bool in_focus)
+{
+    return self->interface->set_focus(self, in_focus);
+}
+
+static void Gfx_flash(Gfx* self)
+{
+    self->interface->flash(self);
+}
+
+static Pair_uint32_t Gfx_pixels(Gfx* self, uint32_t rows, uint32_t columns)
+{
+    return self->interface->pixels(self, rows, columns);
+}
+
+static void Gfx_destroy(Gfx* self)
+{
+    self->interface->destroy(self);
+    free(self);
+}
+
+static void Gfx_destroy_proxy(Gfx* self,  int32_t proxy[static 4])
+{
+    self->interface->destroy_proxy(self, proxy);
+}
+

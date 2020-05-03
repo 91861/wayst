@@ -59,7 +59,7 @@ typedef struct WindowBase
 
     int32_t repeat_count;
 
-    struct external_data
+    struct window_external_data
     {
         void* user_data;
 
