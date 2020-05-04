@@ -1232,7 +1232,6 @@ void Vt_resize(Vt* self, uint32_t x, uint32_t y)
         Pair_uint32_t px = self->callbacks.on_window_size_from_cells_requested(
           self->callbacks.user_data, x, y);
 
-        // gfx_pixels(x, y);
         self->ws = (struct winsize){ .ws_col    = x,
                                      .ws_row    = y,
                                      .ws_xpixel = px.first,
@@ -1252,8 +1251,6 @@ void Vt_resize(Vt* self, uint32_t x, uint32_t y)
           self->callbacks
             .on_number_of_cells_requested(self->callbacks.user_data)
             .second;
-
-        // gfx_get_char_size().second;
 
         Vt_update_scrollbar_dims(self);
     }

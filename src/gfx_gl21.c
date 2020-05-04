@@ -643,7 +643,7 @@ Pair_uint32_t GfxOpenGL21_pixels(Gfx* self, uint32_t c, uint32_t r)
 
     float x, y;
     x = c * gw;
-    y = r * (gfxOpenGL21(self)->face->size->metrics.height + 64);
+    y = r * (gfxOpenGL21(self)->face->size->metrics.height);
 
     return (Pair_uint32_t){ .first = x / 64.0, .second = y / 64.0 };
 }
