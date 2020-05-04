@@ -49,7 +49,7 @@ __attribute__((always_inline)) static inline void TimePoint_subtract(
     self->tv_sec -= other.tv_sec;
     if (self->tv_nsec < other.tv_nsec) {
         --self->tv_sec;
-        __syscall_slong_t rest = other.tv_nsec - self->tv_nsec;
+        int64_t rest = other.tv_nsec - self->tv_nsec;
         self->tv_nsec          = SEC_IN_NSECS - rest;
     } else
         self->tv_nsec -= other.tv_nsec;

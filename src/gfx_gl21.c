@@ -512,8 +512,8 @@ __attribute__((cold)) static Texture create_squiggle_texture(uint32_t w,
     double distance_limit_full_alpha = stroke_width / 2.0;
     double distance_limit_zero_alpha = stroke_width / 2.0 + stroke_fade;
 
-    for (int_fast32_t x = 0; x < w; ++x)
-        for (int_fast32_t y = 0; y < h; ++y) {
+    for (uint_fast32_t x = 0; x < w; ++x)
+        for (uint_fast32_t y = 0; y < h; ++y) {
             uint8_t* fragment = &fragments[(y * w + x) * 4];
 
 #define DISTANCE(_x, _y, _x2, _y2)                                             \

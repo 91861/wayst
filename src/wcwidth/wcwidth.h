@@ -3,10 +3,15 @@
 
 #include <stdlib.h>
 
-__BEGIN_DECLS
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 int wcwidth(wchar_t ucs);
 
-__END_DECLS
+#ifdef __cplusplus
+}
+#endif
 
 #endif
