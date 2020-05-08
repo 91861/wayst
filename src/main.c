@@ -48,7 +48,6 @@ void App_init(App* self)
 
     self->gfx = Gfx_new_OpenGL21();
 
-
     if (!settings.x11_is_default)
 #ifndef NOWL
         self->win = Window_new_wayland(
@@ -75,18 +74,15 @@ void App_init(App* self)
     Pair_uint32_t size = Window_size(self->win);
     Gfx_resize(self->gfx, size.first, size.second);
 
-    self->resolution = (Pair_uint32_t){ 0, 0 };
+    self->resolution = size;
 }
 
 void App_run(App* self)
 {
-
     while (!Window_closed(self->win) && !self->vt.is_done) {
         Window_events(self->win);
 
-        while (Vt_wait(&self->vt) || Vt_read(&self->vt))
-            if (self->vt.is_done)
-                break;
+        while ((Vt_wait(&self->vt) || Vt_read(&self->vt)) && !self->vt.is_done);
 
         Pair_uint32_t newres = Window_size(self->win);
 
@@ -180,19 +176,30 @@ void App_key_handler(void* self, uint32_t key, uint32_t mods)
     Vt_handle_key(&((App*)self)->vt, key, mods);
 }
 
-void App_button_handler(void* self, uint32_t button, bool state, int32_t x, int32_t y, int32_t ammount, uint32_t mods)
+void App_button_handler(void*    self,
+                        uint32_t button,
+                        bool     state,
+                        int32_t  x,
+                        int32_t  y,
+                        int32_t  ammount,
+                        uint32_t mods)
 {
     Vt_handle_button(&((App*)self)->vt, button, state, x, y, ammount, mods);
 }
 
-void App_motion_handler(void *self, uint32_t button, int32_t x, int32_t y)
+void App_motion_handler(void* self, uint32_t button, int32_t x, int32_t y)
 {
     Vt_handle_motion(&((App*)self)->vt, button, x, y);
 }
 
-void App_clipboard_handler(void *self, const char *text)
+void App_clipboard_handler(void* self, const char* text)
 {
     Vt_handle_clipboard(&((App*)self)->vt, text);
+}
+
+void App_reload_font(void* self)
+{
+    Gfx_reload_font(((App*)self)->gfx);
 }
 
 static void App_set_callbacks(App* self)
@@ -210,8 +217,9 @@ static void App_set_callbacks(App* self)
     self->vt.callbacks.on_window_size_from_cells_requested = App_pixels;
     self->vt.callbacks.on_number_of_cells_requested        = App_get_char_size;
     self->vt.callbacks.on_title_changed                    = App_update_title;
-    self->vt.callbacks.on_bell_flash       = App_flash;
-    self->vt.callbacks.on_action_performed = App_action;
+    self->vt.callbacks.on_bell_flash                       = App_flash;
+    self->vt.callbacks.on_action_performed                 = App_action;
+    self->vt.callbacks.on_font_reload_requseted            = App_reload_font;
 
     self->win->callbacks.key_handler             = App_key_handler;
     self->win->callbacks.button_handler          = App_button_handler;

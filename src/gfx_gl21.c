@@ -220,12 +220,14 @@ bool          GfxOpenGL21_set_focus(Gfx* self, bool focus);
 void          GfxOpenGL21_flash(Gfx* self);
 Pair_uint32_t GfxOpenGL21_pixels(Gfx* self, uint32_t c, uint32_t r);
 void          GfxOpenGL21_destroy_proxy(Gfx* self, int32_t proxy[static 4]);
+void          GfxOpenGL21_reload_font(Gfx* self);
 
 static struct IGfx gfx_interface_opengl21 = {
     .draw_vt                     = GfxOpenGL21_draw_vt,
     .resize                      = GfxOpenGL21_resize,
     .get_char_size               = GfxOpenGL21_get_char_size,
     .init_with_context_activated = GfxOpenGL21_init_with_context_activated,
+    .reload_font                 = GfxOpenGL21_reload_font,
     .update_timers               = GfxOpenGL21_update_timers,
     .notify_action               = GfxOpenGL21_notify_action,
     .set_focus                   = GfxOpenGL21_set_focus,
@@ -576,12 +578,8 @@ void GfxOpenGL21_resize(Gfx* self, uint32_t w, uint32_t h)
     gfxOpenGL21(self)->sx = 2.0f / gfxOpenGL21(self)->win_w;
     gfxOpenGL21(self)->sy = 2.0f / gfxOpenGL21(self)->win_h;
 
-    static uint32_t height = 0, hber;
-
-    if (!height) {
-        height = gfxOpenGL21(self)->face->size->metrics.height;
-        hber   = gfxOpenGL21(self)->face->glyph->metrics.horiBearingY;
-    }
+    uint32_t height = gfxOpenGL21(self)->face->size->metrics.height;
+    uint32_t hber   = gfxOpenGL21(self)->face->glyph->metrics.horiBearingY;
 
     gfxOpenGL21(self)->line_height_pixels = height / 64.0;
 
@@ -594,11 +592,7 @@ void GfxOpenGL21_resize(Gfx* self, uint32_t w, uint32_t h)
     gfxOpenGL21(self)->pen_begin_pixels =
       (float)(height / 64.0 / 1.75) + (float)((hber) / 2.0 / 64.0);
 
-    static uint32_t gw = 0;
-    if (!gw) {
-        gw = gfxOpenGL21(self)->face->glyph->advance.x;
-    }
-
+    uint32_t gw = gfxOpenGL21(self)->face->glyph->advance.x;
     gfxOpenGL21(self)->glyph_width_pixels = gw / 64;
     gfxOpenGL21(self)->glyph_width        = gw * gfxOpenGL21(self)->sx / 64.0;
 
@@ -636,11 +630,7 @@ Pair_uint32_t GfxOpenGL21_get_char_size(Gfx* self)
 
 Pair_uint32_t GfxOpenGL21_pixels(Gfx* self, uint32_t c, uint32_t r)
 {
-    static uint32_t gw = 0;
-    if (!gw) {
-        gw = gfxOpenGL21(self)->face->glyph->advance.x;
-    }
-
+    uint32_t gw = gfxOpenGL21(self)->face->glyph->advance.x;
     float x, y;
     x = c * gw;
     y = r * (gfxOpenGL21(self)->face->size->metrics.height);
@@ -650,8 +640,15 @@ Pair_uint32_t GfxOpenGL21_pixels(Gfx* self, uint32_t c, uint32_t r)
 
 void GfxOpenGL21_load_font(Gfx* self)
 {
-    if (FT_Init_FreeType(&gfxOpenGL21(self)->ft) ||
-        FT_New_Face(gfxOpenGL21(self)->ft, settings.font_name, 0,
+    static bool ft_init = false;
+
+    if (!ft_init) {
+        if (FT_Init_FreeType(&gfxOpenGL21(self)->ft)) {
+            ERR("Failed to initialize freetype");
+        }
+    }
+    
+    if (FT_New_Face(gfxOpenGL21(self)->ft, settings.font_name, 0,
                     &gfxOpenGL21(self)->face)) {
         ERR("Font error, font file: %s", settings.font_name);
     }
@@ -718,16 +715,23 @@ void GfxOpenGL21_load_font(Gfx* self)
         FT_Select_Size(gfxOpenGL21(self)->face_fallback2, 0);
     }
 
-    const char* fmt = FT_Get_Font_Format(gfxOpenGL21(self)->face);
-    if (strcmp(fmt, "TrueType") && strcmp(fmt, "CFF")) {
-        ERR("Font format \"%s\" not supported", fmt);
-    }
+    if (!ft_init) {
 
-    if (FT_Library_SetLcdFilter(gfxOpenGL21(self)->ft, FT_LCD_FILTER_DEFAULT)) {
-        gfxOpenGL21(self)->lcd_filter = true;
-    } else {
-        WRN("LCD filtering not avaliable\n");
-        gfxOpenGL21(self)->lcd_filter = false;
+        // we can only do this once per ft instance
+        const char* fmt = FT_Get_Font_Format(gfxOpenGL21(self)->face);
+        if (strcmp(fmt, "TrueType") && strcmp(fmt, "CFF")) {
+            ERR("Font format \"%s\" not supported", fmt);
+        }
+
+
+        if (FT_Library_SetLcdFilter(gfxOpenGL21(self)->ft, FT_LCD_FILTER_DEFAULT)) {
+            gfxOpenGL21(self)->lcd_filter = true;
+        } else {
+            WRN("LCD filtering not avaliable\n");
+            gfxOpenGL21(self)->lcd_filter = false;
+        }
+
+        ft_init = true;
     }
 
     // Load a character we will be centering the entire text to.
@@ -887,7 +891,6 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
     gfxOpenGL21(self)->vec_vertex_buffer2 = Vector_new_vertex_t();
 
     GfxOpenGL21_notify_action(self);
-    // Gfx_notify_action(self);
 
     float height = gfxOpenGL21(self)->face->size->metrics.height + 64;
     gfxOpenGL21(self)->line_height_pixels = height / 64.0;
@@ -897,6 +900,58 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
 
     gfxOpenGL21(self)->squiggle_texture = create_squiggle_texture(
       t_height * M_PI / 2.0, t_height, CLAMP(t_height / 7, 1, 10));
+}
+
+void GfxOpenGL21_reload_font(Gfx* self)
+{
+    Atlas_destroy(&gfxOpenGL21(self)->_atlas);
+    if (gfxOpenGL21(self)->atlas != gfxOpenGL21(self)->atlas_bold)
+        Atlas_destroy(&gfxOpenGL21(self)->_atlas_bold);
+    if (gfxOpenGL21(self)->atlas != gfxOpenGL21(self)->atlas_italic)
+        Atlas_destroy(&gfxOpenGL21(self)->_atlas_italic);
+
+    Cache_destroy(&gfxOpenGL21(self)->_cache);
+    if (gfxOpenGL21(self)->cache != gfxOpenGL21(self)->cache_bold)
+        Cache_destroy(&gfxOpenGL21(self)->_cache_bold);
+    if (gfxOpenGL21(self)->cache != gfxOpenGL21(self)->cache_italic)
+        Cache_destroy(&gfxOpenGL21(self)->_cache_italic);
+
+    FT_Done_Face(gfxOpenGL21(self)->face);
+    if (settings.font_name_bold)
+        FT_Done_Face(gfxOpenGL21(self)->face_bold);
+    if (settings.font_name_italic)
+        FT_Done_Face(gfxOpenGL21(self)->face_italic);
+    if (settings.font_name_fallback)
+        FT_Done_Face(gfxOpenGL21(self)->face_fallback);
+    if (settings.font_name_fallback2)
+        FT_Done_Face(gfxOpenGL21(self)->face_fallback2);
+
+    GfxOpenGL21_load_font(self);
+    GfxOpenGL21_resize(self, gfxOpenGL21(self)->win_w, gfxOpenGL21(self)->win_h);
+
+    gfxOpenGL21(self)->_atlas = Atlas_new(gfxOpenGL21(self), gfxOpenGL21(self)->face);
+    Cache_init(&gfxOpenGL21(self)->_cache);
+
+    if (settings.font_name_bold) {
+        gfxOpenGL21(self)->_atlas_bold = Atlas_new(gfxOpenGL21(self), gfxOpenGL21(self)->face_bold);
+        Cache_init(&gfxOpenGL21(self)->_cache_bold);
+    }
+
+    if (settings.font_name_italic) {
+        gfxOpenGL21(self)->_atlas_italic = Atlas_new(gfxOpenGL21(self), gfxOpenGL21(self)->face_italic);
+        Cache_init(&gfxOpenGL21(self)->_cache_italic);
+    }
+
+    // regenerate the squiggle texture
+    glDeleteTextures(1, &gfxOpenGL21(self)->squiggle_texture.id);
+    float height = gfxOpenGL21(self)->face->size->metrics.height + 64;
+    gfxOpenGL21(self)->line_height_pixels = height / 64.0;
+    uint32_t t_height =
+      CLAMP(gfxOpenGL21(self)->line_height_pixels / 8.0 + 2, 4, UINT8_MAX);
+    gfxOpenGL21(self)->squiggle_texture = create_squiggle_texture(
+      t_height * M_PI / 2.0, t_height, CLAMP(t_height / 7, 1, 10));
+
+    GfxOpenGL21_notify_action(self);
 }
 
 bool GfxOpenGL21_set_focus(Gfx* self, bool focus)
@@ -1672,8 +1727,6 @@ __attribute__((hot)) static inline void gfx_rasterize_line(GfxOpenGL21*    gfx,
             line_color = nc;
         }
     } // END drawing lines
-
-    gl_check_error();
 
     if (is_for_blinking) {
         vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK] =

@@ -144,16 +144,14 @@ typedef struct _Vt
     struct VtCallbacks
     {
         void* user_data;
+
         Pair_uint32_t (*on_window_size_requested)(void*);
         Pair_uint32_t (*on_window_size_from_cells_requested)(void*,
                                                              uint32_t r,
                                                              uint32_t c);
         Pair_uint32_t (*on_number_of_cells_requested)(void*);
-
         void (*on_window_resize_requested)(void*, uint32_t w, uint32_t h);
-
         Pair_uint32_t (*on_window_position_requested)(void*);
-
         void (*on_action_performed)(void*);
         void (*on_repaint_required)(void*);
         void (*on_bell_flash)(void*);
@@ -161,6 +159,7 @@ typedef struct _Vt
         void (*on_title_changed)(void*, const char*);
 
         void (*on_clipboard_requested)(void*);
+        void (*on_font_reload_requseted)(void*);
         void (*on_clipboard_sent)(void*, const char*);
 
     } callbacks;

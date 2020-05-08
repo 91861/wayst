@@ -11,8 +11,8 @@
 #include <sys/select.h>
 #include <sys/time.h>
 #include <termios.h>
-#include <utmp.h>
 #include <uchar.h>
+#include <utmp.h>
 
 #include "wcwidth/wcwidth.h"
 
@@ -100,7 +100,6 @@ static Vector_char line_to_string(Vector_VtRune* line,
                                   size_t         begin,
                                   size_t         end,
                                   const char*    tail);
-
 
 /**
  * Update gui scrollbar dimensions */
@@ -364,6 +363,20 @@ static inline void Vt_clear_proxies_in_region(Vt*    self,
 {
     for (size_t i = begin; i <= end; ++i)
         Vt_clear_proxy(self, i);
+}
+
+static inline void Vt_clear_all_proxies(Vt* self)
+{
+    Vt_clear_proxies_in_region(self, 0, self->lines.size - 1);
+
+    if (self->alt_lines.buf) {
+        for (size_t i = 0; i < self->alt_lines.size -1; ++i) {
+            if (!self->alt_lines.buf[i].damaged) {
+                self->alt_lines.buf[i].damaged = true;
+                Vt_destroy_line_proxy(self->alt_lines.buf[i].proxy.data);
+            }
+        }
+    }
 }
 
 __attribute__((always_inline)) static inline void
@@ -693,14 +706,14 @@ static Vector_char line_to_string(Vector_VtRune* line,
             prev_wide = false;
             continue;
         }
-        
+
         if (line->buf[i].code > CHAR_MAX) {
             static mbstate_t mbstate;
             size_t bytes = c32rtomb(utfbuf, line->buf[i].code, &mbstate);
             if (bytes > 0) {
                 Vector_pushv_char(&res, utfbuf, bytes);
             }
-            prev_wide =  wcwidth(line->buf[i].code) > 1;
+            prev_wide = wcwidth(line->buf[i].code) > 1;
         } else {
             Vector_push_char(&res, line->buf[i].code);
             prev_wide = false;
@@ -835,11 +848,11 @@ Vt Vt_new(uint32_t cols, uint32_t rows)
         ERR("Failed to fork process %s", strerror(errnocpy));
     }
 
-    self.is_done                 = false;
-    self.parser.state            = PARSER_STATE_LITERAL;
-    self.parser.in_mb_seq      = false;
+    self.is_done          = false;
+    self.parser.state     = PARSER_STATE_LITERAL;
+    self.parser.in_mb_seq = false;
 
-    self.parser.char_state = space = (VtRune) {
+    self.parser.char_state = space = (VtRune){
         .code          = ' ',
         .bg            = settings.bg,
         .fg            = settings.fg,
@@ -1104,7 +1117,7 @@ static void Vt_reflow_shrink(Vt* self, uint32_t x)
                     Vector_insert_VtRune(
                       &self->lines.buf[i + 1].data,
                       self->lines.buf[i + 1].data.buf,
-                      *(self->lines.buf[i].data.buf + x + ii));
+                      *(self->lines.buf[i].data.buf + x + chars_to_move - ii -1));
                 }
 
                 self->lines.buf[i + 1].damaged = true;
@@ -1115,6 +1128,7 @@ static void Vt_reflow_shrink(Vt* self, uint32_t x)
 
                 Vector_insert_VtLine(&self->lines, (self->lines.buf) + (i + 1),
                                      VtLine_new());
+
                 ++self->active_line;
                 ++bottom_bound;
 
@@ -1227,40 +1241,32 @@ void Vt_resize(Vt* self, uint32_t x, uint32_t y)
         ox = x;
         oy = y;
 
-        ASSERT(self->callbacks.on_window_size_from_cells_requested,
-               "callback is NULL");
-        Pair_uint32_t px = self->callbacks.on_window_size_from_cells_requested(
-          self->callbacks.user_data, x, y);
-
-        self->ws = (struct winsize){ .ws_col    = x,
-                                     .ws_row    = y,
-                                     .ws_xpixel = px.first,
-                                     .ws_ypixel = px.second };
-
-        self->pixels_per_cell_x = (double)self->ws.ws_xpixel / self->ws.ws_col;
-        self->pixels_per_cell_y = (double)self->ws.ws_ypixel / self->ws.ws_row;
-
-        if (ioctl(self->master, TIOCSWINSZ, &self->ws) < 0)
-            WRN("IO operation failed %s\n", strerror(errno));
-
-        self->scroll_region_top = 0;
-
-        ASSERT(self->callbacks.on_number_of_cells_requested,
-               "callback is NULL");
-        self->scroll_region_bottom =
-          self->callbacks
-            .on_number_of_cells_requested(self->callbacks.user_data)
-            .second;
-
-        Vt_update_scrollbar_dims(self);
     }
+
+    ASSERT(self->callbacks.on_window_size_from_cells_requested,
+            "callback is NULL");
+    Pair_uint32_t px = self->callbacks.on_window_size_from_cells_requested(
+        self->callbacks.user_data, x, y);
+
+    self->ws = (struct winsize){ .ws_col    = x,
+                                 .ws_row    = y,
+                                 .ws_xpixel = px.first,
+                                 .ws_ypixel = px.second };
+
+    self->pixels_per_cell_x = (double)self->ws.ws_xpixel / self->ws.ws_col;
+    self->pixels_per_cell_y = (double)self->ws.ws_ypixel / self->ws.ws_row;
+
+    if (ioctl(self->master, TIOCSWINSZ, &self->ws) < 0)
+        WRN("IO operation failed %s\n", strerror(errno));
+
+    self->scroll_region_top = 0;
+    self->scroll_region_bottom = self->ws.ws_row;
+
+    Vt_update_scrollbar_dims(self);
 }
 
 bool Vt_wait(Vt* self)
 {
-    /* FD_ZERO(&self->rfdset); */
-    /* FD_ZERO(&self->wfdset); */
-
     // needs to be reset every time
     FD_SET(self->master, &self->rfdset);
     FD_SET(self->master, &self->wfdset);
@@ -2536,17 +2542,17 @@ Vt_handle_literal(Vt* self, char c)
     if (unlikely(self->parser.in_mb_seq)) {
 
         char32_t res;
-        size_t rd = mbrtoc32(&res, &c, 1, &self->parser.input_mbstate);
+        size_t   rd = mbrtoc32(&res, &c, 1, &self->parser.input_mbstate);
 
         // encoding error
-        if (unlikely(rd == (size_t) -1)) {
+        if (unlikely(rd == (size_t)-1)) {
             WRN("%s\n", strerror(errno));
             errno = 0;
 
-        // sequence is complete
-        } else if (rd != (size_t) -2) {
+            // sequence is complete
+        } else if (rd != (size_t)-2) {
             VtRune new_rune = self->parser.char_state;
-            new_rune.code = res;
+            new_rune.code   = res;
             Vt_insert_char_at_cursor(self, new_rune);
             self->parser.in_mb_seq = false;
         }
@@ -2873,9 +2879,6 @@ __attribute__((hot)) inline bool Vt_read(Vt* self)
                         self->callbacks.user_data, self->ws.ws_col,
                         self->ws.ws_row);
 
-                    /* Pair_uint32_t px = gfx_pixels(self->ws.ws_col, */
-                    /*                              self->ws.ws_row); */
-
                     self->ws.ws_xpixel = px.first;
                     self->ws.ws_ypixel = px.second;
                     if (ioctl(self->master, TIOCSWINSZ, &self->ws) < 0)
@@ -3080,9 +3083,7 @@ Vt_maybe_handle_application_key(Vt* self, uint32_t key, uint32_t mods)
                     self->unicode_input.buffer.buf, result);
 
                 static mbstate_t mbstate;
-                size_t seq_len = c32rtomb(Vt_buffer(self),
-                                          result,
-                                          &mbstate);
+                size_t seq_len = c32rtomb(Vt_buffer(self), result, &mbstate);
                 if (seq_len) {
                     Vt_buffer(self)[seq_len] = '\0';
                     Vt_write(self);
@@ -3147,12 +3148,26 @@ Vt_maybe_handle_application_key(Vt* self, uint32_t key, uint32_t mods)
                     return true;
                 }
 
-                case 31: // ^_
-                    LOG("should decrease font size");
+                case 31: { // ^_
+                    if (settings.font_size > 1) {
+                        --settings.font_size;
+                        Vt_clear_all_proxies(self);
+                        self->callbacks.on_font_reload_requseted(self->callbacks.user_data);
+                        Pair_uint32_t cells = self->callbacks.on_number_of_cells_requested(self->callbacks.user_data);
+                        Vt_resize(self, cells.first, cells.second);
+                        self->callbacks.on_repaint_required(self->callbacks.user_data);
+                    }
+                }
                     return true;
 
-                case 43: // ^+
-                    LOG("should enlarge font");
+                case 43: { // ^+
+                    ++settings.font_size;
+                    Vt_clear_all_proxies(self);
+                    self->callbacks.on_font_reload_requseted(self->callbacks.user_data);
+                    Pair_uint32_t cells = self->callbacks.on_number_of_cells_requested(self->callbacks.user_data);
+                    Vt_resize(self, cells.first, cells.second);
+                    self->callbacks.on_repaint_required(self->callbacks.user_data);
+                }
                     return true;
 
                 case 13:
@@ -3308,7 +3323,7 @@ void Vt_handle_key(void* _self, uint32_t key, uint32_t mods)
         !Vt_maybe_handle_function_key(self, key, mods)) {
         key = numpad_key_convert(key);
 
-        uint8_t  offset = 0;
+        uint8_t offset = 0;
         if (FLAG_IS_SET(mods, MODIFIER_ALT) && !self->modes.no_alt_sends_esc) {
             Vt_buffer(self)[0] = '\e';
             offset             = 1;
@@ -3332,8 +3347,6 @@ void Vt_handle_key(void* _self, uint32_t key, uint32_t mods)
 
     ASSERT(self->callbacks.on_action_performed, "callback is NULL");
     self->callbacks.on_action_performed(self->callbacks.user_data);
-
-    // gfx_notify_action();
 }
 
 /**

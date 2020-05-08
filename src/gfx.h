@@ -21,6 +21,7 @@ struct IGfx
     void (*resize)                      (Gfx* self, uint32_t w, uint32_t h);
     Pair_uint32_t (*get_char_size)      (Gfx* self);
     void (*init_with_context_activated) (Gfx* self);
+    void (*reload_font)                 (Gfx* self);
     bool (*update_timers)               (Gfx* self, Vt* vt);
     void (*notify_action)               (Gfx* self);
     bool (*set_focus)                   (Gfx* self, bool in_focus);
@@ -37,8 +38,6 @@ static void Gfx_draw_vt(Gfx* self, const Vt* vt)
 
 static void Gfx_resize(Gfx* self, uint32_t w, uint32_t h)
 {
-    LOG("gfx here %p\ngfx->iface %p\n", self, self->interface);
-
     self->interface->resize(self, w, h);
 }
 
@@ -50,6 +49,11 @@ static Pair_uint32_t Gfx_get_char_size(Gfx* self)
 static void Gfx_init_with_context_activated(Gfx* self)
 {
     self->interface->init_with_context_activated(self);
+}
+
+static void Gfx_reload_font(Gfx* self)
+{
+    self->interface->reload_font(self);
 }
 
 static bool Gfx_update_timers(Gfx* self, Vt* vt)
