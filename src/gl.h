@@ -54,7 +54,7 @@ extern PFNGLGENERATEMIPMAPPROC          glGenerateMipmap;
 extern PFNGLDEBUGMESSAGECALLBACKPROC glDebugMessageCallback;
 #endif
 
-void* (*gl_load_ext)(const char* procname);
+extern void* (*gl_load_ext)(const char* procname);
 
 void gl_load_exts();
 
