@@ -1199,7 +1199,6 @@ void Vt_resize(Vt* self, uint32_t x, uint32_t y)
 
     static uint32_t ox = 0, oy = 0;
     if (x != ox || y != oy) {
-
         if (!self->alt_lines.buf && !Vt_scroll_region_not_default(self)) {
             if (x < ox) {
                 Vt_reflow_shrink(self, x);

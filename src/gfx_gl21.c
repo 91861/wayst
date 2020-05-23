@@ -151,6 +151,7 @@ typedef struct
     size_t   max_cells_in_line;
 
     float sx, sy;
+    uint32_t gw; 
 
     Framebuffer line_fb;
 
@@ -355,7 +356,7 @@ static Atlas Atlas_new(GfxOpenGL21* gfx, FT_Face face_)
             .rows       = gfx->g->bitmap.rows,
             .width      = gfx->g->bitmap.width,
             .left       = (float)gfx->g->bitmap_left * 1.15,
-            .top        = (float)gfx->g->bitmap_top,
+            .top        = (float)gfx->g->bitmap_top - 0.01,
             .tex_coords = { (float)ox / self.w,
 
                             1.0f - ((float)(self.h - oy) / self.h),
@@ -483,8 +484,8 @@ Cache_get_glyph(GfxOpenGL21* gfx, Cache* self, FT_Face face, char32_t code)
                .is_color = color,
 
                // for whatever reason this fixes some alignment problems
-               .left = (float) gfx->g->bitmap_left * 1.15,
-               .top = (float) gfx->g->bitmap_top,
+              .left = (float) gfx->g->bitmap_left * 1.15,
+               .top = (float) gfx->g->bitmap_top - 0.01,
                .tex = tex,
              });
 
@@ -596,9 +597,10 @@ void GfxOpenGL21_resize(Gfx* self, uint32_t w, uint32_t h)
     gfxOpenGL21(self)->pen_begin_pixels =
       (float)(height / 64.0 / 1.75) + (float)((hber) / 2.0 / 64.0);
 
-    uint32_t gw = gfxOpenGL21(self)->face->glyph->advance.x;
-    gfxOpenGL21(self)->glyph_width_pixels = gw / 64;
-    gfxOpenGL21(self)->glyph_width        = gw * gfxOpenGL21(self)->sx / 64.0;
+
+    gfxOpenGL21(self)->gw = gfxOpenGL21(self)->face->glyph->advance.x;
+    gfxOpenGL21(self)->glyph_width_pixels = gfxOpenGL21(self)->gw / 64;
+    gfxOpenGL21(self)->glyph_width        = gfxOpenGL21(self)->gw * gfxOpenGL21(self)->sx / 64.0;
 
     LOG("glyph box size: %fx%f\n", gfxOpenGL21(self)->glyph_width,
         gfxOpenGL21(self)->line_height);
@@ -634,13 +636,16 @@ Pair_uint32_t GfxOpenGL21_get_char_size(Gfx* self)
 
 Pair_uint32_t GfxOpenGL21_pixels(Gfx* self, uint32_t c, uint32_t r)
 {
-    if (FT_Load_Char(gfxOpenGL21(self)->face, '-', FT_LOAD_TARGET_LCD) ||
-        FT_Render_Glyph(gfxOpenGL21(self)->face->glyph, FT_RENDER_MODE_LCD)) {
-        WRN("Glyph error\n");
+    if (!gfxOpenGL21(self)->gw) {
+        if (FT_Load_Char(gfxOpenGL21(self)->face, '>', FT_LOAD_TARGET_LCD) ||
+            FT_Render_Glyph(gfxOpenGL21(self)->face->glyph, FT_RENDER_MODE_LCD)) {
+            WRN("Glyph error\n");
+        }
+        gfxOpenGL21(self)->gw = gfxOpenGL21(self)->face->glyph->advance.x;
     }
-    uint32_t gw = gfxOpenGL21(self)->face->glyph->advance.x;
+
     float x, y;
-    x = c * gw;
+    x = c * gfxOpenGL21(self)->gw;
     y = r * (gfxOpenGL21(self)->face->size->metrics.height);
 
     return (Pair_uint32_t){ .first = x / 64.0, .second = y / 64.0 };
@@ -648,9 +653,9 @@ Pair_uint32_t GfxOpenGL21_pixels(Gfx* self, uint32_t c, uint32_t r)
 
 void GfxOpenGL21_load_font(Gfx* self)
 {
-    static bool ft_init = false;
+    static bool ft_lib_was_initialized = false;
 
-    if (!ft_init) {
+    if (!ft_lib_was_initialized) {
         if (FT_Init_FreeType(&gfxOpenGL21(self)->ft)) {
             ERR("Failed to initialize freetype");
         }
@@ -668,7 +673,7 @@ void GfxOpenGL21_load_font(Gfx* self)
     }
 
     if (!FT_IS_FIXED_WIDTH(gfxOpenGL21(self)->face)) {
-        WRN("main font is not fixed width\n");
+        WRN("Main font is not fixed width\n");
     }
 
     if (settings.font_name_bold) {
@@ -683,7 +688,7 @@ void GfxOpenGL21_load_font(Gfx* self)
         }
 
         if (!FT_IS_FIXED_WIDTH(gfxOpenGL21(self)->face_bold)) {
-            WRN("bold font is not fixed width\n");
+            WRN("Bold font is not fixed width\n");
         }
     }
 
@@ -699,7 +704,7 @@ void GfxOpenGL21_load_font(Gfx* self)
         }
 
         if (!FT_IS_FIXED_WIDTH(gfxOpenGL21(self)->face_italic)) {
-            WRN("italic font is not fixed width\n");
+            WRN("Italic font is not fixed width\n");
         }
     }
 
@@ -723,14 +728,13 @@ void GfxOpenGL21_load_font(Gfx* self)
         FT_Select_Size(gfxOpenGL21(self)->face_fallback2, 0);
     }
 
-    if (!ft_init) {
+    if (!ft_lib_was_initialized) {
 
         // we can only do this once per ft instance
         const char* fmt = FT_Get_Font_Format(gfxOpenGL21(self)->face);
         if (strcmp(fmt, "TrueType") && strcmp(fmt, "CFF")) {
             ERR("Font format \"%s\" not supported", fmt);
         }
-
 
         if (FT_Library_SetLcdFilter(gfxOpenGL21(self)->ft, FT_LCD_FILTER_DEFAULT)) {
             gfxOpenGL21(self)->lcd_filter = true;
@@ -739,7 +743,7 @@ void GfxOpenGL21_load_font(Gfx* self)
             gfxOpenGL21(self)->lcd_filter = false;
         }
 
-        ft_init = true;
+        ft_lib_was_initialized = true;
     }
 }
 
@@ -947,8 +951,6 @@ void GfxOpenGL21_reload_font(Gfx* self)
 
     // regenerate the squiggle texture
     glDeleteTextures(1, &gfxOpenGL21(self)->squiggle_texture.id);
-    float height = gfxOpenGL21(self)->face->size->metrics.height + 64;
-    gfxOpenGL21(self)->line_height_pixels = height / 64.0;
     uint32_t t_height =
       CLAMP(gfxOpenGL21(self)->line_height_pixels / 8.0 + 2, 4, UINT8_MAX);
     gfxOpenGL21(self)->squiggle_texture = create_squiggle_texture(
@@ -1138,9 +1140,9 @@ __attribute__((hot)) static inline void gfx_rasterize_line(GfxOpenGL21*    gfx,
       ColorRGBA_get_float(settings.bg, 0), ColorRGBA_get_float(settings.bg, 1),
       ColorRGBA_get_float(settings.bg, 2), ColorRGBA_get_float(settings.bg, 3));
 
-    glDisable(GL_BLEND);
     glClear(GL_COLOR_BUFFER_BIT);
     glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     static float buffer[] = {
         -1.0f, -1.0f, -1.0f, 1.0f,
@@ -1319,6 +1321,8 @@ __attribute__((hot)) static inline void gfx_rasterize_line(GfxOpenGL21*    gfx,
                                   gfx->flex_vbo.size, newsize);
 
                                 glBindTexture(GL_TEXTURE_2D, gfx->atlas->tex);
+
+                                glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
                                 glDrawArrays(GL_QUADS, 0,
                                              gfx->vec_glyph_buffer->size * 4);
 
@@ -1341,6 +1345,7 @@ __attribute__((hot)) static inline void gfx_rasterize_line(GfxOpenGL21*    gfx,
 
                                     glBindTexture(GL_TEXTURE_2D,
                                                   gfx->atlas_italic->tex);
+
                                     glDrawArrays(
                                       GL_QUADS, 0,
                                       gfx->vec_glyph_buffer_italic->size * 4);
@@ -1365,6 +1370,7 @@ __attribute__((hot)) static inline void gfx_rasterize_line(GfxOpenGL21*    gfx,
 
                                     glBindTexture(GL_TEXTURE_2D,
                                                   gfx->atlas_bold->tex);
+
                                     glDrawArrays(
                                       GL_QUADS, 0,
                                       gfx->vec_glyph_buffer_bold->size * 4);
