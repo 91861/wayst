@@ -420,13 +420,7 @@ static void Vt_select_set_end(Vt* self, int32_t x, int32_t y)
         ASSERT(self->callbacks.on_repaint_required, "callback is NULL");
         self->callbacks.on_repaint_required(self->callbacks.user_data);
 
-        for (size_t i = MIN(old_end, self->selection.end_line);
-             i <= MAX(old_end, self->selection.end_line); ++i) {
-            if (!self->lines.buf[i].damaged) {
-                self->lines.buf[i].damaged = true;
-                Vt_destroy_line_proxy(self->lines.buf[i].proxy.data);
-            }
-        }
+        Vt_clear_proxies_in_region(self, MIN(old_end, self->selection.end_line), MAX(old_end, self->selection.end_line));
     }
 }
 
@@ -3424,7 +3418,6 @@ void Vt_handle_button(void*    _self,
 void Vt_handle_motion(void* _self, uint32_t button, int32_t x, int32_t y)
 {
     Vt* self = _self;
-
     if (Vt_scrollbar_consume_drag(self, button, x, y) ||
         Vt_consume_drag(self, button, x, y))
         return;

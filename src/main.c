@@ -74,6 +74,9 @@ void App_init(App* self)
     Pair_uint32_t size = Window_size(self->win);
     Gfx_resize(self->gfx, size.first, size.second);
 
+    Pair_uint32_t chars = Gfx_get_char_size(self->gfx);
+    Vt_resize(&self->vt, chars.first, chars.second);
+
     self->resolution = size;
 }
 
