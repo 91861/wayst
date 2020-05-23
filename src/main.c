@@ -82,7 +82,8 @@ void App_run(App* self)
     while (!Window_closed(self->win) && !self->vt.is_done) {
         Window_events(self->win);
 
-        while ((Vt_wait(&self->vt) || Vt_read(&self->vt)) && !self->vt.is_done);
+        Vt_wait(&self->vt);
+        while ((Vt_read(&self->vt)) && !self->vt.is_done);
 
         Pair_uint32_t newres = Window_size(self->win);
 
@@ -200,6 +201,9 @@ void App_clipboard_handler(void* self, const char* text)
 void App_reload_font(void* self)
 {
     Gfx_reload_font(((App*)self)->gfx);
+    Gfx_draw_vt(((App*)self)->gfx, &((App*)self)->vt);
+    Window_notify_content_change(((App*)self)->win);
+    Window_maybe_swap(((App*)self)->win);
 }
 
 static void App_set_callbacks(App* self)

@@ -1267,17 +1267,19 @@ void Vt_resize(Vt* self, uint32_t x, uint32_t y)
 
 bool Vt_wait(Vt* self)
 {
-    // needs to be reset every time
+    FD_ZERO(&self->rfdset);
+    FD_ZERO(&self->wfdset);
+    
     FD_SET(self->master, &self->rfdset);
     FD_SET(self->master, &self->wfdset);
 
-    if (0 > pselect(MAX(self->master, self->io) + 1, &self->rfdset,
+    if (0 > pselect(MAX(self->master, self->io) +1, &self->rfdset,
                     &self->wfdset, NULL, NULL, NULL)) {
         if (errno == EINTR || errno == EAGAIN) {
             errno = 0;
             return true;
         } else {
-            ERR("IO operation failed %s", strerror(errno));
+            WRN("pselect failed: %s\n", strerror(errno));
         }
     }
 

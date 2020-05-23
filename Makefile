@@ -31,8 +31,8 @@ CCWNO = -Wall -Wextra -Wno-unused-parameter -Wno-address -Wno-unused-function -W
 SRCS = $(wildcard $(SRC_DIR)/*.c wildcard $(SRC_DIR)/wcwidth/wcwidth.c)
 SRCS_WLEXTS = $(wildcard $(SRC_DIR)/wl_exts/*.c)
 
-XLDLIBS = -lX11 -lXrandr -lXrender -lEGL
-WLLDLIBS = -lwayland-client -lwayland-egl -lwayland-cursor -lxkbcommon 
+XLDLIBS = -lX11 -lXrandr -lXrender
+WLLDLIBS = -lwayland-client -lwayland-egl -lwayland-cursor -lxkbcommon -lEGL
 
 ifeq ($(window_protocol), x11)
 	CFLAGS += -DNOWL

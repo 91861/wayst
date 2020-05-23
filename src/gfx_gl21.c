@@ -354,8 +354,8 @@ static Atlas Atlas_new(GfxOpenGL21* gfx, FT_Face face_)
         self.char_info[i - ATLAS_RENDERABLE_START] = (struct Atlas_char_info){
             .rows       = gfx->g->bitmap.rows,
             .width      = gfx->g->bitmap.width,
-            .left       = gfx->g->bitmap_left,
-            .top        = gfx->g->bitmap_top,
+            .left       = (float)gfx->g->bitmap_left * 1.15,
+            .top        = (float)gfx->g->bitmap_top,
             .tex_coords = { (float)ox / self.w,
 
                             1.0f - ((float)(self.h - oy) / self.h),
@@ -483,9 +483,8 @@ Cache_get_glyph(GfxOpenGL21* gfx, Cache* self, FT_Face face, char32_t code)
                .is_color = color,
 
                // for whatever reason this fixes some alignment problems
-               .left = (float)gfx->g->bitmap_left * 1.15,
-
-               .top = (float)gfx->g->bitmap_top,
+               .left = (float) gfx->g->bitmap_left * 1.15,
+               .top = (float) gfx->g->bitmap_top,
                .tex = tex,
              });
 
@@ -570,6 +569,11 @@ __attribute__((cold)) static Texture create_squiggle_texture(uint32_t w,
 
 void GfxOpenGL21_resize(Gfx* self, uint32_t w, uint32_t h)
 {
+    if (FT_Load_Char(gfxOpenGL21(self)->face, '>', FT_LOAD_TARGET_LCD) ||
+        FT_Render_Glyph(gfxOpenGL21(self)->face->glyph, FT_RENDER_MODE_LCD)) {
+        WRN("Glyph error\n");
+    }
+
     gfxOpenGL21(self)->win_w = w;
     gfxOpenGL21(self)->win_h = h;
 
@@ -630,6 +634,10 @@ Pair_uint32_t GfxOpenGL21_get_char_size(Gfx* self)
 
 Pair_uint32_t GfxOpenGL21_pixels(Gfx* self, uint32_t c, uint32_t r)
 {
+    if (FT_Load_Char(gfxOpenGL21(self)->face, '-', FT_LOAD_TARGET_LCD) ||
+        FT_Render_Glyph(gfxOpenGL21(self)->face->glyph, FT_RENDER_MODE_LCD)) {
+        WRN("Glyph error\n");
+    }
     uint32_t gw = gfxOpenGL21(self)->face->glyph->advance.x;
     float x, y;
     x = c * gw;
@@ -660,7 +668,7 @@ void GfxOpenGL21_load_font(Gfx* self)
     }
 
     if (!FT_IS_FIXED_WIDTH(gfxOpenGL21(self)->face)) {
-        WRN("main font is not fixed width");
+        WRN("main font is not fixed width\n");
     }
 
     if (settings.font_name_bold) {
@@ -675,7 +683,7 @@ void GfxOpenGL21_load_font(Gfx* self)
         }
 
         if (!FT_IS_FIXED_WIDTH(gfxOpenGL21(self)->face_bold)) {
-            WRN("bold font is not fixed width");
+            WRN("bold font is not fixed width\n");
         }
     }
 
@@ -691,7 +699,7 @@ void GfxOpenGL21_load_font(Gfx* self)
         }
 
         if (!FT_IS_FIXED_WIDTH(gfxOpenGL21(self)->face_italic)) {
-            WRN("italic font is not fixed width");
+            WRN("italic font is not fixed width\n");
         }
     }
 
@@ -732,12 +740,6 @@ void GfxOpenGL21_load_font(Gfx* self)
         }
 
         ft_init = true;
-    }
-
-    // Load a character we will be centering the entire text to.
-    if (FT_Load_Char(gfxOpenGL21(self)->face, '|', FT_LOAD_TARGET_LCD) ||
-        FT_Render_Glyph(gfxOpenGL21(self)->face->glyph, FT_RENDER_MODE_LCD)) {
-        WRN("Glyph error\n");
     }
 }
 
@@ -927,6 +929,7 @@ void GfxOpenGL21_reload_font(Gfx* self)
         FT_Done_Face(gfxOpenGL21(self)->face_fallback2);
 
     GfxOpenGL21_load_font(self);
+
     GfxOpenGL21_resize(self, gfxOpenGL21(self)->win_w, gfxOpenGL21(self)->win_h);
 
     gfxOpenGL21(self)->_atlas = Atlas_new(gfxOpenGL21(self), gfxOpenGL21(self)->face);

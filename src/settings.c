@@ -68,6 +68,8 @@ static struct option long_options[] = {
     { "no-flash",                    no_argument,       0, 'F' },
     { "colorscheme",                 required_argument, 0, 's' },
     { "font",                        required_argument, 0, 'Y' },
+    { "font-fallback",               required_argument, 0, 'Y' },
+    { "font-fallback2",              required_argument, 0, 'Y' },
     { "font-size",                   required_argument, 0, 'S' },
     { "dpi",                         required_argument, 0, 'D' },
     { "scroll-lines",                required_argument, 0, 'y' },
@@ -114,7 +116,9 @@ static const char* long_options_descriptions[][2] =
     { NULL        , "disable visual flash"                                  },
     { "name"      , "colorscheme preset: wayst, linux, xterm, rxvt, yaru, tan"
                     "go, orchis, solarized"                                 },
-    { "name"      , "font family"                                           },
+    { "name"      , "primary font family"                                   },
+    { "name"      , "fallback font family"                                  },
+    { "name"      , "second fallback font family"                           },
     { arg_int     , "font size"                                             },
     { arg_int     , "dpi"                                                   },
     { arg_int     , "lines scrolled per whell click"                        },
@@ -443,16 +447,16 @@ static void find_font()
     }
 
     if (!settings.font_name_bold)
-        WRN("Selected font has no bold style\n");
+        WRN("No bold style found for \"%s\"\n", settings.font);
 
     if (!settings.font_name_italic)
-        WRN("Selected font has no italic style\n");
+        WRN("No italic style found for \"%s\"\n", settings.font);
 
     if (!settings.font_name_fallback)
-        WRN("Fallback font could not be found\n");
+        WRN("Failed to locate font files for \"%s\"", settings.font_fallback);
 
     if (!settings.font_name_fallback2)
-        WRN("Fallback font could not be found\n");
+        WRN("Failed to locate font files for \"%s\"", settings.font_fallback2);
 
     LOG("font files:\n  normal: %s\n  bold: %s\n  italic: %s\n"
         "  fallback/symbol: %s\n  fallback/symbol: %s\n",
@@ -561,7 +565,6 @@ static void handle_option(const char   opt,
                           char* const* argv)
 {
     switch (opt) {
-
         case 'X':
             settings.x11_is_default = true;
             break;
@@ -587,7 +590,17 @@ static void handle_option(const char   opt,
             break;
 
         case 'Y':
-            settings.font = strdup(value);
+            switch (array_index) {
+            case 34:
+                settings.font = strdup(value);
+                break;
+            case 35:
+                settings.font_fallback = strdup(value);
+                break;
+            case 36:
+                settings.font_fallback2 = strdup(value);
+                break;
+            }
             break;
 
         case 'S':
@@ -743,10 +756,10 @@ static void handle_config_option(const char*  key,
                                  const char*  val,
                                  const int    argc,
                                  char* const* argv)
-{
-    if (val && key)
-        for (struct option* opt = long_options; opt->name; ++opt)
-            if (!strcmp(key, opt->name))
+{ 
+    if (val && key) {
+        for (struct option* opt = long_options; opt->name; ++opt) {
+            if (!strcmp(key, opt->name)) {
                 if (opt->has_arg == required_argument ||
                     !strcasecmp(val, "true")) {
                     int arrayindex = 0;
@@ -755,8 +768,21 @@ static void handle_config_option(const char*  key,
                         if (parsed <= 16)
                             arrayindex = parsed + 12;
                     }
+
+                    if (streq_wildcard(key, "font*")) {
+                        if (!strcmp(key, "font-fallback"))
+                            arrayindex = 35;
+                        else if (!strcmp(key, "font-fallback2"))
+                            arrayindex = 36;
+                        else
+                            arrayindex = 34;
+                    }
+
                     handle_option(opt->val, arrayindex, val, argc, argv);
                 }
+            }
+        }
+    }
 }
 
 DEF_VECTOR(char, NULL);

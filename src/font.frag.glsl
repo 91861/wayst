@@ -16,5 +16,5 @@ void main() {
     gl_FragData[0] = vec4(mix(bclr.r, clr.r, c.r),
                           mix(bclr.g, clr.g, c.g),
                           mix(bclr.b, clr.b, c.b),
-                          bclr.a + length(c));
+                          bclr.a + c.r + c.g + c.b);
 }
