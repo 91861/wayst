@@ -373,7 +373,7 @@ static void Vt_destroy(Vt* self)
     Vector_destroy_size_t(&self->title_stack);
 }
 
-void Vt_handle_key(void* self, uint32_t key, uint32_t mods);
+void Vt_handle_key(void* self, uint32_t key, uint32_t rawkey, uint32_t mods);
 
 void Vt_handle_clipboard(void* self, const char* text);
 

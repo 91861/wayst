@@ -65,6 +65,9 @@ void App_init(App* self)
     }
 
     App_set_callbacks(self);
+
+    settings_after_window_system_connected();
+
     Window_set_swap_interval(self->win, 0);
 
     gl_load_ext = App_load_gl_ext;
@@ -175,9 +178,9 @@ void App_action(void* self)
     Gfx_notify_action(((App*)self)->gfx);
 }
 
-void App_key_handler(void* self, uint32_t key, uint32_t mods)
+void App_key_handler(void* self, uint32_t key, uint32_t rawkey, uint32_t mods)
 {
-    Vt_handle_key(&((App*)self)->vt, key, mods);
+    Vt_handle_key(&((App*)self)->vt, key, rawkey, mods);
 }
 
 void App_button_handler(void*    self,
@@ -209,6 +212,11 @@ void App_reload_font(void* self)
     Window_maybe_swap(((App*)self)->win);
 }
 
+uint32_t App_get_key_code(void* self, char* name)
+{
+    return Window_get_keysym_from_name(((App*)self)->win, name);
+}
+
 static void App_set_callbacks(App* self)
 {
     Vt_destroy_line_proxy = App_destroy_proxy;
@@ -233,6 +241,9 @@ static void App_set_callbacks(App* self)
     self->win->callbacks.motion_handler          = App_motion_handler;
     self->win->callbacks.clipboard_handler       = App_clipboard_handler;
     self->win->callbacks.activity_notify_handler = App_action;
+
+    settings.callbacks.user_data           = self;
+    settings.callbacks.keycode_from_string = App_get_key_code;
 }
 
 __attribute__((destructor)) void destructor()

@@ -17,9 +17,6 @@
 #define MOUSE_BUTTON_2       (1 << 2)
 #define MOUSE_BUTTON_3       (1 << 3)
 
-#define MODIFIER_SHIFT   (1 << 0)
-#define MODIFIER_ALT     (1 << 1)
-#define MODIFIER_CONTROL (1 << 2)
 
 typedef struct
 {
@@ -45,6 +42,7 @@ struct IWindow
     void (*clipboard_get)(struct WindowBase* self);
     void (*set_swap_interval)(struct WindowBase* self, int val);
     void* (*get_gl_ext_proc_adress)(struct WindowBase* self, const char* name);
+    uint32_t (*get_keycode_from_name)(void* self, char* name);
 };
 
 typedef struct WindowBase
@@ -63,7 +61,7 @@ typedef struct WindowBase
     {
         void* user_data;
 
-        void (*key_handler)(void* user_data, uint32_t code, uint32_t mods);
+        void (*key_handler)(void* user_data, uint32_t code, uint32_t rawcode, uint32_t mods);
 
         void (*button_handler)(void*    user_data,
                                uint32_t code,
@@ -223,4 +221,9 @@ __attribute__((always_inline)) static inline void Window_notify_content_change(
   void* self)
 {
     ((struct WindowBase*)self)->paint = true;
+}
+
+__attribute__((always_inline)) static inline uint32_t Window_get_keysym_from_name(struct WindowBase* self, char* name)
+{
+    return self->interface->get_keycode_from_name(self, name);
 }

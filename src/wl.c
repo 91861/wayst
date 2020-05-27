@@ -76,6 +76,8 @@ void WindowWl_clipboard_get(struct WindowBase* self);
 void* WindowWl_get_gl_ext_proc_adress(struct WindowBase* self,
                                       const char*        name);
 
+uint32_t WindowWl_get_keycode_from_name(void* self, char* name);
+
 static struct IWindow window_interface_wayland = {
     .set_fullscreen         = WindowWl_set_fullscreen,
     .resize                 = WindowWl_resize,
@@ -88,6 +90,7 @@ static struct IWindow window_interface_wayland = {
     .clipboard_get          = WindowWl_clipboard_get,
     .set_swap_interval      = WindowWl_set_swap_interval,
     .get_gl_ext_proc_adress = WindowWl_get_gl_ext_proc_adress,
+    .get_keycode_from_name  = WindowWl_get_keycode_from_name,
 };
 
 typedef struct
@@ -95,6 +98,7 @@ typedef struct
     struct xkb_context* ctx;
     struct xkb_keymap*  keymap;
     struct xkb_state*   state;
+    struct xkb_state*   clean_state;
 
     xkb_mod_mask_t ctrl_mask;
     xkb_mod_mask_t alt_mask;
@@ -130,6 +134,7 @@ typedef struct
 
     int32_t   kbd_repeat_dealy, kbd_repeat_rate;
     uint32_t  keycode_to_repeat;
+    uint32_t  raw_keycode_to_repeat;
     uint32_t  modstate_to_repeat;
     uint32_t  last_button_pressed;
     TimePoint repeat_point;
@@ -170,15 +175,17 @@ void WindowWl_clipboard_send(struct WindowBase* self, const char* text)
     LOG("making a data source\n");
 
     if (w->data_source_text)
-        free((void*) w->data_source_text);
+        free((void*)w->data_source_text);
 
     windowWl(self)->data_source_text = text;
-    windowWl(self)->data_source = wl_data_device_manager_create_data_source(globalWl->data_device_manager);
+    windowWl(self)->data_source =
+      wl_data_device_manager_create_data_source(globalWl->data_device_manager);
     wl_data_source_add_listener(w->data_source, &data_source_listener, self);
 
     wl_data_source_offer(w->data_source, "text/plain;charset=utf-8");
 
-    wl_data_device_set_selection(globalWl->data_device, w->data_source, globalWl->serial);
+    wl_data_device_set_selection(globalWl->data_device, w->data_source,
+                                 globalWl->serial);
 }
 
 void WindowWl_clipboard_get(struct WindowBase* self)
@@ -396,7 +403,8 @@ static void keyboard_handle_keymap(void*               data,
     if (!globalWl->xkb.keymap)
         goto fail;
 
-    globalWl->xkb.state = xkb_state_new(globalWl->xkb.keymap);
+    globalWl->xkb.state       = xkb_state_new(globalWl->xkb.keymap);
+    globalWl->xkb.clean_state = xkb_state_new(globalWl->xkb.keymap);
 
     if (!globalWl->xkb.state)
         goto fail;
@@ -455,15 +463,12 @@ static void keyboard_handle_key(void*               data,
 
     struct WindowBase* win = data;
 
-    uint32_t            code, num_syms;
-    const xkb_keysym_t* syms;
-    xkb_keysym_t        sym;
+    uint32_t     code;
+    xkb_keysym_t sym, rawsym;
 
-    code     = key + 8;
-    num_syms = xkb_state_key_get_syms(globalWl->xkb.state, code, &syms);
-    sym      = XKB_KEY_NoSymbol;
-    if (num_syms == 1)
-        sym = syms[0];
+    code   = key + 8;
+    sym    = xkb_state_key_get_one_sym(globalWl->xkb.state, code);
+    rawsym = xkb_state_key_get_one_sym(globalWl->xkb.clean_state, code);
 
     int no_consume =
       xkb_state_mod_index_is_consumed(globalWl->xkb.state, code, 0);
@@ -515,9 +520,10 @@ static void keyboard_handle_key(void*               data,
 
     if (state == 1 && no_consume) {
         if (repeat) {
-            win->repeat_count            = 0;
-            globalWl->keycode_to_repeat  = final;
-            globalWl->modstate_to_repeat = final_mods;
+            win->repeat_count               = 0;
+            globalWl->keycode_to_repeat     = final;
+            globalWl->raw_keycode_to_repeat = code;
+            globalWl->modstate_to_repeat    = final_mods;
             globalWl->repeat_point =
               TimePoint_ms_from_now(globalWl->kbd_repeat_dealy);
         } else {
@@ -525,7 +531,7 @@ static void keyboard_handle_key(void*               data,
         }
 
         if (win->callbacks.key_handler)
-            win->callbacks.key_handler(win->callbacks.user_data, final,
+            win->callbacks.key_handler(win->callbacks.user_data, final, rawsym,
                                        final_mods);
     } else {
         globalWl->keycode_to_repeat = 0;
@@ -763,7 +769,7 @@ static void data_offer_handle_offer(void*                 data,
                                     const char*           mime_type)
 {
     WindowWl* w = windowWl(((struct WindowBase*)data));
-    
+
     LOG("wl.data_offer::offer {mime_type: %s}\n", mime_type);
 
     if (!strcmp(mime_type, "text/plain;charset=utf-8") ||
@@ -878,8 +884,7 @@ static void data_source_handle_send(void*                  data,
     if (windowWl(((struct WindowBase*)data))->data_source_text &&
         (!strcmp(mime_type, "text/plain") ||
          !strcmp(mime_type, "text/plain;charset=utf-8") ||
-         !strcmp(mime_type, "TEXT") ||
-         !strcmp(mime_type, "STRING") ||
+         !strcmp(mime_type, "TEXT") || !strcmp(mime_type, "STRING") ||
          !strcmp(mime_type, "UTF8_STRING"))) {
         LOG("writing \'%s\' to fd\n",
             windowWl(((struct WindowBase*)data))->data_source_text);
@@ -893,7 +898,7 @@ static void data_source_handle_send(void*                  data,
 static void data_source_handle_cancelled(void*                  data,
                                          struct wl_data_source* wl_data_source)
 {
-    WindowWl* w = data;
+    WindowWl* w    = data;
     w->data_source = NULL;
     wl_data_source_destroy(wl_data_source);
     LOG("wl.data_source::canceled\n");
@@ -976,8 +981,7 @@ static void registry_add(void*               data,
 static void registry_remove(void*               data,
                             struct wl_registry* registry,
                             uint32_t            name)
-{
-}
+{}
 
 static struct wl_registry_listener registry_listener = {
     .global        = registry_add,
@@ -1256,9 +1260,9 @@ static inline void WindowWl_repeat_check(struct WindowBase* self)
         self->repeat_count = MIN(self->repeat_count + 1, INT32_MAX - 1);
 
         if (self->callbacks.key_handler)
-            self->callbacks.key_handler(self->callbacks.user_data,
-                                        globalWl->keycode_to_repeat,
-                                        globalWl->modstate_to_repeat);
+            self->callbacks.key_handler(
+              self->callbacks.user_data, globalWl->keycode_to_repeat,
+              globalWl->raw_keycode_to_repeat, globalWl->modstate_to_repeat);
     }
 }
 
@@ -1400,6 +1404,13 @@ int WindowWl_get_connection_fd(struct WindowBase* self)
 void* WindowWl_get_gl_ext_proc_adress(struct WindowBase* self, const char* name)
 {
     return eglGetProcAddress(name);
+}
+
+uint32_t WindowWl_get_keycode_from_name(void* self, char* name)
+{
+    xkb_keysym_t xkb_keysym =
+      xkb_keysym_from_name(name, XKB_KEYSYM_CASE_INSENSITIVE);
+    return xkb_keysym == XKB_KEY_NoSymbol ? 0 : xkb_keysym_to_utf32(xkb_keysym);
 }
 
 #endif

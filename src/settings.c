@@ -30,267 +30,261 @@ static const char* const arg_int     = "number";
 static const char* const arg_color   = "#RRGGBB";
 static const char* const arg_color_a = "#RRGGBBAA";
 static const char* const arg_string  = "string";
+static const char* const arg_key     = "key";
 
 // -e and -x are reserved
 static struct option long_options[] = {
-    { "config-file",                 required_argument, 0, 'i' },
-    { "skip-config",                 no_argument,       0, 'C' },
-    { "xorg-only",                   no_argument,       0, 'X' },
-    { "term",                        required_argument, 0, 'r' },
-    { "title",                       required_argument, 0, 't' },
-    { "no-dynamic-title",            no_argument,       0, 'T' },
-    { "title-format",                required_argument, 0, 'o' },
-    { "locale",                      required_argument, 0, 'l' },
-    { "rows",                        required_argument, 0, 'R' },
-    { "columns",                     required_argument, 0, 'c' },
-    { "bg-color",                    required_argument, 0, '0' },
-    { "fg-color",                    required_argument, 0, '1' },
-    { "color-0",                     required_argument, 0, '~' },
-    { "color-1",                     required_argument, 0, '~' },
-    { "color-2",                     required_argument, 0, '~' },
-    { "color-3",                     required_argument, 0, '~' },
-    { "color-4",                     required_argument, 0, '~' },
-    { "color-5",                     required_argument, 0, '~' },
-    { "color-6",                     required_argument, 0, '~' },
-    { "color-7",                     required_argument, 0, '~' },
-    { "color-8",                     required_argument, 0, '~' },
-    { "color-9",                     required_argument, 0, '~' },
-    { "color-10",                    required_argument, 0, '~' },
-    { "color-11",                    required_argument, 0, '~' },
-    { "color-12",                    required_argument, 0, '~' },
-    { "color-13",                    required_argument, 0, '~' },
-    { "color-14",                    required_argument, 0, '~' },
-    { "color-15",                    required_argument, 0, '~' },
-    { "fg-color-dim",                required_argument, 0, '2' },
-    { "h-bg-color",                  required_argument, 0, '3' },
-    { "h-fg-color",                  required_argument, 0, '4' },
-    { "h-change-fg",                 no_argument,       0, 'f' },
-    { "no-flash",                    no_argument,       0, 'F' },
-    { "colorscheme",                 required_argument, 0, 's' },
-    { "font",                        required_argument, 0, 'Y' },
-    { "font-fallback",               required_argument, 0, 'Y' },
-    { "font-fallback2",              required_argument, 0, 'Y' },
-    { "font-size",                   required_argument, 0, 'S' },
-    { "dpi",                         required_argument, 0, 'D' },
-    { "scroll-lines",                required_argument, 0, 'y' },
-    { "version",                     no_argument,       0, 'v' },
-    { "help",                        no_argument,       0, 'h' },
+    { "config-file", required_argument, 0, 'i' },
+    { "skip-config", no_argument, 0, 'C' },
+    { "xorg-only", no_argument, 0, 'X' },
+    { "term", required_argument, 0, 'r' },
+    { "title", required_argument, 0, 't' },
+    { "no-dynamic-title", no_argument, 0, 'T' },
+    { "title-format", required_argument, 0, 'o' },
+    { "locale", required_argument, 0, 'l' },
+
+    { "rows", required_argument, 0, 'R' },
+    { "columns", required_argument, 0, 'c' },
+
+    { "bg-color", required_argument, 0, '0' },
+    { "fg-color", required_argument, 0, '1' },
+
+    { "color-0", required_argument, 0, '~' },
+    { "color-1", required_argument, 0, '~' },
+    { "color-2", required_argument, 0, '~' },
+    { "color-3", required_argument, 0, '~' },
+    { "color-4", required_argument, 0, '~' },
+    { "color-5", required_argument, 0, '~' },
+    { "color-6", required_argument, 0, '~' },
+    { "color-7", required_argument, 0, '~' },
+    { "color-8", required_argument, 0, '~' },
+    { "color-9", required_argument, 0, '~' },
+    { "color-10", required_argument, 0, '~' },
+    { "color-11", required_argument, 0, '~' },
+    { "color-12", required_argument, 0, '~' },
+    { "color-13", required_argument, 0, '~' },
+    { "color-14", required_argument, 0, '~' },
+    { "color-15", required_argument, 0, '~' },
+
+    { "fg-color-dim", required_argument, 0, '2' },
+    { "h-bg-color", required_argument, 0, '3' },
+    { "h-fg-color", required_argument, 0, '4' },
+
+    { "h-change-fg", no_argument, 0, 'f' },
+    { "no-flash", no_argument, 0, 'F' },
+    { "colorscheme", required_argument, 0, 's' },
+
+    { "font", required_argument, 0, 'Y' },
+    { "font-fallback", required_argument, 0, 'Y' },
+    { "font-fallback2", required_argument, 0, 'Y' },
+    { "font-size", required_argument, 0, 'S' },
+    { "dpi", required_argument, 0, 'D' },
+
+    { "scroll-lines", required_argument, 0, 'y' },
+
+    { "bind-key-copy", required_argument, 0, '^' },
+    { "bind-key-paste", required_argument, 0, '^' },
+    { "bind-key-enlarge", required_argument, 0, '^' },
+    { "bind-key-shrink", required_argument, 0, '^' },
+    { "bind-key-uni", required_argument, 0, '^' },
+    { "bind-key-debug", required_argument, 0, '^' },
+    { "bind-key-quit", required_argument, 0, '^' },
+
+    { "version", no_argument, 0, 'v' },
+    { "help", no_argument, 0, 'h' },
     { 0 }
 };
 
+static const char* long_options_descriptions[][2] = {
+    { arg_path, "use configuration file" },
+    { NULL, "skip default configuration file" },
+    { NULL, "always use X11" },
+    { arg_string, "TERM value" },
+    { arg_string, "window title and application class name" },
+    { NULL, "don't allow programs to change window title" },
+    { arg_string, "window title format string" },
+    { arg_string, "override locale" },
+    { arg_int, "number of rows" },
+    { arg_int, "number of columns" },
+    { arg_color_a, "background color" },
+    { arg_color, "foreground color" },
+    { arg_color, "palette color black" },
+    { arg_color, "palette color red" },
+    { arg_color, "palette color green" },
+    { arg_color, "palette color yellow" },
+    { arg_color, "palette color blue" },
+    { arg_color, "palette color magenta" },
+    { arg_color, "palette color cyan" },
+    { arg_color, "palette color grey" },
+    { arg_color, "palette color bright black" },
+    { arg_color, "palette color bright red" },
+    { arg_color, "palette color bright green" },
+    { arg_color, "palette color bright yellow" },
+    { arg_color, "palette color bright blue" },
+    { arg_color, "palette color bright magenta" },
+    { arg_color, "palette color bright cyan" },
+    { arg_color, "palette color bright grey" },
+    { arg_color, "dim/faint text color" },
+    { arg_color_a, "highlighted text background color" },
+    { arg_color, "highlighted text foreground color" },
+    { NULL, "highligting text changes foreground color" },
+    { NULL, "disable visual flash" },
+    { "name", "colorscheme preset: wayst, linux, xterm, rxvt, yaru, tan"
+              "go, orchis, solarized" },
+    { "name", "primary font family" },
+    { "name", "fallback font family" },
+    { "name", "second fallback font family" },
+    { arg_int, "font size" },
+    { arg_int, "dpi" },
+    { arg_int, "lines scrolled per whell click" },
 
-static const char* long_options_descriptions[][2] =
-{
-    { arg_path    , "use configuration file"                                },
-    { NULL        , "skip default configuration file"                       },
-    { NULL        , "always use X11"                                        },
-    { arg_string  , "TERM value"                                            },
-    { arg_string  , "window title and application class name"               },
-    { NULL        , "don't allow programs to change window title"           },
-    { arg_string  , "window title format string"                            },
-    { arg_string  , "override locale"                                       },
-    { arg_int     , "number of rows"                                        },
-    { arg_int     , "number of columns"                                     },
-    { arg_color_a , "background color"                                      },
-    { arg_color   , "foreground color"                                      },
-    { arg_color   , "palette color black"                                   },
-    { arg_color   , "palette color red"                                     },
-    { arg_color   , "palette color green"                                   },
-    { arg_color   , "palette color yellow"                                  },
-    { arg_color   , "palette color blue"                                    },
-    { arg_color   , "palette color magenta"                                 },
-    { arg_color   , "palette color cyan"                                    },
-    { arg_color   , "palette color grey"                                    },
-    { arg_color   , "palette color bright black"                            },
-    { arg_color   , "palette color bright red"                              },
-    { arg_color   , "palette color bright green"                            },
-    { arg_color   , "palette color bright yellow"                           },
-    { arg_color   , "palette color bright blue"                             },
-    { arg_color   , "palette color bright magenta"                          },
-    { arg_color   , "palette color bright cyan"                             },
-    { arg_color   , "palette color bright grey"                             },
-    { arg_color   , "dim/faint text color"                                  },
-    { arg_color_a , "highlighted text background color"                     },
-    { arg_color   , "highlighted text foreground color"                     },
-    { NULL        , "highligting text changes foreground color"             },
-    { NULL        , "disable visual flash"                                  },
-    { "name"      , "colorscheme preset: wayst, linux, xterm, rxvt, yaru, tan"
-                    "go, orchis, solarized"                                 },
-    { "name"      , "primary font family"                                   },
-    { "name"      , "fallback font family"                                  },
-    { "name"      , "second fallback font family"                           },
-    { arg_int     , "font size"                                             },
-    { arg_int     , "dpi"                                                   },
-    { arg_int     , "lines scrolled per whell click"                        },
-    { NULL        , "show version"                                          },
-    { NULL        , "show this message"                                     },
+    { arg_key, "bind copy key command" },
+    { arg_key, "bind paste key command" },
+    { arg_key, "bind enlagre font key command" },
+    { arg_key, "bind shrink font key command" },
+    { arg_key, "bind unicode entry mode activation key command" },
+    { arg_key, "bind debug info key command" },
+    { arg_key, "bind quit key command" },
+
+    { NULL, "show version" },
+    { NULL, "show this message" },
     { 0 }
 };
 
-
-const char* const
-colors_default[8][18] =
-{
-    {   /* wayst */
-        "000000",
-        "AB1F00",
-        "D2FF00",
-        "FF7D00",
-        "00518C",
-        "B7006F",
-        "00AEA0",
-        "AAAAAA",
-        "545454",
-        "BB3939",
-        "AFFF52",
-        "FFA855",
-        "107BC9",
-        "FF368A",
-        "40FFEF",
-        "FFFFFF",
-        "000000EE",
-        "FFFFFF",
+const char* const colors_default[8][18] = {
+    {
+      /* wayst */
+      "000000",
+      "AB1F00",
+      "D2FF00",
+      "FF7D00",
+      "00518C",
+      "B7006F",
+      "00AEA0",
+      "AAAAAA",
+      "545454",
+      "BB3939",
+      "AFFF52",
+      "FFA855",
+      "107BC9",
+      "FF368A",
+      "40FFEF",
+      "FFFFFF",
+      "000000EE",
+      "FFFFFF",
     },
-    {   /* linux console */
-        "000000",
-        "AA0000",
-        "00AA00",
-        "AA5500",
-        "0000AA",
-        "AA00AA",
-        "00AAAA",
-        "AAAAAA",
-        "555555",
-        "FF5555",
-        "55FF55",
-        "FFFF55",
-        "5555FF",
-        "FF55FF",
-        "55FFFF",
-        "FFFFFF",
-        "000000",
-        "FFFFFF",
+    {
+      /* linux console */
+      "000000",
+      "AA0000",
+      "00AA00",
+      "AA5500",
+      "0000AA",
+      "AA00AA",
+      "00AAAA",
+      "AAAAAA",
+      "555555",
+      "FF5555",
+      "55FF55",
+      "FFFF55",
+      "5555FF",
+      "FF55FF",
+      "55FFFF",
+      "FFFFFF",
+      "000000",
+      "FFFFFF",
     },
-    {   /* xterm */
-        "000000",
-        "CD0000",
-        "00CD00",
-        "CDCD00",
-        "0000EE",
-        "CD00CD",
-        "00CDCD",
-        "E5E5E5",
-        "7F7F7F",
-        "FF0000",
-        "00FF00",
-        "FFFF00",
-        "5C5CFF",
-        "FF00FF",
-        "00FFFF",
-        "FFFFFF",
-        "000000",
-        "FFFFFF",
+    {
+      /* xterm */
+      "000000",
+      "CD0000",
+      "00CD00",
+      "CDCD00",
+      "0000EE",
+      "CD00CD",
+      "00CDCD",
+      "E5E5E5",
+      "7F7F7F",
+      "FF0000",
+      "00FF00",
+      "FFFF00",
+      "5C5CFF",
+      "FF00FF",
+      "00FFFF",
+      "FFFFFF",
+      "000000",
+      "FFFFFF",
     },
-    {   /* rxvt */
-        "000000",
-        "CD0000",
-        "00CD00",
-        "CDCD00",
-        "0000CD",
-        "CD00CD",
-        "00CDCD",
-        "FAEBD7",
-        "404040",
-        "FF0000",
-        "00FF00",
-        "FFFF00",
-        "0000FF",
-        "FF00FF",
-        "00FFFF",
-        "FFFFFF",
-        "000000",
-        "FFFFFF",
+    {
+      /* rxvt */
+      "000000",
+      "CD0000",
+      "00CD00",
+      "CDCD00",
+      "0000CD",
+      "CD00CD",
+      "00CDCD",
+      "FAEBD7",
+      "404040",
+      "FF0000",
+      "00FF00",
+      "FFFF00",
+      "0000FF",
+      "FF00FF",
+      "00FFFF",
+      "FFFFFF",
+      "000000",
+      "FFFFFF",
     },
-    {   /* yaru */
-        "2E3436",
-        "CC0000",
-        "4E9A06",
-        "C4A000",
-        "3465A4",
-        "75507B",
-        "06989A",
-        "D3D7CF",
-        "555753",
-        "EF2929",
-        "8AE234",
-        "FCE94F",
-        "729FCF",
-        "AD7FA8",
-        "34E2E2",
-        "EEEEEC",
-        "300A24",
-        "FFFFFF"
+    { /* yaru */
+      "2E3436", "CC0000", "4E9A06", "C4A000", "3465A4", "75507B", "06989A",
+      "D3D7CF", "555753", "EF2929", "8AE234", "FCE94F", "729FCF", "AD7FA8",
+      "34E2E2", "EEEEEC", "300A24", "FFFFFF" },
+    {
+      /* tango */ "000000",
+      "CC0000",
+      "4D9A05",
+      "C3A000",
+      "3464A3",
+      "754F7B",
+      "05979A",
+      "D3D6CF",
+      "545652",
+      "EF2828",
+      "89E234",
+      "FBE84F",
+      "729ECF",
+      "AC7EA8",
+      "34E2E2",
+      "EDEDEB",
+      "2D2D2D",
+      "EEEEEC",
     },
-    {   /* tango */
-        "000000",
-        "CC0000",
-        "4D9A05",
-        "C3A000",
-        "3464A3",
-        "754F7B",
-        "05979A",
-        "D3D6CF",
-        "545652",
-        "EF2828",
-        "89E234",
-        "FBE84F",
-        "729ECF",
-        "AC7EA8",
-        "34E2E2",
-        "EDEDEB",
-        "2D2D2D",
-        "EEEEEC",
+    {
+      // orchis
+      "000000",
+      "CC0000",
+      "4D9A05",
+      "C3A000",
+      "3464A3",
+      "754F7B",
+      "05979A",
+      "D3D6CF",
+      "545652",
+      "EF2828",
+      "89E234",
+      "FBE84F",
+      "729ECF",
+      "AC7EA8",
+      "34E2E2",
+      "EDEDEB",
+      "303030",
+      "EFEFEF",
     },
-    {   /* orchis */
-        "000000",
-        "CC0000",
-        "4D9A05",
-        "C3A000",
-        "3464A3",
-        "754F7B",
-        "05979A",
-        "D3D6CF",
-        "545652",
-        "EF2828",
-        "89E234",
-        "FBE84F",
-        "729ECF",
-        "AC7EA8",
-        "34E2E2",
-        "EDEDEB",
-        "303030",
-        "EFEFEF",
-    },
-    {   /* solarized */
-        "073642",
-        "DC322F",
-        "859900",
-        "B58900",
-        "268BD2",
-        "D33682",
-        "2AA198",
-        "EEE8D5",
-        "002B36",
-        "CB4B16",
-        "586E75",
-        "657B83",
-        "839496",
-        "6C71C4",
-        "93A1A1",
-        "FDF6E3",
-        "002B36",
-        "839496"
-    }
+    { // solarized
+      "073642", "DC322F", "859900", "B58900", "268BD2", "D33682", "2AA198",
+      "EEE8D5", "002B36", "CB4B16", "586E75", "657B83", "839496", "6C71C4",
+      "93A1A1", "FDF6E3", "002B36", "839496" },
 };
 
 Settings settings;
@@ -470,6 +464,45 @@ static void find_font()
 static void settings_make_default()
 {
     settings = (Settings){
+
+        .key_commands = {
+            [KCMD_QUIT] = (KeyCommand) {
+                .key.code = 0,
+                .is_name = false,
+                .mods = 0,
+            },
+            [KCMD_UNICODE_ENTRY] = (KeyCommand) {
+                .key.code = 117, // u
+                .is_name = false,
+                .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
+            },
+            [KCMD_COPY] = (KeyCommand) {
+                .key.code = 99, // c
+                .is_name = false,
+                .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
+            },
+            [KCMD_PASTE] = (KeyCommand) {
+                .key.code = 118, // v
+                .is_name = false,
+                .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
+            },
+            [KCMD_FONT_ENLARGE] = (KeyCommand) {
+                .key.code = 61, // equal
+                .is_name = false,
+                .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
+            },
+            [KCMD_FONT_SHRINK] = (KeyCommand) {
+                .key.code = 45, // minus
+                .is_name = false,
+                .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
+            },
+            [KCMD_DEBUG] = (KeyCommand) {
+                .key.code = 13, // Return
+                .is_name = false,
+                .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
+            },
+        },
+
         .config_path    = NULL,
         .skip_config    = false,
         .x11_is_default = false,
@@ -591,15 +624,15 @@ static void handle_option(const char   opt,
 
         case 'Y':
             switch (array_index) {
-            case 34:
-                settings.font = strdup(value);
-                break;
-            case 35:
-                settings.font_fallback = strdup(value);
-                break;
-            case 36:
-                settings.font_fallback2 = strdup(value);
-                break;
+                case 34:
+                    settings.font = strdup(value);
+                    break;
+                case 35:
+                    settings.font_fallback = strdup(value);
+                    break;
+                case 36:
+                    settings.font_fallback2 = strdup(value);
+                    break;
             }
             break;
 
@@ -692,6 +725,50 @@ static void handle_option(const char   opt,
             } else
                 WRN("Failed to parse \"%s\" as color", value);
         } break;
+
+        case '^': {
+            // point 'name_start' to after the last '-'
+            const char* name_start = value;
+            while (*name_start)
+                ++name_start;
+            while (*name_start != '-' && name_start >= value)
+                --name_start;
+
+            // get modifiers from between 'value' and 'name_start'
+            uint32_t    mods          = 0;
+            const char* current_begin = value;
+            for (const char* i = value; i <= name_start; ++i) {
+                if (*i == '-') {
+                    static const char* ctrl_names[]  = { "C", "Ctrl",
+                                                        "Control" };
+                    static const char* alt_names[]   = { "A", "M", "Alt",
+                                                       "Meta" };
+                    static const char* shift_names[] = { "S", "Shift" };
+
+                    size_t slice_range = i - current_begin;
+#define CHECK_NAMES(_array, _mask)                                             \
+    for (uint_fast8_t j = 0; j < ARRAY_SIZE(_array); ++j)                      \
+        if (strneqci(_array[j], current_begin, slice_range)) {                 \
+            mods |= _mask;                                                     \
+            LOG("parsed %.*s as " #_mask "\n", (int)slice_range,               \
+                current_begin);                                                \
+            goto done_parsing;                                                 \
+        }
+                    CHECK_NAMES(ctrl_names, MODIFIER_CONTROL)
+                    CHECK_NAMES(alt_names, MODIFIER_ALT)
+                    CHECK_NAMES(shift_names, MODIFIER_SHIFT)
+                    WRN("Invalid modifier key name \'%.*s\'\n",
+                        (int)slice_range, current_begin);
+                done_parsing:;
+                    current_begin = i + 1;
+                }
+            }
+
+            settings.key_commands[array_index - 40].mods    = mods;
+            settings.key_commands[array_index - 40].is_name = true;
+            settings.key_commands[array_index - 40].key.name =
+              strdup(name_start + 1); // FIXME: Parse mods
+        } break;
     }
 }
 
@@ -756,19 +833,20 @@ static void handle_config_option(const char*  key,
                                  const char*  val,
                                  const int    argc,
                                  char* const* argv)
-{ 
+{
     if (val && key) {
         for (struct option* opt = long_options; opt->name; ++opt) {
             if (!strcmp(key, opt->name)) {
                 if (opt->has_arg == required_argument ||
                     !strcasecmp(val, "true")) {
+
+                    // getopt provides an array index of option
                     int arrayindex = 0;
                     if (streq_wildcard(key, "color-*")) {
                         int parsed = strtol(key + 6, NULL, 10);
                         if (parsed <= 16)
                             arrayindex = parsed + 12;
                     }
-
                     if (streq_wildcard(key, "font*")) {
                         if (!strcmp(key, "font-fallback"))
                             arrayindex = 35;
@@ -776,8 +854,32 @@ static void handle_config_option(const char*  key,
                             arrayindex = 36;
                         else
                             arrayindex = 34;
+                    } else if (streq_wildcard(key, "bind*")) {
+                        // bind-key-(switch)
+                        switch (key[9]) {
+                            case 'c':
+                                arrayindex = 40;
+                                break;
+                            case 'p':
+                                arrayindex = 41;
+                                break;
+                            case 'e':
+                                arrayindex = 42;
+                                break;
+                            case 's':
+                                arrayindex = 43;
+                                break;
+                            case 'u':
+                                arrayindex = 44;
+                                break;
+                            case 'd':
+                                arrayindex = 45;
+                                break;
+                            case 'q':
+                                arrayindex = 46;
+                                break;
+                        }
                     }
-
                     handle_option(opt->val, arrayindex, val, argc, argv);
                 }
             }

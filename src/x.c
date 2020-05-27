@@ -70,6 +70,8 @@ void WindowX11_clipboard_send(struct WindowBase* self, const char* text);
 void* WindowX11_get_gl_ext_proc_adress(struct WindowBase* self,
                                        const char*        name);
 
+uint32_t WindowX11_get_keycode_from_name(void* self, char* name);
+
 static struct IWindow window_interface_x11 = {
     .set_fullscreen         = WindowX11_set_fullscreen,
     .resize                 = WindowX11_resize,
@@ -83,6 +85,7 @@ static struct IWindow window_interface_x11 = {
     .clipboard_get          = WindowX11_clipboard_get,
     .set_swap_interval      = WindowX11_set_swap_interval,
     .get_gl_ext_proc_adress = WindowX11_get_gl_ext_proc_adress,
+    .get_keycode_from_name  = WindowX11_get_keycode_from_name,
 };
 
 typedef struct
@@ -490,10 +493,13 @@ void WindowX11_events(struct WindowBase* self)
                             no_consume = 1;
                 }
 
-                if (no_consume)
+                if (no_consume) {
+                    int32_t always_lower = XkbKeycodeToKeysym(globalX11->display, e->xkey.keycode, 0, 0);
                     self->callbacks.key_handler(self->callbacks.user_data,
                                                 stat == 4 ? code : ret,
+                                                always_lower,
                                                 windowX11(self)->mods);
+                }
 
                 WindowX11_pointer(self, true);
                 break;
@@ -692,6 +698,12 @@ void WindowX11_destroy(struct WindowBase* self)
 int WindowX11_get_connection_fd(struct WindowBase* self)
 {
     return ConnectionNumber(globalX11->display);
+}
+
+uint32_t WindowX11_get_keycode_from_name(void* self, char* name)
+{
+    KeyCode kcode = XStringToKeysym(name);
+    return kcode == NoSymbol ? 0 : kcode;
 }
 
 #endif

@@ -370,7 +370,7 @@ static inline void Vt_clear_all_proxies(Vt* self)
     Vt_clear_proxies_in_region(self, 0, self->lines.size - 1);
 
     if (self->alt_lines.buf) {
-        for (size_t i = 0; i < self->alt_lines.size -1; ++i) {
+        for (size_t i = 0; i < self->alt_lines.size - 1; ++i) {
             if (!self->alt_lines.buf[i].damaged) {
                 self->alt_lines.buf[i].damaged = true;
                 Vt_destroy_line_proxy(self->alt_lines.buf[i].proxy.data);
@@ -420,7 +420,8 @@ static void Vt_select_set_end(Vt* self, int32_t x, int32_t y)
         ASSERT(self->callbacks.on_repaint_required, "callback is NULL");
         self->callbacks.on_repaint_required(self->callbacks.user_data);
 
-        Vt_clear_proxies_in_region(self, MIN(old_end, self->selection.end_line), MAX(old_end, self->selection.end_line));
+        Vt_clear_proxies_in_region(self, MIN(old_end, self->selection.end_line),
+                                   MAX(old_end, self->selection.end_line));
     }
 }
 
@@ -1108,10 +1109,10 @@ static void Vt_reflow_shrink(Vt* self, uint32_t x)
             // line below is a reflow already
             if (i + 1 < bottom_bound && self->lines.buf[i + 1].rejoinable) {
                 for (size_t ii = 0; ii < chars_to_move; ++ii) {
-                    Vector_insert_VtRune(
-                      &self->lines.buf[i + 1].data,
-                      self->lines.buf[i + 1].data.buf,
-                      *(self->lines.buf[i].data.buf + x + chars_to_move - ii -1));
+                    Vector_insert_VtRune(&self->lines.buf[i + 1].data,
+                                         self->lines.buf[i + 1].data.buf,
+                                         *(self->lines.buf[i].data.buf + x +
+                                           chars_to_move - ii - 1));
                 }
 
                 self->lines.buf[i + 1].damaged = true;
@@ -1233,18 +1234,16 @@ void Vt_resize(Vt* self, uint32_t x, uint32_t y)
 
         ox = x;
         oy = y;
-
     }
 
     ASSERT(self->callbacks.on_window_size_from_cells_requested,
-            "callback is NULL");
+           "callback is NULL");
     Pair_uint32_t px = self->callbacks.on_window_size_from_cells_requested(
-        self->callbacks.user_data, x, y);
+      self->callbacks.user_data, x, y);
 
-    self->ws = (struct winsize){ .ws_col    = x,
-                                 .ws_row    = y,
-                                 .ws_xpixel = px.first,
-                                 .ws_ypixel = px.second };
+    self->ws = (struct winsize){
+        .ws_col = x, .ws_row = y, .ws_xpixel = px.first, .ws_ypixel = px.second
+    };
 
     self->pixels_per_cell_x = (double)self->ws.ws_xpixel / self->ws.ws_col;
     self->pixels_per_cell_y = (double)self->ws.ws_ypixel / self->ws.ws_row;
@@ -1252,7 +1251,7 @@ void Vt_resize(Vt* self, uint32_t x, uint32_t y)
     if (ioctl(self->master, TIOCSWINSZ, &self->ws) < 0)
         WRN("IO operation failed %s\n", strerror(errno));
 
-    self->scroll_region_top = 0;
+    self->scroll_region_top    = 0;
     self->scroll_region_bottom = self->ws.ws_row;
 
     Vt_update_scrollbar_dims(self);
@@ -1262,11 +1261,11 @@ bool Vt_wait(Vt* self)
 {
     FD_ZERO(&self->rfdset);
     FD_ZERO(&self->wfdset);
-    
+
     FD_SET(self->master, &self->rfdset);
     FD_SET(self->master, &self->wfdset);
 
-    if (0 > pselect(MAX(self->master, self->io) +1, &self->rfdset,
+    if (0 > pselect(MAX(self->master, self->io) + 1, &self->rfdset,
                     &self->wfdset, NULL, NULL, NULL)) {
         if (errno == EINTR || errno == EAGAIN) {
             errno = 0;
@@ -3063,7 +3062,7 @@ application_mod_keypad_response(const uint32_t key)
  * key commands used by the terminal itself
  * @return keypress was consumed */
 __attribute__((always_inline)) static inline bool
-Vt_maybe_handle_application_key(Vt* self, uint32_t key, uint32_t mods)
+Vt_maybe_handle_application_key(Vt* self, uint32_t key, uint32_t rawkey, uint32_t mods)
 {
     if (self->unicode_input.active) {
         if (key == 13) {
@@ -3086,7 +3085,7 @@ Vt_maybe_handle_application_key(Vt* self, uint32_t key, uint32_t mods)
             } else {
                 WRN("Failed to parse \'%s\'\n", self->unicode_input.buffer.buf);
             }
-        } else if (key == 27 || key == 32) {
+        } else if (key == 27) {
             // Escape
             self->unicode_input.buffer.size = 0;
             self->unicode_input.active      = false;
@@ -3117,71 +3116,47 @@ Vt_maybe_handle_application_key(Vt* self, uint32_t key, uint32_t mods)
         }
         return true;
     } else {
-        if (FLAG_IS_SET(mods, MODIFIER_CONTROL) &&
-            FLAG_IS_SET(mods, MODIFIER_SHIFT)) {
-            switch (key) {
-                case 3:    // ^C
-                case 25: { // ^Y
-                    ASSERT(self->callbacks.on_clipboard_sent,
-                           "callback is NULL");
-
-                    Vector_char txt = Vt_select_region_to_string(self);
-                    self->callbacks.on_clipboard_sent(self->callbacks.user_data,
-                                                      txt.buf);
-                    // clipboard_send should free
-
-                    return true;
-                }
-
-                case 22:   // ^V
-                case 16: { // ^P
-
-                    ASSERT(self->callbacks.on_clipboard_requested,
-                           "callback is NULL");
-                    self->callbacks.on_clipboard_requested(
-                      self->callbacks.user_data);
-                    return true;
-                }
-
-                case 31: { // ^_
-                    if (settings.font_size > 1) {
-                        --settings.font_size;
-                        Vt_clear_all_proxies(self);
-                        self->callbacks.on_font_reload_requseted(self->callbacks.user_data);
-                        Pair_uint32_t cells = self->callbacks.on_number_of_cells_requested(self->callbacks.user_data);
-                        Vt_resize(self, cells.first, cells.second);
-                        self->callbacks.on_repaint_required(self->callbacks.user_data);
-                    }
-                }
-                    return true;
-
-                case 43: { // ^+
-                    ++settings.font_size;
-                    Vt_clear_all_proxies(self);
-                    self->callbacks.on_font_reload_requseted(self->callbacks.user_data);
-                    Pair_uint32_t cells = self->callbacks.on_number_of_cells_requested(self->callbacks.user_data);
-                    Vt_resize(self, cells.first, cells.second);
-                    self->callbacks.on_repaint_required(self->callbacks.user_data);
-                }
-                    return true;
-
-                case 13:
-                    Vt_dump_info(self);
-                    return true;
-
-                case 21: // ^U
-                    self->unicode_input.active = true;
-                    ASSERT(self->callbacks.on_repaint_required,
-                           "callback is NULL");
-                    self->callbacks.on_repaint_required(
-                      self->callbacks.user_data);
-                    return true;
-
-                default:
-                    LOG("application key %u\n", key);
-                    return false;
-            }
+        if (KeyCommand_is_active(&settings.key_commands[KCMD_COPY], key, rawkey,
+                                 mods)) {
+            Vector_char txt = Vt_select_region_to_string(self);
+            self->callbacks.on_clipboard_sent(
+              self->callbacks.user_data, txt.buf); // clipboard_send should free
+            return true;
+        } else if (KeyCommand_is_active(&settings.key_commands[KCMD_PASTE], key, rawkey,
+                                        mods)) {
+            self->callbacks.on_clipboard_requested(self->callbacks.user_data);
+            return true;
+        } else if (KeyCommand_is_active(
+                       &settings.key_commands[KCMD_FONT_SHRINK], key, rawkey, mods)) {
+            --settings.font_size;
+            Vt_clear_all_proxies(self);
+            self->callbacks.on_font_reload_requseted(self->callbacks.user_data);
+            Pair_uint32_t cells = self->callbacks.on_number_of_cells_requested(
+              self->callbacks.user_data);
+            Vt_resize(self, cells.first, cells.second);
+            self->callbacks.on_repaint_required(self->callbacks.user_data);
+            return true;
+        } else if (KeyCommand_is_active(
+                       &settings.key_commands[KCMD_FONT_ENLARGE], key, rawkey, mods)) {
+            ++settings.font_size;
+            Vt_clear_all_proxies(self);
+            self->callbacks.on_font_reload_requseted(self->callbacks.user_data);
+            Pair_uint32_t cells = self->callbacks.on_number_of_cells_requested(
+              self->callbacks.user_data);
+            Vt_resize(self, cells.first, cells.second);
+            self->callbacks.on_repaint_required(self->callbacks.user_data);
+            return true;
+        } else if (KeyCommand_is_active(&settings.key_commands[KCMD_DEBUG], key, rawkey,
+                                        mods)) {
+            Vt_dump_info(self);
+            return true;
+        } else if (KeyCommand_is_active(
+                       &settings.key_commands[KCMD_UNICODE_ENTRY], key, rawkey, mods)) {
+            self->unicode_input.active = true;
+            self->callbacks.on_repaint_required(self->callbacks.user_data);
+            return true;
         }
+
     }
 
     return false;
@@ -3309,11 +3284,11 @@ __attribute__((always_inline)) static inline uint32_t numpad_key_convert(
 
 /**
  * Respond to key event */
-void Vt_handle_key(void* _self, uint32_t key, uint32_t mods)
+void Vt_handle_key(void* _self, uint32_t key, uint32_t rawkey, uint32_t mods)
 {
     Vt* self = _self;
 
-    if (!Vt_maybe_handle_application_key(self, key, mods) &&
+    if (!Vt_maybe_handle_application_key(self, key, rawkey, mods) &&
         !Vt_maybe_handle_keypad_key(self, key, mods) &&
         !Vt_maybe_handle_function_key(self, key, mods)) {
         key = numpad_key_convert(key);
@@ -3383,7 +3358,7 @@ void Vt_handle_button(void*    _self,
             }
 
             if (self->modes.extended_report) {
-                sprintf(self->out_buf, "\e[<%d;%lu;%lu%c", button - 1,
+                sprintf(self->out_buf, "\e[<%u;%lu;%lu%c", button - 1,
                         self->last_click_x + 1, self->last_click_y + 1,
                         state ? 'M' : 'm');
             } else if (self->modes.mouse_btn_report) {
