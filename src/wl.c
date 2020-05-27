@@ -522,7 +522,7 @@ static void keyboard_handle_key(void*               data,
         if (repeat) {
             win->repeat_count               = 0;
             globalWl->keycode_to_repeat     = final;
-            globalWl->raw_keycode_to_repeat = code;
+            globalWl->raw_keycode_to_repeat = rawsym;
             globalWl->modstate_to_repeat    = final_mods;
             globalWl->repeat_point =
               TimePoint_ms_from_now(globalWl->kbd_repeat_dealy);
