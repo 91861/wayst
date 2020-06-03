@@ -223,7 +223,6 @@ static inline void Framebuffer_generate_depth_attachment_only(Framebuffer* self,
     assert(self->color_tex.id == 0);
 
     self->color_tex = *tex;
-    printf("using: %d to generate rb [%ux%u - %ux%d]\n", self->color_tex.id, self->color_tex.w, self->color_tex.h, w, h);
     glBindTexture(GL_TEXTURE_2D, self->color_tex.id);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -253,7 +252,6 @@ static inline void Framebuffer_generate_color_and_depth_attachments(
     glBindFramebuffer(GL_FRAMEBUFFER, self->id);
 
     glGenTextures(1, &self->color_tex.id);
-    printf("generated %d\n",self->color_tex.id);
     glBindTexture(GL_TEXTURE_2D, self->color_tex.id);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);

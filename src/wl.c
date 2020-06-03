@@ -32,12 +32,18 @@
 #include <GL/gl.h>
 
 #include <linux/input.h>
+#include <xkbcommon/xkbcommon-keysyms.h>
 #include <xkbcommon/xkbcommon.h>
 
 static WindowStatic* global;
 
 #define globalWl       ((GlobalWl*)&global->subclass_data)
 #define windowWl(base) ((WindowWl*)&base->extend_data)
+
+static inline bool keysym_is_mod(xkb_keysym_t sym)
+{
+    return sym >= XKB_KEY_Shift_L && sym <= XKB_KEY_Hyper_R;
+}
 
 PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC eglSwapBuffersWithDamageKHR;
 
@@ -470,10 +476,8 @@ static void keyboard_handle_key(void*               data,
     sym    = xkb_state_key_get_one_sym(globalWl->xkb.state, code);
     rawsym = xkb_state_key_get_one_sym(globalWl->xkb.clean_state, code);
 
-    int no_consume =
-      xkb_state_mod_index_is_consumed(globalWl->xkb.state, code, 0);
-
-    uint32_t utf = xkb_state_key_get_utf32(globalWl->xkb.state, code);
+    uint32_t utf        = xkb_state_key_get_utf32(globalWl->xkb.state, code);
+    int      no_consume = utf ? true : !keysym_is_mod(sym);
 
     uint32_t final_mods = 0;
     uint32_t mods =
@@ -491,32 +495,16 @@ static void keyboard_handle_key(void*               data,
 
     bool repeat = true;
 
-    switch (key) {
-        case KEY_HOME:
-        case KEY_END:
+    switch (sym) {
+        case XKB_KEY_Home:
+        case XKB_KEY_End:
             repeat = false;
-            /* fallthrough */
-        case KEY_RIGHT:
-        case KEY_LEFT:
-        case KEY_UP:
-        case KEY_DOWN:
-        case KEY_ENTER:
-        case KEY_KPENTER:
-        case KEY_SPACE:
-        case KEY_DELETE:
-            no_consume = 1;
-            break;
-        case KEY_LEFTALT:
-        case KEY_RIGHTALT:
-            no_consume = 0;
-    }
-
-    switch (utf) {
-        case '\e':
-            no_consume = 1;
     }
 
     uint32_t final = utf ? utf : sym;
+
+    /* LOG("wl_key:{ state: %d, final: %u, raw: %u, key: %u, code: %u, mods: %u,
+     * consume: %d }\n",state, final, rawsym, key, code, mods, no_consume); */
 
     if (state == 1 && no_consume) {
         if (repeat) {
