@@ -6,6 +6,7 @@
 
 #include <GL/gl.h>
 #include <stdarg.h>
+#include <assert.h>
 
 #include "gl_exts/glext.h"
 
@@ -213,13 +214,46 @@ static inline void Framebuffer_assert_complete(Framebuffer* self)
     }
 }
 
-static inline void Framebuffer_generate_texture_attachment(Framebuffer* self,
-                                                           uint32_t     w,
-                                                           int32_t      h)
+static inline void Framebuffer_generate_depth_attachment_only(Framebuffer* self,
+                                                              Texture*     tex,
+                                                              uint32_t     w,
+                                                              int32_t      h)
+{
+    glBindFramebuffer(GL_FRAMEBUFFER, self->id);
+    assert(self->color_tex.id == 0);
+
+    self->color_tex = *tex;
+    printf("using: %d to generate rb [%ux%u - %ux%d]\n", self->color_tex.id, self->color_tex.w, self->color_tex.h, w, h);
+    glBindTexture(GL_TEXTURE_2D, self->color_tex.id);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                           self->color_tex.id, 0);
+
+    glBindRenderbuffer(GL_RENDERBUFFER, self->depth_renderbuffer);
+
+    if (self->color_tex.w != self->rb_w) {
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16,
+                              self->color_tex.w, self->color_tex.h);
+    }
+
+    self->rb_w = self->color_tex.w;
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                              GL_RENDERBUFFER, self->depth_renderbuffer);
+    glViewport(0, 0, w, h);
+}
+
+static inline void Framebuffer_generate_color_and_depth_attachments(
+  Framebuffer* self,
+  uint32_t     w,
+  int32_t      h)
 {
     glBindFramebuffer(GL_FRAMEBUFFER, self->id);
 
     glGenTextures(1, &self->color_tex.id);
+    printf("generated %d\n",self->color_tex.id);
     glBindTexture(GL_TEXTURE_2D, self->color_tex.id);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);

@@ -52,15 +52,18 @@
 #define TERMCOLOR_BG_CYAN_LIGHT    "\e[106m"
 #define TERMCOLOR_BG_WHITE         "\e[107m"
 
-#define likely(x)    __builtin_expect((bool)(x), 1)
-#define unlikely(x)  __builtin_expect((x), 0)
-#define expect(x, y) __builtin_expect((x), (y))
+#define likely(_x)     __builtin_expect((bool)(_x), 1)
+#define unlikely(_x)   __builtin_expect((bool)(_x), 0)
+#define expect(_x, _y) __builtin_expect((_x), (_y))
 
-#define MAX(a, b)        ((a) > (b) ? (a) : (b))
-#define MIN(a, b)        ((a) < (b) ? (a) : (b))
-#define CLAMP(v, lo, hi) ((v) > (hi) ? (hi) : (v) < (lo) ? (lo) : (v))
+#define POW2(_x)            ((_x) * (_x))
+#define POW3(_x)            ((_x) * (_x) * (_X))
+#define MAX(_a, _b)         ((_a) > (_b) ? (_a) : (_b))
+#define MIN(_a, _b)         ((_a) < (_b) ? (_a) : (_b))
+#define CLAMP(_v, _lo, _hi) ((_v) > (_hi) ? (_hi) : (_v) < (_lo) ? (_lo) : (_v))
 
-#define ARRAY_SIZE(array) (sizeof((array)) / sizeof((array[0])))
+#define ARRAY_SIZE(_array) (sizeof((_array)) / sizeof((_array[0])))
+#define ARRAY_LAST(_array) (_array[(sizeof((_array)) / sizeof((_array[0]))) -1])
 
 #define STATIC_ASSERT(cond, msg)                                               \
     typedef char static_assertion_##msg[(cond) ? 1 : -1]
