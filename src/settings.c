@@ -367,7 +367,8 @@ static void find_font()
                 settings.font_name = strdup((char*)file);
             }
 
-            if (!strcmp((const char*)style, "Text")) {
+            if (!strcmp((const char*)style, "Text") ||
+                !strcmp((const char*)style, "Medium")) {
                 if (regular_alternative)
                     free(regular_alternative);
                 regular_alternative = strdup((char*)file);

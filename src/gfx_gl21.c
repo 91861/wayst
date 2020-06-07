@@ -291,7 +291,7 @@ static Atlas Atlas_new(GfxOpenGL21* gfx, FT_Face face_)
 
     for (int i = ATLAS_RENDERABLE_START; i <= ATLAS_RENDERABLE_END; i++) {
         if (FT_Load_Char(face_, i, FT_LOAD_TARGET_LCD))
-            WRN("font error");
+            WRN("glyph load error\n");
 
         gfx->g = face_->glyph;
 
@@ -339,7 +339,7 @@ static Atlas Atlas_new(GfxOpenGL21* gfx, FT_Face face_)
             FT_Render_Glyph(face_->glyph, gfx->lcd_filter
                                             ? FT_RENDER_MODE_LCD
                                             : FT_RENDER_MODE_MONO)) {
-            WRN("font error");
+            WRN("glyph render error\n");
         }
 
         gfx->g = face_->glyph;
@@ -584,6 +584,11 @@ void GfxOpenGL21_resize(Gfx* self, uint32_t w, uint32_t h)
         WRN("Glyph error\n");
     }
 
+    if (!gfxOpenGL21(self)->face->size->metrics.height ||
+        !gfxOpenGL21(self)->face->glyph->advance.x) {
+        ERR("Font error, reported size is NULL");
+    }
+
     gfxOpenGL21(self)->win_w = w;
     gfxOpenGL21(self)->win_h = h;
 
@@ -649,7 +654,7 @@ Pair_uint32_t GfxOpenGL21_pixels(Gfx* self, uint32_t c, uint32_t r)
         if (FT_Load_Char(gfxOpenGL21(self)->face, '>', FT_LOAD_TARGET_LCD) ||
             FT_Render_Glyph(gfxOpenGL21(self)->face->glyph,
                             FT_RENDER_MODE_LCD)) {
-            WRN("Glyph error\n");
+            WRN("Glyph load error\n");
         }
         gfxOpenGL21(self)->gw = gfxOpenGL21(self)->face->glyph->advance.x;
     }
@@ -664,22 +669,49 @@ Pair_uint32_t GfxOpenGL21_pixels(Gfx* self, uint32_t c, uint32_t r)
 void GfxOpenGL21_load_font(Gfx* self)
 {
     static bool ft_lib_was_initialized = false;
+    FT_Error    ft_err                 = 0;
+    int         req_h = 0, req_w = 0, strike_idx = -1;
 
     if (!ft_lib_was_initialized) {
-        if (FT_Init_FreeType(&gfxOpenGL21(self)->ft)) {
-            ERR("Failed to initialize freetype");
+        if ((ft_err = FT_Init_FreeType(&gfxOpenGL21(self)->ft))) {
+            ERR("Failed to initialize freetype %s", stringify_ft_error(ft_err));
         }
     }
 
-    if (FT_New_Face(gfxOpenGL21(self)->ft, settings.font_name, 0,
-                    &gfxOpenGL21(self)->face)) {
-        ERR("Font error, font file: %s", settings.font_name);
+    if ((ft_err = FT_New_Face(gfxOpenGL21(self)->ft, settings.font_name, 0,
+                              &gfxOpenGL21(self)->face))) {
+        ERR("Font error, failed to load font file: %s. error: %s",
+            settings.font_name, stringify_ft_error(ft_err));
     }
 
-    if (FT_Set_Char_Size(gfxOpenGL21(self)->face, settings.font_size * 64,
-                         settings.font_size * 64, settings.font_dpi,
-                         settings.font_dpi)) {
-        LOG("Failed to set font size\n");
+    const char* fmt = FT_Get_Font_Format(gfxOpenGL21(self)->face);
+    if (!fmt || (strcmp(fmt, "TrueType") && strcmp(fmt, "CFF"))) {
+        ERR("Font format \"%s\" not supported", fmt);
+    }
+
+    if ((ft_err = FT_Set_Char_Size(
+           gfxOpenGL21(self)->face, settings.font_size * 64,
+           settings.font_size * 64, settings.font_dpi, settings.font_dpi))) {
+
+        if (!gfxOpenGL21(self)->face->size->metrics.height) {
+            for (strike_idx = 0;
+                 strike_idx < gfxOpenGL21(self)->face->num_fixed_sizes;
+                 ++strike_idx) {
+                req_w =
+                  gfxOpenGL21(self)->face->available_sizes[strike_idx].width;
+                req_h =
+                  gfxOpenGL21(self)->face->available_sizes[strike_idx].height;
+            }
+
+            if ((ft_err =
+                   FT_Select_Size(gfxOpenGL21(self)->face, strike_idx - 1))) {
+                ERR(
+                  "Failed to set main font bitmap strike, file %s. error: %s\n",
+                  settings.font_name, stringify_ft_error(ft_err));
+            }
+
+            WRN("Bitmap fonts are currently broken!\n");
+        }
     }
 
     if (!FT_IS_FIXED_WIDTH(gfxOpenGL21(self)->face)) {
@@ -687,14 +719,27 @@ void GfxOpenGL21_load_font(Gfx* self)
     }
 
     if (settings.font_name_bold) {
-        if (FT_New_Face(gfxOpenGL21(self)->ft, settings.font_name_bold, 0,
-                        &gfxOpenGL21(self)->face_bold))
-            ERR("Font error, font file: %s", settings.font_name_bold);
+        if ((ft_err =
+               FT_New_Face(gfxOpenGL21(self)->ft, settings.font_name_bold, 0,
+                           &gfxOpenGL21(self)->face_bold)))
+            ERR("Font error, failed to load font file: %s. error: %s",
+                settings.font_name_bold, stringify_ft_error(ft_err));
 
-        if (FT_Set_Char_Size(gfxOpenGL21(self)->face_bold,
-                             settings.font_size * 64, settings.font_size * 64,
-                             settings.font_dpi, settings.font_dpi)) {
-            LOG("Failed to set font size\n");
+        if (strike_idx >= 0) {
+            if ((ft_err = FT_Select_Size(gfxOpenGL21(self)->face_bold,
+                                         strike_idx - 1))) {
+                WRN(
+                  "Failed to set main font bitmap strike, file %s. error: %s\n",
+                  settings.font_name_bold, stringify_ft_error(ft_err));
+            }
+        } else {
+            if ((ft_err = FT_Set_Char_Size(
+                   gfxOpenGL21(self)->face_bold, settings.font_size * 64,
+                   settings.font_size * 64, settings.font_dpi,
+                   settings.font_dpi))) {
+                WRN("Failed to set font size, file %s. error: %s\n",
+                    settings.font_name_bold, stringify_ft_error(ft_err));
+            }
         }
 
         if (!FT_IS_FIXED_WIDTH(gfxOpenGL21(self)->face_bold)) {
@@ -703,14 +748,26 @@ void GfxOpenGL21_load_font(Gfx* self)
     }
 
     if (settings.font_name_italic) {
-        if (FT_New_Face(gfxOpenGL21(self)->ft, settings.font_name_italic, 0,
-                        &gfxOpenGL21(self)->face_italic))
-            ERR("Font error, font file: %s", settings.font_name_italic);
+        if ((ft_err =
+               FT_New_Face(gfxOpenGL21(self)->ft, settings.font_name_italic, 0,
+                           &gfxOpenGL21(self)->face_italic)))
+            ERR("Font error, failed to load font file: %s. error: %s",
+                settings.font_name_italic, stringify_ft_error(ft_err));
 
-        if (FT_Set_Char_Size(gfxOpenGL21(self)->face_italic,
-                             settings.font_size * 64, settings.font_size * 64,
-                             settings.font_dpi, settings.font_dpi)) {
-            LOG("Failed to set font size\n");
+        if (strike_idx >= 0) {
+            if ((ft_err = FT_Select_Size(gfxOpenGL21(self)->face_italic,
+                                         strike_idx - 1))) {
+                WRN("Failed to set font bitmap strike, file %s. error: %s\n",
+                    settings.font_name_italic, stringify_ft_error(ft_err));
+            }
+        } else {
+            if ((ft_err = FT_Set_Char_Size(
+                   gfxOpenGL21(self)->face_italic, settings.font_size * 64,
+                   settings.font_size * 64, settings.font_dpi,
+                   settings.font_dpi))) {
+                WRN("Failed to set font size, file %s. error: %s\n",
+                    settings.font_name_italic, stringify_ft_error(ft_err));
+            }
         }
 
         if (!FT_IS_FIXED_WIDTH(gfxOpenGL21(self)->face_italic)) {
@@ -721,36 +778,38 @@ void GfxOpenGL21_load_font(Gfx* self)
     if (settings.font_name_fallback) {
         if (FT_New_Face(gfxOpenGL21(self)->ft, settings.font_name_fallback, 0,
                         &gfxOpenGL21(self)->face_fallback))
-            ERR("Font error, font file: %s", settings.font_name_fallback);
+            WRN("Font error, failed to load font file: %s",
+                settings.font_name_fallback);
 
-        if (FT_Set_Char_Size(gfxOpenGL21(self)->face_fallback,
-                             settings.font_size * 64, settings.font_size * 64,
-                             settings.font_dpi, settings.font_dpi)) {
-            LOG("Failed to set font size\n");
+        if ((ft_err = FT_Set_Char_Size(gfxOpenGL21(self)->face_fallback,
+                                       settings.font_size * 64,
+                                       settings.font_size * 64,
+                                       settings.font_dpi, settings.font_dpi))) {
+            WRN("Failed to set font size, file %s. error: %s\n",
+                settings.font_name_fallback, stringify_ft_error(ft_err));
         }
     }
 
     if (settings.font_name_fallback2) {
         if (FT_New_Face(gfxOpenGL21(self)->ft, settings.font_name_fallback2, 0,
                         &gfxOpenGL21(self)->face_fallback2))
-            ERR("Font error, font file: %s", settings.font_name_fallback2);
+            ERR("Font error, failed to load font file: %s",
+                settings.font_name_fallback2);
 
-        FT_Select_Size(gfxOpenGL21(self)->face_fallback2, 0);
+        if ((ft_err = FT_Select_Size(gfxOpenGL21(self)->face_fallback2, 0))) {
+            WRN("Failed to set font size, file %s. error: %s\n",
+                settings.font_name_fallback2, stringify_ft_error(ft_err));
+        }
     }
 
     if (!ft_lib_was_initialized) {
 
         // we can only do this once per ft instance
-        const char* fmt = FT_Get_Font_Format(gfxOpenGL21(self)->face);
-        if (strcmp(fmt, "TrueType") && strcmp(fmt, "CFF")) {
-            ERR("Font format \"%s\" not supported", fmt);
-        }
-
-        if (FT_Library_SetLcdFilter(gfxOpenGL21(self)->ft,
-                                    FT_LCD_FILTER_DEFAULT)) {
+        if ((ft_err = FT_Library_SetLcdFilter(gfxOpenGL21(self)->ft,
+                                              FT_LCD_FILTER_DEFAULT))) {
             gfxOpenGL21(self)->lcd_filter = true;
         } else {
-            WRN("LCD filtering not avaliable\n");
+            WRN("LCD filtering not avaliable %s\n", stringify_ft_error(ft_err));
             gfxOpenGL21(self)->lcd_filter = false;
         }
 
@@ -1127,7 +1186,8 @@ __attribute__((hot)) static inline void gfx_rasterize_line(GfxOpenGL21*    gfx,
     float texture_height = gfx->line_height_pixels;
 
     /* Texture recovered = { */
-    /*     .id = vt_line->proxy.data[is_for_blinking ? PROXY_INDEX_TEXTURE_BLINK */
+    /*     .id = vt_line->proxy.data[is_for_blinking ? PROXY_INDEX_TEXTURE_BLINK
+     */
     /*                                               : PROXY_INDEX_TEXTURE], */
     /*     .w  = vt_line->proxy.data[PROXY_INDEX_TEXTURE_SIZE], */
     /* }; */
@@ -1158,33 +1218,39 @@ __attribute__((hot)) static inline void gfx_rasterize_line(GfxOpenGL21*    gfx,
     /* if (can_reuse && false) { */
     /*     puts("reuse"); */
     /*     Framebuffer_generate_depth_attachment_only( */
-    /*       &gfx->line_framebuffer, &recovered, texture_width, texture_height); */
+    /*       &gfx->line_framebuffer, &recovered, texture_width, texture_height);
+     */
     /* } else if (gfx->recycled_line_textures[0].id && */
     /*            gfx->recycled_line_textures[0].w >= texture_width) { */
     /*     printf("Recycle! %d\n", gfx->recycled_line_textures->id); */
 
     /*     Framebuffer_generate_depth_attachment_only( */
-    /*       &gfx->line_framebuffer, gfx->recycled_line_textures, texture_width, */
+    /*       &gfx->line_framebuffer, gfx->recycled_line_textures, texture_width,
+     */
     /*       texture_height); */
 
     /*     memmove(&gfx->recycled_line_textures[0], */
     /*             &gfx->recycled_line_textures[1], */
-    /*             ARRAY_SIZE(gfx->recycled_line_textures) * sizeof(Texture) - 1); */
+    /*             ARRAY_SIZE(gfx->recycled_line_textures) * sizeof(Texture) -
+     * 1); */
 
-    /*     gfx->recycled_line_textures[ARRAY_SIZE(gfx->recycled_line_textures) - 1] */
+    /*     gfx->recycled_line_textures[ARRAY_SIZE(gfx->recycled_line_textures) -
+     * 1] */
     /*       .id = 0; */
-    /*     gfx->recycled_line_textures[ARRAY_SIZE(gfx->recycled_line_textures) - 1] */
+    /*     gfx->recycled_line_textures[ARRAY_SIZE(gfx->recycled_line_textures) -
+     * 1] */
     /*       .w = 0; */
 
-    /*     for (uint8_t i = 0; i < ARRAY_SIZE(gfx->recycled_line_textures); ++i) { */
+    /*     for (uint8_t i = 0; i < ARRAY_SIZE(gfx->recycled_line_textures); ++i)
+     * { */
     /*         printf("yoinked entry id: %d, w: %d\n", */
     /*                gfx->recycled_line_textures[i].id, */
     /*                gfx->recycled_line_textures[i].w); */
     /*     } */
 
     /* } else { */
-        Framebuffer_generate_color_and_depth_attachments(
-          &gfx->line_framebuffer, texture_width, texture_height);
+    Framebuffer_generate_color_and_depth_attachments(
+      &gfx->line_framebuffer, texture_width, texture_height);
     /* } */
 
     glBindTexture(GL_TEXTURE_2D, 0);
@@ -2305,7 +2371,8 @@ __attribute__((hot)) void GfxOpenGL21_destroy_proxy(Gfx* self, int32_t* proxy)
         /* // maybe store for reuse */
         /* uint_fast8_t insert_point = UINT8_MAX; */
         /* for (uint_fast8_t i = 0; */
-        /*      i < ARRAY_SIZE(gfxOpenGL21(self)->recycled_line_textures); ++i) { */
+        /*      i < ARRAY_SIZE(gfxOpenGL21(self)->recycled_line_textures); ++i)
+         * { */
         /*     if (gfxOpenGL21(self)->recycled_line_textures[i].w < */
         /*           (uint32_t)proxy[PROXY_INDEX_TEXTURE_SIZE] || */
         /*         !gfxOpenGL21(self)->recycled_line_textures[i].id) { */
@@ -2320,7 +2387,8 @@ __attribute__((hot)) void GfxOpenGL21_destroy_proxy(Gfx* self, int32_t* proxy)
         /*     size_t last_idx = */
         /*       ARRAY_SIZE(gfxOpenGL21(self)->recycled_line_textures) - 1; */
 
-        /*     // number of slots to clear, if we have a blink proxy try to clear */
+        /*     // number of slots to clear, if we have a blink proxy try to
+         * clear */
         /*     // two spots */
         /*     uint_fast8_t clear_num = */
         /*       unlikely(proxy[PROXY_INDEX_TEXTURE_BLINK]) && */
@@ -2334,14 +2402,17 @@ __attribute__((hot)) void GfxOpenGL21_destroy_proxy(Gfx* self, int32_t* proxy)
         /*     } */
 
         /*     if (unlikely(clear_num == 2) && */
-        /*         gfxOpenGL21(self)->recycled_line_textures[last_idx - 1].id) { */
+        /*         gfxOpenGL21(self)->recycled_line_textures[last_idx - 1].id) {
+         */
         /*         Texture_destroy( */
-        /*           &gfxOpenGL21(self)->recycled_line_textures[last_idx - 1]); */
+        /*           &gfxOpenGL21(self)->recycled_line_textures[last_idx - 1]);
+         */
         /*     } */
 
         /*     memmove(&gfxOpenGL21(self)->recycled_line_textures[clear_num], */
         /*             gfxOpenGL21(self)->recycled_line_textures, */
-        /*             (ARRAY_SIZE(gfxOpenGL21(self)->recycled_line_textures) - */
+        /*             (ARRAY_SIZE(gfxOpenGL21(self)->recycled_line_textures) -
+         */
         /*              clear_num) * */
         /*               sizeof(Texture)); */
 
@@ -2351,16 +2422,17 @@ __attribute__((hot)) void GfxOpenGL21_destroy_proxy(Gfx* self, int32_t* proxy)
         /*                  .h  = gfxOpenGL21(self)->line_height_pixels }; */
 
         /*     if (unlikely(clear_num == 2)) { */
-        /*         gfxOpenGL21(self)->recycled_line_textures[insert_point + 1] = */
+        /*         gfxOpenGL21(self)->recycled_line_textures[insert_point + 1] =
+         */
         /*           (Texture){ .id = proxy[PROXY_INDEX_TEXTURE_BLINK], */
         /*                      .w  = proxy[PROXY_INDEX_TEXTURE_SIZE], */
-        /*                      .h  = gfxOpenGL21(self)->line_height_pixels }; */
+        /*                      .h  = gfxOpenGL21(self)->line_height_pixels };
+         */
         /*     } */
 
-
         /* } else { */
-            glDeleteTextures(unlikely(proxy[PROXY_INDEX_TEXTURE_BLINK]) ? 2 : 1,
-                             (GLuint*)&proxy[0]);
+        glDeleteTextures(unlikely(proxy[PROXY_INDEX_TEXTURE_BLINK]) ? 2 : 1,
+                         (GLuint*)&proxy[0]);
         /* } */
         proxy[PROXY_INDEX_TEXTURE]       = 0;
         proxy[PROXY_INDEX_TEXTURE_BLINK] = 0;
