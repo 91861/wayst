@@ -706,17 +706,27 @@ static void output_handle_geometry(void*             data,
                                    const char*       model,
                                    int32_t           transform)
 {
-    // TODO: tell settings about this
+    enum LcdFilter settings_value = LCD_FILTER_UNDEFINED;
+
     switch (subpixel) {
+        case WL_OUTPUT_SUBPIXEL_NONE:
+            break;
         case WL_OUTPUT_SUBPIXEL_VERTICAL_BGR:
+            settings_value = LCD_FILTER_V_BGR;
+            break;
         case WL_OUTPUT_SUBPIXEL_VERTICAL_RGB:
+            settings_value = LCD_FILTER_V_RGB;
+            break;
         case WL_OUTPUT_SUBPIXEL_HORIZONTAL_BGR:
-            WRN("subpixel rendering mode not supported\n");
-            /* case 0: // unknown */
-            /* case 1: // none */
-            /* case 2: // rgb */
-            /*     ; */
+            settings_value = LCD_FILTER_H_BGR;
+            break;
+        case WL_OUTPUT_SUBPIXEL_HORIZONTAL_RGB:
+            settings_value = LCD_FILTER_H_RGB;
+            break;
     }
+
+    if (settings.lcd_filter == LCD_FILTER_UNDEFINED)
+        settings.lcd_filter = settings_value;
 }
 
 static void output_handle_mode(void*             data,

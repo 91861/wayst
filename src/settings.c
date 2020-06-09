@@ -15,13 +15,28 @@
 #include "util.h"
 #include "vector.h"
 
+// configuration file subdirectory
 #ifndef CFG_SDIR_NAME
 #define CFG_SDIR_NAME "wayst"
 #endif
 
+// configuration file name
 #ifndef CFG_FNAME
 #define CFG_FNAME "config"
 #endif
+
+// executable name
+#ifndef EXE_FNAME
+#define EXE_FNAME "wayst"
+#endif
+
+// application name
+#ifndef APP_NAME
+#define APP_NAME "Wayst"
+#endif
+
+// point size in inches for converting font sizes
+#define PT_AS_INCH 0.0138889
 
 ColorRGB color_palette_256[257];
 
@@ -350,10 +365,16 @@ static void find_font()
 
     FcPattern* pat = FcNameParse((const FcChar8*)settings.font);
 
-    FcObjectSet* os = FcObjectSetBuild(FC_FAMILY, FC_STYLE, FC_FILE, NULL);
-    FcFontSet*   fs = FcFontList(cfg, pat, os);
+    FcObjectSet* os =
+      FcObjectSetBuild(FC_FAMILY, FC_STYLE, FC_FILE, FC_PIXEL_SIZE, NULL);
+    FcFontSet* fs = FcFontList(cfg, pat, os);
 
     char* regular_alternative = NULL;
+
+    bool is_bitmap_satisfied = false, is_bitmap_satisfied_alt = false,
+         is_bitmap_satisfied_bold = false, is_bitmap_satisfied_italic = false;
+    bool is_bitmap_size_ok = false;
+    bool is_bitmap         = false;
 
     for (int_fast32_t i = 0; fs && i < fs->nfont; ++i) {
         FcPattern* font = fs->fonts[i];
@@ -361,31 +382,59 @@ static void find_font()
 
         if (FcPatternGetString(font, FC_FILE, 0, &file) == FcResultMatch &&
             FcPatternGetString(font, FC_STYLE, 0, &style) == FcResultMatch) {
+
+            double pix_size = 0;
+            FcPatternGetDouble(font, FC_PIXEL_SIZE, 0, &pix_size);
+
+            if (pix_size) {
+                is_bitmap = true;
+                is_bitmap_size_ok =
+                  pix_size >=
+                  (double)settings.font_size * PT_AS_INCH * settings.font_dpi;
+            }
+
             if (!strcmp((const char*)style, "Regular")) {
+                if (is_bitmap && is_bitmap_satisfied)
+                    continue;
                 if (settings.font_name)
                     free(settings.font_name);
-                settings.font_name = strdup((char*)file);
+                is_bitmap_satisfied = is_bitmap && is_bitmap_size_ok;
+                settings.font_name  = strdup((char*)file);
             }
 
             if (!strcmp((const char*)style, "Text") ||
                 !strcmp((const char*)style, "Medium")) {
+                if (is_bitmap && is_bitmap_satisfied_alt)
+                    continue;
                 if (regular_alternative)
                     free(regular_alternative);
+                is_bitmap_satisfied_alt =
+                  is_bitmap && is_bitmap_size_ok;
                 regular_alternative = strdup((char*)file);
             }
 
             if (!strcmp((const char*)style, "Bold")) {
+                if (is_bitmap && is_bitmap_satisfied_bold)
+                    continue;
                 if (settings.font_name_bold)
                     free(settings.font_name_bold);
-                settings.font_name_bold = strdup((char*)file);
+                is_bitmap_satisfied_bold = is_bitmap && is_bitmap_size_ok;
+                settings.font_name_bold  = strdup((char*)file);
             }
 
             if (!strcmp((const char*)style, "Italic")) {
+                if (is_bitmap && is_bitmap_satisfied_italic)
+                    continue;
                 if (settings.font_name_italic)
                     free(settings.font_name_italic);
-                settings.font_name_italic = strdup((char*)file);
+                is_bitmap_satisfied_italic = is_bitmap && is_bitmap_size_ok;
+                settings.font_name_italic  = strdup((char*)file);
             }
         }
+    }
+
+    if (is_bitmap) {
+        settings.lcd_filter = LCD_FILTER_NONE;
     }
 
     FcFontSetDestroy(fs);
@@ -519,6 +568,7 @@ static void settings_make_default()
         .font_fallback2 = "NotoColorEmoji",
         .font_size      = 10,
         .font_dpi       = 96,
+        .lcd_filter     = LCD_FILTER_UNDEFINED,
 
         .bg     = { .r = 0, .g = 0, .b = 0, .a = 240 },
         .bghl   = { .r = 50, .g = 50, .b = 50, .a = 240 },
@@ -527,7 +577,7 @@ static void settings_make_default()
         .fg_dim = { .r = 150, .g = 150, .b = 150 },
 
         .highlight_change_fg = false,
-        .title               = "Wayst",
+        .title               = APP_NAME,
         .dynamic_title       = true,
         .title_format        = "%2$s - %1$s",
 
@@ -563,9 +613,9 @@ static void settings_complete_defaults()
     find_font();
 }
 
-static void print_help(char* const* argv)
+static void print_help()
 {
-    printf("Usage: %s [options...] [-e/x command args...]\n", argv[0] + 2);
+    printf("Usage: %s [options...] [-e/x command args...]\n", EXE_FNAME);
 
     for (uint32_t i = 0; i < sizeof(long_options) / sizeof(long_options[0]) - 1;
          ++i) {
@@ -608,7 +658,7 @@ static void handle_option(const char   opt,
             break;
 
         case 'h':
-            print_help(argv);
+            print_help();
             break;
 
         case 'T':

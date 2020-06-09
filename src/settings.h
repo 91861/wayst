@@ -9,6 +9,12 @@
 #define VERSION "unknown"
 #endif
 
+
+// default lcd filter
+#ifndef LCD_FILT_DFT
+#define LCD_FILT_DFT LCD_FILTER_H_RGB
+#endif
+
 #define MODIFIER_SHIFT   (1 << 0)
 #define MODIFIER_ALT     (1 << 1)
 #define MODIFIER_CONTROL (1 << 2)
@@ -44,6 +50,16 @@ enum KeyCommands
     KCMD_QUIT,
 
     NUM_KEY_COMMANDS, // array size
+};
+
+enum LcdFilter
+{
+    LCD_FILTER_UNDEFINED, // use window system if available
+    LCD_FILTER_NONE,
+    LCD_FILTER_H_RGB,
+    LCD_FILTER_H_BGR,
+    LCD_FILTER_V_RGB,
+    LCD_FILTER_V_BGR,
 };
 
 typedef struct
@@ -109,6 +125,7 @@ typedef struct
     char*    font_name_fallback2;
     uint16_t font_size;
     uint16_t font_dpi;
+    enum LcdFilter lcd_filter;
 
     /* colors - normal, highlight */
     ColorRGBA bg, bghl;
@@ -137,6 +154,7 @@ typedef struct
 
     uint32_t scrollback;
 
+
 } Settings;
 
 extern ColorRGB color_palette_256[257];
@@ -150,6 +168,9 @@ static inline void settings_after_window_system_connected()
     for (int_fast8_t i = 0; i < NUM_KEY_COMMANDS; ++i) {
         KeyCommand_name_to_code(&settings.key_commands[i]);
     }
+
+    if (settings.lcd_filter == LCD_FILTER_UNDEFINED)
+        settings.lcd_filter = LCD_FILT_DFT;
 }
 
 void settings_cleanup();
