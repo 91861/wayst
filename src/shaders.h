@@ -79,6 +79,21 @@ image_tint_rgb_fs_src =
 
 
 const char*
+font_gray_fs_src =
+"#version 120\n"
+"uniform vec3 clr;"
+"uniform sampler2D tex;"
+"varying vec2 tex_coord;"
+"void main(){"
+"vec3 c=texture2D(tex,tex_coord).rgb;"
+"gl_FragData[0]=vec4(c.r*clr.r,"
+"c.r*clr.g,"
+"c.r*clr.b,"
+"c.r);"
+"}";
+
+
+const char*
 image_rgb_fs_src =
 "#version 120\n"
 "uniform sampler2D tex;"

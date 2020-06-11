@@ -42,7 +42,9 @@ static WindowStatic* global;
 
 static inline bool keysym_is_mod(xkb_keysym_t sym)
 {
-    return sym >= XKB_KEY_Shift_L && sym <= XKB_KEY_Hyper_R;
+    return (sym >= XKB_KEY_Shift_L && sym <= XKB_KEY_Hyper_R) ||
+        (sym >= XKB_KEY_ISO_Lock && sym <= XKB_KEY_ISO_Last_Group_Lock) || // Extension modifier keys
+        sym == XKB_KEY_Multi_key; // Compose key
 }
 
 PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC eglSwapBuffersWithDamageKHR;

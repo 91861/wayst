@@ -5,8 +5,8 @@
 #define _GNU_SOURCE
 
 #include <GL/gl.h>
-#include <stdarg.h>
 #include <assert.h>
+#include <stdarg.h>
 
 #include "gl_exts/glext.h"
 
@@ -84,76 +84,81 @@ typedef struct
 
 typedef struct
 {
-    GLuint   id;
-    bool     has_alpha;
-    uint32_t w, h;
-} Texture;
-
-typedef struct
-{
     GLuint vbo;
     size_t size;
 } VBO;
 
-/* Texture */
-
-static Texture Texture_new_with_alignment(uint8_t alignment)
+__attribute__((packed)) enum TextureFormat
 {
-    GLuint id = 0;
+    TEX_FMT_RGBA,
+    TEX_FMT_RGB,
+    TEX_FMT_MONO,
+};
 
-    glActiveTexture(GL_TEXTURE0);
-
-    glGenTextures(1, &id);
-
-    glBindTexture(GL_TEXTURE_2D, id);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, alignment);
-
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-    return (Texture){ id, false, 0, 0 };
-}
-
-static Texture Texture_new()
+typedef struct
 {
-    return Texture_new_with_alignment(4);
-}
+    GLuint             id;
+    enum TextureFormat format;
+    uint32_t           w, h;
+} Texture;
 
-static inline void Texture_image_with_format(Texture*    self,
-                                             GLuint      w,
-                                             GLuint      h,
-                                             const void* data,
-                                             int         format)
-{
-    glBindTexture(GL_TEXTURE_2D, self->id);
-    self->has_alpha = (format == GL_RGBA || format == GL_BGRA);
+/* static Texture Texture_new_with_alignment(uint8_t alignment) */
+/* { */
+/*     GLuint id = 0; */
 
-    glTexImage2D(GL_TEXTURE_2D, 0, format, (self->w = w), (self->h = h), 0,
-                 format, GL_UNSIGNED_BYTE, data);
-}
+/*     glActiveTexture(GL_TEXTURE0); */
 
-static inline void Texture_image(Texture*    self,
-                                 bool        alpha,
-                                 GLuint      w,
-                                 GLuint      h,
-                                 const void* data)
-{
-    Texture_image_with_format(self, w, h, data, alpha ? GL_RGBA : GL_RGB);
-}
+/*     glGenTextures(1, &id); */
 
-static void Texture_sub_image(Texture*    self,
-                              GLuint      x,
-                              GLuint      y,
-                              GLuint      w,
-                              GLuint      h,
-                              const void* data)
-{
+/*     glBindTexture(GL_TEXTURE_2D, id); */
+/*     glPixelStorei(GL_UNPACK_ALIGNMENT, alignment); */
 
-    glBindTexture(GL_TEXTURE_2D, self->id);
+/*     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST); */
+/*     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST); */
 
-    glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h,
-                    self->has_alpha ? GL_RGBA : GL_RGB, GL_UNSIGNED_BYTE, data);
-}
+/*     return (Texture){ id, false, 0, 0 }; */
+/* } */
+
+/* static Texture Texture_new() */
+/* { */
+/*     return Texture_new_with_alignment(4); */
+/* } */
+
+/* static inline void Texture_image_with_format(Texture*    self, */
+/*                                              GLuint      w, */
+/*                                              GLuint      h, */
+/*                                              const void* data, */
+/*                                              int         format) */
+/* { */
+/*     glBindTexture(GL_TEXTURE_2D, self->id); */
+/*     self->has_alpha = (format == GL_RGBA || format == GL_BGRA); */
+
+/*     glTexImage2D(GL_TEXTURE_2D, 0, format, (self->w = w), (self->h = h), 0, */
+/*                  format, GL_UNSIGNED_BYTE, data); */
+/* } */
+
+/* static inline void Texture_image(Texture*    self, */
+/*                                  bool        alpha, */
+/*                                  GLuint      w, */
+/*                                  GLuint      h, */
+/*                                  const void* data) */
+/* { */
+/*     Texture_image_with_format(self, w, h, data, alpha ? GL_RGBA : GL_RGB); */
+/* } */
+
+/* static void Texture_sub_image(Texture*    self, */
+/*                               GLuint      x, */
+/*                               GLuint      y, */
+/*                               GLuint      w, */
+/*                               GLuint      h, */
+/*                               const void* data) */
+/* { */
+
+/*     glBindTexture(GL_TEXTURE_2D, self->id); */
+
+/*     glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h, */
+/*                     self->has_alpha ? GL_RGBA : GL_RGB, GL_UNSIGNED_BYTE, data); */
+/* } */
 
 static inline void Texture_destroy(Texture* self)
 {

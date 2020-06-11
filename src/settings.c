@@ -7,6 +7,7 @@
 #include <locale.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 #include <unistd.h>
 
 #include <fontconfig/fontconfig.h>
@@ -370,11 +371,9 @@ static void find_font()
     FcFontSet* fs = FcFontList(cfg, pat, os);
 
     char* regular_alternative = NULL;
-
-    bool is_bitmap_satisfied = false, is_bitmap_satisfied_alt = false,
-         is_bitmap_satisfied_bold = false, is_bitmap_satisfied_italic = false;
-    bool is_bitmap_size_ok = false;
     bool is_bitmap         = false;
+    double pix_sz_regular = 0, pix_sz_bold = 0, pix_sz_italic = 0;
+    double desired_pix_size = (double)settings.font_size * PT_AS_INCH * settings.font_dpi;
 
     for (int_fast32_t i = 0; fs && i < fs->nfont; ++i) {
         FcPattern* font = fs->fonts[i];
@@ -386,49 +385,46 @@ static void find_font()
             double pix_size = 0;
             FcPatternGetDouble(font, FC_PIXEL_SIZE, 0, &pix_size);
 
-            if (pix_size) {
+            if (pix_size)
                 is_bitmap = true;
-                is_bitmap_size_ok =
-                  pix_size >=
-                  (double)settings.font_size * PT_AS_INCH * settings.font_dpi;
-            }
+
+#define SZ_DIFF(_ps) fabs(desired_pix_size - (_ps))
 
             if (!strcmp((const char*)style, "Regular")) {
-                if (is_bitmap && is_bitmap_satisfied)
+                if (is_bitmap && SZ_DIFF(pix_sz_regular) < SZ_DIFF(pix_size))
                     continue;
                 if (settings.font_name)
                     free(settings.font_name);
-                is_bitmap_satisfied = is_bitmap && is_bitmap_size_ok;
                 settings.font_name  = strdup((char*)file);
+                pix_sz_regular = pix_size;
             }
 
             if (!strcmp((const char*)style, "Text") ||
                 !strcmp((const char*)style, "Medium")) {
-                if (is_bitmap && is_bitmap_satisfied_alt)
+                if (is_bitmap && SZ_DIFF(pix_sz_regular) < SZ_DIFF(pix_size))
                     continue;
                 if (regular_alternative)
                     free(regular_alternative);
-                is_bitmap_satisfied_alt =
-                  is_bitmap && is_bitmap_size_ok;
                 regular_alternative = strdup((char*)file);
+                pix_sz_regular = pix_size;
             }
 
             if (!strcmp((const char*)style, "Bold")) {
-                if (is_bitmap && is_bitmap_satisfied_bold)
+                if (is_bitmap && SZ_DIFF(pix_sz_bold) < SZ_DIFF(pix_size))
                     continue;
                 if (settings.font_name_bold)
                     free(settings.font_name_bold);
-                is_bitmap_satisfied_bold = is_bitmap && is_bitmap_size_ok;
                 settings.font_name_bold  = strdup((char*)file);
+                pix_sz_bold = pix_size;
             }
 
             if (!strcmp((const char*)style, "Italic")) {
-                if (is_bitmap && is_bitmap_satisfied_italic)
+                if (is_bitmap && SZ_DIFF(pix_sz_italic) < SZ_DIFF(pix_size))
                     continue;
                 if (settings.font_name_italic)
                     free(settings.font_name_italic);
-                is_bitmap_satisfied_italic = is_bitmap && is_bitmap_size_ok;
                 settings.font_name_italic  = strdup((char*)file);
+                pix_sz_italic = pix_size;
             }
         }
     }
