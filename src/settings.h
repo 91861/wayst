@@ -87,7 +87,7 @@ typedef struct
     char* term;
 
     /* override locale */
-    char* locale;
+    const char* locale;
 
     /* main title (application name) */
     char* title;
@@ -185,7 +185,7 @@ static inline void KeyCommand_name_to_code(KeyCommand* cmd)
         if (!code) {
             WRN("Invalid key name \'%s\'\n", cmd->key.name);
         } else {
-            WRN("Converting key name \'%s\' to keycode %u\n", cmd->key.name,
+            LOG("Converting key name \'%s\' to keycode %u\n", cmd->key.name,
                 code);
         }
 

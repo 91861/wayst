@@ -5,9 +5,9 @@
 #include <errno.h>
 #include <getopt.h>
 #include <locale.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
-#include <math.h>
 #include <unistd.h>
 
 #include <fontconfig/fontconfig.h>
@@ -370,10 +370,11 @@ static void find_font()
       FcObjectSetBuild(FC_FAMILY, FC_STYLE, FC_FILE, FC_PIXEL_SIZE, NULL);
     FcFontSet* fs = FcFontList(cfg, pat, os);
 
-    char* regular_alternative = NULL;
-    bool is_bitmap         = false;
+    char*  regular_alternative = NULL;
+    bool   is_bitmap           = false;
     double pix_sz_regular = 0, pix_sz_bold = 0, pix_sz_italic = 0;
-    double desired_pix_size = (double)settings.font_size * PT_AS_INCH * settings.font_dpi;
+    double desired_pix_size =
+      (double)settings.font_size * PT_AS_INCH * settings.font_dpi;
 
     for (int_fast32_t i = 0; fs && i < fs->nfont; ++i) {
         FcPattern* font = fs->fonts[i];
@@ -395,8 +396,8 @@ static void find_font()
                     continue;
                 if (settings.font_name)
                     free(settings.font_name);
-                settings.font_name  = strdup((char*)file);
-                pix_sz_regular = pix_size;
+                settings.font_name = strdup((char*)file);
+                pix_sz_regular     = pix_size;
             }
 
             if (!strcmp((const char*)style, "Text") ||
@@ -406,7 +407,7 @@ static void find_font()
                 if (regular_alternative)
                     free(regular_alternative);
                 regular_alternative = strdup((char*)file);
-                pix_sz_regular = pix_size;
+                pix_sz_regular      = pix_size;
             }
 
             if (!strcmp((const char*)style, "Bold")) {
@@ -414,8 +415,8 @@ static void find_font()
                     continue;
                 if (settings.font_name_bold)
                     free(settings.font_name_bold);
-                settings.font_name_bold  = strdup((char*)file);
-                pix_sz_bold = pix_size;
+                settings.font_name_bold = strdup((char*)file);
+                pix_sz_bold             = pix_size;
             }
 
             if (!strcmp((const char*)style, "Italic")) {
@@ -423,8 +424,8 @@ static void find_font()
                     continue;
                 if (settings.font_name_italic)
                     free(settings.font_name_italic);
-                settings.font_name_italic  = strdup((char*)file);
-                pix_sz_italic = pix_size;
+                settings.font_name_italic = strdup((char*)file);
+                pix_sz_italic             = pix_size;
             }
         }
     }
@@ -600,9 +601,22 @@ static void settings_make_default()
 
 static void settings_complete_defaults()
 {
-    setlocale(LC_ALL, settings.locale ? settings.locale : "");
-    settings_colorscheme_default(settings.colorscheme_preset);
+    if (!settings.locale) {
+        const char* locale;
+        locale = getenv("LC_ALL");
+        if (!locale || !*locale)
+            locale = getenv("LC_CTYPE");
+        if (!locale || !*locale)
+            locale = getenv("LANG");
+        if (!locale || !*locale)
+            locale = "C";
+        settings.locale = locale;
+    }
 
+    setlocale(LC_ALL, settings.locale);
+    LOG("Using locale: %s\n", settings.locale);
+
+    settings_colorscheme_default(settings.colorscheme_preset);
     free(settings._explicit_colors_set);
     settings._explicit_colors_set = NULL;
 

@@ -32,6 +32,7 @@
 #include <GL/gl.h>
 
 #include <linux/input.h>
+#include <xkbcommon/xkbcommon-compose.h>
 #include <xkbcommon/xkbcommon-keysyms.h>
 #include <xkbcommon/xkbcommon.h>
 
@@ -42,9 +43,44 @@ static WindowStatic* global;
 
 static inline bool keysym_is_mod(xkb_keysym_t sym)
 {
-    return (sym >= XKB_KEY_Shift_L && sym <= XKB_KEY_Hyper_R) ||
-        (sym >= XKB_KEY_ISO_Lock && sym <= XKB_KEY_ISO_Last_Group_Lock) || // Extension modifier keys
-        sym == XKB_KEY_Multi_key; // Compose key
+    return (sym >= XKB_KEY_Shift_L &&
+            sym <= XKB_KEY_Hyper_R) || // Regular modifier keys
+           (sym >= XKB_KEY_ISO_Lock &&
+            sym <= XKB_KEY_ISO_Last_Group_Lock) || // Extension modifier keys
+           (sym >= XKB_KEY_Multi_key &&
+            sym <= XKB_KEY_PreviousCandidate); // International & multi-key
+                                               // character composition
+}
+
+static inline bool keysym_is_misc(xkb_keysym_t sym)
+{
+    return (sym >= XKB_KEY_Select &&
+            sym <= XKB_KEY_Num_Lock) || // Regular misc keys
+           (sym >= XKB_KEY_XF86Standby &&
+            sym <= XKB_KEY_XF86RotationLockToggle) ||
+           (sym >= XKB_KEY_XF86ModeLock &&
+            sym <= XKB_KEY_XF86MonBrightnessCycle) || // XFree86 vendor specific
+           (sym >= XKB_KEY_Pause &&
+            sym <= XKB_KEY_Sys_Req); // TTY function keys
+}
+
+static inline bool keysym_is_dead(xkb_keysym_t sym)
+{
+    return (sym >= XKB_KEY_dead_grave &&
+            sym <= XKB_KEY_dead_currency) || // Extension function keys
+
+           (sym >= XKB_KEY_dead_lowline &&
+            sym <= XKB_KEY_dead_longsolidusoverlay) || // Extra dead elements
+                                                       // for German T3 layout
+           (sym >= XKB_KEY_dead_a &&
+            sym <= XKB_KEY_dead_greek); // Dead vowels for universal
+                                        // syllable entry
+}
+
+static inline bool keysym_is_consumed(xkb_keysym_t sym)
+{
+    return sym == XKB_KEY_NoSymbol || keysym_is_mod(sym) ||
+           keysym_is_dead(sym) || keysym_is_misc(sym);
 }
 
 PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC eglSwapBuffersWithDamageKHR;
@@ -107,6 +143,9 @@ typedef struct
     struct xkb_keymap*  keymap;
     struct xkb_state*   state;
     struct xkb_state*   clean_state;
+
+    struct xkb_compose_table* compose_table;
+    struct xkb_compose_state* compose_state;
 
     xkb_mod_mask_t ctrl_mask;
     xkb_mod_mask_t alt_mask;
@@ -175,6 +214,27 @@ typedef struct
     bool got_discrete_axis_event;
 
 } WindowWl;
+
+static inline xkb_keysym_t keysym_filter_compose(xkb_keysym_t sym)
+{
+    if (!globalWl->xkb.compose_state || sym == XKB_KEY_NoSymbol)
+        return sym;
+
+    if (xkb_compose_state_feed(globalWl->xkb.compose_state, sym) !=
+        XKB_COMPOSE_FEED_ACCEPTED)
+        return sym;
+
+    switch (xkb_compose_state_get_status(globalWl->xkb.compose_state)) {
+        default:
+        case XKB_COMPOSE_NOTHING:
+            return sym;
+        case XKB_COMPOSE_COMPOSING:
+        case XKB_COMPOSE_CANCELLED:
+            return XKB_KEY_NoSymbol;
+        case XKB_COMPOSE_COMPOSED:
+            return xkb_compose_state_get_one_sym(globalWl->xkb.compose_state);
+    }
+}
 
 void WindowWl_clipboard_send(struct WindowBase* self, const char* text)
 {
@@ -393,13 +453,13 @@ static void keyboard_handle_keymap(void*               data,
                                    int                 fd,
                                    uint32_t            size)
 {
-    if (!globalWl->xkb.ctx)
-        goto fail;
+    ASSERT(globalWl->xkb.ctx,
+           "xkb context not created in keyboard::handle_keymap");
 
     char* map_str = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
 
     if (map_str == MAP_FAILED)
-        goto fail;
+        ERR("Reading keymap info failed");
 
     globalWl->xkb.keymap = xkb_keymap_new_from_string(
       globalWl->xkb.ctx, map_str, XKB_KEYMAP_FORMAT_TEXT_V1,
@@ -409,13 +469,28 @@ static void keyboard_handle_keymap(void*               data,
     close(fd);
 
     if (!globalWl->xkb.keymap)
-        goto fail;
+        ERR("Failed to generate keymap");
 
     globalWl->xkb.state       = xkb_state_new(globalWl->xkb.keymap);
     globalWl->xkb.clean_state = xkb_state_new(globalWl->xkb.keymap);
 
-    if (!globalWl->xkb.state)
-        goto fail;
+    if (!globalWl->xkb.state || !globalWl->xkb.clean_state)
+        ERR("Failed to create keyboard state");
+
+    ASSERT(settings.locale, "locale string is NULL")
+    globalWl->xkb.compose_table = xkb_compose_table_new_from_locale(
+      globalWl->xkb.ctx, settings.locale, XKB_COMPOSE_COMPILE_NO_FLAGS);
+
+    if (!globalWl->xkb.compose_table)
+        ERR("Failed to generate keyboard compose table, is locale \'%s\' "
+            "correct?",
+            settings.locale);
+
+    globalWl->xkb.compose_state = xkb_compose_state_new(
+      globalWl->xkb.compose_table, XKB_COMPOSE_STATE_NO_FLAGS);
+
+    if (!globalWl->xkb.compose_state)
+        ERR("Failed to create compose state");
 
     globalWl->xkb.ctrl_mask =
       1 << xkb_keymap_mod_get_index(globalWl->xkb.keymap, "Control");
@@ -425,9 +500,6 @@ static void keyboard_handle_keymap(void*               data,
       1 << xkb_keymap_mod_get_index(globalWl->xkb.keymap, "Shift");
 
     return;
-
-fail:;
-    ERR("Failed to generate keymap");
 }
 
 static void keyboard_handle_enter(void*               data,
@@ -474,12 +546,14 @@ static void keyboard_handle_key(void*               data,
     uint32_t     code;
     xkb_keysym_t sym, rawsym;
 
-    code   = key + 8;
-    sym    = xkb_state_key_get_one_sym(globalWl->xkb.state, code);
+    code = key + 8;
+    sym  = keysym_filter_compose(
+      xkb_state_key_get_one_sym(globalWl->xkb.state, code));
     rawsym = xkb_state_key_get_one_sym(globalWl->xkb.clean_state, code);
 
-    uint32_t utf        = xkb_state_key_get_utf32(globalWl->xkb.state, code);
-    int      no_consume = utf ? true : !keysym_is_mod(sym);
+    uint32_t utf = xkb_state_key_get_utf32(globalWl->xkb.state, code);
+
+    bool no_consume = utf ? true : !keysym_is_consumed(sym);
 
     uint32_t final_mods = 0;
     uint32_t mods =
@@ -505,10 +579,11 @@ static void keyboard_handle_key(void*               data,
 
     uint32_t final = utf ? utf : sym;
 
-    /* LOG("wl_key:{ state: %d, final: %u, raw: %u, key: %u, code: %u, mods: %u,
-     * consume: %d }\n",state, final, rawsym, key, code, mods, no_consume); */
+    LOG("wl_key:{ state: %u, final: %u, raw: %u, key: %u, code: %u, mods: %u, "
+        "consume?: %d }\n",
+        state, final, rawsym, key, code, mods, no_consume);
 
-    if (state == 1 && no_consume) {
+    if (state == WL_KEYBOARD_KEY_STATE_PRESSED && no_consume) {
         if (repeat) {
             win->repeat_count               = 0;
             globalWl->keycode_to_repeat     = final;
