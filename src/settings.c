@@ -613,7 +613,7 @@ static void settings_complete_defaults()
         settings.locale = locale;
     }
 
-    setlocale(LC_ALL, settings.locale);
+    setlocale(LC_CTYPE, settings.locale);
     LOG("Using locale: %s\n", settings.locale);
 
     settings_colorscheme_default(settings.colorscheme_preset);

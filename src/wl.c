@@ -221,8 +221,9 @@ static inline xkb_keysym_t keysym_filter_compose(xkb_keysym_t sym)
         return sym;
 
     if (xkb_compose_state_feed(globalWl->xkb.compose_state, sym) !=
-        XKB_COMPOSE_FEED_ACCEPTED)
+        XKB_COMPOSE_FEED_ACCEPTED) {
         return sym;
+    }
 
     switch (xkb_compose_state_get_status(globalWl->xkb.compose_state)) {
         default:
@@ -478,8 +479,18 @@ static void keyboard_handle_keymap(void*               data,
         ERR("Failed to create keyboard state");
 
     ASSERT(settings.locale, "locale string is NULL")
-    globalWl->xkb.compose_table = xkb_compose_table_new_from_locale(
-      globalWl->xkb.ctx, settings.locale, XKB_COMPOSE_COMPILE_NO_FLAGS);
+    const char* compose_file_name = getenv("XCOMPOSEFILE");
+    FILE* compose_file          = NULL;
+    if (compose_file_name && *compose_file_name && (compose_file = fopen(compose_file_name, "r"))) {
+        LOG("using XCOMPOSEFILE = %s\n", compose_file_name);
+        globalWl->xkb.compose_table = xkb_compose_table_new_from_file(
+          globalWl->xkb.ctx, compose_file, settings.locale,
+          XKB_COMPOSE_FORMAT_TEXT_V1, XKB_COMPOSE_COMPILE_NO_FLAGS);
+        fclose(compose_file);
+    } else {
+        globalWl->xkb.compose_table = xkb_compose_table_new_from_locale(
+          globalWl->xkb.ctx, settings.locale, XKB_COMPOSE_COMPILE_NO_FLAGS);
+    }
 
     if (!globalWl->xkb.compose_table)
         ERR("Failed to generate keyboard compose table, is locale \'%s\' "
@@ -543,15 +554,22 @@ static void keyboard_handle_key(void*               data,
 
     struct WindowBase* win = data;
 
-    uint32_t     code;
-    xkb_keysym_t sym, rawsym;
+    uint32_t     code, utf;
+    xkb_keysym_t sym, rawsym, composed_sym;
 
     code = key + 8;
-    sym  = keysym_filter_compose(
-      xkb_state_key_get_one_sym(globalWl->xkb.state, code));
+    sym = composed_sym = xkb_state_key_get_one_sym(globalWl->xkb.state, code);
     rawsym = xkb_state_key_get_one_sym(globalWl->xkb.clean_state, code);
 
-    uint32_t utf = xkb_state_key_get_utf32(globalWl->xkb.state, code);
+    if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
+        composed_sym = keysym_filter_compose(sym);
+    }
+
+    if (composed_sym != sym) {
+        utf = xkb_keysym_to_utf32(composed_sym);
+    } else {
+        utf = xkb_state_key_get_utf32(globalWl->xkb.state, code);
+    }
 
     bool no_consume = utf ? true : !keysym_is_consumed(sym);
 
@@ -579,9 +597,9 @@ static void keyboard_handle_key(void*               data,
 
     uint32_t final = utf ? utf : sym;
 
-    LOG("wl_key:{ state: %u, final: %u, raw: %u, key: %u, code: %u, mods: %u, "
+    LOG("wl_key:{ state: %u, sym: %u, final: %u, raw: %u, key: %u, code: %u, mods: %u, "
         "consume?: %d }\n",
-        state, final, rawsym, key, code, mods, no_consume);
+        state, sym, final, rawsym, key, code, mods, no_consume);
 
     if (state == WL_KEYBOARD_KEY_STATE_PRESSED && no_consume) {
         if (repeat) {
