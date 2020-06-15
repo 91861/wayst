@@ -36,6 +36,29 @@
 #define APP_NAME "Wayst"
 #endif
 
+// default font families
+#ifndef DFT_FONT_NAME
+#define DFT_FONT_NAME "Noto Sans Mono"
+#endif
+
+#ifndef DFT_FONT_NAME_FALLBACK
+#define DFT_FONT_NAME_FALLBACK "FontAwesome"
+#endif
+
+#ifndef DFT_FONT_NAME_FALLBACK2
+#define DFT_FONT_NAME_FALLBACK2 "NotoColorEmoji"
+#endif
+
+// default title format
+#ifndef DFT_TITLE_FMT
+#define DFT_TITLE_FMT "%2$s - %1$s"
+#endif
+
+// default term value
+#ifndef DFT_TERM
+#define DFT_TERM "xterm-256color"
+#endif
+
 // point size in inches for converting font sizes
 #define PT_AS_INCH 0.0138889
 
@@ -438,42 +461,49 @@ static void find_font()
     FcObjectSetDestroy(os);
     FcPatternDestroy(pat);
 
-    pat = FcNameParse((const FcChar8*)settings.font_fallback);
-    os  = FcObjectSetBuild(FC_FAMILY, FC_STYLE, FC_FILE, NULL);
-    fs  = FcFontList(cfg, pat, os);
+    if (settings.font_fallback) {
+        pat = FcNameParse((const FcChar8*)settings.font_fallback);
+        os  = FcObjectSetBuild(FC_FAMILY, FC_STYLE, FC_FILE, NULL);
+        fs  = FcFontList(cfg, pat, os);
 
-    for (int_fast32_t i = 0; fs && i < fs->nfont; ++i) {
-        FcPattern* font = fs->fonts[i];
-        FcChar8 *  file, *style;
+        for (int_fast32_t i = 0; fs && i < fs->nfont; ++i) {
+            FcPattern* font = fs->fonts[i];
+            FcChar8 *  file, *style;
 
-        if (FcPatternGetString(font, FC_FILE, 0, &file) == FcResultMatch &&
-            FcPatternGetString(font, FC_STYLE, 0, &style) == FcResultMatch) {
-            free(settings.font_name_fallback);
-            settings.font_name_fallback = strdup((char*)file);
+            if (FcPatternGetString(font, FC_FILE, 0, &file) == FcResultMatch &&
+                FcPatternGetString(font, FC_STYLE, 0, &style) ==
+                  FcResultMatch) {
+                free(settings.font_name_fallback);
+                settings.font_name_fallback = strdup((char*)file);
+            }
         }
+
+        FcFontSetDestroy(fs);
+        FcObjectSetDestroy(os);
+        FcPatternDestroy(pat);
     }
 
-    FcFontSetDestroy(fs);
-    FcObjectSetDestroy(os);
-    FcPatternDestroy(pat);
+    if (settings.font_fallback2) {
+        pat = FcNameParse((const FcChar8*)settings.font_fallback2);
+        os  = FcObjectSetBuild(FC_FAMILY, FC_STYLE, FC_FILE, NULL);
+        fs  = FcFontList(cfg, pat, os);
 
-    pat = FcNameParse((const FcChar8*)settings.font_fallback2);
-    os  = FcObjectSetBuild(FC_FAMILY, FC_STYLE, FC_FILE, NULL);
-    fs  = FcFontList(cfg, pat, os);
+        for (int_fast32_t i = 0; fs && i < fs->nfont; ++i) {
+            FcPattern* font = fs->fonts[i];
+            FcChar8 *  file, *style;
 
-    for (int_fast32_t i = 0; fs && i < fs->nfont; ++i) {
-        FcPattern* font = fs->fonts[i];
-        FcChar8 *  file, *style;
-
-        if (FcPatternGetString(font, FC_FILE, 0, &file) == FcResultMatch &&
-            FcPatternGetString(font, FC_STYLE, 0, &style) == FcResultMatch) {
-            settings.font_name_fallback2 = strdup((char*)file);
+            if (FcPatternGetString(font, FC_FILE, 0, &file) == FcResultMatch &&
+                FcPatternGetString(font, FC_STYLE, 0, &style) ==
+                  FcResultMatch) {
+                free(settings.font_name_fallback2);
+                settings.font_name_fallback2 = strdup((char*)file);
+            }
         }
-    }
 
-    FcFontSetDestroy(fs);
-    FcObjectSetDestroy(os);
-    FcPatternDestroy(pat);
+        FcFontSetDestroy(fs);
+        FcObjectSetDestroy(os);
+        FcPatternDestroy(pat);
+    }
 
     FcConfigDestroy(cfg);
 
@@ -556,13 +586,13 @@ static void settings_make_default()
         .shell          = NULL,
         .shell_argc     = 0,
         .shell_argv     = NULL,
-        .term           = "xterm-256color",
+        .term           = NULL,
         .locale         = NULL,
         .bsp_sends_del  = true,
 
-        .font           = "Noto Sans Mono",
-        .font_fallback  = "FontAwesome",
-        .font_fallback2 = "NotoColorEmoji",
+        .font           = NULL,
+        .font_fallback  = NULL,
+        .font_fallback2 = NULL,
         .font_size      = 10,
         .font_dpi       = 96,
         .lcd_filter     = LCD_FILTER_UNDEFINED,
@@ -574,9 +604,9 @@ static void settings_make_default()
         .fg_dim = { .r = 150, .g = 150, .b = 150 },
 
         .highlight_change_fg = false,
-        .title               = APP_NAME,
+        .title               = NULL,
         .dynamic_title       = true,
-        .title_format        = "%2$s - %1$s",
+        .title_format        = NULL,
 
         .cols = 80,
         .rows = 24,
@@ -601,8 +631,31 @@ static void settings_make_default()
 
 static void settings_complete_defaults()
 {
+    // set up fonts
+    if (!settings.font)
+        settings.font = DFT_FONT_NAME;
+
+    if (!settings.font_fallback)
+        settings.font_fallback = DFT_FONT_NAME_FALLBACK;
+
+    if (!settings.font_fallback2)
+        settings.font_fallback2 = DFT_FONT_NAME_FALLBACK2;
+
+    find_font();
+
+    // other strings
+    if (!settings.title_format)
+        settings.title_format = DFT_TITLE_FMT;
+
+    if (!settings.term)
+        settings.term = DFT_TERM;
+
+    if (!settings.title)
+        settings.title = APP_NAME;
+
+    // set up locale
     if (!settings.locale) {
-        const char* locale;
+        char* locale;
         locale = getenv("LC_ALL");
         if (!locale || !*locale)
             locale = getenv("LC_CTYPE");
@@ -616,11 +669,10 @@ static void settings_complete_defaults()
     setlocale(LC_CTYPE, settings.locale);
     LOG("Using locale: %s\n", settings.locale);
 
+    // load colorscheme
     settings_colorscheme_default(settings.colorscheme_preset);
     free(settings._explicit_colors_set);
     settings._explicit_colors_set = NULL;
-
-    find_font();
 }
 
 static void print_help()
@@ -652,11 +704,9 @@ static void print_help()
     exit(0);
 }
 
-static void handle_option(const char   opt,
-                          const int    array_index,
-                          const char*  value,
-                          const int    argc,
-                          char* const* argv)
+static void handle_option(const char  opt,
+                          const int   array_index,
+                          const char* value)
 {
     switch (opt) {
         case 'X':
@@ -686,12 +736,15 @@ static void handle_option(const char   opt,
         case 'Y':
             switch (array_index) {
                 case 34:
+                    free(settings.font);
                     settings.font = strdup(value);
                     break;
                 case 35:
+                    free(settings.font_fallback);
                     settings.font_fallback = strdup(value);
                     break;
                 case 36:
+                    free(settings.font_fallback2);
                     settings.font_fallback2 = strdup(value);
                     break;
             }
@@ -728,6 +781,7 @@ static void handle_option(const char   opt,
             break;
 
         case 't':
+            free(settings.title);
             settings.title = strdup(value);
             break;
 
@@ -740,10 +794,12 @@ static void handle_option(const char   opt,
             break;
 
         case 'r':
+            free(settings.term);
             settings.term = strdup(value);
             break;
 
         case 'l':
+            free(settings.locale);
             settings.locale = strdup(value);
             break;
 
@@ -753,6 +809,7 @@ static void handle_option(const char   opt,
             break;
 
         case 'o':
+            free(settings.title_format);
             settings.title_format = strdup(value);
             break;
 
@@ -856,7 +913,7 @@ static void settings_get_opts(const int    argc,
             else if (o == 'i')
                 settings.config_path = strdup(optarg);
         } else {
-            handle_option(o, opid, optarg, argc, argv);
+            handle_option(o, opid, optarg);
         }
     }
 
@@ -908,13 +965,13 @@ static void handle_config_option(const char*  key,
                         if (parsed <= 16)
                             arrayindex = parsed + 12;
                     }
-                    if (streq_wildcard(key, "font*")) {
+                    if (streq_wildcard(key, "font-f*")) {
                         if (!strcmp(key, "font-fallback"))
                             arrayindex = 35;
                         else if (!strcmp(key, "font-fallback2"))
                             arrayindex = 36;
-                        else
-                            arrayindex = 34;
+                    } else if (!strcmp(key, "font")) {
+                        arrayindex = 34;
                     } else if (streq_wildcard(key, "bind*")) {
                         // bind-key-(switch)
                         switch (key[9]) {
@@ -941,7 +998,7 @@ static void handle_config_option(const char*  key,
                                 break;
                         }
                     }
-                    handle_option(opt->val, arrayindex, val, argc, argv);
+                    handle_option(opt->val, arrayindex, val);
                 }
             }
         }
@@ -1062,6 +1119,7 @@ void settings_init(const int argc, char* const* argv)
 {
     settings_make_default();
     settings_get_opts(argc, argv, true);
+
     if (!settings.skip_config) {
         const char* cfg_path = find_config_path();
         FILE*       cfg      = open_config(cfg_path);
@@ -1071,25 +1129,10 @@ void settings_init(const int argc, char* const* argv)
         if (cfg_path)
             free((void*)cfg_path);
     }
+
     settings_get_opts(argc, argv, false);
     settings_complete_defaults();
     init_color_palette();
 }
 
-void settings_cleanup()
-{
-    if (settings.font_name)
-        free(settings.font_name);
-
-    if (settings.font_name_bold)
-        free(settings.font_name_bold);
-
-    if (settings.font_name_italic)
-        free(settings.font_name_italic);
-
-    if (settings.font_name_fallback)
-        free(settings.font_name_fallback);
-
-    if (settings.font_name_fallback2)
-        free(settings.font_name_fallback2);
-}
+void settings_cleanup() {}

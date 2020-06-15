@@ -9,7 +9,6 @@
 #define VERSION "unknown"
 #endif
 
-
 // default lcd filter
 #ifndef LCD_FILT_DFT
 #define LCD_FILT_DFT LCD_FILTER_H_RGB
@@ -87,7 +86,7 @@ typedef struct
     char* term;
 
     /* override locale */
-    const char* locale;
+    char* locale;
 
     /* main title (application name) */
     char* title;
@@ -118,13 +117,13 @@ typedef struct
     char* font_fallback2;
 
     /* font files */
-    char*    font_name;
-    char*    font_name_bold;
-    char*    font_name_italic;
-    char*    font_name_fallback;
-    char*    font_name_fallback2;
-    uint16_t font_size;
-    uint16_t font_dpi;
+    char*          font_name;
+    char*          font_name_bold;
+    char*          font_name_italic;
+    char*          font_name_fallback;
+    char*          font_name_fallback2;
+    uint16_t       font_size;
+    uint16_t       font_dpi;
     enum LcdFilter lcd_filter;
 
     /* colors - normal, highlight */
@@ -153,7 +152,6 @@ typedef struct
     bool allow_multiple_underlines;
 
     uint32_t scrollback;
-
 
 } Settings;
 

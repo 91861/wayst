@@ -485,14 +485,15 @@ Cache_get_glyph(GfxOpenGL21* gfx, GlyphMap* self, FT_Face face, char32_t code)
                                        ? FT_RENDER_MODE_LCD
                                        : FT_RENDER_MODE_NORMAL)) {
         WRN("Glyph error in main font %d \n", code);
-    } else if (face->glyph->glyph_index == 0) {
+    } else if (face->glyph->glyph_index == 0 && gfx->face_fallback) {
         // Glyph is missing im main font
 
         index = FT_Get_Char_Index(gfx->face_fallback, code);
         if (FT_Load_Glyph(gfx->face_fallback, index, FT_LOAD_TARGET_LCD) ||
             FT_Render_Glyph(gfx->face_fallback->glyph, FT_RENDER_MODE_LCD)) {
             WRN("Glyph error in fallback font %d \n", code);
-        } else if (gfx->face_fallback->glyph->glyph_index == 0) {
+        } else if (gfx->face_fallback->glyph->glyph_index == 0 &&
+                   gfx->face_fallback2) {
             color = true;
             self  = gfx->cache; // put this in the 'Regular style' map
             index = FT_Get_Char_Index(gfx->face_fallback2, code);
@@ -767,7 +768,8 @@ Pair_uint32_t GfxOpenGL21_pixels(Gfx* self, uint32_t c, uint32_t r)
     }
 
     float x, y;
-    x = c * gfxOpenGL21(self)->gw + (gfxOpenGL21(self)->is_main_font_rgb ? 0 : 64);
+    x = c * gfxOpenGL21(self)->gw +
+        (gfxOpenGL21(self)->is_main_font_rgb ? 0 : 64);
     y = r * (gfxOpenGL21(self)->face->size->metrics.height + 128);
 
     return (Pair_uint32_t){ .first = x / 64.0, .second = y / 64.0 };
@@ -777,7 +779,7 @@ void GfxOpenGL21_load_font(Gfx* self)
 {
     static bool ft_lib_was_initialized = false;
     FT_Error    ft_err                 = 0;
-    int         strike_idx = -1;
+    int         strike_idx             = -1;
 
     if (!ft_lib_was_initialized) {
         if ((ft_err = FT_Init_FreeType(&gfxOpenGL21(self)->ft))) {
