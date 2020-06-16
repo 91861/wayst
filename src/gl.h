@@ -44,7 +44,6 @@ extern PFNGLRENDERBUFFERSTORAGEPROC     glRenderbufferStorage;
 extern PFNGLBINDBUFFERPROC              glBindBuffer;
 extern PFNGLGENBUFFERSPROC              glGenBuffers;
 extern PFNGLDELETEFRAMEBUFFERSPROC      glDeleteFramebuffers;
-extern PFNGLCHECKFRAMEBUFFERSTATUSPROC  glCheckFramebufferStatus;
 extern PFNGLFRAMEBUFFERTEXTURE2DPROC    glFramebufferTexture2D;
 extern PFNGLBINDFRAMEBUFFERPROC         glBindFramebuffer;
 extern PFNGLBINDRENDERBUFFERPROC        glBindRenderbuffer;
@@ -52,7 +51,8 @@ extern PFNGLGENRENDERBUFFERSPROC        glGenRenderbuffers;
 extern PFNGLGENFRAMEBUFFERSPROC         glGenFramebuffers;
 extern PFNGLGENERATEMIPMAPPROC          glGenerateMipmap;
 #ifdef DEBUG
-extern PFNGLDEBUGMESSAGECALLBACKPROC glDebugMessageCallback;
+extern PFNGLDEBUGMESSAGECALLBACKPROC   glDebugMessageCallback;
+extern PFNGLCHECKFRAMEBUFFERSTATUSPROC glCheckFramebufferStatus;
 #endif
 
 extern void* (*gl_load_ext)(const char* procname);
@@ -88,8 +88,7 @@ typedef struct
     size_t size;
 } VBO;
 
-__attribute__((packed)) enum TextureFormat
-{
+__attribute__((packed)) enum TextureFormat {
     TEX_FMT_RGBA,
     TEX_FMT_RGB,
     TEX_FMT_MONO,
@@ -133,7 +132,8 @@ typedef struct
 /*     glBindTexture(GL_TEXTURE_2D, self->id); */
 /*     self->has_alpha = (format == GL_RGBA || format == GL_BGRA); */
 
-/*     glTexImage2D(GL_TEXTURE_2D, 0, format, (self->w = w), (self->h = h), 0, */
+/*     glTexImage2D(GL_TEXTURE_2D, 0, format, (self->w = w), (self->h = h), 0,
+ */
 /*                  format, GL_UNSIGNED_BYTE, data); */
 /* } */
 
@@ -157,7 +157,8 @@ typedef struct
 /*     glBindTexture(GL_TEXTURE_2D, self->id); */
 
 /*     glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h, */
-/*                     self->has_alpha ? GL_RGBA : GL_RGB, GL_UNSIGNED_BYTE, data); */
+/*                     self->has_alpha ? GL_RGBA : GL_RGB, GL_UNSIGNED_BYTE,
+ * data); */
 /* } */
 
 static inline void Texture_destroy(Texture* self)
@@ -170,23 +171,18 @@ static inline void Texture_destroy(Texture* self)
 
 typedef struct
 {
-    GLuint   id;
-    Texture  color_tex;
-    GLuint   depth_renderbuffer;
-    uint32_t rb_w;
+    GLuint  id;
+    Texture color_tex;
 } Framebuffer;
 
 static Framebuffer Framebuffer_new()
 {
     Framebuffer ret = {
-        .id                 = 0,
-        .color_tex          = { 0 },
-        .depth_renderbuffer = 0,
+        .id        = 0,
+        .color_tex = { 0 },
     };
 
     glGenFramebuffers(1, &ret.id);
-    glGenRenderbuffers(1, &ret.depth_renderbuffer);
-    glBindRenderbuffer(GL_RENDERBUFFER, ret.depth_renderbuffer);
 
     return ret;
 }
@@ -198,6 +194,7 @@ static inline void Framebuffer_attach_texture(Framebuffer* self, Texture* tex)
                            tex->id, 0);
 }
 
+#ifdef DEBUG
 static inline void Framebuffer_assert_complete(Framebuffer* self)
 {
     GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
@@ -218,38 +215,29 @@ static inline void Framebuffer_assert_complete(Framebuffer* self)
         ERR("Framebuffer error, status %s", ss);
     }
 }
+#else
+#define Framebuffer_assert_complete(_fb) ;
+#endif
 
-static inline void Framebuffer_generate_depth_attachment_only(Framebuffer* self,
-                                                              Texture*     tex,
-                                                              uint32_t     w,
-                                                              int32_t      h)
+static inline void Framebuffer_attach_as_color(Framebuffer* self,
+                                               Texture*     tex,
+                                               uint32_t     w,
+                                               int32_t      h)
 {
     glBindFramebuffer(GL_FRAMEBUFFER, self->id);
     assert(self->color_tex.id == 0);
 
     self->color_tex = *tex;
     glBindTexture(GL_TEXTURE_2D, self->color_tex.id);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE,
-                 0);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
                            self->color_tex.id, 0);
-
-    glBindRenderbuffer(GL_RENDERBUFFER, self->depth_renderbuffer);
-
-    if (self->color_tex.w != self->rb_w) {
-        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16,
-                              self->color_tex.w, self->color_tex.h);
-    }
-
-    self->rb_w = self->color_tex.w;
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-                              GL_RENDERBUFFER, self->depth_renderbuffer);
+                              GL_RENDERBUFFER, 0);
     glViewport(0, 0, w, h);
+    gl_check_error();
 }
 
-static inline void Framebuffer_generate_color_and_depth_attachments(
+static inline void Framebuffer_generate_color_attachment(
   Framebuffer* self,
   uint32_t     w,
   int32_t      h)
@@ -265,13 +253,8 @@ static inline void Framebuffer_generate_color_and_depth_attachments(
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
                            self->color_tex.id, 0);
 
-    glBindRenderbuffer(GL_RENDERBUFFER, self->depth_renderbuffer);
-    if (w != self->rb_w) {
-        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT16, w, h);
-        self->rb_w = w;
-    }
     glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
-                              GL_RENDERBUFFER, self->depth_renderbuffer);
+                              GL_RENDERBUFFER, 0);
 
     glViewport(0, 0, w, h);
     gl_check_error();

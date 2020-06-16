@@ -348,11 +348,25 @@ static void Vt_select_init_line(Vt* self, int32_t y)
       Vt_visual_top_line(self) + click_y;
 }
 
+__attribute__((always_inline)) static inline void Vt_mark_proxy_damaged(Vt*    self,
+                                                                        size_t idx)
+{
+    self->lines.buf[idx].damaged = true;
+}
+
+static inline void Vt_mark_proxies_damaged_in_region(Vt*    self,
+                                                     size_t begin,
+                                                     size_t end)
+{
+    for (size_t i = begin; i <= end; ++i)
+        Vt_mark_proxy_damaged(self, i);
+}
+
 __attribute__((always_inline)) static inline void Vt_clear_proxy(Vt*    self,
                                                                  size_t idx)
 {
     if (!self->lines.buf[idx].damaged) {
-        self->lines.buf[idx].damaged = true;
+        Vt_mark_proxy_damaged(self, idx);
         Vt_destroy_line_proxy(self->lines.buf[idx].proxy.data);
     }
 }
@@ -380,10 +394,11 @@ static inline void Vt_clear_all_proxies(Vt* self)
 }
 
 __attribute__((always_inline)) static inline void
-Vt_clear_proxies_in_select_region(Vt* self)
+Vt_mark_proxies_damaged_in_selected_region(Vt* self)
 {
-    Vt_clear_proxies_in_region(self, self->selection.begin_line,
-                               self->selection.end_line);
+    Vt_mark_proxies_damaged_in_region(self,
+                                      self->selection.begin_line,
+                                      self->selection.end_line);
 }
 
 /**
@@ -399,7 +414,7 @@ static void Vt_select_commit(Vt* self)
         self->selection.begin_char_idx = self->selection.end_char_idx =
           self->selection.click_begin_char_idx;
 
-        Vt_clear_proxies_in_select_region(self);
+        Vt_mark_proxies_damaged_in_selected_region(self);
     }
 }
 
@@ -428,7 +443,7 @@ static void Vt_select_set_end(Vt* self, int32_t x, int32_t y)
 static void Vt_select_end(Vt* self)
 {
     self->selection.mode = SELECT_MODE_NONE;
-    Vt_clear_proxies_in_select_region(self);
+    Vt_mark_proxies_damaged_in_selected_region(self);
 }
 
 static bool Vt_consume_drag(Vt* self, uint32_t button, int32_t x, int32_t y)
@@ -2467,7 +2482,7 @@ __attribute__((always_inline, hot)) static inline void Vt_insert_char_at_cursor(
         c.bg         = ColorRGBA_from_RGB(tmp);
     }
 
-    Vt_clear_proxy(self, self->active_line);
+    Vt_mark_proxy_damaged(self, self->active_line);
 
     self->lines.buf[self->active_line].data.buf[self->cursor_pos] = c;
 

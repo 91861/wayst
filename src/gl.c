@@ -37,7 +37,6 @@ PFNGLRENDERBUFFERSTORAGEPROC     glRenderbufferStorage;
 PFNGLBINDBUFFERPROC              glBindBuffer;
 PFNGLGENBUFFERSPROC              glGenBuffers;
 PFNGLDELETEFRAMEBUFFERSPROC      glDeleteFramebuffers;
-PFNGLCHECKFRAMEBUFFERSTATUSPROC  glCheckFramebufferStatus;
 PFNGLFRAMEBUFFERTEXTURE2DPROC    glFramebufferTexture2D;
 PFNGLBINDFRAMEBUFFERPROC         glBindFramebuffer;
 PFNGLBINDRENDERBUFFERPROC        glBindRenderbuffer;
@@ -45,7 +44,8 @@ PFNGLGENRENDERBUFFERSPROC        glGenRenderbuffers;
 PFNGLGENFRAMEBUFFERSPROC         glGenFramebuffers;
 PFNGLGENERATEMIPMAPPROC          glGenerateMipmap;
 #ifdef DEBUG
-PFNGLDEBUGMESSAGECALLBACKPROC glDebugMessageCallback;
+PFNGLDEBUGMESSAGECALLBACKPROC   glDebugMessageCallback;
+PFNGLCHECKFRAMEBUFFERSTATUSPROC glCheckFramebufferStatus;
 #endif
 
 void gl_load_exts()
@@ -86,7 +86,6 @@ void gl_load_exts()
     glBindBuffer              = gl_load_ext("glBindBuffer");
     glGenBuffers              = gl_load_ext("glGenBuffers");
     glDeleteFramebuffers      = gl_load_ext("glDeleteFramebuffers");
-    glCheckFramebufferStatus  = gl_load_ext("glCheckFramebufferStatus");
     glFramebufferTexture2D    = gl_load_ext("glFramebufferTexture2D");
     glBindFramebuffer         = gl_load_ext("glBindFramebuffer");
     glBindRenderbuffer        = gl_load_ext("glBindRenderbuffer");
@@ -94,7 +93,8 @@ void gl_load_exts()
     glGenFramebuffers         = gl_load_ext("glGenFramebuffers");
     glGenerateMipmap          = gl_load_ext("glGenerateMipmap");
 #ifdef DEBUG
-    glDebugMessageCallback = gl_load_ext("glDebugMessageCallback");
+    glDebugMessageCallback   = gl_load_ext("glDebugMessageCallback");
+    glCheckFramebufferStatus = gl_load_ext("glCheckFramebufferStatus");
 #endif
     LOG("all gl extensions loaded succesfully\n");
 }

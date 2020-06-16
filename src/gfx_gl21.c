@@ -1291,80 +1291,39 @@ __attribute__((hot)) static inline void gfx_rasterize_line(GfxOpenGL21*    gfx,
                                                            const size_t line,
                                                            bool is_for_blinking)
 {
-    const size_t length             = vt_line->data.size;
-    bool         has_blinking_chars = false;
-
-    float texture_width  = vt_line->data.size * gfx->glyph_width_pixels;
-    float texture_height = gfx->line_height_pixels;
-
-    /* Texture recovered = { */
-    /*     .id = vt_line->proxy.data[is_for_blinking ? PROXY_INDEX_TEXTURE_BLINK
-     */
-    /*                                               : PROXY_INDEX_TEXTURE], */
-    /*     .w  = vt_line->proxy.data[PROXY_INDEX_TEXTURE_SIZE], */
-    /* }; */
-
-    /* bool can_reuse = recovered.id && recovered.w >= texture_width; */
-
-    // TODO: check size, potentially reuse
     if (!is_for_blinking) {
-        if (likely(!vt_line->damaged || !vt_line->data.size))
+        if (likely(!vt_line->damaged || !vt_line->data.size)) {
             return;
-
-        if (unlikely(vt_line->proxy.data[PROXY_INDEX_TEXTURE])) {
-            GfxOpenGL21_destroy_proxy((Gfx*)gfx - offsetof(Gfx, extend_data),
-                                      vt_line->proxy.data);
         }
     }
 
-#define BOUND_RESOURCES_NONE      0
-#define BOUND_RESOURCES_BG        1
-#define BOUND_RESOURCES_FONT      2
-#define BOUND_RESOURCES_LINES     3
-#define BOUND_RESOURCES_IMAGE     4
-#define BOUND_RESOURCES_FONT_MONO 5
-    int_fast8_t bound_resources = BOUND_RESOURCES_NONE;
+    const size_t length             = vt_line->data.size;
+    bool         has_blinking_chars = false;
+    float texture_width  = vt_line->data.size * gfx->glyph_width_pixels;
+    float texture_height = gfx->line_height_pixels;
 
-    float scalex = 2.0f / texture_width;
-    float scaley = 2.0f / texture_height;
+    // Try to reuse the texture that is already there
+    Texture recovered = {
+        .id = vt_line->proxy.data[is_for_blinking ? PROXY_INDEX_TEXTURE_BLINK
+                                                  : PROXY_INDEX_TEXTURE],
+        .w  = vt_line->proxy.data[PROXY_INDEX_TEXTURE_SIZE],
+    };
 
-    /* if (can_reuse && false) { */
-    /*     puts("reuse"); */
-    /*     Framebuffer_generate_depth_attachment_only( */
-    /*       &gfx->line_framebuffer, &recovered, texture_width, texture_height);
-     */
-    /* } else if (gfx->recycled_line_textures[0].id && */
-    /*            gfx->recycled_line_textures[0].w >= texture_width) { */
-    /*     printf("Recycle! %d\n", gfx->recycled_line_textures->id); */
+    bool can_reuse = recovered.id && recovered.w >= texture_width;
 
-    /*     Framebuffer_generate_depth_attachment_only( */
-    /*       &gfx->line_framebuffer, gfx->recycled_line_textures, texture_width,
-     */
-    /*       texture_height); */
+    if (can_reuse) {
+        Framebuffer_attach_as_color(&gfx->line_framebuffer, &recovered,
+                                    recovered.w, texture_height);
+    } else {
+        GfxOpenGL21_destroy_proxy((Gfx*)gfx - offsetof(Gfx, extend_data),
+                                  vt_line->proxy.data);
 
-    /*     memmove(&gfx->recycled_line_textures[0], */
-    /*             &gfx->recycled_line_textures[1], */
-    /*             ARRAY_SIZE(gfx->recycled_line_textures) * sizeof(Texture) -
-     * 1); */
+        // TODO: try to recycle
+        Framebuffer_generate_color_attachment(&gfx->line_framebuffer,
+                                              texture_width, texture_height);
+    }
 
-    /*     gfx->recycled_line_textures[ARRAY_SIZE(gfx->recycled_line_textures) -
-     * 1] */
-    /*       .id = 0; */
-    /*     gfx->recycled_line_textures[ARRAY_SIZE(gfx->recycled_line_textures) -
-     * 1] */
-    /*       .w = 0; */
-
-    /*     for (uint8_t i = 0; i < ARRAY_SIZE(gfx->recycled_line_textures); ++i)
-     * { */
-    /*         printf("yoinked entry id: %d, w: %d\n", */
-    /*                gfx->recycled_line_textures[i].id, */
-    /*                gfx->recycled_line_textures[i].w); */
-    /*     } */
-
-    /* } else { */
-    Framebuffer_generate_color_and_depth_attachments(
-      &gfx->line_framebuffer, texture_width, texture_height);
-    /* } */
+    Framebuffer_assert_complete(&gfx->line_framebuffer);
 
     glBindTexture(GL_TEXTURE_2D, 0);
     glUseProgram(0);
@@ -1383,6 +1342,17 @@ __attribute__((hot)) static inline void gfx_rasterize_line(GfxOpenGL21*    gfx,
         0.0f, // overwritten
         -1.0f,
     };
+
+#define BOUND_RESOURCES_NONE      0
+#define BOUND_RESOURCES_BG        1
+#define BOUND_RESOURCES_FONT      2
+#define BOUND_RESOURCES_LINES     3
+#define BOUND_RESOURCES_IMAGE     4
+#define BOUND_RESOURCES_FONT_MONO 5
+    int_fast8_t bound_resources = BOUND_RESOURCES_NONE;
+
+    float scalex = 2.0f / texture_width;
+    float scaley = 2.0f / texture_height;
 
     ColorRGBA bg_color = settings.bg;
 
