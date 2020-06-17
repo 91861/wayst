@@ -793,11 +793,6 @@ void GfxOpenGL21_load_font(Gfx* self)
             settings.font_name, stringify_ft_error(ft_err));
     }
 
-    /* const char* fmt = FT_Get_Font_Format(gfxOpenGL21(self)->face); */
-    /* if (!fmt || (strcmp(fmt, "TrueType") && strcmp(fmt, "CFF"))) { */
-    /*     ERR("Font format \"%s\" not supported", fmt); */
-    /* } */
-
     if ((ft_err = FT_Set_Char_Size(
            gfxOpenGL21(self)->face, settings.font_size * 64,
            settings.font_size * 64, settings.font_dpi, settings.font_dpi))) {
@@ -814,8 +809,6 @@ void GfxOpenGL21_load_font(Gfx* self)
                   "Failed to set main font bitmap strike, file %s. error: %s\n",
                   settings.font_name, stringify_ft_error(ft_err));
             }
-
-            WRN("Bitmap fonts are currently broken!\n");
         }
     }
 
@@ -1087,7 +1080,7 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
 
 void GfxOpenGL21_reload_font(Gfx* self)
 {
-    if (gfxOpenGL21(self)->is_main_font_rgb) {
+    if (!gfxOpenGL21(self)->is_main_font_rgb) {
         WRN("Resizing is not available for bitmap fonts\n");
         return;
     }
