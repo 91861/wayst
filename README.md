@@ -35,6 +35,16 @@ make install
 
 To build without X11 or Wayland support set ```window_protocol=wayland``` or ```window_protocol=x11``` respectively. With both backends enabled wayst will default to wayland. You can force X11 mode with the ```xorg-only``` option. To build in debug mode set ```mode=debugoptimized```.
 
+# Installation
+
+## From AUR
+
+You can install [wayst-git](https://aur.archlinux.org/pkgbase/wayst-git/) from AUR (arch user repository)
+
+```
+yay -S wayst-git
+```
+
 ###### Dependencies:
 * OpenGL >= 2.1
 * freetype >= 2.10
@@ -57,7 +67,7 @@ font-size=10
 dpi=96
 colorscheme=wayst
 title="Terminal"
-term="xterm256-color"
+term="xterm-256color"
 dynamic-title=true
 title-format = "%2$s - %1$s"       # -> user@host:~ - $title
 ```
