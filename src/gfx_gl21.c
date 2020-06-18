@@ -51,6 +51,7 @@
 #define PROXY_INDEX_TEXTURE       0
 #define PROXY_INDEX_TEXTURE_BLINK 1
 #define PROXY_INDEX_TEXTURE_SIZE  2
+#define PROXY_INDEX_HAS_BLINKING  3
 
 enum GlyphColor
 {
@@ -1241,7 +1242,13 @@ __attribute__((hot, always_inline)) static inline void gfx_push_line_quads(
   VtLine* const vt_line,
   uint_fast16_t line_index)
 {
-    if (vt_line->proxy.data[0]) {
+    if (vt_line->proxy.data[PROXY_INDEX_TEXTURE] ||
+        vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK]) {
+
+        if (vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK]) {
+            gfx->has_blinking_text = true;
+        }
+
         float tex_end_x =
           -1.0f + vt_line->data.size * gfx->glyph_width_pixels * gfx->sx;
         float tex_begin_y =
@@ -1262,16 +1269,19 @@ gfx_draw_line_quads(GfxOpenGL21*  gfx,
                     VtLine* const vt_line,
                     uint_fast32_t quad_index)
 {
-    if (vt_line->proxy.data[0]) {
-        if (vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK])
-            gfx->has_blinking_text = true;
+    if (vt_line->proxy.data[PROXY_INDEX_TEXTURE] ||
+        vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK]) {
 
-        glBindTexture(GL_TEXTURE_2D,
-                      vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK] &&
-                          !gfx->draw_blinking_text
-                        ? vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK]
-                        : vt_line->proxy.data[PROXY_INDEX_TEXTURE]);
-        glDrawArrays(GL_QUADS, quad_index * 4, 4);
+        if (vt_line->proxy.data[PROXY_INDEX_TEXTURE] ||
+            !gfx->draw_blinking_text) {
+
+            glBindTexture(GL_TEXTURE_2D,
+                          vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK] &&
+                              !gfx->draw_blinking_text
+                            ? vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK]
+                            : vt_line->proxy.data[PROXY_INDEX_TEXTURE]);
+            glDrawArrays(GL_QUADS, quad_index * 4, 4);
+        }
         ++quad_index;
     }
 
@@ -1292,8 +1302,9 @@ __attribute__((hot)) static inline void gfx_rasterize_line(GfxOpenGL21*    gfx,
 
     const size_t length             = vt_line->data.size;
     bool         has_blinking_chars = false;
-    float texture_width  = vt_line->data.size * gfx->glyph_width_pixels;
-    float texture_height = gfx->line_height_pixels;
+    float        texture_width = vt_line->data.size * gfx->glyph_width_pixels;
+    float        actual_texture_width = texture_width;
+    float        texture_height       = gfx->line_height_pixels;
 
     // Try to reuse the texture that is already there
     Texture recovered = {
@@ -1305,11 +1316,14 @@ __attribute__((hot)) static inline void gfx_rasterize_line(GfxOpenGL21*    gfx,
     bool can_reuse = recovered.id && recovered.w >= texture_width;
 
     if (can_reuse) {
+        actual_texture_width = recovered.w;
         Framebuffer_attach_as_color(&gfx->line_framebuffer, &recovered,
                                     recovered.w, texture_height);
     } else {
-        GfxOpenGL21_destroy_proxy((Gfx*)gfx - offsetof(Gfx, extend_data),
-                                  vt_line->proxy.data);
+        if (!is_for_blinking) {
+            GfxOpenGL21_destroy_proxy((Gfx*)gfx - offsetof(Gfx, extend_data),
+                                      vt_line->proxy.data);
+        }
 
         // TODO: try to recycle
         Framebuffer_generate_color_attachment(&gfx->line_framebuffer,
@@ -1355,8 +1369,10 @@ __attribute__((hot)) static inline void gfx_rasterize_line(GfxOpenGL21*    gfx,
          ++idx_each_char) {
         c = vt_line->data.buf + idx_each_char;
 
-        if (likely(idx_each_char != vt_line->data.size) && unlikely(c->blinkng))
+        if (likely(idx_each_char != vt_line->data.size) &&
+            unlikely(c->blinkng)) {
             has_blinking_chars = true;
+        }
 
         if (idx_each_char == length ||
             !ColorRGBA_eq(
@@ -1423,8 +1439,7 @@ __attribute__((hot)) static inline void gfx_rasterize_line(GfxOpenGL21*    gfx,
                                   each_rune_same_colors - vt_line->data.buf;
 
                                 if (is_for_blinking &&
-                                    each_rune_same_colors_filtered_blink
-                                      ->blinkng) {
+                                    each_rune_same_colors->blinkng) {
                                     same_color_blank_space =
                                       *each_rune_same_colors_filtered_blink;
                                     same_color_blank_space.code = ' ';
@@ -2000,11 +2015,13 @@ __attribute__((hot)) static inline void gfx_rasterize_line(GfxOpenGL21*    gfx,
           -1.0f + (float)column * scalex * (float)gfx->glyph_width_pixels;     \
     }
 
-            SET_BOUNDS_BEGIN(each_rune->underlined, 0);
-            SET_BOUNDS_BEGIN(each_rune->doubleunderline, 1);
-            SET_BOUNDS_BEGIN(each_rune->strikethrough, 2);
-            SET_BOUNDS_BEGIN(each_rune->overline, 3);
-            SET_BOUNDS_BEGIN(each_rune->curlyunderline, 4);
+            if (each_rune != vt_line->data.buf + vt_line->data.size) {
+                SET_BOUNDS_BEGIN(each_rune->underlined, 0);
+                SET_BOUNDS_BEGIN(each_rune->doubleunderline, 1);
+                SET_BOUNDS_BEGIN(each_rune->strikethrough, 2);
+                SET_BOUNDS_BEGIN(each_rune->overline, 3);
+                SET_BOUNDS_BEGIN(each_rune->curlyunderline, 4);
+            }
 
             if (each_rune != vt_line->data.buf + vt_line->data.size) {
                 drawing[0] = each_rune->underlined;
@@ -2025,22 +2042,20 @@ __attribute__((hot)) static inline void gfx_rasterize_line(GfxOpenGL21*    gfx,
     } // END drawing lines
 
     // set proxy data to generated texture
-    if (is_for_blinking) {
+    if (unlikely(is_for_blinking)) {
         vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK] =
-          Framebuffer_get_color_texture(&gfx->line_framebuffer).id;
+          Framebuffer_extract_color_texture(&gfx->line_framebuffer).id;
     } else {
         vt_line->proxy.data[PROXY_INDEX_TEXTURE] =
-          Framebuffer_get_color_texture(&gfx->line_framebuffer).id;
-        vt_line->damaged = false;
+          Framebuffer_extract_color_texture(&gfx->line_framebuffer).id;
+        vt_line->proxy.data[PROXY_INDEX_TEXTURE_SIZE] = actual_texture_width;
+        vt_line->damaged                              = false;
     }
-
-    vt_line->proxy.data[PROXY_INDEX_TEXTURE_SIZE] = texture_width;
 
     Framebuffer_use(NULL);
     glViewport(0, 0, gfx->win_w, gfx->win_h);
 
     if (unlikely(has_blinking_chars && !is_for_blinking)) {
-        // render version with blinking chars hidden
         gfx_rasterize_line(gfx, vt, vt_line, line, true);
     }
 }
@@ -2424,7 +2439,7 @@ void GfxOpenGL21_draw_vt(Gfx* self, const Vt* vt)
     glLoadIdentity();
 
     gfxOpenGL21(self)->vec_glyph_buffer->size = 0;
-
+    gfxOpenGL21(self)->has_blinking_text      = false;
     for (VtLine* i = begin; i < end; ++i)
         gfx_push_line_quads(gfxOpenGL21(self), i, i - begin);
 
@@ -2446,8 +2461,6 @@ void GfxOpenGL21_draw_vt(Gfx* self, const Vt* vt)
         Shader_use(&gfxOpenGL21(self)->image_shader);
         glVertexAttribPointer(gfxOpenGL21(self)->image_shader.attribs->location,
                               4, GL_FLOAT, GL_FALSE, 0, 0);
-
-        gfxOpenGL21(self)->has_blinking_text = false;
 
         uint_fast32_t quad_index = 0;
         for (VtLine* i = begin; i < end; ++i)
@@ -2498,21 +2511,15 @@ void GfxOpenGL21_draw_vt(Gfx* self, const Vt* vt)
 
     /* { */
     /*     Shader_use(NULL); */
-
-    /*     glBindTexture(GL_TEXTURE_2D, gfxOpenGL21(self)->_atlas.tex); */
-
+    /*     glBindTexture(GL_TEXTURE_2D, ); */
     /*     glBegin(GL_QUADS); */
-    /*     glColor4f(1, 1, 1, 1); */
-
+    /*     glColor4f(1, 1, 1, 0.5); */
     /*     glTexCoord2f(1, 1); */
-    /*     glVertex2f(1, 1); */
-
+    /*     glVertex2f(1, 0); */
     /*     glTexCoord2f(0, 1); */
-    /*     glVertex2f(-1, 1); */
-
+    /*     glVertex2f(0, 0); */
     /*     glTexCoord2f(0, 0); */
-    /*     glVertex2f(-1, -1); */
-
+    /*     glVertex2f(0, -1); */
     /*     glTexCoord2f(1, 0); */
     /*     glVertex2f(1, -1); */
     /*     glEnd(); */
@@ -2529,77 +2536,17 @@ void GfxOpenGL21_destroy_recycled_proxies(GfxOpenGL21* self)
 
 __attribute__((hot)) void GfxOpenGL21_destroy_proxy(Gfx* self, int32_t* proxy)
 {
-    if (likely(proxy[0])) {
-
-        /* // maybe store for reuse */
-        /* uint_fast8_t insert_point = UINT8_MAX; */
-        /* for (uint_fast8_t i = 0; */
-        /*      i < ARRAY_SIZE(gfxOpenGL21(self)->recycled_line_textures); ++i)
-         * { */
-        /*     if (gfxOpenGL21(self)->recycled_line_textures[i].w < */
-        /*           (uint32_t)proxy[PROXY_INDEX_TEXTURE_SIZE] || */
-        /*         !gfxOpenGL21(self)->recycled_line_textures[i].id) { */
-        /*         // our dropped proxy is bigger than i-th recycled texture */
-        /*         insert_point = i; */
-        /*         break; */
-        /*     } */
-        /* } */
-
-        /* if (unlikely(insert_point != UINT8_MAX)) { */
-        /*     // recycle proxy */
-        /*     size_t last_idx = */
-        /*       ARRAY_SIZE(gfxOpenGL21(self)->recycled_line_textures) - 1; */
-
-        /*     // number of slots to clear, if we have a blink proxy try to
-         * clear */
-        /*     // two spots */
-        /*     uint_fast8_t clear_num = */
-        /*       unlikely(proxy[PROXY_INDEX_TEXTURE_BLINK]) && */
-        /*           insert_point != last_idx */
-        /*         ? 2 */
-        /*         : 1; */
-
-        /*     if (gfxOpenGL21(self)->recycled_line_textures[last_idx].id) { */
-        /*         Texture_destroy( */
-        /*           &gfxOpenGL21(self)->recycled_line_textures[last_idx]); */
-        /*     } */
-
-        /*     if (unlikely(clear_num == 2) && */
-        /*         gfxOpenGL21(self)->recycled_line_textures[last_idx - 1].id) {
-         */
-        /*         Texture_destroy( */
-        /*           &gfxOpenGL21(self)->recycled_line_textures[last_idx - 1]);
-         */
-        /*     } */
-
-        /*     memmove(&gfxOpenGL21(self)->recycled_line_textures[clear_num], */
-        /*             gfxOpenGL21(self)->recycled_line_textures, */
-        /*             (ARRAY_SIZE(gfxOpenGL21(self)->recycled_line_textures) -
-         */
-        /*              clear_num) * */
-        /*               sizeof(Texture)); */
-
-        /*     gfxOpenGL21(self)->recycled_line_textures[insert_point] = */
-        /*       (Texture){ .id = proxy[PROXY_INDEX_TEXTURE], */
-        /*                  .w  = proxy[PROXY_INDEX_TEXTURE_SIZE], */
-        /*                  .h  = gfxOpenGL21(self)->line_height_pixels }; */
-
-        /*     if (unlikely(clear_num == 2)) { */
-        /*         gfxOpenGL21(self)->recycled_line_textures[insert_point + 1] =
-         */
-        /*           (Texture){ .id = proxy[PROXY_INDEX_TEXTURE_BLINK], */
-        /*                      .w  = proxy[PROXY_INDEX_TEXTURE_SIZE], */
-        /*                      .h  = gfxOpenGL21(self)->line_height_pixels };
-         */
-        /*     } */
-
-        /* } else { */
+    // TODO: store for reuse
+    if (likely(proxy[PROXY_INDEX_TEXTURE])) {
         glDeleteTextures(unlikely(proxy[PROXY_INDEX_TEXTURE_BLINK]) ? 2 : 1,
-                         (GLuint*)&proxy[0]);
-        /* } */
-        proxy[PROXY_INDEX_TEXTURE]       = 0;
-        proxy[PROXY_INDEX_TEXTURE_BLINK] = 0;
+                         (GLuint*)&proxy[PROXY_INDEX_TEXTURE]);
+    } else if (unlikely(proxy[PROXY_INDEX_TEXTURE_BLINK])) {
+        glDeleteTextures(1, (GLuint*)&proxy[PROXY_INDEX_TEXTURE_BLINK]);
     }
+    proxy[PROXY_INDEX_TEXTURE]       = 0;
+    proxy[PROXY_INDEX_TEXTURE_BLINK] = 0;
+    proxy[PROXY_INDEX_TEXTURE_SIZE]  = 0;
+    proxy[PROXY_INDEX_HAS_BLINKING]  = 0;
 }
 
 void GfxOpenGL21_destroy(Gfx* self)

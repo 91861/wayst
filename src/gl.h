@@ -260,7 +260,7 @@ static inline void Framebuffer_generate_color_attachment(
     gl_check_error();
 }
 
-static inline Texture Framebuffer_get_color_texture(Framebuffer* self)
+static inline Texture Framebuffer_extract_color_texture(Framebuffer* self)
 {
     Texture tmp        = self->color_tex;
     self->color_tex.id = 0;
