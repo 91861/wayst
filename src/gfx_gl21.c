@@ -53,6 +53,7 @@
 #define PROXY_INDEX_TEXTURE_SIZE  2
 #define PROXY_INDEX_HAS_BLINKING  3
 
+
 enum GlyphColor
 {
     GLYPH_COLOR_MONO,
@@ -535,7 +536,7 @@ Cache_get_glyph(GfxOpenGL21* gfx, GlyphMap* self, FT_Face face, char32_t code)
     // rgb texture width i 1/3 of its bitmap width
     int actual_width =
       gfx->g->bitmap.width /
-      (color || fallback_font || gfx->is_main_font_rgb ? 3 : 1);
+        (!color && (fallback_font || gfx->is_main_font_rgb) ? 3 : 1);
 
     FT_Bitmap conversion_map;
     if (bitmap_is_packed) {
@@ -578,7 +579,6 @@ Cache_get_glyph(GfxOpenGL21* gfx, GlyphMap* self, FT_Face face, char32_t code)
       // TODO: we can use RGB to flip subpixel order
       color ? GL_BGRA
             : (fallback_font || gfx->is_main_font_rgb) ? GL_RGB : GL_RED,
-
       GL_UNSIGNED_BYTE,
       bitmap_is_packed ? conversion_map.buffer : gfx->g->bitmap.buffer);
 
