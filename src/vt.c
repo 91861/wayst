@@ -96,6 +96,8 @@ static void Vt_push_title(Vt* self);
 
 static void Vt_pop_title(Vt* self);
 
+static inline void Vt_insert_char_at_cursor(Vt* self, VtRune c);
+
 static Vector_char line_to_string(Vector_VtRune* line,
                                   size_t         begin,
                                   size_t         end,
@@ -786,7 +788,9 @@ __attribute__((always_inline)) static inline bool is_csi_sequence_terminated(
     if (!size)
         return false;
 
-    return isalpha(seq[size - 1]);
+    return isalpha(seq[size - 1]) || seq[size - 1] == '@' ||
+           seq[size - 1] == '{' || seq[size - 1] == '}' ||
+           seq[size - 1] == '~' || seq[size - 1] == '|';
 }
 
 __attribute__((always_inline)) static inline bool is_osc_sequence_terminated(
@@ -1412,7 +1416,8 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
                 /* <ESC>[ Ps K - clear(erase) line right of cursor (EL)
                  * none/0 - right 1 - left 2 - all */
                 case 'K': {
-                    int arg = *seq == 'K' ? 0 : short_sequence_get_int_argument(seq);
+                    int arg =
+                      *seq == 'K' ? 0 : short_sequence_get_int_argument(seq);
                     switch (arg) {
                         case 0:
                             Vt_clear_right(self);
@@ -1429,6 +1434,15 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
                             WRN("Unknown control sequence: " TERMCOLOR_DEFAULT
                                 "%s\n",
                                 seq);
+                    }
+                } break;
+
+                /* <ECS>[ Ps @ - Insert Ps Chars (ICH) */
+                case '@': {
+                    // TODO: (SL), ECMA-48
+                    int arg = short_sequence_get_int_argument(seq);
+                    for (int i = 0; i < arg; ++i) {
+                        Vt_insert_char_at_cursor(self, space);
                     }
                 } break;
 
@@ -1455,6 +1469,7 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
 
                 /* <ESC>[ Ps A - move cursor up Ps lines (CUU) */
                 case 'A': {
+                    // TODO: (SL), ECMA-48
                     int arg = short_sequence_get_int_argument(seq);
                     for (int i = 0; i < arg; ++i)
                         Vt_cursor_up(self);
