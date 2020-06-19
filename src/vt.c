@@ -348,8 +348,9 @@ static void Vt_select_init_line(Vt* self, int32_t y)
       Vt_visual_top_line(self) + click_y;
 }
 
-__attribute__((always_inline)) static inline void Vt_mark_proxy_damaged(Vt*    self,
-                                                                        size_t idx)
+__attribute__((always_inline)) static inline void Vt_mark_proxy_damaged(
+  Vt*    self,
+  size_t idx)
 {
     self->lines.buf[idx].damaged = true;
 }
@@ -396,8 +397,7 @@ static inline void Vt_clear_all_proxies(Vt* self)
 __attribute__((always_inline)) static inline void
 Vt_mark_proxies_damaged_in_selected_region(Vt* self)
 {
-    Vt_mark_proxies_damaged_in_region(self,
-                                      self->selection.begin_line,
+    Vt_mark_proxies_damaged_in_region(self, self->selection.begin_line,
                                       self->selection.end_line);
 }
 
@@ -1007,7 +1007,7 @@ static void Vt_dump_info(Vt* self)
            self->modes.mouse_motion_on_btn_report);
     printf("  mouse motion reporting:           %d\n",
            self->modes.mouse_motion_report);
-    printf("  x11 compat mouse reporting:       %d\n",
+    printf("  x10 compat mouse reporting:       %d\n",
            self->modes.x10_mouse_compat);
     printf("  no auto wrap:                     %d\n",
            self->modes.no_auto_wrap);
@@ -1412,8 +1412,8 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
                 /* <ESC>[ Ps K - clear(erase) line right of cursor (EL)
                  * none/0 - right 1 - left 2 - all */
                 case 'K': {
-                    switch (
-                      *seq == 'K' ? 0 : short_sequence_get_int_argument(seq)) {
+                    int arg = *seq == 'K' ? 0 : short_sequence_get_int_argument(seq);
+                    switch (arg) {
                         case 0:
                             Vt_clear_right(self);
                             break;
@@ -2089,8 +2089,11 @@ __attribute__((always_inline)) static inline void Pty_handle_OSC(Vt*  self,
         int arg = strtol(tokens.buf[0].buf + 1, NULL, 10);
 
         switch (arg) {
+            /* Change Icon Name and Window Title */
             case 0:
+            /* Change Icon Name */
             case 1:
+            /* Change Window Title */
             case 2:
                 /* Set title */
                 if (tokens.size >= 2) {
@@ -2104,13 +2107,49 @@ __attribute__((always_inline)) static inline void Pty_handle_OSC(Vt*  self,
                 }
                 break;
 
+            /* Set X property on top-level window (prop=val) */
+            case 3:
+                // TODO:
+                WRN("OSC 3 not implemented\n");
+                break;
+
+            /* Modify regular color palette */
+            case 4:
+                // TODO:
+                WRN("OSC 4 not implemented\n");
+                break;
+
+            /* Modify special color palette */
+            case 5:
+                // TODO:
+                WRN("OSC 5 not implemented\n");
+                break;
+
+            /* enable/disable special color */
+            case 6:
+                // TODO:
+                WRN("OSC 6 not implemented\n");
+                break;
+
+            /* pwd info as URI */
+            case 7:
+                // TODO:
+                WRN("OSC 7 not implemented\n");
+                break;
+
+            /* hidden link to URI */
+            case 8:
+                // TODO:
+                WRN("OSC 8 not implemented\n");
+                break;
+
             /* Notification */
             case 777:
+                WRN("OSC 777 not implemented\n");
                 break;
 
             default:
-                WRN("Unknown operating system command:" TERMCOLOR_DEFAULT
-                    " %s\n",
+                WRN("Unknown OSC:" TERMCOLOR_DEFAULT " %s\n",
                     self->parser.active_sequence.buf);
         }
 
@@ -2368,7 +2407,7 @@ __attribute__((always_inline)) static inline void Vt_delete_chars(Vt*    self,
 __attribute__((always_inline)) static inline void Vt_scroll_out_all_content(
   Vt* self)
 {
-    size_t to_add = 0;
+    int64_t to_add = 0;
     for (size_t i = Vt_visual_bottom_line(self) - 1;
          i >= Vt_visual_top_line(self); --i) {
         if (self->lines.buf[i].data.size) {
@@ -2379,7 +2418,7 @@ __attribute__((always_inline)) static inline void Vt_scroll_out_all_content(
     to_add -= Vt_visual_top_line(self);
     to_add += 1;
 
-    for (size_t i = 0; i < to_add; ++i) {
+    for (int64_t i = 0; i < to_add; ++i) {
         Vector_push_VtLine(&self->lines, VtLine_new());
         Vt_empty_line_fill_bg(self, self->lines.size - 1);
     }
@@ -3077,7 +3116,10 @@ application_mod_keypad_response(const uint32_t key)
  * key commands used by the terminal itself
  * @return keypress was consumed */
 __attribute__((always_inline)) static inline bool
-Vt_maybe_handle_application_key(Vt* self, uint32_t key, uint32_t rawkey, uint32_t mods)
+Vt_maybe_handle_application_key(Vt*      self,
+                                uint32_t key,
+                                uint32_t rawkey,
+                                uint32_t mods)
 {
     if (self->unicode_input.active) {
         if (key == 13) {
@@ -3137,12 +3179,13 @@ Vt_maybe_handle_application_key(Vt* self, uint32_t key, uint32_t rawkey, uint32_
             self->callbacks.on_clipboard_sent(
               self->callbacks.user_data, txt.buf); // clipboard_send should free
             return true;
-        } else if (KeyCommand_is_active(&settings.key_commands[KCMD_PASTE], key, rawkey,
-                                        mods)) {
+        } else if (KeyCommand_is_active(&settings.key_commands[KCMD_PASTE], key,
+                                        rawkey, mods)) {
             self->callbacks.on_clipboard_requested(self->callbacks.user_data);
             return true;
         } else if (KeyCommand_is_active(
-                       &settings.key_commands[KCMD_FONT_SHRINK], key, rawkey, mods)) {
+                     &settings.key_commands[KCMD_FONT_SHRINK], key, rawkey,
+                     mods)) {
             --settings.font_size;
             Vt_clear_all_proxies(self);
             self->callbacks.on_font_reload_requseted(self->callbacks.user_data);
@@ -3152,7 +3195,8 @@ Vt_maybe_handle_application_key(Vt* self, uint32_t key, uint32_t rawkey, uint32_
             self->callbacks.on_repaint_required(self->callbacks.user_data);
             return true;
         } else if (KeyCommand_is_active(
-                       &settings.key_commands[KCMD_FONT_ENLARGE], key, rawkey, mods)) {
+                     &settings.key_commands[KCMD_FONT_ENLARGE], key, rawkey,
+                     mods)) {
             ++settings.font_size;
             Vt_clear_all_proxies(self);
             self->callbacks.on_font_reload_requseted(self->callbacks.user_data);
@@ -3161,17 +3205,17 @@ Vt_maybe_handle_application_key(Vt* self, uint32_t key, uint32_t rawkey, uint32_
             Vt_resize(self, cells.first, cells.second);
             self->callbacks.on_repaint_required(self->callbacks.user_data);
             return true;
-        } else if (KeyCommand_is_active(&settings.key_commands[KCMD_DEBUG], key, rawkey,
-                                        mods)) {
+        } else if (KeyCommand_is_active(&settings.key_commands[KCMD_DEBUG], key,
+                                        rawkey, mods)) {
             Vt_dump_info(self);
             return true;
         } else if (KeyCommand_is_active(
-                       &settings.key_commands[KCMD_UNICODE_ENTRY], key, rawkey, mods)) {
+                     &settings.key_commands[KCMD_UNICODE_ENTRY], key, rawkey,
+                     mods)) {
             self->unicode_input.active = true;
             self->callbacks.on_repaint_required(self->callbacks.user_data);
             return true;
         }
-
     }
 
     return false;

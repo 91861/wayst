@@ -8,8 +8,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 #include <uchar.h>
+#include <unistd.h>
 
 #include <fcntl.h>
 #include <pty.h>
@@ -28,7 +28,6 @@
 #include "vector.h"
 
 #include "util.h"
-
 
 typedef struct
 {
@@ -99,24 +98,39 @@ DEF_VECTOR(Vector_VtRune, Vector_destroy_VtRune)
 
 DEF_VECTOR(Vector_char, Vector_destroy_char)
 
-typedef struct VtLine_
+// represents a clickable range of text linked to a URI
+typedef struct
 {
+    size_t begin, end;
+    char*  uri_string;
+} VtUriRange;
 
-    /* Proxy resources need to be regenerated */
-    bool damaged;
+static void VtUriRange_destroy(VtUriRange* self)
+{
+    free(self->uri_string);
+}
+
+DEF_VECTOR(VtUriRange, VtUriRange_destroy)
+
+typedef struct
+{
+    Vector_VtRune data;
 
     /* Arbitrary data used by the renderer */
     VtLineProxy proxy;
 
+    Vector_VtUriRange uris;
+
     /* Can be split by resizing window */
-    bool reflowable;
+    bool reflowable : 1;
 
     /* Can be merged into previous line */
-    bool rejoinable;
+    bool rejoinable : 1;
 
-    bool was_reflown;
+    /* Proxy resources need to be regenerated */
+    bool damaged : 1;
 
-    Vector_VtRune data;
+    bool was_reflown : 1;
 
 } VtLine;
 
@@ -265,10 +279,8 @@ typedef struct _Vt
             PARSER_STATE_CHARSET_G3  = '+',
         } state;
 
-
-        bool in_mb_seq;
+        bool      in_mb_seq;
         mbstate_t input_mbstate;
-        
 
         VtRune char_state; // records character properties
         bool   color_inverted;
