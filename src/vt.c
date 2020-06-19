@@ -98,6 +98,8 @@ static void Vt_pop_title(Vt* self);
 
 static inline void Vt_insert_char_at_cursor(Vt* self, VtRune c);
 
+static inline void Vt_insert_char_at_cursor_with_shift(Vt* self,  VtRune c);
+
 static Vector_char line_to_string(Vector_VtRune* line,
                                   size_t         begin,
                                   size_t         end,
@@ -1442,7 +1444,7 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
                     // TODO: (SL), ECMA-48
                     int arg = short_sequence_get_int_argument(seq);
                     for (int i = 0; i < arg; ++i) {
-                        Vt_insert_char_at_cursor(self, space);
+                        Vt_insert_char_at_cursor_with_shift(self, space);
                     }
                 } break;
 
@@ -2351,6 +2353,7 @@ __attribute__((always_inline)) static inline void Vt_erase_chars(Vt*    self,
     Vt_destroy_line_proxy(self->lines.buf[self->active_line].proxy.data);
 }
 
+
 /**
  * remove characters at cursor, remaining content scrolls left */
 __attribute__((always_inline)) static inline void Vt_delete_chars(Vt*    self,
@@ -2553,6 +2556,27 @@ __attribute__((always_inline, hot)) static inline void Vt_insert_char_at_cursor(
         ++self->cursor_pos;
     }
 }
+
+
+static inline void Vt_insert_char_at_cursor_with_shift(Vt* self,  VtRune c)
+{
+    if (unlikely(self->cursor_pos >= (size_t)self->ws.ws_col)) {
+        if (unlikely(self->modes.no_auto_wrap)) {
+            --self->cursor_pos;
+        } else {
+            self->cursor_pos = 0;
+            Vt_insert_new_line(self);
+            self->lines.buf[self->active_line].rejoinable = true;
+        }
+    }
+
+    VtRune* insert_point = Vector_at_VtRune(&self->lines.buf[self->active_line].data, self->cursor_pos);
+    Vector_insert_VtRune(&self->lines.buf[self->active_line].data, insert_point, c);
+
+    Vt_mark_proxy_damaged(self, self->active_line);
+}
+
+
 
 __attribute__((always_inline)) static inline void Vt_empty_line_fill_bg(
   Vt*    self,
