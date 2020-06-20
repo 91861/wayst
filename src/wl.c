@@ -181,8 +181,6 @@ typedef struct
 
     int32_t   kbd_repeat_dealy, kbd_repeat_rate;
     uint32_t  keycode_to_repeat;
-    uint32_t  raw_keycode_to_repeat;
-    uint32_t  modstate_to_repeat;
     uint32_t  last_button_pressed;
     TimePoint repeat_point;
 
@@ -480,8 +478,9 @@ static void keyboard_handle_keymap(void*               data,
 
     ASSERT(settings.locale, "locale string is NULL")
     const char* compose_file_name = getenv("XCOMPOSEFILE");
-    FILE* compose_file          = NULL;
-    if (compose_file_name && *compose_file_name && (compose_file = fopen(compose_file_name, "r"))) {
+    FILE*       compose_file      = NULL;
+    if (compose_file_name && *compose_file_name &&
+        (compose_file = fopen(compose_file_name, "r"))) {
         LOG("using XCOMPOSEFILE = %s\n", compose_file_name);
         globalWl->xkb.compose_table = xkb_compose_table_new_from_file(
           globalWl->xkb.ctx, compose_file, settings.locale,
@@ -542,23 +541,25 @@ static void keyboard_handle_key(void*               data,
                                 uint32_t            key,
                                 uint32_t            state)
 {
-    globalWl->serial = serial;
-    FLAG_SET(((struct WindowBase*)data)->state_flags, WINDOW_NEEDS_SWAP);
+    bool               is_repeat_event = !keyboard;
+    struct WindowBase* win             = data;
+    uint32_t           utf, code = key + 8;
+    xkb_keysym_t       sym, rawsym, composed_sym;
 
-    if (!FLAG_IS_SET(((struct WindowBase*)data)->state_flags,
-                     WINDOW_POINTER_HIDDEN)) {
-        FLAG_SET(((struct WindowBase*)data)->state_flags,
-                 WINDOW_POINTER_HIDDEN);
-        cursor_set(NULL, serial);
+    if (!is_repeat_event) {
+        globalWl->serial = serial;
+        FLAG_SET(win->state_flags, WINDOW_NEEDS_SWAP);
+        if (!FLAG_IS_SET(win->state_flags, WINDOW_POINTER_HIDDEN)) {
+            FLAG_SET(win->state_flags, WINDOW_POINTER_HIDDEN);
+            cursor_set(NULL, serial);
+        }
     }
 
-    struct WindowBase* win = data;
-
-    uint32_t     code, utf;
-    xkb_keysym_t sym, rawsym, composed_sym;
-
-    code = key + 8;
     sym = composed_sym = xkb_state_key_get_one_sym(globalWl->xkb.state, code);
+
+    if (keysym_is_mod(sym))
+        return;
+
     rawsym = xkb_state_key_get_one_sym(globalWl->xkb.clean_state, code);
 
     if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
@@ -571,7 +572,7 @@ static void keyboard_handle_key(void*               data,
         utf = xkb_state_key_get_utf32(globalWl->xkb.state, code);
     }
 
-    bool no_consume = utf ? true : !keysym_is_consumed(sym);
+    bool is_not_consumed = utf ? true : !keysym_is_consumed(sym);
 
     uint32_t final_mods = 0;
     uint32_t mods =
@@ -587,36 +588,22 @@ static void keyboard_handle_key(void*               data,
         FLAG_SET(final_mods, MODIFIER_SHIFT);
     }
 
-    bool repeat = true;
-
-    switch (sym) {
-        case XKB_KEY_Home:
-        case XKB_KEY_End:
-            repeat = false;
-    }
-
     uint32_t final = utf ? utf : sym;
 
-    LOG("wl_key:{ state: %u, sym: %u, final: %u, raw: %u, key: %u, code: %u, mods: %u, "
-        "consume?: %d }\n",
-        state, sym, final, rawsym, key, code, mods, no_consume);
+    if (state == WL_KEYBOARD_KEY_STATE_PRESSED && is_not_consumed) {
+        globalWl->keycode_to_repeat = key;
 
-    if (state == WL_KEYBOARD_KEY_STATE_PRESSED && no_consume) {
-        if (repeat) {
-            win->repeat_count               = 0;
-            globalWl->keycode_to_repeat     = final;
-            globalWl->raw_keycode_to_repeat = rawsym;
-            globalWl->modstate_to_repeat    = final_mods;
+        if (!is_repeat_event) {
+            win->repeat_count = 0;
             globalWl->repeat_point =
               TimePoint_ms_from_now(globalWl->kbd_repeat_dealy);
-        } else {
-            globalWl->keycode_to_repeat = 0;
         }
 
-        if (win->callbacks.key_handler)
+        if (win->callbacks.key_handler) {
             win->callbacks.key_handler(win->callbacks.user_data, final, rawsym,
                                        final_mods);
-    } else if (globalWl->keycode_to_repeat == final) {
+        }
+    } else if (globalWl->keycode_to_repeat == key) {
         globalWl->keycode_to_repeat = 0;
     }
 }
@@ -1352,10 +1339,8 @@ static inline void WindowWl_repeat_check(struct WindowBase* self)
             : 2);
         self->repeat_count = MIN(self->repeat_count + 1, INT32_MAX - 1);
 
-        if (self->callbacks.key_handler)
-            self->callbacks.key_handler(
-              self->callbacks.user_data, globalWl->keycode_to_repeat,
-              globalWl->raw_keycode_to_repeat, globalWl->modstate_to_repeat);
+        keyboard_handle_key(self, NULL, 0, 0, globalWl->keycode_to_repeat,
+                            WL_KEYBOARD_KEY_STATE_PRESSED);
     }
 }
 
