@@ -616,7 +616,7 @@ static void keyboard_handle_key(void*               data,
         if (win->callbacks.key_handler)
             win->callbacks.key_handler(win->callbacks.user_data, final, rawsym,
                                        final_mods);
-    } else {
+    } else if (globalWl->keycode_to_repeat == final) {
         globalWl->keycode_to_repeat = 0;
     }
 }
