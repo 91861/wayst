@@ -207,7 +207,7 @@ typedef struct
     struct wl_data_source* data_source;
 
     char* data_offer_mime;
-    char* data_source_text;
+    const char* data_source_text;
 
     bool got_discrete_axis_event;
 

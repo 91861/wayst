@@ -63,7 +63,8 @@
 #define CLAMP(_v, _lo, _hi) ((_v) > (_hi) ? (_hi) : (_v) < (_lo) ? (_lo) : (_v))
 
 #define ARRAY_SIZE(_array) (sizeof((_array)) / sizeof((_array[0])))
-#define ARRAY_LAST(_array) (_array[(sizeof((_array)) / sizeof((_array[0]))) -1])
+#define ARRAY_LAST(_array)                                                     \
+    (_array[(sizeof((_array)) / sizeof((_array[0]))) - 1])
 
 #define STATIC_ASSERT(cond, msg)                                               \
     typedef char static_assertion_##msg[(cond) ? 1 : -1]
@@ -76,6 +77,7 @@
     }
 
 #ifdef DEBUG
+
 #define ERR(...)                                                               \
     {                                                                          \
         fputs("\e[31m", stderr);                                               \
@@ -99,7 +101,26 @@
     }
 
 #define LOG(...) fprintf(stderr, __VA_ARGS__)
+
+static inline void* _call_fp_helper(const char* const msg,
+                                    const char* const fname,
+                                    const char* const func,
+                                    const int         line)
+{
+    fprintf(stderr, "\e[31m%s In File: \"%s\" function: \"%s\" line: %d \e[m\n",
+            msg, fname, func, line);
+    exit(EXIT_FAILURE);
+}
+
+// call function pointer matching T(*)(void*, ...), error if NULL
+#define CALL_FP(_func, _void_ptr, ...)                                         \
+    (_func)((_func) ? (_void_ptr)                                              \
+                    : _call_fp_helper("function \'" #_func "\' is NULL.",      \
+                                      __FILE__, __func__, __LINE__),           \
+            ##__VA_ARGS__)
+
 #else
+
 #define ASSERT(...)                                                            \
     {                                                                          \
         ;                                                                      \
@@ -119,6 +140,9 @@
         fputs("\e[m\n", stderr);                                               \
         exit(EXIT_FAILURE);                                                    \
     }
+
+#define CALL_FP(_func, _void_ptr, ...) ((_func)((_void_ptr), ##__VA_ARGS__))
+
 #endif
 
 #ifndef asprintf
@@ -386,42 +410,45 @@ __attribute__((always_inline)) static inline uint32_t utf8_decode(
     return res;
 }
 
-/** assumes valid input */
-__attribute__((always_inline)) static inline uint32_t utf8_len(uint32_t code)
-{
-    //                              2^7  2^11  2^16   2^21
-    static const uint32_t max[] = { 128, 2048, 65536, 2097152 };
-    for (uint32_t i = 0; i < 4; ++i)
-        if (code < max[i])
-            return i + 1;
-    return 0;
-}
+/* /\** assumes valid input *\/ */
+/* __attribute__((always_inline)) static inline uint32_t utf8_len(uint32_t code)
+ */
+/* { */
+/*     //                              2^7  2^11  2^16   2^21 */
+/*     static const uint32_t max[] = { 128, 2048, 65536, 2097152 }; */
+/*     for (uint32_t i = 0; i < 4; ++i) */
+/*         if (code < max[i]) */
+/*             return i + 1; */
+/*     return 0; */
+/* } */
 
-/**
- * @return bytes written (sequence length), 0 on failure */
-__attribute__((always_inline)) static inline uint32_t utf8_encode(uint32_t code,
-                                                                  char* output)
-{
-    uint32_t len = utf8_len(code);
+/* /\** */
+/*  * @return bytes written (sequence length), 0 on failure *\/ */
+/* __attribute__((always_inline)) static inline uint32_t utf8_encode(uint32_t
+ * code, */
+/*                                                                   char*
+ * output) */
+/* { */
+/*     uint32_t len = utf8_len(code); */
 
-    switch (len) {
-        case 1:
-            *output = (char)code;
-            break;
-        case 2:
-            output[1] = 0b10000000 | (0b00111111 & code);
-            output[0] = 0b11000000 | (0b00011111 & (code >> 6));
-            break;
-        case 3:
-            output[2] = 0b10000000 | (0b00111111 & code);
-            output[1] = 0b10000000 | (0b00111111 & (code >> 6));
-            output[0] = 0b11100000 | (0b00001111 & (code >> 6));
-            break;
-        case 4:
-            output[3] = 0b10000000 | (0b00111111 & code);
-            output[2] = 0b10000000 | (0b00111111 & (code >> 6));
-            output[1] = 0b10000000 | (0b00111111 & (code >> 6));
-            output[0] = 0b11110000 | (0b00000111 & (code >> 6));
-    }
-    return len;
-}
+/*     switch (len) { */
+/*         case 1: */
+/*             *output = (char)code; */
+/*             break; */
+/*         case 2: */
+/*             output[1] = 0b10000000 | (0b00111111 & code); */
+/*             output[0] = 0b11000000 | (0b00011111 & (code >> 6)); */
+/*             break; */
+/*         case 3: */
+/*             output[2] = 0b10000000 | (0b00111111 & code); */
+/*             output[1] = 0b10000000 | (0b00111111 & (code >> 6)); */
+/*             output[0] = 0b11100000 | (0b00001111 & (code >> 6)); */
+/*             break; */
+/*         case 4: */
+/*             output[3] = 0b10000000 | (0b00111111 & code); */
+/*             output[2] = 0b10000000 | (0b00111111 & (code >> 6)); */
+/*             output[1] = 0b10000000 | (0b00111111 & (code >> 6)); */
+/*             output[0] = 0b11110000 | (0b00000111 & (code >> 6)); */
+/*     } */
+/*     return len; */
+/* } */

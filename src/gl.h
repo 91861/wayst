@@ -200,19 +200,21 @@ static inline void Framebuffer_assert_complete(Framebuffer* self)
     GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
 
     if (status != GL_FRAMEBUFFER_COMPLETE) {
-        const char* ss;
+        const char* string;
         switch (status) {
             case GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT:
-                ss = "GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT";
+                string = "GL_FRAMEBUFFER_INCOMPLETE_ATTACHMENT";
                 break;
             case GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT:
-                ss = "GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT";
+                string = "GL_FRAMEBUFFER_INCOMPLETE_MISSING_ATTACHMENT";
                 break;
             case GL_FRAMEBUFFER_UNSUPPORTED:
-                ss = "GL_FRAMEBUFFER_UNSUPPORTED";
+                string = "GL_FRAMEBUFFER_UNSUPPORTED";
                 break;
+            default:
+                string = "UNKNOWN ERROR CODE";
         }
-        ERR("Framebuffer error, status %s", ss);
+        ERR("Framebuffer error, status %s", string);
     }
 }
 #else
@@ -237,10 +239,9 @@ static inline void Framebuffer_attach_as_color(Framebuffer* self,
     gl_check_error();
 }
 
-static inline void Framebuffer_generate_color_attachment(
-  Framebuffer* self,
-  uint32_t     w,
-  int32_t      h)
+static inline void Framebuffer_generate_color_attachment(Framebuffer* self,
+                                                         uint32_t     w,
+                                                         int32_t      h)
 {
     glBindFramebuffer(GL_FRAMEBUFFER, self->id);
 

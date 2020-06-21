@@ -98,7 +98,7 @@ static void Vt_pop_title(Vt* self);
 
 static inline void Vt_insert_char_at_cursor(Vt* self, VtRune c);
 
-static inline void Vt_insert_char_at_cursor_with_shift(Vt* self,  VtRune c);
+static inline void Vt_insert_char_at_cursor_with_shift(Vt* self, VtRune c);
 
 static Vector_char line_to_string(Vector_VtRune* line,
                                   size_t         begin,
@@ -129,9 +129,8 @@ static void Vt_update_scrollbar_vis(Vt* self)
         } else if (TimePoint_passed(self->scrollbar.hide_time)) {
             if (self->scrollbar.visible) {
                 self->scrollbar.visible = false;
-
-                ASSERT(self->callbacks.on_repaint_required, "callback is NULL");
-                self->callbacks.on_repaint_required(self->callbacks.user_data);
+                CALL_FP(self->callbacks.on_repaint_required,
+                        self->callbacks.user_data);
             }
         }
     }
@@ -153,8 +152,7 @@ static bool Vt_scrollbar_consume_click(Vt*      self,
 
     if (self->scrollbar.dragging && !state) {
         self->scrollbar.dragging = false;
-        ASSERT(self->callbacks.on_repaint_required, "callback is NULL");
-        self->callbacks.on_repaint_required(self->callbacks.user_data);
+        CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
         return false;
     }
 
@@ -213,8 +211,8 @@ static bool Vt_scrollbar_consume_click(Vt*      self,
     }
 
     Vt_update_scrollbar_dims(self);
-    ASSERT(self->callbacks.on_repaint_required, "callback is NULL");
-    self->callbacks.on_repaint_required(self->callbacks.user_data);
+
+    CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
 
     return true;
 }
@@ -237,8 +235,7 @@ static bool Vt_scrollbar_consume_drag(Vt*      self,
         Vt_visual_scroll_to(self, target_line);
         Vt_update_scrollbar_dims(self);
 
-        ASSERT(self->callbacks.on_repaint_required, "callback is NULL");
-        self->callbacks.on_repaint_required(self->callbacks.user_data);
+        CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
     }
 
     return true;
@@ -436,8 +433,7 @@ static void Vt_select_set_end(Vt* self, int32_t x, int32_t y)
         self->selection.end_line     = Vt_visual_top_line(self) + click_y;
         self->selection.end_char_idx = click_x;
 
-        ASSERT(self->callbacks.on_repaint_required, "callback is NULL");
-        self->callbacks.on_repaint_required(self->callbacks.user_data);
+        CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
 
         Vt_clear_proxies_in_region(self, MIN(old_end, self->selection.end_line),
                                    MAX(old_end, self->selection.end_line));
@@ -505,14 +501,13 @@ static bool Vt_select_consume_click(Vt*      self,
             } else if (self->selection.click_count == 1) {
                 Vt_select_end(self);
                 Vt_select_init_word(self, x, y);
-
-                ASSERT(self->callbacks.on_repaint_required, "callback is NULL");
-                self->callbacks.on_repaint_required(self->callbacks.user_data);
+                CALL_FP(self->callbacks.on_repaint_required,
+                        self->callbacks.user_data);
             } else if (self->selection.click_count == 2) {
                 Vt_select_end(self);
                 Vt_select_init_line(self, y);
-                ASSERT(self->callbacks.on_repaint_required, "callback is NULL");
-                self->callbacks.on_repaint_required(self->callbacks.user_data);
+                CALL_FP(self->callbacks.on_repaint_required,
+                        self->callbacks.user_data);
             }
         }
         return true;
@@ -1116,8 +1111,7 @@ static void Vt_reflow_expand(Vt* self, uint32_t x)
 static void Vt_reflow_shrink(Vt* self, uint32_t x)
 {
     size_t insertions_made = 0;
-
-    size_t bottom_bound = self->active_line;
+    size_t bottom_bound    = self->active_line;
 
     while (bottom_bound > 0 && self->lines.buf[bottom_bound].rejoinable) {
         --bottom_bound;
@@ -1257,10 +1251,9 @@ void Vt_resize(Vt* self, uint32_t x, uint32_t y)
         oy = y;
     }
 
-    ASSERT(self->callbacks.on_window_size_from_cells_requested,
-           "callback is NULL");
-    Pair_uint32_t px = self->callbacks.on_window_size_from_cells_requested(
-      self->callbacks.user_data, x, y);
+    Pair_uint32_t px =
+      CALL_FP(self->callbacks.on_window_size_from_cells_requested,
+              self->callbacks.user_data, x, y);
 
     self->ws = (struct winsize){
         .ws_col = x, .ws_row = y, .ws_xpixel = px.first, .ws_ypixel = px.second
@@ -1269,8 +1262,11 @@ void Vt_resize(Vt* self, uint32_t x, uint32_t y)
     self->pixels_per_cell_x = (double)self->ws.ws_xpixel / self->ws.ws_col;
     self->pixels_per_cell_y = (double)self->ws.ws_ypixel / self->ws.ws_row;
 
-    if (ioctl(self->master, TIOCSWINSZ, &self->ws) < 0)
-        WRN("IO operation failed %s\n", strerror(errno));
+    if (ioctl(self->master, TIOCSWINSZ, &self->ws) < 0) {
+        WRN("ioctl(%d, TIOCSWINSZ, winsize { %d, %d, %d, %d }) failed:  %s\n",
+            self->master, self->ws.ws_col, self->ws.ws_row, self->ws.ws_xpixel,
+            self->ws.ws_ypixel, strerror(errno));
+    }
 
     self->scroll_region_top    = 0;
     self->scroll_region_bottom = self->ws.ws_row;
@@ -1305,7 +1301,7 @@ short_sequence_get_int_argument(const char* seq)
     return *seq == 0 || seq[1] == 0 ? 1 : strtol(seq, NULL, 10);
 }
 
-__attribute__((always_inline)) static inline void Vt_handle_mode_set(Vt*  self,
+__attribute__((always_inline)) static inline void Vt_handle_dec_mode(Vt*  self,
                                                                      int  code,
                                                                      bool on)
 {
@@ -1329,6 +1325,14 @@ __attribute__((always_inline)) static inline void Vt_handle_mode_set(Vt*  self,
             self->modes.auto_repeat = on;
             break;
 
+        /* Show toolbar (rxvt) */
+        case 10:
+            break;
+
+        /* Start Blinking Cursor (AT&T 610) */
+        case 12:
+            break;
+
             /* hide/show cursor (DECTCEM) */
         case 25:
             self->cursor.hidden = on;
@@ -1338,14 +1342,22 @@ __attribute__((always_inline)) static inline void Vt_handle_mode_set(Vt*  self,
             // case 12:
             // break;
 
+        /* X11 xterm mouse protocol. */
         case 1000:
             self->modes.mouse_btn_report = !on;
             break;
 
+        /* Hilite mouse tracking, xterm */
+        case 1001:
+            WRN("Hilite mouse tracking not implemented\n");
+            break;
+
+        /* xterm cell motion mouse tracking */
         case 1002:
             self->modes.mouse_motion_on_btn_report = !on;
             break;
 
+        /* xterm all motion tracking */
         case 1003:
             self->modes.mouse_motion_report = on;
             break;
@@ -1354,8 +1366,31 @@ __attribute__((always_inline)) static inline void Vt_handle_mode_set(Vt*  self,
             self->modes.window_focus_events_report = !on;
             break;
 
+        /* utf8 Mouse Mode */
+        case 1005:
+            WRN("utf8 mouse mode not implemented\n");
+            break;
+
+        /* SGR mouse mode */
         case 1006:
             self->modes.extended_report = !on;
+            break;
+
+        /* urxvt mouse mode */
+        case 1015:
+            WRN("urxvt mouse mode not implemented\n");
+            break;
+
+        case 1034:
+            WRN("xterm eightBitInput not implemented\n");
+            break;
+
+        case 1035:
+            WRN("xterm numLock not implemented\n");
+            break;
+
+        case 1036:
+            WRN("xterm metaSendsEscape not implemented\n");
             break;
 
         case 1037:
@@ -1366,27 +1401,44 @@ __attribute__((always_inline)) static inline void Vt_handle_mode_set(Vt*  self,
             self->modes.no_alt_sends_esc = !on;
             break;
 
+        /* bell sets urgent WM hint */
+        case 1042:
+            WRN("Urgency hints not implemented\n");
+            break;
+
+        /* bell raises window */
+        case 1043:
+            WRN("xterm popOnBell not implemented\n");
+            break;
+
+        /* Use alternate screen buffer, xterm */
         case 47:
+        /* Also use alternate screen buffer, xterm */
         case 1047:
+        /* After saving the cursor, switch to the Alternate Screen Buffer,
+         * clearing it first. */
         case 1049:
-            if (on)
+            if (on) {
                 Vt_alt_buffer_off(self, code == 1049);
-            else
+            } else {
                 Vt_alt_buffer_on(self, code == 1049);
+            }
             break;
 
         case 2004:
             self->modes.bracket_paste = on;
             break;
 
-        case 1001:
-        case 1005:
-        case 1015:
-            WRN("Requested unimplemeted mouse mode %d\n", code);
+        case 1051: // Sun function-key mode, xterm.
+        case 1052: // HP function-key mode, xterm.
+        case 1053: // SCO function-key mode, xterm.
+        case 1060: // legacy keyboard emulation, i.e, X11R6,
+        case 1061: // VT220 keyboard emulation, xterm.
+            WRN("Unimplemented keyboard option\n");
             break;
 
         default:
-            WRN("Unknown DECSET/DECRET code: " TERMCOLOR_DEFAULT "%d\n", code);
+            WRN("Unknown DECSET/DECRST code: " TERMCOLOR_DEFAULT "%d\n", code);
     }
 }
 
@@ -1401,6 +1453,15 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
         char* seq       = self->parser.active_sequence.buf;
         char  last_char = self->parser.active_sequence
                            .buf[self->parser.active_sequence.size - 2];
+        bool is_single_arg = !strchr(seq, ';') && !strchr(seq, ':');
+
+#define MULTI_ARG_IS_ERROR                                                     \
+    if (!is_single_arg) {                                                      \
+        WRN("Unexpected additional arguments for CSI "                         \
+            "sequence " TERMCOLOR_DEFAULT "\'%s\'\n",                          \
+            seq);                                                              \
+        break;                                                                 \
+    }
 
         if (*seq != '?') {
 
@@ -1418,6 +1479,7 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
                 /* <ESC>[ Ps K - clear(erase) line right of cursor (EL)
                  * none/0 - right 1 - left 2 - all */
                 case 'K': {
+                    MULTI_ARG_IS_ERROR
                     int arg =
                       *seq == 'K' ? 0 : short_sequence_get_int_argument(seq);
                     switch (arg) {
@@ -1433,7 +1495,7 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
                             break;
 
                         default:
-                            WRN("Unknown control sequence: " TERMCOLOR_DEFAULT
+                            WRN("Unknown CSI(EL) sequence: " TERMCOLOR_DEFAULT
                                 "%s\n",
                                 seq);
                     }
@@ -1441,8 +1503,8 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
 
                 /* <ECS>[ Ps @ - Insert Ps Chars (ICH) */
                 case '@': {
-                    // TODO: (SL), ECMA-48
-                    int arg = short_sequence_get_int_argument(seq);
+                    MULTI_ARG_IS_ERROR // TODO: (SL), ECMA-48
+                      int arg = short_sequence_get_int_argument(seq);
                     for (int i = 0; i < arg; ++i) {
                         Vt_insert_char_at_cursor_with_shift(self, space);
                     }
@@ -1450,6 +1512,7 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
 
                 /* <ESC>[ Ps C - move cursor right (forward) Ps lines (CUF) */
                 case 'C': {
+                    MULTI_ARG_IS_ERROR
                     int arg = short_sequence_get_int_argument(seq);
                     for (int i = 0; i < arg; ++i)
                         Vt_cursor_right(self);
@@ -1457,6 +1520,7 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
 
                 /* <ESC>[ Ps L - Insert line at cursor shift rest down (IL) */
                 case 'L': {
+                    MULTI_ARG_IS_ERROR
                     int arg = short_sequence_get_int_argument(seq);
                     for (int i = 0; i < arg; ++i)
                         Vt_insert_line(self);
@@ -1464,6 +1528,7 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
 
                 /* <ESC>[ Ps D - move cursor left (back) Ps lines (CUB) */
                 case 'D': {
+                    MULTI_ARG_IS_ERROR
                     int arg = short_sequence_get_int_argument(seq);
                     for (int i = 0; i < arg; ++i)
                         Vt_cursor_left(self);
@@ -1471,14 +1536,15 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
 
                 /* <ESC>[ Ps A - move cursor up Ps lines (CUU) */
                 case 'A': {
-                    // TODO: (SL), ECMA-48
-                    int arg = short_sequence_get_int_argument(seq);
+                    MULTI_ARG_IS_ERROR // TODO: (SL), ECMA-48
+                      int arg = short_sequence_get_int_argument(seq);
                     for (int i = 0; i < arg; ++i)
                         Vt_cursor_up(self);
                 } break;
 
                 /* <ESC>[ Ps B - move cursor down Ps lines (CUD) */
                 case 'B': {
+                    MULTI_ARG_IS_ERROR
                     int arg = short_sequence_get_int_argument(seq);
                     for (int i = 0; i < arg; ++i)
                         Vt_cursor_down(self);
@@ -1488,6 +1554,7 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
                 case '`':
                 /* <ESC>[ Ps G - move cursor to column Ps (CHA)*/
                 case 'G': {
+                    MULTI_ARG_IS_ERROR
                     self->cursor_pos =
                       MIN(short_sequence_get_int_argument(seq) - 1,
                           self->ws.ws_col);
@@ -1495,6 +1562,7 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
 
                 /* <ESC>[ Ps J - Erase display (ED) - clear... */
                 case 'J': {
+                    MULTI_ARG_IS_ERROR
                     if (*seq == 'J') /* ...from cursor to end of screen */
                         Vt_erase_to_end(self);
                     else {
@@ -1534,6 +1602,7 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
 
                 /* <ESC>[ Ps d - move cursor to row Ps (VPA) */
                 case 'd': {
+                    MULTI_ARG_IS_ERROR
                     /* origin is 1:1 */
                     Vt_move_cursor(self, self->cursor_pos,
                                    short_sequence_get_int_argument(seq) - 1);
@@ -1542,18 +1611,23 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
                 /* <ESC>[ Ps ; Ps r - Set scroll region (top;bottom) (DECSTBM)
                  * default: full window */
                 case 'r': {
+                    uint32_t top, bottom;
 
-                    ASSERT(self->callbacks.on_number_of_cells_requested,
-                           "callback is NULL");
-                    uint32_t top = 0, bottom = self->callbacks
-                                                 .on_number_of_cells_requested(
-                                                   self->callbacks.user_data)
-                                                 .second;
                     if (*seq != 'r') {
-                        sscanf(seq, "%u;%u", &top, &bottom);
+                        if (sscanf(seq, "%u;%u", &top, &bottom) == EOF) {
+                            WRN("invalid CSI(DECSTBM) sequence %s\n", seq);
+                            break;
+                        }
                         --top;
                         --bottom;
+                    } else {
+                        top = 0;
+                        bottom =
+                          CALL_FP(self->callbacks.on_number_of_cells_requested,
+                                  self->callbacks.user_data)
+                            .second;
                     }
+
                     self->scroll_region_top    = top;
                     self->scroll_region_bottom = bottom;
                 } break;
@@ -1564,7 +1638,10 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
                 case 'H': {
                     uint32_t x = 0, y = 0;
                     if (*seq != 'H') {
-                        sscanf(seq, "%u;%u", &y, &x);
+                        if (sscanf(seq, "%u;%u", &y, &x) == EOF) {
+                            WRN("invalid CSI(CUP) sequence %s\n", seq);
+                            break;
+                        }
                         --x;
                         --y;
                     }
@@ -1573,13 +1650,13 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
 
                 /* <ESC>[...c - Send device attributes (Primary DA) */
                 case 'c': {
-                    /* VT 102 */
-                    memcpy(self->out_buf, "\e[?6c", 6);
+                    memcpy(self->out_buf, "\e[?6c", 6); /* report VT 102 */
                     Vt_write(self);
                 } break;
 
                 /* <ESC>[...n - Device status report (DSR) */
                 case 'n': {
+                    MULTI_ARG_IS_ERROR
                     int arg = short_sequence_get_int_argument(seq);
                     if (arg == 5) {
                         /* 5 - is terminal ok
@@ -1596,6 +1673,7 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
 
                 /* <ESC>[ Ps M - Delete lines (default = 1) (DL) */
                 case 'M': {
+                    MULTI_ARG_IS_ERROR
                     int arg = short_sequence_get_int_argument(seq);
                     for (int i = 0; i < arg; ++i)
                         Vt_delete_line(self);
@@ -1603,6 +1681,7 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
 
                 /* <ESC>[ Ps S - Scroll up (default = 1) (SU) */
                 case 'S': {
+                    MULTI_ARG_IS_ERROR
                     int arg = short_sequence_get_int_argument(seq);
                     for (int i = 0; i < arg; ++i)
                         Vt_scroll_up(self);
@@ -1610,6 +1689,7 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
 
                 /* <ESC>[ Ps T - Scroll down (default = 1) (SD) */
                 case 'T': {
+                    MULTI_ARG_IS_ERROR
                     int arg = short_sequence_get_int_argument(seq);
                     for (int i = 0; i < arg; ++i)
                         Vt_scroll_down(self);
@@ -1617,11 +1697,13 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
 
                 /* <ESC>[ Ps X - Erase Ps Character(s) (default = 1) (ECH) */
                 case 'X':
+                    MULTI_ARG_IS_ERROR
                     Vt_erase_chars(self, short_sequence_get_int_argument(seq));
                     break;
 
                 /* <ESC>[ Ps P - Delete Ps Character(s) (default = 1) (DCH) */
                 case 'P':
+                    MULTI_ARG_IS_ERROR
                     Vt_delete_chars(self, short_sequence_get_int_argument(seq));
                     break;
 
@@ -1631,6 +1713,7 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
 
                 /* <ESC>[ Ps q - Set cursor style (DECSCUSR) */
                 case 'q': {
+                    MULTI_ARG_IS_ERROR
                     int arg = short_sequence_get_int_argument(seq);
                     switch (arg) {
                         case 0:
@@ -1663,6 +1746,16 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
                             WRN("Unknown DECSCUR code:" TERMCOLOR_DEFAULT
                                 " %d\n",
                                 arg);
+                    }
+                } break;
+
+                /* <ESC>[  Pm... l - Reset Mode (RM) */
+                case 'l': {
+                    MULTI_ARG_IS_ERROR
+                    switch (short_sequence_get_int_argument(seq)) {
+                        case 4:
+                            // TODO: turn off IRM
+                            break;
                     }
                 } break;
 
@@ -1723,10 +1816,9 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
                             /* maximize window */
                             else if (args[1] == 1 && nargs >= 2) {
                             } else {
-                                WRN(
-                                  "Invalid control sequence:" TERMCOLOR_DEFAULT
-                                  " %s\n",
-                                  seq);
+                                WRN("Invalid CSI(WindowOps) "
+                                    "sequence:" TERMCOLOR_DEFAULT " %s\n",
+                                    seq);
                             }
                         } break;
 
@@ -1740,12 +1832,9 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
 
                         /* Report window position */
                         case 13: {
-
-                            ASSERT(self->callbacks.on_window_position_requested,
-                                   "callback is NULL");
-                            Pair_uint32_t pos =
-                              self->callbacks.on_window_position_requested(
-                                self->callbacks.user_data);
+                            Pair_uint32_t pos = CALL_FP(
+                              self->callbacks.on_window_position_requested,
+                              self->callbacks.user_data);
                             snprintf(self->out_buf, sizeof self->out_buf,
                                      "\e[3;%d;%d;t", pos.first, pos.second);
                             Vt_write(self);
@@ -1801,9 +1890,8 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
 
                 } break;
 
-                default:;
-                    WRN("Unknown control sequence: " TERMCOLOR_DEFAULT "%s\n",
-                        seq);
+                default:
+                    WRN("Unknown CSI sequence: " TERMCOLOR_DEFAULT "%s\n", seq);
 
             } // end switch
 
@@ -1811,16 +1899,26 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
             /* sequence starts with question mark */
             switch (last_char) {
 
+                /* DEC Private Mode Set (DECSET) */
+                case 'h':
                 /* DEC Private Mode Reset (DECRST) */
                 case 'l': {
-                    int arg = short_sequence_get_int_argument(seq + 1);
-                    Vt_handle_mode_set(self, arg, true);
-                } break;
-
-                /* DEC Private Mode Set (DECSET) */
-                case 'h': {
-                    int arg = short_sequence_get_int_argument(seq + 1);
-                    Vt_handle_mode_set(self, arg, false);
+                    bool               is_enable = last_char == 'l';
+                    Vector_Vector_char tokens =
+                      string_split_on(seq + 1, ";:", NULL);
+                    for (Vector_char* token = NULL;
+                         (token = Vector_iter_Vector_char(&tokens, token));) {
+                        errno     = 0;
+                        long code = strtol(token->buf + 1, NULL, 10);
+                        if (code && !errno) {
+                            Vt_handle_dec_mode(self, code, is_enable);
+                        } else {
+                            WRN("Invalid %s argument: \'%s\'\n",
+                                is_enable ? "DECSET" : "DECRST",
+                                token->buf + 1);
+                        }
+                    }
+                    Vector_destroy_Vector_char(&tokens);
                 } break;
             }
         }
@@ -2100,8 +2198,8 @@ __attribute__((always_inline)) static inline void Pty_handle_OSC(Vt*  self,
                                    self->parser.active_sequence.size)) {
         Vector_push_char(&self->parser.active_sequence, '\0');
 
-        Vector_Vector_char tokens =
-          string_split_on(self->parser.active_sequence.buf, ";:", "\a\b\n\t\v");
+        char*              seq    = self->parser.active_sequence.buf;
+        Vector_Vector_char tokens = string_split_on(seq, ";:", "\a\b\n\t\v");
 
         int arg = strtol(tokens.buf[0].buf + 1, NULL, 10);
 
@@ -2114,13 +2212,10 @@ __attribute__((always_inline)) static inline void Pty_handle_OSC(Vt*  self,
             case 2:
                 /* Set title */
                 if (tokens.size >= 2) {
-                    if (self->title)
-                        free(self->title);
+                    free(self->title);
                     self->title = strdup(tokens.buf[1].buf + 1);
-                    ASSERT(self->callbacks.on_title_changed,
-                           "callback is NULL");
-                    self->callbacks.on_title_changed(self->callbacks.user_data,
-                                                     tokens.buf[1].buf + 1);
+                    CALL_FP(self->callbacks.on_title_changed,
+                            self->callbacks.user_data, tokens.buf[1].buf + 1);
                 }
                 break;
 
@@ -2132,37 +2227,71 @@ __attribute__((always_inline)) static inline void Pty_handle_OSC(Vt*  self,
 
             /* Modify regular color palette */
             case 4:
-                // TODO:
-                WRN("OSC 4 not implemented\n");
-                break;
-
             /* Modify special color palette */
             case 5:
-                // TODO:
-                WRN("OSC 5 not implemented\n");
-                break;
-
             /* enable/disable special color */
             case 6:
                 // TODO:
-                WRN("OSC 6 not implemented\n");
+                WRN("Dynamic colors not implemented\n");
                 break;
 
             /* pwd info as URI */
-            case 7:
-                // TODO:
-                WRN("OSC 7 not implemented\n");
-                break;
+            case 7: {
+                free(self->work_dir);
+                char* uri = seq + 2; // 7;
+                if (streq_wildcard(uri, "file:*") && strlen(uri) >= 8) {
+                    uri += 7; // skip 'file://'
+                    while (*uri && *uri != '/')
+                        ++uri; // skip hostname
+                    self->work_dir = strdup(uri);
+                    LOG("Program changed work dir to \'%s\'\n", self->work_dir);
+                } else {
+                    self->work_dir = NULL;
+                    WRN("Bad URI \'%s\', scheme is not \'file\'\n", uri);
+                }
+            } break;
 
             /* hidden link to URI */
             case 8:
                 // TODO:
-                WRN("OSC 8 not implemented\n");
+                WRN("OSC 8 links not implemented\n");
                 break;
 
-            /* Notification */
+            /* sets dynamic colors for xterm colorOps */
+            case 10:
+            case 11:
+            case 12:
+            case 13:
+            case 14:
+            case 15:
+            case 16:
+            case 17:
+            case 18:
+            case 19:
+                WRN("Dynamic colors not implemented\n");
+                break;
+
+            /* coresponding colorOps resets */
+            case 110:
+            case 111:
+            case 112:
+            case 113:
+            case 114:
+            case 115:
+            case 116:
+            case 117:
+            case 118:
+            case 119:
+                // TODO: reset things, when there are things to reset
+                break;
+
+            case 50:
+                WRN("xterm fontOps not implemented\n");
+                break;
+
+            /* Send desktop notification */
             case 777:
-                WRN("OSC 777 not implemented\n");
+                WRN("OSC 777 notifications not implemented\n");
                 break;
 
             default:
@@ -2352,7 +2481,6 @@ __attribute__((always_inline)) static inline void Vt_erase_chars(Vt*    self,
     self->lines.buf[self->active_line].damaged = true;
     Vt_destroy_line_proxy(self->lines.buf[self->active_line].proxy.data);
 }
-
 
 /**
  * remove characters at cursor, remaining content scrolls left */
@@ -2557,8 +2685,7 @@ __attribute__((always_inline, hot)) static inline void Vt_insert_char_at_cursor(
     }
 }
 
-
-static inline void Vt_insert_char_at_cursor_with_shift(Vt* self,  VtRune c)
+static inline void Vt_insert_char_at_cursor_with_shift(Vt* self, VtRune c)
 {
     if (unlikely(self->cursor_pos >= (size_t)self->ws.ws_col)) {
         if (unlikely(self->modes.no_auto_wrap)) {
@@ -2570,13 +2697,13 @@ static inline void Vt_insert_char_at_cursor_with_shift(Vt* self,  VtRune c)
         }
     }
 
-    VtRune* insert_point = Vector_at_VtRune(&self->lines.buf[self->active_line].data, self->cursor_pos);
-    Vector_insert_VtRune(&self->lines.buf[self->active_line].data, insert_point, c);
+    VtRune* insert_point = Vector_at_VtRune(
+      &self->lines.buf[self->active_line].data, self->cursor_pos);
+    Vector_insert_VtRune(&self->lines.buf[self->active_line].data, insert_point,
+                         c);
 
     Vt_mark_proxy_damaged(self, self->active_line);
 }
-
-
 
 __attribute__((always_inline)) static inline void Vt_empty_line_fill_bg(
   Vt*    self,
@@ -2646,10 +2773,10 @@ Vt_handle_literal(Vt* self, char c)
     } else {
         switch (c) {
             case '\a':
-                if (!settings.no_flash)
-
-                    ASSERT(self->callbacks.on_bell_flash, "callback is NULL");
-                self->callbacks.on_bell_flash(self->callbacks.user_data);
+                if (!settings.no_flash) {
+                    CALL_FP(self->callbacks.on_bell_flash,
+                            self->callbacks.user_data);
+                }
                 break;
 
             case '\b':
@@ -2761,10 +2888,10 @@ __attribute__((always_inline)) static inline void Vt_handle_char(Vt*  self,
                     return;
 
                 case 'g':
-                    if (!settings.no_flash)
-                        ASSERT(self->callbacks.on_bell_flash,
-                               "callback is NULL");
-                    self->callbacks.on_bell_flash(self->callbacks.user_data);
+                    if (!settings.no_flash) {
+                        CALL_FP(self->callbacks.on_bell_flash,
+                                self->callbacks.user_data);
+                    }
                     break;
 
                 /* Application Keypad (DECPAM) */
@@ -2788,11 +2915,9 @@ __attribute__((always_inline)) static inline void Vt_handle_char(Vt*  self,
                     self->parser.state      = PARSER_STATE_LITERAL;
                     self->scroll_region_top = 0;
 
-                    ASSERT(self->callbacks.on_number_of_cells_requested,
-                           "callback is NULL");
                     self->scroll_region_bottom =
-                      self->callbacks
-                        .on_number_of_cells_requested(self->callbacks.user_data)
+                      CALL_FP(self->callbacks.on_number_of_cells_requested,
+                              self->callbacks.user_data)
                         .second;
 
                     for (size_t* i = NULL;
@@ -2948,23 +3073,25 @@ __attribute__((hot)) inline bool Vt_read(Vt* self)
             /* nothing more to read */
             return false;
         } else {
-            for (int i = 0; i < rd; ++i)
+            for (int i = 0; i < rd; ++i) {
                 Vt_handle_char(self, self->buf[i]);
-            ASSERT(self->callbacks.on_repaint_required, "callback is NULL");
-            self->callbacks.on_repaint_required(self->callbacks.user_data);
+            }
+
+            CALL_FP(self->callbacks.on_repaint_required,
+                    self->callbacks.user_data);
+
             Vt_update_scrollbar_dims(self);
+
             if ((uint32_t)rd < (sizeof self->buf - 2)) {
                 /* nothing more to read */
                 static bool first = true;
                 if (first) {
                     first = false;
 
-                    ASSERT(self->callbacks.on_window_size_from_cells_requested,
-                           "callback is NULL");
-                    Pair_uint32_t px =
-                      self->callbacks.on_window_size_from_cells_requested(
-                        self->callbacks.user_data, self->ws.ws_col,
-                        self->ws.ws_row);
+                    Pair_uint32_t px = CALL_FP(
+                      self->callbacks.on_window_size_from_cells_requested,
+                      self->callbacks.user_data, self->ws.ws_col,
+                      self->ws.ws_row);
 
                     self->ws.ws_xpixel = px.first;
                     self->ws.ws_ypixel = px.second;
@@ -2988,16 +3115,18 @@ __attribute__((hot)) inline bool Vt_read(Vt* self)
             self->scrollbar.autoscroll_next_step =
               TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS);
             Vt_update_scrollbar_dims(self);
-            ASSERT(self->callbacks.on_repaint_required, "callback is NULL");
-            self->callbacks.on_repaint_required(self->callbacks.user_data);
+
+            CALL_FP(self->callbacks.on_repaint_required,
+                    self->callbacks.user_data);
         } else if (self->scrollbar.autoscroll == AUTOSCROLL_DN &&
                    TimePoint_passed(self->scrollbar.autoscroll_next_step)) {
             Vt_visual_scroll_down(self);
             self->scrollbar.autoscroll_next_step =
               TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS);
             Vt_update_scrollbar_dims(self);
-            ASSERT(self->callbacks.on_repaint_required, "callback is NULL");
-            self->callbacks.on_repaint_required(self->callbacks.user_data);
+
+            CALL_FP(self->callbacks.on_repaint_required,
+                    self->callbacks.user_data);
         }
     }
     return false;
@@ -3185,8 +3314,8 @@ Vt_maybe_handle_application_key(Vt*      self,
             // Escape
             self->unicode_input.buffer.size = 0;
             self->unicode_input.active      = false;
-            ASSERT(self->callbacks.on_repaint_required, "callback is NULL");
-            self->callbacks.on_repaint_required(self->callbacks.user_data);
+            CALL_FP(self->callbacks.on_repaint_required,
+                    self->callbacks.user_data);
         } else if (key == 8) {
             // Backspace
             if (self->unicode_input.buffer.size) {
@@ -3195,54 +3324,68 @@ Vt_maybe_handle_application_key(Vt*      self,
                 self->unicode_input.buffer.size = 0;
                 self->unicode_input.active      = false;
             }
-            ASSERT(self->callbacks.on_repaint_required, "callback is NULL");
-            self->callbacks.on_repaint_required(self->callbacks.user_data);
+            CALL_FP(self->callbacks.on_repaint_required,
+                    self->callbacks.user_data);
         } else if (isxdigit(key)) {
             if (self->unicode_input.buffer.size > 8) {
-                ASSERT(self->callbacks.on_bell_flash, "callback is NULL");
-                self->callbacks.on_bell_flash(self->callbacks.user_data);
+                CALL_FP(self->callbacks.on_bell_flash,
+                        self->callbacks.user_data);
             } else {
                 Vector_push_char(&self->unicode_input.buffer, key);
-                ASSERT(self->callbacks.on_repaint_required, "callback is NULL");
-                self->callbacks.on_repaint_required(self->callbacks.user_data);
+                CALL_FP(self->callbacks.on_repaint_required,
+                        self->callbacks.user_data);
             }
         } else {
-            ASSERT(self->callbacks.on_bell_flash, "callback is NULL");
-            self->callbacks.on_bell_flash(self->callbacks.user_data);
+            CALL_FP(self->callbacks.on_bell_flash, self->callbacks.user_data);
         }
         return true;
     } else {
         if (KeyCommand_is_active(&settings.key_commands[KCMD_COPY], key, rawkey,
                                  mods)) {
             Vector_char txt = Vt_select_region_to_string(self);
-            self->callbacks.on_clipboard_sent(
-              self->callbacks.user_data, txt.buf); // clipboard_send should free
+
+            CALL_FP(self->callbacks.on_clipboard_sent,
+                    self->callbacks.user_data,
+                    txt.buf); // clipboard_send should free
+
             return true;
         } else if (KeyCommand_is_active(&settings.key_commands[KCMD_PASTE], key,
                                         rawkey, mods)) {
-            self->callbacks.on_clipboard_requested(self->callbacks.user_data);
+            CALL_FP(self->callbacks.on_clipboard_requested,
+                    self->callbacks.user_data);
             return true;
         } else if (KeyCommand_is_active(
                      &settings.key_commands[KCMD_FONT_SHRINK], key, rawkey,
                      mods)) {
-            --settings.font_size;
-            Vt_clear_all_proxies(self);
-            self->callbacks.on_font_reload_requseted(self->callbacks.user_data);
-            Pair_uint32_t cells = self->callbacks.on_number_of_cells_requested(
-              self->callbacks.user_data);
-            Vt_resize(self, cells.first, cells.second);
-            self->callbacks.on_repaint_required(self->callbacks.user_data);
+            if (settings.font_size > 1) {
+                --settings.font_size;
+                Vt_clear_all_proxies(self);
+                CALL_FP(self->callbacks.on_font_reload_requseted,
+                        self->callbacks.user_data);
+                Pair_uint32_t cells =
+                  CALL_FP(self->callbacks.on_number_of_cells_requested,
+                          self->callbacks.user_data);
+                Vt_resize(self, cells.first, cells.second);
+                CALL_FP(self->callbacks.on_repaint_required,
+                        self->callbacks.user_data);
+            } else {
+                CALL_FP(self->callbacks.on_bell_flash,
+                        self->callbacks.user_data);
+            }
             return true;
         } else if (KeyCommand_is_active(
                      &settings.key_commands[KCMD_FONT_ENLARGE], key, rawkey,
                      mods)) {
             ++settings.font_size;
             Vt_clear_all_proxies(self);
-            self->callbacks.on_font_reload_requseted(self->callbacks.user_data);
-            Pair_uint32_t cells = self->callbacks.on_number_of_cells_requested(
-              self->callbacks.user_data);
+            CALL_FP(self->callbacks.on_font_reload_requseted,
+                    self->callbacks.user_data);
+            Pair_uint32_t cells =
+              CALL_FP(self->callbacks.on_number_of_cells_requested,
+                      self->callbacks.user_data);
             Vt_resize(self, cells.first, cells.second);
-            self->callbacks.on_repaint_required(self->callbacks.user_data);
+            CALL_FP(self->callbacks.on_repaint_required,
+                    self->callbacks.user_data);
             return true;
         } else if (KeyCommand_is_active(&settings.key_commands[KCMD_DEBUG], key,
                                         rawkey, mods)) {
@@ -3252,7 +3395,8 @@ Vt_maybe_handle_application_key(Vt*      self,
                      &settings.key_commands[KCMD_UNICODE_ENTRY], key, rawkey,
                      mods)) {
             self->unicode_input.active = true;
-            self->callbacks.on_repaint_required(self->callbacks.user_data);
+            CALL_FP(self->callbacks.on_repaint_required,
+                    self->callbacks.user_data);
             return true;
         }
     }
@@ -3413,8 +3557,7 @@ void Vt_handle_key(void* _self, uint32_t key, uint32_t rawkey, uint32_t mods)
         Vt_visual_scroll_reset(self);
     }
 
-    ASSERT(self->callbacks.on_action_performed, "callback is NULL");
-    self->callbacks.on_action_performed(self->callbacks.user_data);
+    CALL_FP(self->callbacks.on_action_performed, self->callbacks.user_data);
 }
 
 /**
@@ -3481,8 +3624,7 @@ void Vt_handle_button(void*    _self,
         Vt_update_scrollbar_dims(self);
     }
 
-    ASSERT(self->callbacks.on_repaint_required, "callback is NULL");
-    self->callbacks.on_repaint_required(self->callbacks.user_data);
+    CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
 }
 
 /**

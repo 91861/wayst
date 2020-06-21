@@ -291,6 +291,7 @@ typedef struct _Vt
     char          out_buf[128];
     char          buf[1024];
     char*         title;
+    char*         work_dir;
     Vector_size_t title_stack;
 
     char32_t (*charset_g0)(char);
@@ -383,6 +384,8 @@ static void Vt_destroy(Vt* self)
         free((char*)*i);
 
     Vector_destroy_size_t(&self->title_stack);
+
+    free(self->work_dir);
 }
 
 void Vt_handle_key(void* self, uint32_t key, uint32_t rawkey, uint32_t mods);
