@@ -230,11 +230,11 @@ void GfxOpenGL21_load_font(Gfx* self);
 void GfxOpenGL21_destroy_recycled_proxies(GfxOpenGL21* self);
 
 void          GfxOpenGL21_destroy(Gfx* self);
-void          GfxOpenGL21_draw_vt(Gfx* self, const Vt* vt);
+void          GfxOpenGL21_draw(Gfx* self, const Vt* vt, Scrollbar* scrollbar);
 Pair_uint32_t GfxOpenGL21_get_char_size(Gfx* self);
 void          GfxOpenGL21_resize(Gfx* self, uint32_t w, uint32_t h);
 void          GfxOpenGL21_init_with_context_activated(Gfx* self);
-bool          GfxOpenGL21_update_timers(Gfx* self, Vt* vt);
+bool          GfxOpenGL21_update_timers(Gfx* self, Vt* vt, Scrollbar* scrollbar);
 void          GfxOpenGL21_notify_action(Gfx* self);
 bool          GfxOpenGL21_set_focus(Gfx* self, bool focus);
 void          GfxOpenGL21_flash(Gfx* self);
@@ -243,7 +243,7 @@ void          GfxOpenGL21_destroy_proxy(Gfx* self, int32_t* proxy);
 void          GfxOpenGL21_reload_font(Gfx* self);
 
 static struct IGfx gfx_interface_opengl21 = {
-    .draw_vt                     = GfxOpenGL21_draw_vt,
+    .draw                        = GfxOpenGL21_draw,
     .resize                      = GfxOpenGL21_resize,
     .get_char_size               = GfxOpenGL21_get_char_size,
     .init_with_context_activated = GfxOpenGL21_init_with_context_activated,
@@ -1164,7 +1164,7 @@ void GfxOpenGL21_notify_action(Gfx* self)
     gfxOpenGL21(self)->inactive = TimePoint_s_from_now(ACTION_END_BLINK_S);
 }
 
-bool GfxOpenGL21_update_timers(Gfx* self, Vt* vt)
+bool GfxOpenGL21_update_timers(Gfx* self, Vt* vt, Scrollbar* scrollbar)
 {
     bool repaint = false;
 
@@ -1189,7 +1189,7 @@ bool GfxOpenGL21_update_timers(Gfx* self, Vt* vt)
         repaint                           = true;
     }
 
-    if (vt->scrollbar.visible) {
+    if (scrollbar->visible) {
         if (gfxOpenGL21(self)->scrollbar_fade < SCROLLBAR_FADE_MAX) {
             gfxOpenGL21(self)->scrollbar_fade =
               MIN(gfxOpenGL21(self)->scrollbar_fade + SCROLLBAR_FADE_INC,
@@ -1218,9 +1218,9 @@ bool GfxOpenGL21_update_timers(Gfx* self, Vt* vt)
     if (TimePoint_passed(gfxOpenGL21(self)->inactive) &&
 
         // all animations finished
-        ((vt->scrollbar.visible &&
+        ((scrollbar->visible &&
           gfxOpenGL21(self)->scrollbar_fade == SCROLLBAR_FADE_MAX) ||
-         (!vt->scrollbar.visible &&
+         (!scrollbar->visible &&
           gfxOpenGL21(self)->scrollbar_fade == SCROLLBAR_FADE_MIN)) &&
 
         gfxOpenGL21(self)->draw_blinking) {
@@ -2420,7 +2420,7 @@ GfxOpenGL21_draw_text_overlays(GfxOpenGL21* gfx, const Vt* vt)
     }
 }
 
-void GfxOpenGL21_draw_vt(Gfx* self, const Vt* vt)
+void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Scrollbar* scrollbar)
 {
     GfxOpenGL21* gfx = gfxOpenGL21(self);
 
@@ -2486,18 +2486,18 @@ void GfxOpenGL21_draw_vt(Gfx* self, const Vt* vt)
     GfxOpenGL21_draw_text_overlays(gfx, vt);
 
     // TODO: use vbo
-    if (vt->scrollbar.visible ||
+    if (scrollbar->visible ||
         gfx->scrollbar_fade != SCROLLBAR_FADE_MIN) {
         Shader_use(NULL);
         glBindTexture(GL_TEXTURE_2D, 0);
 
-        float length = vt->scrollbar.length;
-        float begin  = vt->scrollbar.top;
-        float width  = gfx->sx * vt->scrollbar.width;
+        float length = scrollbar->length;
+        float begin  = scrollbar->top;
+        float width  = gfx->sx * scrollbar->width;
 
         glBegin(GL_QUADS);
         glColor4f(1, 1, 1,
-                  vt->scrollbar.dragging
+                  scrollbar->dragging
                     ? 0.8f
                     : ((float)gfx->scrollbar_fade / 100.0 * 0.5f));
         glVertex2f(1.0f - width, 1.0f - begin);

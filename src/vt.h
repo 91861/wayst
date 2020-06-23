@@ -197,26 +197,26 @@ typedef struct _Vt
 
     } unicode_input;
 
-    struct Scrollbar
-    {
-        bool visible, dragging;
+    /* struct Scrollbar */
+    /* { */
+    /*     bool visible, dragging; */
 
-        enum AutoscrollDir
-        {
-            AUTOSCROLL_NONE = 0,
-            AUTOSCROLL_UP   = 1,
-            AUTOSCROLL_DN   = -1,
+    /*     enum AutoscrollDir */
+    /*     { */
+    /*         AUTOSCROLL_NONE = 0, */
+    /*         AUTOSCROLL_UP   = 1, */
+    /*         AUTOSCROLL_DN   = -1, */
 
-        } autoscroll;
+    /*     } autoscroll; */
 
-        uint8_t   width;
-        float     top;
-        float     length;
-        float     drag_position;
-        TimePoint hide_time;
-        TimePoint autoscroll_next_step;
+    /*     uint8_t   width; */
+    /*     float     top; */
+    /*     float     length; */
+    /*     float     drag_position; */
+    /*     TimePoint hide_time; */
+    /*     TimePoint autoscroll_next_step; */
 
-    } scrollbar;
+    /* } scrollbar; */
 
     struct Selection
     {
@@ -367,6 +367,14 @@ void vt_get_visible_lines(const Vt* self, VtLine** out_begin, VtLine** out_end);
 
 void Vt_resize(Vt* self, uint32_t x, uint32_t y);
 
+Vector_char Vt_select_region_to_string(Vt* self);
+
+void Vt_clear_all_proxies(Vt* self);
+
+void Vt_dump_info(Vt* self);
+
+void Vt_start_unicode_input(Vt* self);
+
 static void Vt_destroy(Vt* self)
 {
     Vt_kill_program(self);
@@ -417,6 +425,14 @@ static inline size_t Vt_visual_bottom_line(const Vt* const self)
     return self->ws.ws_row + Vt_visual_top_line(self) +
            (self->scrolling ? 1 : 0);
 }
+
+void Vt_visual_scroll_to(Vt* self, size_t line);
+
+void Vt_visual_scroll_down(Vt* self);
+
+void Vt_visual_scroll_up(Vt* self);
+
+void Vt_visual_scroll_reset(Vt* self);
 
 void Vt_get_visible_lines(const Vt* self, VtLine** out_begin, VtLine** out_end);
 

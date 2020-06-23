@@ -26,13 +26,13 @@ void (*Vt_destroy_line_proxy)(int32_t proxy[static 4]) = NULL;
 
 static inline size_t Vt_top_line(const Vt* const self);
 
-static void Vt_visual_scroll_to(Vt* self, size_t line);
+void Vt_visual_scroll_to(Vt* self, size_t line);
 
-static void Vt_visual_scroll_up(Vt* self);
+void Vt_visual_scroll_up(Vt* self);
 
-static void Vt_visual_scroll_down(Vt* self);
+void Vt_visual_scroll_down(Vt* self);
 
-static void Vt_visual_scroll_reset(Vt* self);
+void Vt_visual_scroll_reset(Vt* self);
 
 static inline size_t Vt_get_scroll_region_top(Vt* self);
 
@@ -106,144 +106,8 @@ static Vector_char line_to_string(Vector_VtRune* line,
                                   const char*    tail);
 
 /**
- * Update gui scrollbar dimensions */
-static void Vt_update_scrollbar_dims(Vt* self)
-{
-    self->scrollbar.length = 2.0 / self->lines.size * self->ws.ws_row;
-    self->scrollbar.top =
-      2.0 * (double)Vt_visual_top_line(self) / (self->lines.size - 1);
-}
-
-/**
- * Update gui scrollbar visibility */
-static void Vt_update_scrollbar_vis(Vt* self)
-{
-    static bool last_scrolling = false;
-    if (!self->scrolling) {
-        if (last_scrolling) {
-            self->scrollbar.hide_time =
-              TimePoint_ms_from_now(SCROLLBAR_HIDE_DELAY_MS);
-        } else if (self->scrollbar.dragging) {
-            self->scrollbar.hide_time =
-              TimePoint_ms_from_now(SCROLLBAR_HIDE_DELAY_MS);
-        } else if (TimePoint_passed(self->scrollbar.hide_time)) {
-            if (self->scrollbar.visible) {
-                self->scrollbar.visible = false;
-                CALL_FP(self->callbacks.on_repaint_required,
-                        self->callbacks.user_data);
-            }
-        }
-    }
-    last_scrolling = self->scrolling;
-}
-
-/**
- * @return click event was consumed by gui scrollbar */
-static bool Vt_scrollbar_consume_click(Vt*      self,
-                                       uint32_t button,
-                                       uint32_t state,
-                                       int32_t  x,
-                                       int32_t  y)
-{
-    self->scrollbar.autoscroll = AUTOSCROLL_NONE;
-
-    if (!self->scrollbar.visible || button > 3)
-        return false;
-
-    if (self->scrollbar.dragging && !state) {
-        self->scrollbar.dragging = false;
-        CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
-        return false;
-    }
-
-    float dp = 2.0f * ((float)y / (float)self->ws.ws_ypixel);
-
-    if (x > self->ws.ws_xpixel - self->scrollbar.width) {
-        // inside region
-        if (self->scrollbar.top < dp &&
-            self->scrollbar.top + self->scrollbar.length > dp) {
-            // inside scrollbar
-            if (state &&
-                (button == MOUSE_BTN_LEFT || button == MOUSE_BTN_RIGHT ||
-                 button == MOUSE_BTN_MIDDLE)) {
-                self->scrollbar.dragging      = true;
-                self->scrollbar.drag_position = dp - self->scrollbar.top;
-            }
-        } else {
-            // outside of scrollbar
-            if (state && button == MOUSE_BTN_LEFT) {
-                /* jump to that position and start dragging in the middle */
-                self->scrollbar.dragging      = true;
-                self->scrollbar.drag_position = self->scrollbar.length / 2;
-                dp = 2.0f * ((float)y / (float)self->ws.ws_ypixel) -
-                     self->scrollbar.drag_position;
-                float  range = 2.0f - self->scrollbar.length;
-                size_t target_line =
-                  Vt_top_line(self) * CLAMP(dp, 0.0, range) / range;
-                if (target_line != Vt_visual_top_line(self)) {
-                    Vt_visual_scroll_to(self, target_line);
-                }
-            } else if (state && button == MOUSE_BTN_RIGHT) {
-                self->scrollbar.autoscroll_next_step =
-                  TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS);
-
-                if (dp > self->scrollbar.top + self->scrollbar.length / 2) {
-                    self->scrollbar.autoscroll = AUTOSCROLL_DN;
-                } else {
-                    self->scrollbar.autoscroll = AUTOSCROLL_UP;
-                }
-
-            } else if (state && button == MOUSE_BTN_MIDDLE) {
-                /* jump one screen in that direction */
-                if (dp > self->scrollbar.top + self->scrollbar.length / 2) {
-                    Vt_visual_scroll_to(self, self->visual_scroll_top +
-                                                self->ws.ws_row);
-                } else {
-                    size_t to = self->visual_scroll_top > self->ws.ws_row
-                                  ? self->visual_scroll_top - self->ws.ws_row
-                                  : 0;
-                    Vt_visual_scroll_to(self, to);
-                }
-            }
-        }
-    } else {
-        return false;
-    }
-
-    Vt_update_scrollbar_dims(self);
-
-    CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
-
-    return true;
-}
-
-static bool Vt_scrollbar_consume_drag(Vt*      self,
-                                      uint32_t button,
-                                      int32_t  x,
-                                      int32_t  y)
-{
-    if (!self->scrollbar.dragging)
-        return false;
-
-    y        = CLAMP(y, 0, self->ws.ws_ypixel);
-    float dp = 2.0f * ((float)y / (float)self->ws.ws_ypixel) -
-               self->scrollbar.drag_position;
-    float  range       = 2.0f - self->scrollbar.length;
-    size_t target_line = Vt_top_line(self) * CLAMP(dp, 0.0, range) / range;
-
-    if (target_line != Vt_visual_top_line(self)) {
-        Vt_visual_scroll_to(self, target_line);
-        Vt_update_scrollbar_dims(self);
-
-        CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
-    }
-
-    return true;
-}
-
-/**
  * Get string from selected region */
-static Vector_char Vt_select_region_to_string(Vt* self)
+Vector_char Vt_select_region_to_string(Vt* self)
 {
     Vector_char ret, tmp;
     size_t      begin_char_idx, end_char_idx;
@@ -359,7 +223,9 @@ __attribute__((always_inline)) static inline void Vt_mark_proxy_damaged(
 __attribute__((always_inline)) static inline void
 Vt_mark_proxies_damaged_in_region(Vt* self, size_t begin, size_t end)
 {
-    for (size_t i = begin; i <= end; ++i)
+    size_t lo = MIN(begin, end);
+    size_t hi = MAX(begin, end);
+    for (size_t i = lo; i <= hi; ++i)
         Vt_mark_proxy_damaged(self, i);
 }
 
@@ -375,11 +241,13 @@ __attribute__((always_inline)) static inline void Vt_clear_proxy(Vt*    self,
 __attribute__((always_inline)) static inline void
 Vt_clear_proxies_in_region(Vt* self, size_t begin, size_t end)
 {
-    for (size_t i = begin; i <= end; ++i)
+    size_t lo = MIN(begin, end);
+    size_t hi = MAX(begin, end);
+    for (size_t i = lo; i <= hi; ++i)
         Vt_clear_proxy(self, i);
 }
 
-static inline void Vt_clear_all_proxies(Vt* self)
+void Vt_clear_all_proxies(Vt* self)
 {
     Vt_clear_proxies_in_region(self, 0, self->lines.size - 1);
 
@@ -442,6 +310,7 @@ static void Vt_select_end(Vt* self)
 {
     self->selection.mode = SELECT_MODE_NONE;
     Vt_mark_proxies_damaged_in_selected_region(self);
+    CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
 }
 
 static bool Vt_consume_drag(Vt* self, uint32_t button, int32_t x, int32_t y)
@@ -889,8 +758,6 @@ Vt Vt_new(uint32_t cols, uint32_t rows)
 
     self.unicode_input.buffer = Vector_new_char();
 
-    self.scrollbar.width = 10;
-
     return self;
 }
 
@@ -939,20 +806,18 @@ static inline bool Vt_scroll_region_not_default(Vt* self)
            Vt_get_scroll_region_bottom(self) + 1 != Vt_visual_bottom_line(self);
 }
 
-static void Vt_visual_scroll_up(Vt* self)
+void Vt_visual_scroll_up(Vt* self)
 {
     if (self->scrolling) {
-        if (self->visual_scroll_top) {
+        if (self->visual_scroll_top)
             --self->visual_scroll_top;
-        }
     } else if (Vt_top_line(self)) {
         self->scrolling         = true;
-        self->scrollbar.visible = true;
         self->visual_scroll_top = Vt_top_line(self) - 1;
     }
 }
 
-static void Vt_visual_scroll_down(Vt* self)
+void Vt_visual_scroll_down(Vt* self)
 {
     if (self->scrolling && Vt_top_line(self) > self->visual_scroll_top) {
         ++self->visual_scroll_top;
@@ -961,21 +826,19 @@ static void Vt_visual_scroll_down(Vt* self)
     }
 }
 
-static void Vt_visual_scroll_to(Vt* self, size_t line)
+void Vt_visual_scroll_to(Vt* self, size_t line)
 {
-    line = MIN(line, Vt_top_line(self));
-
+    line                    = MIN(line, Vt_top_line(self));
     self->visual_scroll_top = line;
     self->scrolling         = line != Vt_top_line(self);
 }
 
-static void Vt_visual_scroll_reset(Vt* self)
+void Vt_visual_scroll_reset(Vt* self)
 {
     self->scrolling = false;
-    Vt_update_scrollbar_dims(self);
 }
 
-static void Vt_dump_info(Vt* self)
+void Vt_dump_info(Vt* self)
 {
     static int dump_index = 0;
     printf("\n====================[ STATE DUMP %2d ]====================\n",
@@ -1263,8 +1126,6 @@ void Vt_resize(Vt* self, uint32_t x, uint32_t y)
 
     self->scroll_region_top    = 0;
     self->scroll_region_bottom = self->ws.ws_row;
-
-    Vt_update_scrollbar_dims(self);
 }
 
 bool Vt_wait(Vt* self)
@@ -2473,8 +2334,6 @@ __attribute__((always_inline)) static inline void Vt_delete_line(Vt* self)
 
 __attribute__((always_inline)) static inline void Vt_scroll_up(Vt* self)
 {
-    // puts(__func__);
-
     Vector_insert_VtLine(
       &self->lines,
       Vector_at_VtLine(
@@ -3160,6 +3019,7 @@ __attribute__((hot)) inline bool Vt_read(Vt* self)
 {
     if (FD_ISSET(self->master, &self->rfdset)) {
         int rd = read(self->master, self->buf, sizeof(self->buf) - 2);
+
         if (rd >= 0 && settings.scroll_on_output) {
             Vt_visual_scroll_reset(self);
         }
@@ -3190,8 +3050,6 @@ __attribute__((hot)) inline bool Vt_read(Vt* self)
             CALL_FP(self->callbacks.on_repaint_required,
                     self->callbacks.user_data);
 
-            Vt_update_scrollbar_dims(self);
-
             if ((uint32_t)rd < (sizeof self->buf - 2)) {
                 /* nothing more to read */
                 static bool first = true;
@@ -3217,27 +3075,6 @@ __attribute__((hot)) inline bool Vt_read(Vt* self)
         return true;
     } else {
         /* !FD_ISSET(..) */
-        Vt_update_scrollbar_vis(self);
-
-        if (self->scrollbar.autoscroll == AUTOSCROLL_UP &&
-            TimePoint_passed(self->scrollbar.autoscroll_next_step)) {
-            Vt_visual_scroll_up(self);
-            self->scrollbar.autoscroll_next_step =
-              TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS);
-            Vt_update_scrollbar_dims(self);
-
-            CALL_FP(self->callbacks.on_repaint_required,
-                    self->callbacks.user_data);
-        } else if (self->scrollbar.autoscroll == AUTOSCROLL_DN &&
-                   TimePoint_passed(self->scrollbar.autoscroll_next_step)) {
-            Vt_visual_scroll_down(self);
-            self->scrollbar.autoscroll_next_step =
-              TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS);
-            Vt_update_scrollbar_dims(self);
-
-            CALL_FP(self->callbacks.on_repaint_required,
-                    self->callbacks.user_data);
-        }
     }
     return false;
 }
@@ -3380,6 +3217,13 @@ application_mod_keypad_response(const uint32_t key)
     }
 }
 
+void Vt_start_unicode_input(Vt* self)
+{
+    self->unicode_input.active = true;
+    CALL_FP(self->callbacks.on_repaint_required,
+            self->callbacks.user_data);
+}
+
 /**
  * key commands used by the terminal itself
  * @return keypress was consumed */
@@ -3392,10 +3236,9 @@ static bool Vt_maybe_handle_application_key(Vt*      self,
         if (key == 13) {
             // Enter
             Vector_push_char(&self->unicode_input.buffer, 0);
-            self->unicode_input.buffer.size = 0;
             self->unicode_input.active      = false;
-
             char32_t result = strtol(self->unicode_input.buffer.buf, NULL, 16);
+            Vector_clear_char(&self->unicode_input.buffer);
             if (result) {
                 LOG("unicode input \'%s\' -> %d\n",
                     self->unicode_input.buffer.buf, result);
@@ -3438,68 +3281,7 @@ static bool Vt_maybe_handle_application_key(Vt*      self,
             CALL_FP(self->callbacks.on_bell_flash, self->callbacks.user_data);
         }
         return true;
-    } else {
-        if (KeyCommand_is_active(&settings.key_commands[KCMD_COPY], key, rawkey,
-                                 mods)) {
-            Vector_char txt = Vt_select_region_to_string(self);
-
-            CALL_FP(self->callbacks.on_clipboard_sent,
-                    self->callbacks.user_data,
-                    txt.buf); // clipboard_send should free
-
-            return true;
-        } else if (KeyCommand_is_active(&settings.key_commands[KCMD_PASTE], key,
-                                        rawkey, mods)) {
-            CALL_FP(self->callbacks.on_clipboard_requested,
-                    self->callbacks.user_data);
-            return true;
-        } else if (KeyCommand_is_active(
-                     &settings.key_commands[KCMD_FONT_SHRINK], key, rawkey,
-                     mods)) {
-            if (settings.font_size > 1) {
-                --settings.font_size;
-                Vt_clear_all_proxies(self);
-                CALL_FP(self->callbacks.on_font_reload_requseted,
-                        self->callbacks.user_data);
-                Pair_uint32_t cells =
-                  CALL_FP(self->callbacks.on_number_of_cells_requested,
-                          self->callbacks.user_data);
-                Vt_resize(self, cells.first, cells.second);
-                CALL_FP(self->callbacks.on_repaint_required,
-                        self->callbacks.user_data);
-            } else {
-                CALL_FP(self->callbacks.on_bell_flash,
-                        self->callbacks.user_data);
-            }
-            return true;
-        } else if (KeyCommand_is_active(
-                     &settings.key_commands[KCMD_FONT_ENLARGE], key, rawkey,
-                     mods)) {
-            ++settings.font_size;
-            Vt_clear_all_proxies(self);
-            CALL_FP(self->callbacks.on_font_reload_requseted,
-                    self->callbacks.user_data);
-            Pair_uint32_t cells =
-              CALL_FP(self->callbacks.on_number_of_cells_requested,
-                      self->callbacks.user_data);
-            Vt_resize(self, cells.first, cells.second);
-            CALL_FP(self->callbacks.on_repaint_required,
-                    self->callbacks.user_data);
-            return true;
-        } else if (KeyCommand_is_active(&settings.key_commands[KCMD_DEBUG], key,
-                                        rawkey, mods)) {
-            Vt_dump_info(self);
-            return true;
-        } else if (KeyCommand_is_active(
-                     &settings.key_commands[KCMD_UNICODE_ENTRY], key, rawkey,
-                     mods)) {
-            self->unicode_input.active = true;
-            CALL_FP(self->callbacks.on_repaint_required,
-                    self->callbacks.user_data);
-            return true;
-        }
     }
-
     return false;
 }
 
@@ -3677,8 +3459,7 @@ void Vt_handle_button(void*    _self,
 {
     Vt* self = _self;
 
-    if (Vt_scrollbar_consume_click(self, button, state, x, y) ||
-        Vt_select_consume_click(self, button, state, x, y, mods))
+    if (Vt_select_consume_click(self, button, state, x, y, mods))
         return;
 
     bool in_window =
@@ -3711,18 +3492,6 @@ void Vt_handle_button(void*    _self,
             }
             Vt_write(self);
         }
-    } else if (button == MOUSE_BTN_WHEEL_DOWN && state) {
-        uint8_t lines = ammount ? ammount : settings.scroll_discrete_lines;
-        for (uint8_t i = 0; i < lines; ++i) {
-            Vt_visual_scroll_down(self);
-        }
-        Vt_update_scrollbar_dims(self);
-    } else if (button == MOUSE_BTN_WHEEL_UP && state) {
-        uint8_t lines = ammount ? ammount : settings.scroll_discrete_lines;
-        for (uint8_t i = 0; i < lines; ++i) {
-            Vt_visual_scroll_up(self);
-        }
-        Vt_update_scrollbar_dims(self);
     }
 
     CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
@@ -3734,8 +3503,7 @@ void Vt_handle_button(void*    _self,
 void Vt_handle_motion(void* _self, uint32_t button, int32_t x, int32_t y)
 {
     Vt* self = _self;
-    if (Vt_scrollbar_consume_drag(self, button, x, y) ||
-        Vt_consume_drag(self, button, x, y))
+    if (Vt_consume_drag(self, button, x, y))
         return;
 
     if (self->modes.extended_report) {
