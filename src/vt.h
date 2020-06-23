@@ -268,15 +268,17 @@ typedef struct _Vt
     {
         enum VtParserState
         {
-            PARSER_STATE_LITERAL     = '\0',
-            PARSER_STATE_ESCAPED     = '\e',
-            PARSER_STATE_CONTROL_SEQ = '[',
-            PARSER_STATE_DCS         = 'P',
-            PARSER_STATE_OS_COM      = ']',
-            PARSER_STATE_CHARSET_G0  = '(',
-            PARSER_STATE_CHARSET_G1  = ')',
-            PARSER_STATE_CHARSET_G2  = '*',
-            PARSER_STATE_CHARSET_G3  = '+',
+            PARSER_STATE_LITERAL = 0,
+            PARSER_STATE_ESCAPED,
+            PARSER_STATE_CSI,
+            PARSER_STATE_DCS,
+            PARSER_STATE_APC,
+            PARSER_STATE_OSC,
+            PARSER_STATE_PM,
+            PARSER_STATE_CHARSET_G0,
+            PARSER_STATE_CHARSET_G1,
+            PARSER_STATE_CHARSET_G2,
+            PARSER_STATE_CHARSET_G3,
         } state;
 
         bool      in_mb_seq;
@@ -358,10 +360,6 @@ bool Vt_wait(Vt* self);
 bool Vt_read(Vt* self);
 
 static void Vt_write(Vt* self);
-
-void Vt_show_lines(
-  Vt* self,
-  void (*for_line)(const Vt* const, VtLine*, size_t, uint32_t, int32_t));
 
 void Vt_kill_program(Vt* self);
 

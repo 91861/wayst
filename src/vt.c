@@ -356,9 +356,8 @@ __attribute__((always_inline)) static inline void Vt_mark_proxy_damaged(
     self->lines.buf[idx].damaged = true;
 }
 
-static inline void Vt_mark_proxies_damaged_in_region(Vt*    self,
-                                                     size_t begin,
-                                                     size_t end)
+__attribute__((always_inline)) static inline void
+Vt_mark_proxies_damaged_in_region(Vt* self, size_t begin, size_t end)
 {
     for (size_t i = begin; i <= end; ++i)
         Vt_mark_proxy_damaged(self, i);
@@ -373,9 +372,8 @@ __attribute__((always_inline)) static inline void Vt_clear_proxy(Vt*    self,
     }
 }
 
-static inline void Vt_clear_proxies_in_region(Vt*    self,
-                                              size_t begin,
-                                              size_t end)
+__attribute__((always_inline)) static inline void
+Vt_clear_proxies_in_region(Vt* self, size_t begin, size_t end)
 {
     for (size_t i = begin; i <= end; ++i)
         Vt_clear_proxy(self, i);
@@ -740,9 +738,9 @@ static Vector_char line_to_string(Vector_VtRune* line,
  * @param filter first character of returned string is the immediately preceding
  * delimiter, '\0' if none.
  */
-static inline Vector_Vector_char string_split_on(const char* str,
-                                                 const char* symbols,
-                                                 const char* filter)
+static Vector_Vector_char string_split_on(const char* str,
+                                          const char* symbols,
+                                          const char* filter)
 {
     Vector_Vector_char ret = Vector_new_with_capacity_Vector_char(8);
     Vector_push_Vector_char(&ret, Vector_new_with_capacity_char(8));
@@ -790,18 +788,13 @@ __attribute__((always_inline)) static inline bool is_csi_sequence_terminated(
            seq[size - 1] == '~' || seq[size - 1] == '|';
 }
 
-__attribute__((always_inline)) static inline bool is_osc_sequence_terminated(
-  const char*  seq,
-  const size_t size)
+static bool is_generic_sequence_terminated(const char* seq, const size_t size)
 {
     if (!size)
         return false;
 
-    if (seq[size - 1] == '\a' || (size > 1 && seq[size - 2] == '\e')) {
-        return true;
-    }
-
-    return false;
+    return seq[size - 1] == '\a' ||
+           (size > 1 && seq[size - 2] == '\e' && seq[size - 1] == '\\');
 }
 
 Vt Vt_new(uint32_t cols, uint32_t rows)
@@ -915,7 +908,7 @@ static inline size_t Vt_top_line_alt(const Vt* const self)
              : self->alt_lines.size - self->ws.ws_row;
 }
 
-static inline size_t Vt_bottom_line(Vt* self)
+static inline size_t Vt_bottom_line(const Vt* self)
 {
     return Vt_top_line(self) + self->ws.ws_row - 1;
 }
@@ -1442,7 +1435,8 @@ __attribute__((always_inline)) static inline void Vt_handle_dec_mode(Vt*  self,
     }
 }
 
-__attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
+__attribute__((always_inline)) static inline void Vt_handle_CSI(Vt*  self,
+                                                                char c)
 {
     Vector_push_char(&self->parser.active_sequence, c);
 
@@ -1510,6 +1504,8 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
                     }
                 } break;
 
+                /* <ESC>[ Ps a - move cursor right (forward) Ps lines (HPR) */
+                case 'a':
                 /* <ESC>[ Ps C - move cursor right (forward) Ps lines (CUF) */
                 case 'C': {
                     MULTI_ARG_IS_ERROR
@@ -1542,6 +1538,8 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
                         Vt_cursor_up(self);
                 } break;
 
+                /* <ESC>[ Ps e - move cursor down Ps lines (VPR) */
+                case 'e':
                 /* <ESC>[ Ps B - move cursor down Ps lines (CUD) */
                 case 'B': {
                     MULTI_ARG_IS_ERROR
@@ -1632,9 +1630,39 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
                     self->scroll_region_bottom = bottom;
                 } break;
 
-                /* <ESC>[ Py ; Px H - move cursor to Px-Py (CUP)
-                 * no args: 1:1 */
+                /* <ESC>[ Pn I - cursor forward ps tabulations (CHT) */
+                case 'I': {
+                    MULTI_ARG_IS_ERROR
+                    // TODO:
+                } break;
+
+                /* <ESC>[ Pn Z - cursor backward ps tabulations (CBT) */
+                case 'Z': {
+                    MULTI_ARG_IS_ERROR
+                    // TODO:
+                } break;
+
+                /* <ESC>[ Pn g - tabulation clear (TBC) */
+                case 'g': {
+                    MULTI_ARG_IS_ERROR
+                    int arg = short_sequence_get_int_argument(seq);
+
+                    switch (arg) {
+                        case 0:
+                            // TODO: clear currnet tabstop
+                            break;
+                        case 3:
+                            // TODO: clear all tabstops
+                            break;
+                        default:;
+                    }
+
+                } break;
+
+                /* no args: 1:1 */
+                /* <ESC>[ Py ; Px f - move cursor to Px-Py (HVP) */
                 case 'f':
+                /* <ESC>[ Py ; Px H - move cursor to Px-Py (CUP) */
                 case 'H': {
                     uint32_t x = 0, y = 0;
                     if (*seq != 'H') {
@@ -1896,6 +1924,7 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
             } // end switch
 
         } else {
+
             /* sequence starts with question mark */
             switch (last_char) {
 
@@ -1929,9 +1958,7 @@ __attribute__((always_inline)) static inline void Vt_handle_cs(Vt* self, char c)
     }
 }
 
-__attribute__((always_inline)) static inline void Vt_handle_simple_prop_cmd(
-  Vt*   self,
-  char* command)
+static void Vt_handle_simple_prop_cmd(Vt* self, char* command)
 {
     int cmd = *command ? strtol(command, NULL, 10) : 0;
 
@@ -2056,9 +2083,7 @@ __attribute__((always_inline)) static inline void Vt_handle_simple_prop_cmd(
     }
 }
 
-__attribute__((always_inline)) static inline void Vt_alt_buffer_on(
-  Vt*  self,
-  bool save_mouse)
+static inline void Vt_alt_buffer_on(Vt* self, bool save_mouse)
 {
     Vt_visual_scroll_reset(self);
     self->alt_lines = self->lines;
@@ -2072,9 +2097,7 @@ __attribute__((always_inline)) static inline void Vt_alt_buffer_on(
     self->active_line = 0;
 }
 
-__attribute__((always_inline)) static inline void Vt_alt_buffer_off(
-  Vt*  self,
-  bool save_mouse)
+static inline void Vt_alt_buffer_off(Vt* self, bool save_mouse)
 {
     if (self->alt_lines.buf) {
         Vector_destroy_VtLine(&self->lines);
@@ -2096,9 +2119,7 @@ __attribute__((always_inline)) static inline void Vt_alt_buffer_off(
  * some values require a set number of following 'arguments'.
  * 'Commands' may be combined into a single sequence.
  */
-__attribute__((always_inline, flatten)) static inline void Vt_handle_prop_seq(
-  Vt*         self,
-  Vector_char seq)
+static void Vt_handle_prop_seq(Vt* self, Vector_char seq)
 {
     Vector_Vector_char tokens = string_split_on(seq.buf, ";:", NULL);
 
@@ -2189,13 +2210,77 @@ __attribute__((always_inline, flatten)) static inline void Vt_handle_prop_seq(
     Vector_destroy_Vector_char(&tokens);
 }
 
-__attribute__((always_inline)) static inline void Pty_handle_OSC(Vt*  self,
-                                                                 char c)
+static void Vt_handle_APC(Vt* self, char c)
 {
     Vector_push_char(&self->parser.active_sequence, c);
 
-    if (is_osc_sequence_terminated(self->parser.active_sequence.buf,
-                                   self->parser.active_sequence.size)) {
+    if (is_generic_sequence_terminated(self->parser.active_sequence.buf,
+                                       self->parser.active_sequence.size)) {
+        Vector_push_char(&self->parser.active_sequence, '\0');
+
+        const char* seq = self->parser.active_sequence.buf;
+        char*       str = pty_string_prettyfy(seq);
+        WRN("Unknown application programming command:" TERMCOLOR_DEFAULT
+            " %s\n",
+            str);
+        free(str);
+
+        Vector_destroy_char(&self->parser.active_sequence);
+        self->parser.active_sequence = Vector_new_char();
+        self->parser.state           = PARSER_STATE_LITERAL;
+    }
+}
+
+static void Vt_handle_DCS(Vt* self, char c)
+{
+    Vector_push_char(&self->parser.active_sequence, c);
+
+    if (is_generic_sequence_terminated(self->parser.active_sequence.buf,
+                                       self->parser.active_sequence.size)) {
+        Vector_push_char(&self->parser.active_sequence, '\0');
+
+        const char* seq = self->parser.active_sequence.buf;
+        switch (*seq) {
+            /* Terminal image protocol */
+            case 'G':
+                break;
+
+            /* sixel or ReGIS */
+            case '0':
+                break;
+
+            default:;
+        }
+
+        char* str = pty_string_prettyfy(self->parser.active_sequence.buf);
+        WRN("Unknown device control string:" TERMCOLOR_DEFAULT " %s\n", str);
+        free(str);
+
+        Vector_destroy_char(&self->parser.active_sequence);
+        self->parser.active_sequence = Vector_new_char();
+        self->parser.state           = PARSER_STATE_LITERAL;
+    }
+}
+
+static void Vt_handle_PM(Vt* self, char c)
+{
+    Vector_push_char(&self->parser.active_sequence, c);
+
+    if (is_generic_sequence_terminated(self->parser.active_sequence.buf,
+                                       self->parser.active_sequence.size)) {
+
+        Vector_destroy_char(&self->parser.active_sequence);
+        self->parser.active_sequence = Vector_new_char();
+        self->parser.state           = PARSER_STATE_LITERAL;
+    }
+}
+
+static void Vt_handle_OSC(Vt* self, char c)
+{
+    Vector_push_char(&self->parser.active_sequence, c);
+
+    if (is_generic_sequence_terminated(self->parser.active_sequence.buf,
+                                       self->parser.active_sequence.size)) {
         Vector_push_char(&self->parser.active_sequence, '\0');
 
         char*              seq    = self->parser.active_sequence.buf;
@@ -2251,10 +2336,10 @@ __attribute__((always_inline)) static inline void Pty_handle_OSC(Vt*  self,
                 }
             } break;
 
-            /* hidden link to URI */
+            /* mark text as hyperlink with URL */
             case 8:
                 // TODO:
-                WRN("OSC 8 links not implemented\n");
+                WRN("OSC 8 hyperlinks not implemented\n");
                 break;
 
             /* sets dynamic colors for xterm colorOps */
@@ -2307,13 +2392,13 @@ __attribute__((always_inline)) static inline void Pty_handle_OSC(Vt*  self,
 }
 
 // TODO: figure out how this should work
-__attribute__((always_inline)) static inline void Vt_push_title(Vt* self)
+static inline void Vt_push_title(Vt* self)
 {
     Vector_push_size_t(&self->title_stack, (size_t)self->title);
     self->title = NULL;
 }
 
-__attribute__((always_inline)) static inline void Vt_pop_title(Vt* self)
+static inline void Vt_pop_title(Vt* self)
 {
     if (self->title)
         free(self->title);
@@ -2388,6 +2473,8 @@ __attribute__((always_inline)) static inline void Vt_delete_line(Vt* self)
 
 __attribute__((always_inline)) static inline void Vt_scroll_up(Vt* self)
 {
+    // puts(__func__);
+
     Vector_insert_VtLine(
       &self->lines,
       Vector_at_VtLine(
@@ -2484,8 +2571,7 @@ __attribute__((always_inline)) static inline void Vt_erase_chars(Vt*    self,
 
 /**
  * remove characters at cursor, remaining content scrolls left */
-__attribute__((always_inline)) static inline void Vt_delete_chars(Vt*    self,
-                                                                  size_t n)
+static void Vt_delete_chars(Vt* self, size_t n)
 {
     /* Trim if line is longer than screen area */
     if (self->lines.buf[self->active_line].data.size > self->ws.ws_col) {
@@ -2550,8 +2636,7 @@ __attribute__((always_inline)) static inline void Vt_delete_chars(Vt*    self,
     Vt_destroy_line_proxy(self->lines.buf[self->active_line].proxy.data);
 }
 
-__attribute__((always_inline)) static inline void Vt_scroll_out_all_content(
-  Vt* self)
+static inline void Vt_scroll_out_all_content(Vt* self)
 {
     int64_t to_add = 0;
     for (size_t i = Vt_visual_bottom_line(self) - 1;
@@ -2758,13 +2843,16 @@ Vt_handle_literal(Vt* self, char c)
         char32_t res;
         size_t   rd = mbrtoc32(&res, &c, 1, &self->parser.input_mbstate);
 
-        // encoding error
         if (unlikely(rd == (size_t)-1)) {
+            // encoding error
             WRN("%s\n", strerror(errno));
             errno = 0;
 
-            // sequence is complete
+            // zero-initialized mbstate_t always represents the initial
+            // conversion state
+            memset(&self->parser.input_mbstate, 0, sizeof(mbstate_t));
         } else if (rd != (size_t)-2) {
+            // sequence is complete
             VtRune new_rune = self->parser.char_state;
             new_rune.code   = res;
             Vt_insert_char_at_cursor(self, new_rune);
@@ -2800,7 +2888,7 @@ Vt_handle_literal(Vt* self, char c)
             case '\t': {
                 size_t cp = self->cursor_pos;
 
-                // FIX: do this properly
+                // TODO: do this properly
                 for (size_t i = 0; i < self->tabstop - (cp % self->tabstop);
                      ++i)
                     Vt_cursor_right(self);
@@ -2828,8 +2916,8 @@ Vt_handle_literal(Vt* self, char c)
     }
 }
 
-__attribute__((always_inline)) static inline void Vt_handle_char(Vt*  self,
-                                                                 char c)
+__attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt*  self,
+                                                                      char c)
 {
     switch (self->parser.state) {
 
@@ -2837,8 +2925,8 @@ __attribute__((always_inline)) static inline void Vt_handle_char(Vt*  self,
             Vt_handle_literal(self, c);
             break;
 
-        case PARSER_STATE_CONTROL_SEQ:
-            Vt_handle_cs(self, c);
+        case PARSER_STATE_CSI:
+            Vt_handle_CSI(self, c);
             break;
 
         case PARSER_STATE_ESCAPED:
@@ -2846,12 +2934,22 @@ __attribute__((always_inline)) static inline void Vt_handle_char(Vt*  self,
 
                 /* Control sequence introduce (CSI) */
                 case '[':
-                    self->parser.state = PARSER_STATE_CONTROL_SEQ;
+                    self->parser.state = PARSER_STATE_CSI;
                     return;
 
                 /* Operating system command (OSC) */
                 case ']':
-                    self->parser.state = PARSER_STATE_OS_COM;
+                    self->parser.state = PARSER_STATE_OSC;
+                    return;
+
+                /* Device control */
+                case 'P':
+                    self->parser.state = PARSER_STATE_DCS;
+                    return;
+
+                /* Application Programming Command (APC) */
+                case '_':
+                    self->parser.state = PARSER_STATE_APC;
                     return;
 
                 /* Reverse line feed (RI) */
@@ -2943,12 +3041,12 @@ __attribute__((always_inline)) static inline void Vt_handle_char(Vt*  self,
                     return;
 
                 default: {
-                    /* char* cs = control_char_get_pretty_string(c); */
-                    /* char cb[2] = { c, 0 }; */
-                    /* WRN("Unknown escape character:"TERMCOLOR_DEFAULT" %s " */
-                    /*     TERMCOLOR_YELLOW"("TERMCOLOR_DEFAULT"%d"TERMCOLOR_YELLOW")\n",
-                     */
-                    /*     cs ? cs : cb, c); */
+                    char* cs    = control_char_get_pretty_string(c);
+                    char  cb[2] = { c, 0 };
+                    WRN("Unknown escape sequence:" TERMCOLOR_DEFAULT
+                        " %s " TERMCOLOR_YELLOW "(" TERMCOLOR_DEFAULT
+                        "%d" TERMCOLOR_YELLOW ")\n",
+                        cs ? cs : cb, c);
 
                     self->parser.state = PARSER_STATE_LITERAL;
                     return;
@@ -3010,8 +3108,20 @@ __attribute__((always_inline)) static inline void Vt_handle_char(Vt*  self,
             }
             break;
 
-        case PARSER_STATE_OS_COM:
-            Pty_handle_OSC(self, c);
+        case PARSER_STATE_OSC:
+            Vt_handle_OSC(self, c);
+            break;
+
+        case PARSER_STATE_PM:
+            Vt_handle_PM(self, c);
+            break;
+
+        case PARSER_STATE_DCS:
+            Vt_handle_DCS(self, c);
+            break;
+
+        case PARSER_STATE_APC:
+            Vt_handle_APC(self, c);
             break;
 
         default:
@@ -3155,29 +3265,19 @@ __attribute__((always_inline)) static inline void Vt_write(Vt* self)
     Vt_write_n(self, strlen(self->out_buf));
 }
 
-void Vt_show_lines(
-  Vt* self,
-  void (*for_line)(const Vt* cont, VtLine*, size_t, uint32_t, int32_t))
-{
-    size_t start = Vt_visual_top_line(self);
-
-    // if scrolling the last line may be partially visible
-    size_t end = self->ws.ws_row + start + (self->scrolling ? 1 : 0);
-
-    for (size_t i = start; i < end; ++i) {
-        for_line(self, &self->lines.buf[i], self->lines.buf[i].data.size,
-                 i - start,
-                 self->active_line == i ? (int32_t)self->cursor_pos : -1);
-    }
-}
-
 void Vt_get_visible_lines(const Vt* self, VtLine** out_begin, VtLine** out_end)
 {
     if (out_begin)
         *out_begin = self->lines.buf + Vt_visual_top_line(self);
 
-    if (out_end)
-        *out_end = self->lines.buf + Vt_visual_bottom_line(self);
+    if (out_end) {
+        // when scrolling ane-past last visual line may be partially visible
+        bool extra_visible_line =
+          self->scrolling &&
+          Vt_visual_bottom_line(self) != self->lines.size - 1;
+        *out_end = self->lines.buf + Vt_visual_bottom_line(self) +
+                   (extra_visible_line ? 1 : 0);
+    }
 }
 
 __attribute__((always_inline)) static inline const char* normal_keypad_response(
@@ -3283,11 +3383,10 @@ application_mod_keypad_response(const uint32_t key)
 /**
  * key commands used by the terminal itself
  * @return keypress was consumed */
-__attribute__((always_inline)) static inline bool
-Vt_maybe_handle_application_key(Vt*      self,
-                                uint32_t key,
-                                uint32_t rawkey,
-                                uint32_t mods)
+static bool Vt_maybe_handle_application_key(Vt*      self,
+                                            uint32_t key,
+                                            uint32_t rawkey,
+                                            uint32_t mods)
 {
     if (self->unicode_input.active) {
         if (key == 13) {
@@ -3406,8 +3505,9 @@ Vt_maybe_handle_application_key(Vt*      self,
 
 /**
  * @return keypress was consumed */
-__attribute__((always_inline)) static inline bool
-Vt_maybe_handle_keypad_key(Vt* self, uint32_t key, uint32_t mods)
+static inline bool Vt_maybe_handle_keypad_key(Vt*      self,
+                                              uint32_t key,
+                                              uint32_t mods)
 {
     const char* resp = NULL;
     if (mods) {
@@ -3437,8 +3537,9 @@ Vt_maybe_handle_keypad_key(Vt* self, uint32_t key, uint32_t mods)
 
 /**
  * @return keypress was consumed */
-__attribute__((always_inline)) static inline bool
-Vt_maybe_handle_function_key(Vt* self, uint32_t key, uint32_t mods)
+static inline bool Vt_maybe_handle_function_key(Vt*      self,
+                                                uint32_t key,
+                                                uint32_t mods)
 {
     if (key >= XKB_KEY_F1 && key <= XKB_KEY_F35) {
         int f_num = key - XKB_KEY_F1;
@@ -3672,6 +3773,7 @@ void Vt_handle_clipboard(void* _self, const char* text)
         memcpy(self->out_buf, "\e[200~", 6);
         bi += 6;
     }
+
     for (size_t i = 0; i < len;) {
         int to_cpy = MIN(len - i, sizeof(self->out_buf) - bi);
         memcpy(self->out_buf + bi, text + i, to_cpy);
@@ -3682,6 +3784,7 @@ void Vt_handle_clipboard(void* _self, const char* text)
             bi = 0;
         }
     }
+
     if (self->modes.bracket_paste)
         memcpy(self->out_buf + bi, "\e[201~", 7);
     else

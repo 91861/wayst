@@ -306,8 +306,8 @@ DEF_PAIR(wchar_t);
 DEF_PAIR(size_t);
 
 /** check string equality case insensitive */
-__attribute__((always_inline)) static inline bool strneqci(const char*  s1,
-                                                           const char*  s2,
+__attribute__((always_inline)) static inline bool strneqci(const char* restrict s1,
+                                                           const char* restrict s2,
                                                            const size_t n)
 {
     for (size_t i = 0; i < n; ++i)
@@ -317,7 +317,8 @@ __attribute__((always_inline)) static inline bool strneqci(const char*  s1,
 }
 
 /** match string against wildcard pattern */
-static bool streq_wildcard(const char* str, const char* pattern)
+static bool streq_wildcard(const char* restrict str,
+                           const char* restrict pattern)
 {
     while (*pattern && *str)
         switch (*pattern) {
@@ -347,8 +348,7 @@ static bool streq_wildcard(const char* str, const char* pattern)
 }
 
 /** convert string to bool (false if fails) */
-__attribute__((always_inline, flatten)) static inline bool strtob(
-  const char* str)
+static inline bool strtob(const char* restrict str)
 {
     if (!str)
         return false;
@@ -357,98 +357,3 @@ __attribute__((always_inline, flatten)) static inline bool strtob(
     return strneqci("true", str, 4) || strneqci("1", str, 1);
 }
 
-/* UTF-8 decoding and encoding */
-static const uint8_t utf_mask[] = { 0b00000000, 0b10000000, 0b11000000,
-                                    0b11100000, 0b11110000, 0b11111000 };
-
-__attribute__((always_inline)) static inline uint32_t utf8_seq_len(const char c)
-{
-    uint32_t seq_len = 1;
-    if ((c & utf_mask[1]) != utf_mask[0]) {
-        for (seq_len = 2; seq_len <= 4; ++seq_len)
-            if ((c & utf_mask[seq_len + 1]) == utf_mask[seq_len])
-                goto good;
-        return 0; /* sequence invalid */
-    good:;
-    }
-    return seq_len;
-}
-
-/**
- * Decode UTF-8 character
- *
- * @param limit last character that can be read (checks if sequence is complete)
- * NULL - do not check
- *
- * @return NULL if sequence incomplete
- */
-__attribute__((always_inline)) static inline uint32_t utf8_decode(
-  const char* s,
-  const char* limit)
-{
-    uint32_t len = utf8_seq_len(*s);
-    if (limit && (limit - s) <= len)
-        return 0;
-    uint32_t res = 0;
-    switch (len) {
-        case 1:
-            return *s;
-        case 2:
-            res = *s & 0b00111111;
-            break;
-        case 3:
-            res = *s & 0b00001111;
-            break;
-        case 4:
-            res = *s & 0b00000111;
-            break;
-        default:
-            return 0;
-    }
-    for (uint32_t i = 1; i < len; ++i)
-        res = (res << 6) | (*++s & 0b00111111);
-    return res;
-}
-
-/* /\** assumes valid input *\/ */
-/* __attribute__((always_inline)) static inline uint32_t utf8_len(uint32_t code)
- */
-/* { */
-/*     //                              2^7  2^11  2^16   2^21 */
-/*     static const uint32_t max[] = { 128, 2048, 65536, 2097152 }; */
-/*     for (uint32_t i = 0; i < 4; ++i) */
-/*         if (code < max[i]) */
-/*             return i + 1; */
-/*     return 0; */
-/* } */
-
-/* /\** */
-/*  * @return bytes written (sequence length), 0 on failure *\/ */
-/* __attribute__((always_inline)) static inline uint32_t utf8_encode(uint32_t
- * code, */
-/*                                                                   char*
- * output) */
-/* { */
-/*     uint32_t len = utf8_len(code); */
-
-/*     switch (len) { */
-/*         case 1: */
-/*             *output = (char)code; */
-/*             break; */
-/*         case 2: */
-/*             output[1] = 0b10000000 | (0b00111111 & code); */
-/*             output[0] = 0b11000000 | (0b00011111 & (code >> 6)); */
-/*             break; */
-/*         case 3: */
-/*             output[2] = 0b10000000 | (0b00111111 & code); */
-/*             output[1] = 0b10000000 | (0b00111111 & (code >> 6)); */
-/*             output[0] = 0b11100000 | (0b00001111 & (code >> 6)); */
-/*             break; */
-/*         case 4: */
-/*             output[3] = 0b10000000 | (0b00111111 & code); */
-/*             output[2] = 0b10000000 | (0b00111111 & (code >> 6)); */
-/*             output[1] = 0b10000000 | (0b00111111 & (code >> 6)); */
-/*             output[0] = 0b11110000 | (0b00000111 & (code >> 6)); */
-/*     } */
-/*     return len; */
-/* } */

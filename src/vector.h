@@ -44,11 +44,26 @@
                                                                                \
     static void Vector_push_##t(Vector_##t* self, t arg)                       \
     {                                                                          \
+        ASSERT(self->buf, "Vector not initialized");                           \
         if (unlikely(self->cap == self->size)) {                               \
             self->buf = realloc(self->buf, (self->cap <<= 1) * sizeof(t));     \
-            ASSERT(self->buf, "Vector not initialized");                       \
         }                                                                      \
         self->buf[self->size++] = arg;                                         \
+    }                                                                          \
+                                                                               \
+    static void Vector_reserve_##t(Vector_##t* self, size_t cnt)               \
+    {                                                                          \
+        ASSERT(self->buf, "Vector not initialized");                           \
+        if (likely(cnt > self->cap))                                           \
+            self->buf = realloc(self->buf, (self->cap = cnt) * sizeof(t));     \
+    }                                                                          \
+                                                                               \
+    static void Vector_reserve_extra_##t(Vector_##t* self, size_t cnt)         \
+    {                                                                          \
+        ASSERT(self->buf, "Vector not initialized");                           \
+        if (cnt + self->size > self->cap)                                      \
+            self->buf =                                                        \
+              realloc(self->buf, (self->cap = cnt + self->size) * sizeof(t));  \
     }                                                                          \
                                                                                \
     static inline void Vector_remove_at_##t(Vector_##t* self, size_t idx,      \
@@ -63,7 +78,7 @@
                                                                                \
     static inline void Vector_pushv_##t(Vector_##t* self, const t* const argv, \
                                         size_t n)                              \
-    {                                                                          \
+    { /* TODO: optimize */                                                     \
         for (size_t i = 0; i < n; ++i)                                         \
             Vector_push_##t(self, argv[i]);                                    \
     }                                                                          \
@@ -96,6 +111,7 @@
                 ((void (*)(t*))dtor)(&self->buf[i]);                           \
         }                                                                      \
         free(self->buf);                                                       \
+        self->buf = NULL;                                                      \
     }                                                                          \
                                                                                \
     static inline size_t Vector_index_##t(Vector_##t* self, t* i)              \
@@ -145,4 +161,47 @@
             *i = arg;                                                          \
             return i;                                                          \
         }                                                                      \
+    }                                                                          \
+                                                                               \
+    static inline void Vector_insert_at_##t(Vector_##t* self, size_t i, t arg) \
+    {                                                                          \
+        ASSERT(i <= self->size, "Vector index out of range");                  \
+        if (unlikely(!self->size)) {                                           \
+            Vector_push_##t(self, arg);                                        \
+        } else if (unlikely(self->cap == self->size)) {                        \
+            self->buf = realloc(self->buf, (self->cap <<= 1) * sizeof(t));     \
+            memmove(self->buf + i + 1, self->buf + i,                          \
+                    (self->size++ - i) * sizeof(t));                           \
+            self->buf[i] = arg;                                                \
+        } else {                                                               \
+            memmove(self->buf + i + 1, self->buf + i,                          \
+                    (self->size++ - i) * sizeof(t));                           \
+            self->buf[i] = arg;                                                \
+        }                                                                      \
+    }                                                                          \
+                                                                               \
+    static inline void Vector_insert_front_##t(Vector_##t* self, t arg)        \
+    {                                                                          \
+        Vector_insert_##t(self, self->buf, arg);                               \
+    }                                                                          \
+                                                                               \
+    static inline t* Vector_last_##t(Vector_##t* self)                         \
+    {                                                                          \
+        return self->buf + (self->size - 1);                                   \
+    }                                                                          \
+                                                                               \
+    static inline t* Vector_first_##t(Vector_##t* self) { return self->buf; }  \
+                                                                               \
+    static inline void Vector_clear_##t(Vector_##t* self)                      \
+    {                                                                          \
+        if (dtor) {                                                            \
+            for (size_t i = 0; i < self->size; ++i)                            \
+                ((void (*)(t*))dtor)(&self->buf[i]);                           \
+        }                                                                      \
+        self->size = 0;                                                        \
+    }                                                                          \
+                                                                               \
+    static inline void Vector_shrink_##t(Vector_##t* self)                     \
+    {                                                                          \
+        self->buf = realloc(self->buf, (self->cap = self->size) * sizeof(t));  \
     }

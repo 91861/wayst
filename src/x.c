@@ -6,6 +6,8 @@
 
 #include "x.h"
 
+#include <uchar.h>
+
 #include <GL/glx.h>
 #include <X11/X.h>
 #include <X11/XKBlib.h>
@@ -13,9 +15,6 @@
 #include <X11/extensions/Xrandr.h>
 #include <X11/extensions/Xrender.h>
 #include <X11/keysymdef.h>
-
-#include <linux/input.h>
-#include <xkbcommon/xkbcommon-x11.h>
 
 #define _NET_WM_STATE_REMOVE 0l
 #define _NET_WM_STATE_ADD    1l
@@ -259,7 +258,7 @@ struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
     }
 
     if (!globalX11->visual_info)
-        ERR("Failed to get visual info");
+        ERR("Failed to get X11 visual info");
 
     windowX11(win)->set_win_attribs = (XSetWindowAttributes){
         .colormap = windowX11(win)->colormap = XCreateColormap(
@@ -303,7 +302,7 @@ struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
       &windowX11(win)->set_win_attribs);
 
     if (!windowX11(win)->window)
-        ERR("Failed to create window");
+        ERR("Failed to create X11 window");
 
     XFree(fb_cfg);
     XFree(globalX11->visual_info);
@@ -455,23 +454,25 @@ void WindowX11_events(struct WindowBase* self)
                 break;
 
             case KeyPress:;
-                Status stat = 0;
-                KeySym ret;
-                char   buf[5] = { 0 };
-                Xutf8LookupString(globalX11->ic, &e->xkey, buf, 4, &ret, &stat);
-
-                uint32_t code       = utf8_decode(buf, &buf[4]);
-                int      no_consume = (stat == 4);
+                Status  stat = 0;
+                KeySym  ret;
+                char    buf[5] = { 0 };
+                uint8_t bytes  = Xutf8LookupString(globalX11->ic, &e->xkey, buf,
+                                                  4, &ret, &stat);
+                mbstate_t mb   = { 0 };
+                uint32_t  code;
+                int no_consume = (stat == 4);
+                mbrtoc32(&code, buf, bytes, &mb);
 
                 switch (ret) {
-                    case XKB_KEY_Home:
-                    case XKB_KEY_End:
-                    case XKB_KEY_Right:
-                    case XKB_KEY_Left:
-                    case XKB_KEY_Up:
-                    case XKB_KEY_Down:
-                    case XKB_KEY_Return:
-                    case XKB_KEY_KP_Enter:
+                    case XK_Home:
+                    case XK_End:
+                    case XK_Right:
+                    case XK_Left:
+                    case XK_Up:
+                    case XK_Down:
+                    case XK_Return:
+                    case XK_KP_Enter:
                         no_consume = 1;
                         break;
 
@@ -489,16 +490,16 @@ void WindowX11_events(struct WindowBase* self)
                         break;
 
                     default:
-                        if (ret >= XKB_KEY_F1 && ret <= XKB_KEY_F24)
+                        if (ret >= XK_F1 && ret <= XK_F24)
                             no_consume = 1;
                 }
 
                 if (no_consume) {
-                    int32_t always_lower = XkbKeycodeToKeysym(globalX11->display, e->xkey.keycode, 0, 0);
-                    self->callbacks.key_handler(self->callbacks.user_data,
-                                                stat == 4 ? code : ret,
-                                                always_lower,
-                                                windowX11(self)->mods);
+                    int32_t always_lower = XkbKeycodeToKeysym(
+                      globalX11->display, e->xkey.keycode, 0, 0);
+                    self->callbacks.key_handler(
+                      self->callbacks.user_data, stat == 4 ? code : ret,
+                      always_lower, windowX11(self)->mods);
                 }
 
                 WindowX11_pointer(self, true);

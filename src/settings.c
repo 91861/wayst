@@ -42,11 +42,11 @@
 #endif
 
 #ifndef DFT_FONT_NAME_FALLBACK
-#define DFT_FONT_NAME_FALLBACK "FontAwesome"
+#define DFT_FONT_NAME_FALLBACK NULL
 #endif
 
 #ifndef DFT_FONT_NAME_FALLBACK2
-#define DFT_FONT_NAME_FALLBACK2 "NotoColorEmoji"
+#define DFT_FONT_NAME_FALLBACK2 NULL
 #endif
 
 // default title format
@@ -511,23 +511,27 @@ static void find_font()
         if (regular_alternative) {
             settings.font_name = regular_alternative;
         } else {
-            ERR("Failed to locate font files for \"%s\"", settings.font);
+            ERR("Failed to load font \'%s\'", settings.font);
         }
     } else if (regular_alternative) {
         free(regular_alternative);
     }
 
     if (!settings.font_name_bold)
-        WRN("No bold style found for \"%s\"\n", settings.font);
+        WRN("No bold style found for \'%s\'\n", settings.font);
 
     if (!settings.font_name_italic)
-        WRN("No italic style found for \"%s\"\n", settings.font);
+        WRN("No italic style found for \'%s\'\n", settings.font);
 
-    if (!settings.font_name_fallback)
-        WRN("Failed to locate font files for \"%s\"", settings.font_fallback);
+    if (!settings.font_name_fallback && settings.font_fallback)
+        WRN("Failed to load font \'%s\'\n", settings.font_fallback);
 
-    if (!settings.font_name_fallback2)
-        WRN("Failed to locate font files for \"%s\"", settings.font_fallback2);
+    if (!settings.font_name_fallback2 && settings.font_fallback2) {
+        WRN("Failed to load font \'%s\'\n", settings.font_fallback2);
+    } else if (!settings.font_name_fallback) {
+        settings.font_name_fallback = settings.font_name_fallback2;
+        settings.font_name_fallback2 = NULL;
+    }
 
     LOG("font files:\n  normal: %s\n  bold: %s\n  italic: %s\n"
         "  fallback/symbol: %s\n  fallback/symbol: %s\n",

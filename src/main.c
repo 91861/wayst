@@ -61,7 +61,11 @@ void App_init(App* self)
     }
 
     if (!self->win) {
-        ERR("Failed to create window");
+        ERR("Failed to create window"
+        #ifdef NOX
+            ", note: compiled without X11 support"
+        #endif
+        );
     }
 
     App_set_callbacks(self);
