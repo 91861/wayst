@@ -1,5 +1,9 @@
 /* See LICENSE for license information. */
 
+/**
+ * struct WindowBase - window interface/base class
+ */
+
 #pragma once
 
 #include "settings.h"

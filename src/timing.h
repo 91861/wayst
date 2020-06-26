@@ -6,6 +6,9 @@
 #include <stdint.h>
 #include <time.h>
 
+#define MS_IN_NSECS  1000000
+#define SEC_IN_NSECS 1000000000
+
 typedef struct timespec TimePoint;
 
 __attribute__((always_inline)) static inline TimePoint TimePoint_now()
@@ -16,7 +19,6 @@ __attribute__((always_inline)) static inline TimePoint TimePoint_now()
     return t;
 }
 
-#define SEC_IN_NSECS 1000000000
 __attribute__((always_inline)) static inline void TimePoint_add(
   TimePoint* self,
   TimePoint  offset)
@@ -37,9 +39,15 @@ __attribute__((always_inline)) static inline int64_t TimePoint_get_secs(
 }
 
 __attribute__((always_inline)) static inline int64_t TimePoint_get_nsecs(
-  TimePoint* self)
+  TimePoint self)
 {
-    return self->tv_nsec + self->tv_sec * SEC_IN_NSECS;
+    return self.tv_nsec + self.tv_sec * SEC_IN_NSECS;
+}
+
+__attribute__((always_inline)) static inline int64_t TimePoint_get_ms(
+  TimePoint self)
+{
+    return (self.tv_nsec + self.tv_sec * SEC_IN_NSECS) / MS_IN_NSECS;
 }
 
 __attribute__((always_inline)) static inline void TimePoint_subtract(
@@ -49,8 +57,8 @@ __attribute__((always_inline)) static inline void TimePoint_subtract(
     self->tv_sec -= other.tv_sec;
     if (self->tv_nsec < other.tv_nsec) {
         --self->tv_sec;
-        int64_t rest = other.tv_nsec - self->tv_nsec;
-        self->tv_nsec          = SEC_IN_NSECS - rest;
+        int64_t rest  = other.tv_nsec - self->tv_nsec;
+        self->tv_nsec = SEC_IN_NSECS - rest;
     } else
         self->tv_nsec -= other.tv_nsec;
 }
@@ -80,6 +88,20 @@ __attribute__((always_inline)) static inline TimePoint TimePoint_s_from_now(
     TimePoint_add(&t, (TimePoint){ .tv_sec = s_offset, .tv_nsec = 0 });
 
     return t;
+}
+
+__attribute__((always_inline)) static inline int64_t TimePoint_is_nsecs_ahead(
+  TimePoint t)
+{
+    TimePoint_subtract(&t, TimePoint_now());
+    return TimePoint_get_nsecs(t);
+}
+
+__attribute__((always_inline)) static inline int64_t TimePoint_is_ms_ahead(
+  TimePoint t)
+{
+    TimePoint_subtract(&t, TimePoint_now());
+    return TimePoint_get_ms(t);
 }
 
 __attribute__((always_inline)) static inline bool TimePoint_is_earlier(
@@ -136,8 +158,8 @@ __attribute__((always_inline)) static inline float Timer_get_fraction_for(
     TimePoint_subtract(&point_minus_start, self->start);
     TimePoint_subtract(&end_minus_start, self->start);
 
-    return (float)TimePoint_get_nsecs(&point_minus_start) /
-           TimePoint_get_nsecs(&end_minus_start);
+    return (float)TimePoint_get_nsecs(point_minus_start) /
+           TimePoint_get_nsecs(end_minus_start);
 }
 
 __attribute__((always_inline)) static inline float Timer_get_fraction_now(

@@ -1,9 +1,16 @@
+/* See LICENSE for license information. */
+
+/**
+ * Gfx - renderer interface
+ */
+
 #pragma once
 
 
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "ui.h"
 #include "util.h"
 #include "vt.h"
 
@@ -15,37 +22,14 @@ typedef struct
 
 } Gfx;
 
-
-
-typedef struct 
-{
-    bool visible, dragging;
-
-    enum AutoscrollDir
-    {
-        AUTOSCROLL_NONE = 0,
-        AUTOSCROLL_UP   = 1,
-        AUTOSCROLL_DN   = -1,
-
-    } autoscroll;
-
-    uint8_t   width;
-    float     top;
-    float     length;
-    float     drag_position;
-    TimePoint hide_time;
-    TimePoint autoscroll_next_step;
-
-} Scrollbar;
-
 struct IGfx
 {
-    void (*draw)                        (Gfx* self, const Vt*, Scrollbar* scrollbar);
+    void (*draw)                        (Gfx* self, const Vt*, Ui* ui);
     void (*resize)                      (Gfx* self, uint32_t w, uint32_t h);
     Pair_uint32_t (*get_char_size)      (Gfx* self);
     void (*init_with_context_activated) (Gfx* self);
     void (*reload_font)                 (Gfx* self);
-    bool (*update_timers)               (Gfx* self, Vt* vt, Scrollbar* scrollbar);
+    bool (*update_timers)               (Gfx* self, Vt* vt, Ui* ui);
     void (*notify_action)               (Gfx* self);
     bool (*set_focus)                   (Gfx* self, bool in_focus);
     void (*flash)                       (Gfx* self);
@@ -54,9 +38,9 @@ struct IGfx
     void (*destroy_proxy)               (Gfx* self, int32_t proxy[static 4]);
 };
 
-static void Gfx_draw(Gfx* self, const Vt* vt, Scrollbar* scrollbar)
+static void Gfx_draw(Gfx* self, const Vt* vt, Ui* ui)
 {
-    self->interface->draw(self, vt, scrollbar);
+    self->interface->draw(self, vt, ui);
 }
 
 static void Gfx_resize(Gfx* self, uint32_t w, uint32_t h)
@@ -79,9 +63,9 @@ static void Gfx_reload_font(Gfx* self)
     self->interface->reload_font(self);
 }
 
-static bool Gfx_update_timers(Gfx* self, Vt* vt, Scrollbar* scrollbar)
+static bool Gfx_update_timers(Gfx* self, Vt* vt, Ui* ui)
 {
-    return self->interface->update_timers(self, vt, scrollbar);
+    return self->interface->update_timers(self, vt, ui);
 }
 
 static void Gfx_notify_action(Gfx* self)

@@ -1,5 +1,14 @@
 /* See LICENSE for license information. */
 
+/**
+ * App links Vt, Window, Gfx modules together and deals with ui
+ *
+ * TODO:
+ * - Minimum scrollbar size
+ * - It makes more sense for the unicode input prompt to be here
+ *
+ */
+
 #define _GNU_SOURCE
 
 #include <stdio.h>
@@ -16,9 +25,11 @@
 #endif
 
 #include "settings.h"
+#include "ui.h"
 #include "vt.h"
 
 #define SCROLLBAR_HIDE_DELAY_MS 1500
+#define SCROLLBAR_FADE_TIME_MS  150
 #define DOUBLE_CLICK_DELAY_MS   300
 #define AUTOSCROLL_DELAY_MS     50
 
@@ -29,7 +40,29 @@ typedef struct
     Vt       vt;
 
     Pair_uint32_t resolution;
-    Scrollbar     scrollbar;
+
+    // selection
+    uint8_t   click_count;
+    TimePoint next_click_limit;
+    bool      selection_dragging;
+    bool      keyboard_select_mode;
+
+    // scrollbar
+    TimePoint scrollbar_hide_time;
+    TimePoint autoscroll_next_step;
+    float     scrollbar_drag_position;
+
+    Cursor ksm_cursor;
+
+    Ui ui;
+
+    enum AutoscrollDir
+    {
+        AUTOSCROLL_NONE = 0,
+        AUTOSCROLL_UP   = 1,
+        AUTOSCROLL_DN   = -1,
+
+    } autoscroll;
 } App;
 
 static App instance = { NULL };
@@ -38,7 +71,11 @@ static void App_update_scrollbar_dims(App* self);
 
 static void App_update_scrollbar_vis(App* self);
 
+static void App_update_cursor(App* self);
+
 void App_do_autoscroll(App* self);
+
+static void App_clamp_cursor(App* self, Pair_uint32_t chars);
 
 void* App_load_gl_ext(const char* name)
 {
@@ -95,7 +132,7 @@ void App_init(App* self)
     Pair_uint32_t chars = Gfx_get_char_size(self->gfx);
     Vt_resize(&self->vt, chars.first, chars.second);
 
-    self->scrollbar.width = 10;
+    self->ui.scrollbar.width = 10;
 
     self->resolution = size;
 }
@@ -118,6 +155,7 @@ void App_run(App* self)
             Gfx_resize(self->gfx, self->resolution.first,
                        self->resolution.second);
             Pair_uint32_t chars = Gfx_get_char_size(self->gfx);
+            App_clamp_cursor(self, chars);
 
             Window_notify_content_change(self->win);
             Vt_resize(&self->vt, chars.first, chars.second);
@@ -126,15 +164,16 @@ void App_run(App* self)
         App_do_autoscroll(self);
         App_update_scrollbar_vis(self);
         App_update_scrollbar_dims(self);
+        App_update_cursor(self);
 
-        if (!!Gfx_update_timers(self->gfx, &self->vt, &self->scrollbar) +
+        if (!!Gfx_update_timers(self->gfx, &self->vt, &self->ui) +
             !!Gfx_set_focus(self->gfx, FLAG_IS_SET(self->win->state_flags,
                                                    WINDOW_IN_FOCUS))) {
             Window_notify_content_change(self->win);
         }
 
         if (Window_needs_repaint(self->win)) {
-            Gfx_draw(self->gfx, &self->vt, &self->scrollbar);
+            Gfx_draw(self->gfx, &self->vt, &self->ui);
         }
 
         Window_maybe_swap(self->win);
@@ -152,10 +191,11 @@ void App_clipboard_handler(void* self, const char* text)
 
 void App_reload_font(void* self)
 {
-    Gfx_reload_font(((App*)self)->gfx);
-    Gfx_draw(((App*)self)->gfx, &((App*)self)->vt, &((App*)self)->scrollbar);
-    Window_notify_content_change(((App*)self)->win);
-    Window_maybe_swap(((App*)self)->win);
+    App* app = self;
+    Gfx_reload_font(app->gfx);
+    Gfx_draw(app->gfx, &app->vt, &app->ui);
+    Window_notify_content_change(app->win);
+    Window_maybe_swap(app->win);
 }
 
 uint32_t App_get_key_code(void* self, char* name)
@@ -218,6 +258,117 @@ void App_action(void* self)
     Gfx_notify_action(((App*)self)->gfx);
 }
 
+static void App_clamp_cursor(App* self, Pair_uint32_t chars)
+{
+    if (self->keyboard_select_mode) {
+        self->ksm_cursor.col = MIN(self->ksm_cursor.col, chars.first - 1);
+        self->ksm_cursor.row =
+          CLAMP(self->ksm_cursor.row, Vt_visual_top_line(&self->vt),
+                Vt_visual_bottom_line(&self->vt));
+    }
+}
+
+/**
+ * key commands used in keyboard select mode
+ * @return exit ksm mode */
+static bool App_handle_keyboard_select_mode_key(App*     self,
+                                                uint32_t key,
+                                                uint32_t rawkey,
+                                                uint32_t mods)
+{
+    switch (key) {
+        case 27: // Escape
+            Vt_select_end(&self->vt);
+            App_notify_content_change(self);
+            self->keyboard_select_mode = false;
+            Vt_visual_scroll_reset(&self->vt);
+            Gfx_notify_action(self->gfx);
+            return true;
+
+        case 65361: // left
+        case 104:   // h
+            App_notify_content_change(self);
+            if (self->ksm_cursor.col) {
+                self->ksm_cursor.col--;
+            }
+            if (self->vt.selection.mode) {
+                Vt_select_set_end_cell(&self->vt, self->ksm_cursor.col,
+                                       self->ksm_cursor.row);
+            }
+            break;
+
+        case 65364: // down
+        case 106:   // j
+            App_notify_content_change(self);
+            if (self->ksm_cursor.row < self->vt.lines.size - 1) {
+                self->ksm_cursor.row++;
+            }
+
+            if (Vt_visual_bottom_line(&self->vt) == self->vt.lines.size) {
+                Vt_visual_scroll_reset(&self->vt);
+            } else {
+                while (Vt_visual_bottom_line(&self->vt) <
+                       self->ksm_cursor.row + 2) {
+                    Vt_visual_scroll_down(&self->vt);
+                }
+            }
+            if (self->vt.selection.mode) {
+                Vt_select_set_end_cell(&self->vt, self->ksm_cursor.col,
+                                       self->ksm_cursor.row);
+            }
+            break;
+
+        case 65362: // up
+        case 107:   // k
+            App_notify_content_change(self);
+            if (self->ksm_cursor.row) {
+                self->ksm_cursor.row--;
+            }
+            while (Vt_visual_top_line(&self->vt) > self->ksm_cursor.row) {
+                Vt_visual_scroll_up(&self->vt);
+            }
+            if (self->vt.selection.mode) {
+                Vt_select_set_end_cell(&self->vt, self->ksm_cursor.col,
+                                       self->ksm_cursor.row);
+            }
+            break;
+
+        case 65363: // right
+        case 108:   // l
+            App_notify_content_change(self);
+            if (self->ksm_cursor.col + 1 < self->vt.ws.ws_col) {
+                self->ksm_cursor.col++;
+            }
+            if (self->vt.selection.mode) {
+                Vt_select_set_end_cell(&self->vt, self->ksm_cursor.col,
+                                       self->ksm_cursor.row);
+            }
+            break;
+
+        case 121: // y
+        case 99:  // c
+        {
+            Vector_char txt = Vt_select_region_to_string(&self->vt);
+            App_clipboard_send(self, txt.buf);
+        } break;
+
+        case 13: // Return
+            if (self->vt.selection.mode) {
+                Vt_select_end(&self->vt);
+                break;
+            }
+            Vt_select_init_cell(&self->vt,
+                                FLAG_IS_SET(mods, MODIFIER_CONTROL)
+                                  ? SELECT_MODE_BOX
+                                  : SELECT_MODE_NORMAL,
+                                self->ksm_cursor.col, self->ksm_cursor.row);
+            Vt_select_commit(&self->vt);
+
+            break;
+    }
+    return false;
+}
+
 /**
  * key commands used by the terminal itself
  * @return keypress was consumed */
@@ -226,12 +377,18 @@ static bool App_maybe_handle_application_key(App*     self,
                                              uint32_t rawkey,
                                              uint32_t mods)
 {
-    Vt* vt = &((App*)self)->vt;
+    Vt* vt = &self->vt;
+
+    if (self->keyboard_select_mode) {
+        self->keyboard_select_mode =
+          !App_handle_keyboard_select_mode_key(self, key, rawkey, mods);
+        return true;
+    }
 
     if (KeyCommand_is_active(&settings.key_commands[KCMD_COPY], key, rawkey,
                              mods)) {
         Vector_char txt = Vt_select_region_to_string(vt);
-        App_clipboard_handler(self, txt.buf);
+        App_clipboard_send(self, txt.buf);
         return true;
     } else if (KeyCommand_is_active(&settings.key_commands[KCMD_PASTE], key,
                                     rawkey, mods)) {
@@ -267,6 +424,14 @@ static bool App_maybe_handle_application_key(App*     self,
                                     key, rawkey, mods)) {
         Vt_start_unicode_input(vt);
         return true;
+    } else if (KeyCommand_is_active(
+                 &settings.key_commands[KCMD_KEYBOARD_SELECT], key, rawkey,
+                 mods)) {
+        self->ksm_cursor           = self->vt.cursor;
+        self->ksm_cursor.blinking  = false;
+        self->ui.cursor            = &self->ksm_cursor;
+        self->keyboard_select_mode = true;
+        return true;
     }
 
     return false;
@@ -278,14 +443,31 @@ void App_key_handler(void* self, uint32_t key, uint32_t rawkey, uint32_t mods)
         Vt_handle_key(&((App*)self)->vt, key, rawkey, mods);
 }
 
+static void App_update_cursor(App* self)
+{
+    if (self->keyboard_select_mode) {
+        self->ui.cursor = &self->ksm_cursor;
+    } else {
+        self->ui.cursor = &self->vt.cursor;
+    }
+}
+
 /**
  * Update gui scrollbar dimensions */
 static void App_update_scrollbar_dims(App* self)
 {
-    Vt* vt                 = &self->vt;
-    self->scrollbar.length = 2.0 / vt->lines.size * vt->ws.ws_row;
-    self->scrollbar.top =
+    Vt* vt                    = &self->vt;
+    self->ui.scrollbar.length = 2.0 / vt->lines.size * vt->ws.ws_row;
+    self->ui.scrollbar.top =
       2.0 * (double)Vt_visual_top_line(vt) / (vt->lines.size - 1);
+
+    int64_t ms = TimePoint_is_ms_ahead(self->scrollbar_hide_time);
+    if (ms > 0 && ms < SCROLLBAR_FADE_TIME_MS && !self->vt.scrolling) {
+        self->ui.scrollbar.opacity = ((float)ms / SCROLLBAR_FADE_TIME_MS);
+        App_notify_content_change(self);
+    } else {
+        self->ui.scrollbar.opacity = 1.0f;
+    }
 }
 
 static bool App_scrollbar_consume_drag(App*     self,
@@ -293,14 +475,15 @@ static bool App_scrollbar_consume_drag(App*     self,
                                        int32_t  x,
                                        int32_t  y)
 {
-    if (!self->scrollbar.dragging)
+    if (!self->ui.scrollbar.dragging) {
         return false;
+    }
 
     Vt* vt   = &self->vt;
     y        = CLAMP(y, 0, vt->ws.ws_ypixel);
     float dp = 2.0f * ((float)y / (float)vt->ws.ws_ypixel) -
-               self->scrollbar.drag_position;
-    float  range       = 2.0f - self->scrollbar.length;
+               self->scrollbar_drag_position;
+    float  range       = 2.0f - self->ui.scrollbar.length;
     size_t target_line = Vt_top_line(vt) * CLAMP(dp, 0.0, range) / range;
 
     if (target_line != Vt_visual_top_line(vt)) {
@@ -322,57 +505,59 @@ static bool App_scrollbar_consume_click(App*     self,
 {
     Vt* vt = &self->vt;
 
-    self->scrollbar.autoscroll = AUTOSCROLL_NONE;
+    self->autoscroll = AUTOSCROLL_NONE;
 
-    if (!self->scrollbar.visible || button > 3)
+    if (!self->ui.scrollbar.visible || button > 3)
         return false;
 
-    if (self->scrollbar.dragging && !state) {
-        self->scrollbar.dragging = false;
+    if (self->ui.scrollbar.dragging && !state) {
+        self->ui.scrollbar.dragging = false;
         App_notify_content_change(self);
         return false;
     }
 
     float dp = 2.0f * ((float)y / (float)vt->ws.ws_ypixel);
 
-    if (x > vt->ws.ws_xpixel - self->scrollbar.width) {
+    if (x > vt->ws.ws_xpixel - self->ui.scrollbar.width) {
         // inside region
-        if (self->scrollbar.top < dp &&
-            self->scrollbar.top + self->scrollbar.length > dp) {
+        if (self->ui.scrollbar.top < dp &&
+            self->ui.scrollbar.top + self->ui.scrollbar.length > dp) {
             // inside scrollbar
             if (state &&
                 (button == MOUSE_BTN_LEFT || button == MOUSE_BTN_RIGHT ||
                  button == MOUSE_BTN_MIDDLE)) {
-                self->scrollbar.dragging      = true;
-                self->scrollbar.drag_position = dp - self->scrollbar.top;
+                self->ui.scrollbar.dragging   = true;
+                self->scrollbar_drag_position = dp - self->ui.scrollbar.top;
             }
         } else {
             // outside of scrollbar
             if (state && button == MOUSE_BTN_LEFT) {
                 /* jump to that position and start dragging in the middle */
-                self->scrollbar.dragging      = true;
-                self->scrollbar.drag_position = self->scrollbar.length / 2;
+                self->ui.scrollbar.dragging   = true;
+                self->scrollbar_drag_position = self->ui.scrollbar.length / 2;
                 dp = 2.0f * ((float)y / (float)vt->ws.ws_ypixel) -
-                     self->scrollbar.drag_position;
-                float  range = 2.0f - self->scrollbar.length;
+                     self->scrollbar_drag_position;
+                float  range = 2.0f - self->ui.scrollbar.length;
                 size_t target_line =
                   Vt_top_line(vt) * CLAMP(dp, 0.0, range) / range;
                 if (target_line != Vt_visual_top_line(vt)) {
                     Vt_visual_scroll_to(vt, target_line);
                 }
             } else if (state && button == MOUSE_BTN_RIGHT) {
-                self->scrollbar.autoscroll_next_step =
+                self->autoscroll_next_step =
                   TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS);
 
-                if (dp > self->scrollbar.top + self->scrollbar.length / 2) {
-                    self->scrollbar.autoscroll = AUTOSCROLL_DN;
+                if (dp >
+                    self->ui.scrollbar.top + self->ui.scrollbar.length / 2) {
+                    self->autoscroll = AUTOSCROLL_DN;
                 } else {
-                    self->scrollbar.autoscroll = AUTOSCROLL_UP;
+                    self->autoscroll = AUTOSCROLL_UP;
                 }
 
             } else if (state && button == MOUSE_BTN_MIDDLE) {
                 /* jump one screen in that direction */
-                if (dp > self->scrollbar.top + self->scrollbar.length / 2) {
+                if (dp >
+                    self->ui.scrollbar.top + self->ui.scrollbar.length / 2) {
                     Vt_visual_scroll_to(vt,
                                         vt->visual_scroll_top + vt->ws.ws_row);
                 } else {
@@ -401,14 +586,14 @@ static void App_update_scrollbar_vis(App* self)
     static bool last_scrolling = false;
     if (!vt->scrolling) {
         if (last_scrolling) {
-            self->scrollbar.hide_time =
+            self->scrollbar_hide_time =
               TimePoint_ms_from_now(SCROLLBAR_HIDE_DELAY_MS);
-        } else if (self->scrollbar.dragging) {
-            self->scrollbar.hide_time =
+        } else if (self->selection_dragging) {
+            self->scrollbar_hide_time =
               TimePoint_ms_from_now(SCROLLBAR_HIDE_DELAY_MS);
-        } else if (TimePoint_passed(self->scrollbar.hide_time)) {
-            if (self->scrollbar.visible) {
-                self->scrollbar.visible = false;
+        } else if (TimePoint_passed(self->scrollbar_hide_time)) {
+            if (self->ui.scrollbar.visible) {
+                self->ui.scrollbar.visible = false;
                 App_notify_content_change(self);
             }
         }
@@ -421,22 +606,112 @@ void App_do_autoscroll(App* self)
     Vt* vt = &self->vt;
     App_update_scrollbar_vis(self);
 
-    if (self->scrollbar.autoscroll == AUTOSCROLL_UP &&
-        TimePoint_passed(self->scrollbar.autoscroll_next_step)) {
-        self->scrollbar.visible = true;
+    if (self->autoscroll == AUTOSCROLL_UP &&
+        TimePoint_passed(self->autoscroll_next_step)) {
+        self->ui.scrollbar.visible = true;
         Vt_visual_scroll_up(vt);
-        self->scrollbar.autoscroll_next_step =
-          TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS);
+        self->autoscroll_next_step = TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS);
         App_update_scrollbar_dims(self);
         App_notify_content_change(self);
-    } else if (self->scrollbar.autoscroll == AUTOSCROLL_DN &&
-               TimePoint_passed(self->scrollbar.autoscroll_next_step)) {
+    } else if (self->autoscroll == AUTOSCROLL_DN &&
+               TimePoint_passed(self->autoscroll_next_step)) {
         Vt_visual_scroll_down(vt);
-        self->scrollbar.autoscroll_next_step =
-          TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS);
+        self->autoscroll_next_step = TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS);
         App_update_scrollbar_dims(self);
         App_notify_content_change(self);
     }
+}
+
+static bool App_consume_drag(App* self, uint32_t button, int32_t x, int32_t y)
+{
+    Vt* vt            = &((App*)self)->vt;
+    self->click_count = 0;
+
+    if (button != 1 || !self->selection_dragging)
+        return false;
+
+    if (vt->selection.next_mode)
+        Vt_select_commit(vt);
+
+    Vt_select_set_end(vt, x, y);
+    return true;
+}
+
+/**
+ * @return does text field consume click event */
+static bool App_select_consume_click(App*     self,
+                                     uint32_t button,
+                                     uint32_t state,
+                                     int32_t  x,
+                                     int32_t  y,
+                                     uint32_t mods)
+{
+    Vt* vt = &self->vt;
+
+    if (!state) {
+        self->selection_dragging = false;
+    }
+
+    if (vt->modes.x10_mouse_compat) {
+        return false;
+    }
+
+    if (button == MOUSE_BTN_LEFT &&
+        (!(vt->modes.extended_report || vt->modes.mouse_btn_report ||
+           vt->modes.mouse_motion_on_btn_report) ||
+         FLAG_IS_SET(mods, MODIFIER_SHIFT))) {
+        if (!state && vt->selection.mode == SELECT_MODE_NONE)
+            return false;
+
+        if (state) {
+            if (!TimePoint_passed(self->next_click_limit)) {
+                ++self->click_count;
+            } else {
+                self->click_count = 0;
+            }
+
+            self->next_click_limit =
+              TimePoint_ms_from_now(DOUBLE_CLICK_DELAY_MS);
+
+            if (self->click_count == 0) {
+                Vt_select_end(vt);
+                Vt_select_init(vt,
+                               FLAG_IS_SET(mods, MODIFIER_CONTROL)
+                                 ? SELECT_MODE_BOX
+                                 : SELECT_MODE_NORMAL,
+                               x, y);
+                self->selection_dragging = true;
+            } else if (self->click_count == 1) {
+                Vt_select_end(vt);
+                Vt_select_init_word(vt, x, y);
+                App_notify_content_change(self);
+            } else if (self->click_count == 2) {
+                Vt_select_end(vt);
+                Vt_select_init_line(vt, y);
+                App_notify_content_change(self);
+            }
+        }
+        return true;
+
+        /* paste from primary selection */
+    } else if (button == MOUSE_BTN_MIDDLE && state &&
+               (!(vt->modes.mouse_btn_report ||
+                  vt->modes.mouse_motion_on_btn_report) ||
+                (FLAG_IS_SET(mods, MODIFIER_CONTROL) ||
+                 FLAG_IS_SET(mods, MODIFIER_SHIFT)))) {
+        if (vt->selection.mode != SELECT_MODE_NONE) {
+            Vector_char text = Vt_select_region_to_string(vt);
+            Vt_handle_clipboard(&self->vt, text.buf);
+            Vector_destroy_char(&text);
+        } else {
+            ; // TODO: we don't own primary, get it from the window system
+        }
+    } else if (vt->selection.mode != SELECT_MODE_NONE) {
+        Vt_select_end(vt);
+        return true;
+    }
+
+    return false;
 }
 
 void App_button_handler(void*    self,
@@ -450,27 +725,33 @@ void App_button_handler(void*    self,
     Vt* vt = &((App*)self)->vt;
     if (button == MOUSE_BTN_WHEEL_DOWN && state) {
         uint8_t lines = ammount ? ammount : settings.scroll_discrete_lines;
-        ((App*)self)->scrollbar.visible = true;
+        ((App*)self)->ui.scrollbar.visible = true;
+
         for (uint8_t i = 0; i < lines; ++i)
             Vt_visual_scroll_down(vt);
+
         App_update_scrollbar_dims(self);
         App_notify_content_change(self);
     } else if (button == MOUSE_BTN_WHEEL_UP && state) {
         uint8_t lines = ammount ? ammount : settings.scroll_discrete_lines;
-        ((App*)self)->scrollbar.visible = true;
+        ((App*)self)->ui.scrollbar.visible = true;
+
         for (uint8_t i = 0; i < lines; ++i)
             Vt_visual_scroll_up(vt);
+
         App_update_scrollbar_vis(self);
         App_update_scrollbar_dims(self);
         App_notify_content_change(self);
-    } else if (!App_scrollbar_consume_click(self, button, state, x, y)) {
+    } else if (!App_scrollbar_consume_click(self, button, state, x, y) &&
+               !App_select_consume_click(self, button, state, x, y, mods)) {
         Vt_handle_button(&((App*)self)->vt, button, state, x, y, ammount, mods);
     }
 }
 
 void App_motion_handler(void* self, uint32_t button, int32_t x, int32_t y)
 {
-    if (!App_scrollbar_consume_drag(self, button, x, y))
+    if (!App_scrollbar_consume_drag(self, button, x, y) &&
+        !App_consume_drag(self, button, x, y))
         Vt_handle_motion(&((App*)self)->vt, button, x, y);
 }
 

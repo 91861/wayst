@@ -529,6 +529,7 @@ static void find_font()
     if (!settings.font_name_fallback2 && settings.font_fallback2) {
         WRN("Failed to load font \'%s\'\n", settings.font_fallback2);
     } else if (!settings.font_name_fallback) {
+        // if fallback is not found but fallback2 is, swap them
         settings.font_name_fallback = settings.font_name_fallback2;
         settings.font_name_fallback2 = NULL;
     }
@@ -548,7 +549,7 @@ static void settings_make_default()
 
         .key_commands = {
             [KCMD_QUIT] = (KeyCommand) {
-                .key.code = 0,
+                .key.code = 0, // NoSymbol
                 .is_name = false,
                 .mods = 0,
             },
@@ -574,6 +575,11 @@ static void settings_make_default()
             },
             [KCMD_FONT_SHRINK] = (KeyCommand) {
                 .key.code = 45, // minus
+                .is_name = false,
+                .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
+            },
+            [KCMD_KEYBOARD_SELECT] = (KeyCommand) {
+                .key.code = 107, // k
                 .is_name = false,
                 .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
             },

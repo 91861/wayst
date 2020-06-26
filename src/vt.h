@@ -11,23 +11,13 @@
 #include <uchar.h>
 #include <unistd.h>
 
-#include <fcntl.h>
 #include <pty.h>
-#include <sys/ioctl.h>
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <termios.h>
-#include <utmp.h>
-#include <xkbcommon/xkbcommon.h>
 
 #include "colors.h"
-#include "gui.h"
 #include "settings.h"
 #include "timing.h"
 #include "util.h"
 #include "vector.h"
-
-#include "util.h"
 
 typedef struct
 {
@@ -52,12 +42,12 @@ enum MouseButton
     MOUSE_BTN_WHEEL_DOWN = 66,
 };
 
-typedef struct
+typedef struct Cursor
 {
     enum CursorType type : 2;
     uint8_t         blinking : 1;
     uint8_t         hidden : 1;
-
+    size_t          col, row;
 } Cursor;
 
 enum __attribute__((packed)) VtRuneStyle
@@ -98,7 +88,7 @@ DEF_VECTOR(Vector_VtRune, Vector_destroy_VtRune)
 
 DEF_VECTOR(Vector_char, Vector_destroy_char)
 
-// represents a clickable range of text linked to a URI
+// represents a clickable range of text linked to a URL
 typedef struct
 {
     size_t begin, end;
@@ -114,11 +104,13 @@ DEF_VECTOR(VtUriRange, VtUriRange_destroy)
 
 typedef struct
 {
+    /* Characters */
     Vector_VtRune data;
 
     /* Arbitrary data used by the renderer */
     VtLineProxy proxy;
 
+    /* Clickable link ranges */
     Vector_VtUriRange uris;
 
     /* Can be split by resizing window */
@@ -127,10 +119,11 @@ typedef struct
     /* Can be merged into previous line */
     bool rejoinable : 1;
 
+    /* Part of this line was moved to the next one */
+    bool was_reflown : 1;
+
     /* Proxy resources need to be regenerated */
     bool damaged : 1;
-
-    bool was_reflown : 1;
 
 } VtLine;
 
@@ -197,48 +190,22 @@ typedef struct _Vt
 
     } unicode_input;
 
-    /* struct Scrollbar */
-    /* { */
-    /*     bool visible, dragging; */
-
-    /*     enum AutoscrollDir */
-    /*     { */
-    /*         AUTOSCROLL_NONE = 0, */
-    /*         AUTOSCROLL_UP   = 1, */
-    /*         AUTOSCROLL_DN   = -1, */
-
-    /*     } autoscroll; */
-
-    /*     uint8_t   width; */
-    /*     float     top; */
-    /*     float     length; */
-    /*     float     drag_position; */
-    /*     TimePoint hide_time; */
-    /*     TimePoint autoscroll_next_step; */
-
-    /* } scrollbar; */
-
     struct Selection
     {
-
         enum SelectMode
         {
             SELECT_MODE_NONE = 0,
             SELECT_MODE_NORMAL,
             SELECT_MODE_BOX,
-        } mode, // active selection mode
+        } mode, /* active selection mode */
 
-          next_mode; // new selection mode decided by modkeys' state during
-                     // initializing click
-
-        bool dragging;
-        bool drag_can_start;
-
-        uint8_t   click_count;
-        TimePoint next_click_limit;
+          /** new selection mode decided by modkeys' state during
+           * initializing click */
+          next_mode;
 
         /* region start point recorded when text was clicked, but
-         * no drag event was received yet */
+         * no drag event was received yet (at that point a previous selection
+         * region may still be valid) */
         size_t click_begin_line;
         size_t click_begin_char_idx;
 
@@ -307,11 +274,10 @@ typedef struct _Vt
 
     Cursor cursor;
 
-    size_t cursor_pos;
     size_t alt_cursor_pos;
     size_t saved_cursor_pos;
 
-    size_t active_line;
+    /* size_t active_line; */
     size_t alt_active_line;
     size_t saved_active_line;
 
@@ -340,7 +306,8 @@ typedef struct _Vt
 
 Vt Vt_new(uint32_t cols, uint32_t rows);
 
-/** set gui server connection fd to monitor for activity */
+/**
+ * set window system connection fd to monitor for activity */
 static inline void Vt_watch_fd(Vt* const self, const int fd)
 {
     self->io = fd;
@@ -436,8 +403,26 @@ void Vt_visual_scroll_reset(Vt* self);
 
 void Vt_get_visible_lines(const Vt* self, VtLine** out_begin, VtLine** out_end);
 
+void Vt_select_init_word(Vt* self, int32_t x, int32_t y);
+
+void Vt_select_init(Vt* self, enum SelectMode mode, int32_t x, int32_t y);
+
+void Vt_select_init_cell(Vt* self, enum SelectMode mode, int32_t x, int32_t y);
+
+void Vt_select_init_line(Vt* self, int32_t y);
+
+void Vt_select_commit(Vt* self);
+
+void Vt_select_set_end(Vt* self, int32_t x, int32_t y);
+
+void Vt_select_set_end_cell(Vt* self, int32_t x, int32_t y);
+
+void Vt_select_end(Vt* self);
+
+/**
+ * Should cell (in screen coordinates) be visually highlighted as selected */
 __attribute__((always_inline, hot)) static inline bool
-Vt_selection_should_highlight_char(const Vt* const self, size_t x, size_t y)
+Vt_is_cell_selected(const Vt* const self, size_t x, size_t y)
 {
     switch (expect(self->selection.mode, SELECT_MODE_NONE)) {
         case SELECT_MODE_NONE:
