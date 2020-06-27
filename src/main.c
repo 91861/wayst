@@ -143,7 +143,7 @@ void App_run(App* self)
         Window_events(self->win);
 
         Vt_wait(&self->vt);
-        while ((Vt_read(&self->vt)) && !self->vt.is_done)
+        for (int rd = 0; Vt_read(&self->vt, &rd) && !self->vt.is_done;)
             ;
 
         Pair_uint32_t newres = Window_size(self->win);

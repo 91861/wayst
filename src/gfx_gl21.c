@@ -11,14 +11,11 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <sys/sysinfo.h>
-#include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
 
 #include <GL/gl.h>
 
-#include <freetype/ftlcdfil.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
 #include FT_GLYPH_H

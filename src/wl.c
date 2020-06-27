@@ -31,7 +31,6 @@
 #include <EGL/eglext.h>
 #include <GL/gl.h>
 
-#include <linux/input.h>
 #include <xkbcommon/xkbcommon-compose.h>
 #include <xkbcommon/xkbcommon-keysyms.h>
 #include <xkbcommon/xkbcommon.h>

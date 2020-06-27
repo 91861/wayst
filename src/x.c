@@ -328,8 +328,14 @@ struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
     XRRScreenConfiguration* xrr_s_conf =
       XRRGetScreenInfo(globalX11->display, RootWindow(globalX11->display, 0));
 
-    short xrr_ref_rate           = XRRConfigCurrentRate(xrr_s_conf);
-    global->target_frame_time_ms = 1000 / xrr_ref_rate;
+    short xrr_ref_rate = xrr_s_conf ? XRRConfigCurrentRate(xrr_s_conf) : 0;
+
+    LOG("Detected refresh rate: %d fps\n", xrr_ref_rate);
+    if (xrr_ref_rate > 1) {
+        global->target_frame_time_ms = 1000 / xrr_ref_rate;
+    } else {
+        global->target_frame_time_ms = 1000 / 60;
+    }
 
     XRRFreeScreenConfigInfo(xrr_s_conf);
 
@@ -461,7 +467,7 @@ void WindowX11_events(struct WindowBase* self)
                                                   4, &ret, &stat);
                 mbstate_t mb   = { 0 };
                 uint32_t  code;
-                int no_consume = (stat == 4);
+                int       no_consume = (stat == 4);
                 mbrtoc32(&code, buf, bytes, &mb);
 
                 switch (ret) {
@@ -646,7 +652,11 @@ void WindowX11_set_current_context(struct WindowBase* self) {}
 
 void WindowX11_set_swap_interval(struct WindowBase* self, int32_t ival)
 {
-    glXSwapIntervalEXT(globalX11->display, windowX11(self)->window, ival);
+    if (glXSwapIntervalEXT) {
+        glXSwapIntervalEXT(globalX11->display, windowX11(self)->window, ival);
+    } else {
+        WRN("glXSwapIntervalEXT not found\n");
+    }
 }
 
 void WindowX11_set_title(struct WindowBase* self, const char* title)

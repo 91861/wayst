@@ -2,6 +2,16 @@
 
 #pragma once
 
+#ifdef __linux
+#include <pty.h>
+#elif defined(__OpenBSD__) || defined(__NetBSD__)
+#include <util.h>
+#include <termios.h>
+#elif defined(__FreeBSD__) || defined(__DragonFly__)
+#include <libutil.h>
+#include <termios.h>
+#endif
+
 #include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -10,8 +20,6 @@
 #include <string.h>
 #include <uchar.h>
 #include <unistd.h>
-
-#include <pty.h>
 
 #include "colors.h"
 #include "settings.h"
@@ -319,12 +327,12 @@ static inline char* Vt_buffer(Vt* const self)
 }
 
 /**
- * @return 1 - requires retry */
+ * @return requires retry */
 bool Vt_wait(Vt* self);
 
 /**
- * @return 1 - requires retry */
-bool Vt_read(Vt* self);
+ * @return requires retry */
+bool Vt_read(Vt* self, int* rd);
 
 static void Vt_write(Vt* self);
 

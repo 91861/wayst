@@ -4,21 +4,25 @@
 
 #include "vt.h"
 
+#ifdef __linux
+#include <pty.h>
+#include <utmp.h>
+#elif defined(__OpenBSD__) || defined(__NetBSD__)
+#include <util.h>
+#elif defined(__FreeBSD__) || defined(__DragonFly__)
+#include <libutil.h>
+#endif
+
 #include <fcntl.h>
 #include <limits.h>
-#include <pty.h>
+#include <signal.h>
 #include <sys/ioctl.h>
 #include <sys/select.h>
 #include <sys/time.h>
-#include <termios.h>
-#include <uchar.h>
-#include <utmp.h>
-
-#include <fcntl.h>
-#include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <utmp.h>
+#include <termios.h>
+#include <uchar.h>
 
 #include <xkbcommon/xkbcommon.h>
 
@@ -305,11 +309,11 @@ void Vt_select_commit(Vt* self)
 void Vt_select_set_end(Vt* self, int32_t x, int32_t y)
 {
     if (self->selection.mode != SELECT_MODE_NONE) {
-        x                            = CLAMP(x, 0, self->ws.ws_xpixel);
-        y                            = CLAMP(y, 0, self->ws.ws_ypixel);
-        size_t click_x               = (double)x / self->pixels_per_cell_x;
-        size_t click_y               = (double)y / self->pixels_per_cell_y;
-        Vt_select_set_end_cell(self, click_x,  click_y);
+        x              = CLAMP(x, 0, self->ws.ws_xpixel);
+        y              = CLAMP(y, 0, self->ws.ws_ypixel);
+        size_t click_x = (double)x / self->pixels_per_cell_x;
+        size_t click_y = (double)y / self->pixels_per_cell_y;
+        Vt_select_set_end_cell(self, click_x, click_y);
     }
 }
 
@@ -2950,7 +2954,7 @@ static inline void Vt_clear_proxies(Vt* self)
     }
 }
 
-__attribute__((hot)) inline bool Vt_read(Vt* self)
+__attribute__((hot)) inline bool Vt_read(Vt* self, int* last)
 {
     if (FD_ISSET(self->master, &self->rfdset)) {
         int rd = read(self->master, self->buf, sizeof(self->buf) - 2);
@@ -2976,6 +2980,13 @@ __attribute__((hot)) inline bool Vt_read(Vt* self)
             self->is_done = true;
         } else if (rd == 0) {
             /* nothing more to read */
+            if (last) {
+                /* if we get 0 twice the program is done or something went
+                 * really wrong */
+                if (!*last)
+                    self->is_done = true;
+                *last = 0;
+            }
             return false;
         } else {
             for (int i = 0; i < rd; ++i) {
@@ -3008,8 +3019,6 @@ __attribute__((hot)) inline bool Vt_read(Vt* self)
             }
         }
         return true;
-    } else {
-        /* !FD_ISSET(..) */
     }
     return false;
 }

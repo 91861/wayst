@@ -1,6 +1,5 @@
 CC = gcc
 EXEC = wayst
-VERSION = "0.1.0"
 INSTALL_DIR = /usr/local/bin
 
 ARGS =
@@ -10,19 +9,23 @@ BLD_DIR = build
 TGT_DIR = .
 
 LDLIBS = -lGL -lfreetype -lfontconfig -lutil -L/usr/lib -lm
-INCLUDES = -I"/usr/include/freetype2/"
 
+ifeq ($(shell uname -s),FreeBSD)
+	INCLUDES = -I/usr/local/include/freetype2/
+else
+	INCLUDES = -I/usr/include/freetype2/
+endif
 
 ifeq ($(mode),debug)
-	CFLAGS = -O0 -g3 -ffinite-math-only -fno-rounding-math -std=c18 -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -DDEBUG -DVERSION="\"${VERSION} debug build\""
-	LDFLAGS =  -fsanitize=address -fsanitize=undefined -fsanitize=unreachable -fno-omit-frame-pointer
+	CFLAGS = -O0 -g3 -ffinite-math-only -fno-rounding-math -std=c18 -fsanitize=address -fsanitize=undefined -DDEBUG -DVERSION="\"debug build\""
+	LDFLAGS =  -fsanitize=address -fsanitize=undefined -fsanitize=unreachable
 	LDLIBS += -lGLU
 else ifeq ($(mode),debugoptimized)
-	CFLAGS = -std=c18 -s -O2 -ftree-loop-vectorize -mtune=generic -ffast-math -mfpmath=sse -DDEBUG -DVERSION="\"${VERSION} debug build\""
+	CFLAGS = -std=c18 -g -O2 -fno-omit-frame-pointer -mtune=generic -ffast-math -DDEBUG -DVERSION="\"debug build\""
 	LDFLAGS = -O2 -g
 	LDLIBS += -lGLU
 else
-	CFLAGS = -std=c18 -s -O3 -fomit-frame-pointer -mtune=native -ffast-math -mfpmath=sse -DVERSION=\"${VERSION}\"
+	CFLAGS = -std=c18 -s -O2 -ftree-loop-vectorize -mtune=generic -ffast-math
 	LDFLAGS = -s -O2 -flto
 endif
 
@@ -49,10 +52,10 @@ endif
 
 
 $(EXEC): $(OBJ)
-	$(CC) $(OBJ) $(LDLIBS) -o $(TGT_DIR)/$(EXEC) $(LDFLAGS) $(INCLUDES) $(CCWNO)
+	$(CC) $(OBJ) $(LDLIBS) -o $(TGT_DIR)/$(EXEC) $(LDFLAGS)
 
 all: $(OBJ)
-	$(CC) $(OBJ) $(LDLIBS) -o $(TGT_DIR)/$(EXEC) $(LDFLAGS) $(INCLUDES) $(CCWNO)
+	$(CC) $(OBJ) $(LDLIBS) -o $(TGT_DIR)/$(EXEC) $(LDFLAGS)
 
 $(BLD_DIR)/%.o: $(SRC_DIR)/%.c
 	@mkdir -p $(BLD_DIR)
@@ -61,10 +64,10 @@ $(BLD_DIR)/%.o: $(SRC_DIR)/%.c
 	$(CC) -c $< $(CFLAGS) $(CCWNO) $(INCLUDES) -o $@
 
 run:
-	@cd $(TGT_DIR);./$(EXEC) $(ARGS)
+	./$(TGT_DIR)/$(EXEC) $(ARGS)
 
 debug:
-	@cd $(TGT_DIR); gdb --args ./$(EXEC) $(ARGS)
+	gdb --args ./$(TGT_DIR)/$(EXEC) $(ARGS)
 
 clean:
 	$(RM) -f $(OBJ)
