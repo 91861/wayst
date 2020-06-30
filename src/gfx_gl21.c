@@ -89,7 +89,7 @@ struct AtlasCharInfo
     float   tex_coords[4];
 };
 
-#define ATLAS_RENDERABLE_START 32
+#define ATLAS_RENDERABLE_START ' '
 #define ATLAS_RENDERABLE_END   CHAR_MAX
 typedef struct
 {
@@ -625,7 +625,7 @@ __attribute__((cold)) static Texture create_squiggle_texture(uint32_t w,
 
     double pixel_size                = 2.0 / h;
     double stroke_width              = thickness * pixel_size;
-    double stroke_fade               = pixel_size * M_PI / 2.0;
+    double stroke_fade               = pixel_size * 1.5;
     double distance_limit_full_alpha = POW2(stroke_width / 2.0);
     double distance_limit_zero_alpha = POW2(stroke_width / 2.0 + stroke_fade);
 
@@ -649,9 +649,9 @@ __attribute__((cold)) static Texture create_squiggle_texture(uint32_t w,
             double closest_distance =
               DISTANCE_SQR(x_frag, y_frag, x_frag, y_curve);
 
-            double step = dx_frag * y_dist < 0.0 ? 0.001 : -0.001;
+            double step = dx_frag * y_dist < 0.0 ? 0.01 : -0.01;
 
-            for (double i = x_frag + step;; i += step) {
+            for (double i = x_frag + step;; i += step / 2.0) {
                 double i_distance = DISTANCE_SQR(x_frag, y_frag, i, sin(i));
                 if (likely(i_distance <= closest_distance)) {
                     closest_distance = i_distance;
@@ -666,10 +666,9 @@ __attribute__((cold)) static Texture create_squiggle_texture(uint32_t w,
                   UINT8_MAX;
             } else if (closest_distance < distance_limit_zero_alpha) {
                 double alpha =
-                  pow(1.0 - (closest_distance - distance_limit_full_alpha) /
-                              (distance_limit_zero_alpha -
-                               distance_limit_full_alpha),
-                      0.7);
+                  (1.0 -
+                   (closest_distance - distance_limit_full_alpha) /
+                     (distance_limit_zero_alpha - distance_limit_full_alpha));
 
                 fragment[0] = fragment[1] = fragment[2] = UINT8_MAX;
                 fragment[3] = CLAMP(alpha * UINT8_MAX, 0, UINT8_MAX);
@@ -726,8 +725,10 @@ void GfxOpenGL21_resize(Gfx* self, uint32_t w, uint32_t h)
     gfxOpenGL21(self)->glyph_width =
       gfxOpenGL21(self)->gw * gfxOpenGL21(self)->sx / 64.0;
 
-    LOG("glyph box size: %fx%f\n", gfxOpenGL21(self)->glyph_width,
-        gfxOpenGL21(self)->line_height);
+    LOG("glyph box size GL: %fx%f, pixels: %dx%d\n",
+        gfxOpenGL21(self)->glyph_width, gfxOpenGL21(self)->line_height,
+        gfxOpenGL21(self)->glyph_width_pixels,
+        gfxOpenGL21(self)->line_height_pixels);
 
     gfxOpenGL21(self)->max_cells_in_line =
       gfxOpenGL21(self)->win_w / gfxOpenGL21(self)->glyph_width_pixels;
@@ -1077,7 +1078,7 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
       CLAMP(gfxOpenGL21(self)->line_height_pixels / 8.0 + 2, 4, UINT8_MAX);
 
     gfxOpenGL21(self)->squiggle_texture = create_squiggle_texture(
-      t_height * M_PI / 2.0, t_height, CLAMP(t_height / 7, 1, 10));
+      t_height * M_PI / 2.0, t_height, CLAMP(t_height / 3, 1, 10));
 }
 
 void GfxOpenGL21_reload_font(Gfx* self)
@@ -1838,9 +1839,9 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(
                             r_begin  = each_rune_same_bg;
                             fg_color = each_rune_same_bg->fg;
                         }
-                    } // END for each block with the same color
-                }     // END for each char
-            }         // END for each block with the same bg
+                    } // end for each block with the same color
+                }     // end for each char
+            }         // end for each block with the same bg
 
             buffer[0] = buffer[2] =
               -1.0f + (idx_each_char + extra_width) * scalex *
@@ -2046,7 +2047,7 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(
 
             line_color = nc;
         }
-    } // END drawing lines
+    } // end drawing lines
 
     // set proxy data to generated texture
     if (unlikely(is_for_blinking)) {
@@ -2144,8 +2145,9 @@ GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const Ui* ui)
         VtRune*   cursor_char = NULL;
         if (vt->lines.size > ui->cursor->row &&
             vt->lines.buf[ui->cursor->row].data.size > col) {
-            clr    = &vt->lines.buf[ui->cursor->row].data.buf[col].fg;
-            clr_bg = (ColorRGB*)&vt->lines.buf[ui->cursor->row].data.buf[col].bg;
+            clr = &vt->lines.buf[ui->cursor->row].data.buf[col].fg;
+            clr_bg =
+              (ColorRGB*)&vt->lines.buf[ui->cursor->row].data.buf[col].bg;
             cursor_char = &vt->lines.buf[ui->cursor->row].data.buf[col];
         } else {
             clr = &settings.fg;

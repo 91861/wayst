@@ -205,7 +205,7 @@ typedef struct
     struct wl_data_offer*  data_offer;
     struct wl_data_source* data_source;
 
-    char* data_offer_mime;
+    char*       data_offer_mime;
     const char* data_source_text;
 
     bool got_discrete_axis_event;
@@ -236,6 +236,9 @@ static inline xkb_keysym_t keysym_filter_compose(xkb_keysym_t sym)
 
 void WindowWl_clipboard_send(struct WindowBase* self, const char* text)
 {
+    if (!text)
+        return;
+
     WindowWl* w = windowWl(self);
 
     LOG("making a data source\n");
@@ -359,6 +362,8 @@ static void pointer_handle_button(void*              data,
                                   uint32_t           button,
                                   uint32_t           state)
 {
+    struct WindowBase* win = data;
+
     globalWl->serial = serial;
 
     uint32_t final_mods = 0;
@@ -378,11 +383,8 @@ static void pointer_handle_button(void*              data,
     button = button == 2 + 271 ? 3 : button == 3 + 271 ? 2 : button - 271;
     globalWl->last_button_pressed = state ? button : 0;
 
-    ((struct WindowBase*)data)
-      ->callbacks.button_handler(
-        ((struct WindowBase*)data)->callbacks.user_data, button, state,
-        ((struct WindowBase*)data)->pointer_x,
-        ((struct WindowBase*)data)->pointer_y, 0, final_mods);
+    CALL_FP(win->callbacks.button_handler, win->callbacks.user_data, button,
+            state, win->pointer_x, win->pointer_y, 0, final_mods);
 }
 
 static void pointer_handle_axis(void*              data,

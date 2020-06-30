@@ -51,6 +51,7 @@ typedef struct
     TimePoint scrollbar_hide_time;
     TimePoint autoscroll_next_step;
     float     scrollbar_drag_position;
+    bool      last_scrolling;
 
     Cursor ksm_cursor;
 
@@ -582,10 +583,9 @@ static bool App_scrollbar_consume_click(App*     self,
  * Update gui scrollbar visibility */
 static void App_update_scrollbar_vis(App* self)
 {
-    Vt*         vt             = &self->vt;
-    static bool last_scrolling = false;
+    Vt* vt = &self->vt;
     if (!vt->scrolling) {
-        if (last_scrolling) {
+        if (self->last_scrolling) {
             self->scrollbar_hide_time =
               TimePoint_ms_from_now(SCROLLBAR_HIDE_DELAY_MS);
         } else if (self->selection_dragging) {
@@ -598,7 +598,7 @@ static void App_update_scrollbar_vis(App* self)
             }
         }
     }
-    last_scrolling = vt->scrolling;
+    self->last_scrolling = vt->scrolling;
 }
 
 void App_do_autoscroll(App* self)
@@ -722,10 +722,11 @@ void App_button_handler(void*    self,
                         int32_t  ammount,
                         uint32_t mods)
 {
-    Vt* vt = &((App*)self)->vt;
+    App* app = self;
+    Vt*  vt  = &app->vt;
     if (button == MOUSE_BTN_WHEEL_DOWN && state) {
         uint8_t lines = ammount ? ammount : settings.scroll_discrete_lines;
-        ((App*)self)->ui.scrollbar.visible = true;
+        app->ui.scrollbar.visible = true;
 
         for (uint8_t i = 0; i < lines; ++i)
             Vt_visual_scroll_down(vt);
@@ -734,7 +735,7 @@ void App_button_handler(void*    self,
         App_notify_content_change(self);
     } else if (button == MOUSE_BTN_WHEEL_UP && state) {
         uint8_t lines = ammount ? ammount : settings.scroll_discrete_lines;
-        ((App*)self)->ui.scrollbar.visible = true;
+        app->ui.scrollbar.visible = true;
 
         for (uint8_t i = 0; i < lines; ++i)
             Vt_visual_scroll_up(vt);
@@ -744,7 +745,7 @@ void App_button_handler(void*    self,
         App_notify_content_change(self);
     } else if (!App_scrollbar_consume_click(self, button, state, x, y) &&
                !App_select_consume_click(self, button, state, x, y, mods)) {
-        Vt_handle_button(&((App*)self)->vt, button, state, x, y, ammount, mods);
+        Vt_handle_button(vt, button, state, x, y, ammount, mods);
     }
 }
 

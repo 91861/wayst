@@ -301,6 +301,7 @@ void Vt_select_commit(Vt* self)
           self->selection.click_begin_char_idx;
 
         Vt_mark_proxies_damaged_in_selected_region(self);
+        CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
     }
 }
 
@@ -1059,6 +1060,9 @@ void Vt_resize(Vt* self, uint32_t x, uint32_t y)
     self->ws = (struct winsize){
         .ws_col = x, .ws_row = y, .ws_xpixel = px.first, .ws_ypixel = px.second
     };
+
+    LOG("resized to: %d %d [%d %d]\n", self->ws.ws_col, self->ws.ws_row,
+        self->ws.ws_xpixel, self->ws.ws_ypixel);
 
     self->pixels_per_cell_x = (double)self->ws.ws_xpixel / self->ws.ws_col;
     self->pixels_per_cell_y = (double)self->ws.ws_ypixel / self->ws.ws_row;
@@ -3413,7 +3417,6 @@ void Vt_handle_button(void*    _self,
          self->modes.mouse_motion_on_btn_report ||
          self->modes.mouse_btn_report) &&
         in_window) {
-
         if (!self->scrolling) {
             self->last_click_x = (double)x / self->pixels_per_cell_x;
             self->last_click_y = (double)y / self->pixels_per_cell_y;
@@ -3436,9 +3439,9 @@ void Vt_handle_button(void*    _self,
             }
             Vt_write(self);
         }
-    }
+    } else
 
-    CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
+        CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
 }
 
 /**
