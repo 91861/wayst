@@ -113,6 +113,8 @@ static Vector_char line_to_string(Vector_VtRune* line,
                                   size_t         end,
                                   const char*    tail);
 
+static inline void Vt_mark_proxy_damaged(Vt* self, size_t idx);
+
 /**
  * Get string from selected region */
 Vector_char Vt_select_region_to_string(Vt* self)
@@ -207,16 +209,20 @@ void Vt_select_init_word(Vt* self, int32_t x, int32_t y)
       &self->lines.buf[Vt_visual_top_line(self) + click_y].data;
     size_t cmax = ln->size, begin = click_x, end = click_x;
 
-    while (begin - 1 < cmax && begin > 0 && !isspace(ln->buf[begin - 1].code))
+    while (begin - 1 < cmax && begin > 0 && !isspace(ln->buf[begin - 1].code)) {
         --begin;
+    }
 
-    while (end + 1 < cmax && end > 0 && !isspace(ln->buf[end + 1].code))
+    while (end + 1 < cmax && end > 0 && !isspace(ln->buf[end + 1].code)) {
         ++end;
+    }
 
     self->selection.begin_char_idx = begin;
     self->selection.end_char_idx   = end;
     self->selection.begin_line     = self->selection.end_line =
       Vt_visual_top_line(self) + click_y;
+
+    Vt_mark_proxy_damaged(self, self->selection.begin_line);
 }
 
 /**
@@ -230,17 +236,18 @@ void Vt_select_init_line(Vt* self, int32_t y)
     self->selection.end_char_idx   = self->ws.ws_col;
     self->selection.begin_line     = self->selection.end_line =
       Vt_visual_top_line(self) + click_y;
+
+    Vt_mark_proxy_damaged(self, self->selection.begin_line);
 }
 
-__attribute__((always_inline)) static inline void Vt_mark_proxy_damaged(
-  Vt*    self,
-  size_t idx)
+static inline void Vt_mark_proxy_damaged(Vt* self, size_t idx)
 {
     self->lines.buf[idx].damaged = true;
 }
 
-__attribute__((always_inline)) static inline void
-Vt_mark_proxies_damaged_in_region(Vt* self, size_t begin, size_t end)
+static inline void Vt_mark_proxies_damaged_in_region(Vt*    self,
+                                                     size_t begin,
+                                                     size_t end)
 {
     size_t lo = MIN(begin, end);
     size_t hi = MAX(begin, end);
@@ -248,8 +255,7 @@ Vt_mark_proxies_damaged_in_region(Vt* self, size_t begin, size_t end)
         Vt_mark_proxy_damaged(self, i);
 }
 
-__attribute__((always_inline)) static inline void Vt_clear_proxy(Vt*    self,
-                                                                 size_t idx)
+static inline void Vt_clear_proxy(Vt* self, size_t idx)
 {
     if (!self->lines.buf[idx].damaged) {
         Vt_mark_proxy_damaged(self, idx);
@@ -257,8 +263,9 @@ __attribute__((always_inline)) static inline void Vt_clear_proxy(Vt*    self,
     }
 }
 
-__attribute__((always_inline)) static inline void
-Vt_clear_proxies_in_region(Vt* self, size_t begin, size_t end)
+static inline void Vt_clear_proxies_in_region(Vt*    self,
+                                              size_t begin,
+                                              size_t end)
 {
     size_t lo = MIN(begin, end);
     size_t hi = MAX(begin, end);
@@ -280,8 +287,7 @@ void Vt_clear_all_proxies(Vt* self)
     }
 }
 
-__attribute__((always_inline)) static inline void
-Vt_mark_proxies_damaged_in_selected_region(Vt* self)
+static inline void Vt_mark_proxies_damaged_in_selected_region(Vt* self)
 {
     Vt_mark_proxies_damaged_in_region(self, self->selection.begin_line,
                                       self->selection.end_line);
@@ -332,6 +338,40 @@ void Vt_select_set_end_cell(Vt* self, int32_t x, int32_t y)
         size_t lo = MIN(MIN(old_end, self->selection.end_line),
                         self->selection.begin_line);
         size_t hi = MAX(MAX(old_end, self->selection.end_line),
+                        self->selection.begin_line);
+        Vt_mark_proxies_damaged_in_region(self, hi, lo);
+
+        CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
+    }
+}
+
+/**
+ * set front glyph for selection by pixel coordinates */
+void Vt_select_set_front(Vt* self, int32_t x, int32_t y)
+{
+    if (self->selection.mode != SELECT_MODE_NONE) {
+        x              = CLAMP(x, 0, self->ws.ws_xpixel);
+        y              = CLAMP(y, 0, self->ws.ws_ypixel);
+        size_t click_x = (double)x / self->pixels_per_cell_x;
+        size_t click_y = (double)y / self->pixels_per_cell_y;
+        Vt_select_set_front_cell(self, click_x, click_y);
+    }
+}
+
+/**
+ * set front glyph for selection by cell coordinates */
+void Vt_select_set_front_cell(Vt* self, int32_t x, int32_t y)
+{
+    if (self->selection.mode != SELECT_MODE_NONE) {
+        size_t old_front               = self->selection.begin_line;
+        x                              = CLAMP(x, 0, self->ws.ws_col);
+        y                              = CLAMP(y, 0, self->ws.ws_row);
+        self->selection.begin_line     = Vt_visual_top_line(self) + y;
+        self->selection.begin_char_idx = x;
+
+        size_t lo = MIN(MIN(old_front, self->selection.end_line),
+                        self->selection.begin_line);
+        size_t hi = MAX(MAX(old_front, self->selection.end_line),
                         self->selection.begin_line);
         Vt_mark_proxies_damaged_in_region(self, hi, lo);
 
@@ -2629,8 +2669,9 @@ static inline void Vt_insert_new_line(Vt* self)
 
 /**
  * Move cursor to given location */
-__attribute__((always_inline, hot)) static inline void
-Vt_move_cursor(Vt* self, uint32_t columns, uint32_t rows)
+__attribute__((hot)) static inline void Vt_move_cursor(Vt*      self,
+                                                       uint32_t columns,
+                                                       uint32_t rows)
 {
     self->cursor.row =
       MIN(rows, (uint32_t)self->ws.ws_row - 1) + Vt_top_line(self);
@@ -3439,9 +3480,9 @@ void Vt_handle_button(void*    _self,
             }
             Vt_write(self);
         }
-    } else
+    }
 
-        CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
+    CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
 }
 
 /**

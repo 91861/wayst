@@ -344,6 +344,10 @@ void Vt_resize(Vt* self, uint32_t x, uint32_t y);
 
 Vector_char Vt_select_region_to_string(Vt* self);
 
+void Vt_select_set_front(Vt* self, int32_t x, int32_t y);
+
+void Vt_select_set_front_cell(Vt* self, int32_t x, int32_t y);
+
 void Vt_clear_all_proxies(Vt* self);
 
 void Vt_dump_info(Vt* self);

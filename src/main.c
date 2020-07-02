@@ -44,8 +44,14 @@ typedef struct
     // selection
     uint8_t   click_count;
     TimePoint next_click_limit;
-    bool      selection_dragging;
-    bool      keyboard_select_mode;
+    bool      selection_dragging_left;
+    enum SelectionDragRight
+    {
+        SELECT_DRAG_RIGHT_NONE = 0,
+        SELECT_DRAG_RIGHT_FORNT,
+        SELECT_DRAG_RIGHT_BACK
+    } selection_dragging_right;
+    bool keyboard_select_mode;
 
     // scrollbar
     TimePoint scrollbar_hide_time;
@@ -588,7 +594,7 @@ static void App_update_scrollbar_vis(App* self)
         if (self->last_scrolling) {
             self->scrollbar_hide_time =
               TimePoint_ms_from_now(SCROLLBAR_HIDE_DELAY_MS);
-        } else if (self->selection_dragging) {
+        } else if (self->selection_dragging_left) {
             self->scrollbar_hide_time =
               TimePoint_ms_from_now(SCROLLBAR_HIDE_DELAY_MS);
         } else if (TimePoint_passed(self->scrollbar_hide_time)) {
@@ -624,44 +630,57 @@ void App_do_autoscroll(App* self)
 
 static bool App_consume_drag(App* self, uint32_t button, int32_t x, int32_t y)
 {
-    Vt* vt            = &((App*)self)->vt;
+    Vt* vt            = &self->vt;
     self->click_count = 0;
 
-    if (button != 1 || !self->selection_dragging)
-        return false;
-
-    if (vt->selection.next_mode)
-        Vt_select_commit(vt);
-
-    Vt_select_set_end(vt, x, y);
+    if (button == MOUSE_BTN_LEFT && self->selection_dragging_left) {
+        if (vt->selection.next_mode)
+            Vt_select_commit(vt);
+        Vt_select_set_end(vt, x, y);
+    } else if (button == MOUSE_BTN_RIGHT && self->selection_dragging_right) {
+        if (self->selection_dragging_right == SELECT_DRAG_RIGHT_BACK) {
+            Vt_select_set_end(vt, x, y);
+        } else {
+            Vt_select_set_front(vt, x, y);
+        }
+    }
     return true;
 }
 
 /**
  * @return does text field consume click event */
-static bool App_select_consume_click(App*     self,
-                                     uint32_t button,
-                                     uint32_t state,
-                                     int32_t  x,
-                                     int32_t  y,
-                                     uint32_t mods)
+static bool App_consume_clic(App*     self,
+                             uint32_t button,
+                             uint32_t state,
+                             int32_t  x,
+                             int32_t  y,
+                             uint32_t mods)
 {
     Vt* vt = &self->vt;
 
     if (!state) {
-        self->selection_dragging = false;
+        self->selection_dragging_left  = false;
+        self->selection_dragging_right = SELECT_DRAG_RIGHT_NONE;
     }
 
     if (vt->modes.x10_mouse_compat) {
         return false;
     }
 
-    if (button == MOUSE_BTN_LEFT &&
-        (!(vt->modes.extended_report || vt->modes.mouse_btn_report ||
-           vt->modes.mouse_motion_on_btn_report) ||
-         FLAG_IS_SET(mods, MODIFIER_SHIFT))) {
-        if (!state && vt->selection.mode == SELECT_MODE_NONE)
+    bool no_left_report =
+      (!(vt->modes.extended_report || vt->modes.mouse_btn_report ||
+         vt->modes.mouse_motion_on_btn_report) ||
+       FLAG_IS_SET(mods, MODIFIER_SHIFT));
+
+    bool no_middle_report =
+      (!(vt->modes.mouse_btn_report || vt->modes.mouse_motion_on_btn_report) ||
+       (FLAG_IS_SET(mods, MODIFIER_CONTROL) ||
+        FLAG_IS_SET(mods, MODIFIER_SHIFT)));
+
+    if (button == MOUSE_BTN_LEFT && no_left_report) {
+        if (!state && vt->selection.mode == SELECT_MODE_NONE) {
             return false;
+        }
 
         if (state) {
             if (!TimePoint_passed(self->next_click_limit)) {
@@ -680,25 +699,62 @@ static bool App_select_consume_click(App*     self,
                                  ? SELECT_MODE_BOX
                                  : SELECT_MODE_NORMAL,
                                x, y);
-                self->selection_dragging = true;
+                self->selection_dragging_left = true;
             } else if (self->click_count == 1) {
+                App_notify_content_change(self);
                 Vt_select_end(vt);
                 Vt_select_init_word(vt, x, y);
-                App_notify_content_change(self);
             } else if (self->click_count == 2) {
+                App_notify_content_change(self);
                 Vt_select_end(vt);
                 Vt_select_init_line(vt, y);
-                App_notify_content_change(self);
+                self->click_count = 0;
             }
         }
         return true;
 
+        /* extend selection */
+    } else if (button == MOUSE_BTN_RIGHT && state && no_middle_report &&
+               vt->selection.mode) {
+
+        size_t clicked_line =
+          Vt_visual_top_line(vt) + y / vt->pixels_per_cell_y;
+
+        if (vt->selection.begin_line == vt->selection.end_line) {
+            if (clicked_line < vt->selection.begin_line) {
+                Vt_select_set_front(vt, x, y);
+                self->selection_dragging_right = SELECT_DRAG_RIGHT_FORNT;
+            } else if (clicked_line > vt->selection.begin_line) {
+                Vt_select_set_end(vt, x, y);
+                self->selection_dragging_right = SELECT_DRAG_RIGHT_BACK;
+            } else {
+                size_t clicked_cell = x / vt->pixels_per_cell_x,
+                       center_cell  = (vt->selection.begin_char_idx +
+                                      vt->selection.end_char_idx) /
+                                     2;
+                if (clicked_cell > center_cell) {
+                    Vt_select_set_end(vt, x, y);
+                    self->selection_dragging_right = SELECT_DRAG_RIGHT_BACK;
+                } else {
+                    Vt_select_set_front(vt, x, y);
+                    self->selection_dragging_right = SELECT_DRAG_RIGHT_FORNT;
+                }
+            }
+        } else {
+            size_t center_line =
+              (vt->selection.begin_line + vt->selection.end_line) / 2;
+            if (clicked_line < center_line) {
+                Vt_select_set_front(vt, x, y);
+                self->selection_dragging_right = SELECT_DRAG_RIGHT_FORNT;
+            } else {
+                Vt_select_set_end(vt, x, y);
+                self->selection_dragging_right = SELECT_DRAG_RIGHT_BACK;
+            }
+        }
+
+        return true;
         /* paste from primary selection */
-    } else if (button == MOUSE_BTN_MIDDLE && state &&
-               (!(vt->modes.mouse_btn_report ||
-                  vt->modes.mouse_motion_on_btn_report) ||
-                (FLAG_IS_SET(mods, MODIFIER_CONTROL) ||
-                 FLAG_IS_SET(mods, MODIFIER_SHIFT)))) {
+    } else if (button == MOUSE_BTN_MIDDLE && state && no_middle_report) {
         if (vt->selection.mode != SELECT_MODE_NONE) {
             Vector_char text = Vt_select_region_to_string(vt);
             Vt_handle_clipboard(&self->vt, text.buf);
@@ -706,11 +762,10 @@ static bool App_select_consume_click(App*     self,
         } else {
             ; // TODO: we don't own primary, get it from the window system
         }
-    } else if (vt->selection.mode != SELECT_MODE_NONE) {
+    } else if (vt->selection.mode != SELECT_MODE_NONE && state) {
         Vt_select_end(vt);
         return true;
     }
-
     return false;
 }
 
@@ -744,7 +799,7 @@ void App_button_handler(void*    self,
         App_update_scrollbar_dims(self);
         App_notify_content_change(self);
     } else if (!App_scrollbar_consume_click(self, button, state, x, y) &&
-               !App_select_consume_click(self, button, state, x, y, mods)) {
+               !App_consume_clic(self, button, state, x, y, mods)) {
         Vt_handle_button(vt, button, state, x, y, ammount, mods);
     }
 }

@@ -393,17 +393,16 @@ static void pointer_handle_axis(void*              data,
                                 uint32_t           axis,
                                 wl_fixed_t         value)
 {
-    int32_t v  = wl_fixed_to_int(value);
-    bool    gd = windowWl(((struct WindowBase*)data))->got_discrete_axis_event;
+    struct WindowBase* win = data;
+    int32_t            v   = wl_fixed_to_int(value);
 
-    if (v && !gd)
-        ((struct WindowBase*)data)
-          ->callbacks.button_handler(
-            ((struct WindowBase*)data)->callbacks.user_data, v < 0 ? 65 : 66, 1,
-            ((struct WindowBase*)data)->pointer_x,
-            ((struct WindowBase*)data)->pointer_y, v < 0 ? -v : v, 0);
+    if (v && !windowWl(win)->got_discrete_axis_event) {
+        CALL_FP(win->callbacks.button_handler, win->callbacks.user_data,
+                v < 0 ? 65 : 66, 1, win->pointer_x, win->pointer_y,
+                v < 0 ? -v : v, 0);
+    }
 
-    windowWl(((struct WindowBase*)data))->got_discrete_axis_event = false;
+    windowWl(win)->got_discrete_axis_event = false;
 }
 
 static void pointer_handle_frame(void* data, struct wl_pointer* pointer) {}
@@ -424,14 +423,12 @@ static void pointer_handle_axis_discrete(void*              data,
                                          uint32_t           axis,
                                          int32_t            discrete)
 {
+    struct WindowBase* win = data;
     /* this is sent before a coresponding axis event, tell it to do nothing */
-    windowWl(((struct WindowBase*)data))->got_discrete_axis_event = true;
+    windowWl(win)->got_discrete_axis_event = true;
 
-    ((struct WindowBase*)data)
-      ->callbacks.button_handler(
-        ((struct WindowBase*)data)->callbacks.user_data, discrete < 0 ? 65 : 66,
-        1, ((struct WindowBase*)data)->pointer_x,
-        ((struct WindowBase*)data)->pointer_y, 0, 0);
+    CALL_FP(win->callbacks.button_handler, win->callbacks.user_data,
+            discrete < 0 ? 65 : 66, 1, win->pointer_x, win->pointer_y, 0, 0);
 }
 
 static struct wl_pointer_listener pointer_listener = {
