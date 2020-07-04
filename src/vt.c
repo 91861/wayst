@@ -2382,7 +2382,7 @@ __attribute__((always_inline)) static inline void Vt_cursor_right(Vt* self)
 static inline void Vt_erase_to_end(Vt* self)
 {
     for (size_t i = self->cursor.row + 1; i <= Vt_bottom_line(self); ++i) {
-        self->lines.buf[i].data.size = 0;
+        Vector_clear_VtRune(&self->lines.buf[i].data);
         Vt_empty_line_fill_bg(self, i);
     }
     Vt_clear_right(self);
@@ -2661,7 +2661,7 @@ static inline void Vt_insert_new_line(Vt* self)
     } else {
         if (Vt_bottom_line(self) == self->cursor.row) {
             Vector_push_VtLine(&self->lines, VtLine_new());
-            Vt_empty_line_fill_bg(self, self->cursor.row + 1);
+            Vt_empty_line_fill_bg(self, self->lines.size - 1);
         }
         ++self->cursor.row;
     }
@@ -2833,6 +2833,7 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt*  self,
                         CALL_FP(self->callbacks.on_bell_flash,
                                 self->callbacks.user_data);
                     }
+                    self->parser.state = PARSER_STATE_LITERAL;
                     break;
 
                 /* Application Keypad (DECPAM) */
@@ -2872,12 +2873,14 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt*  self,
                 case '7':
                     self->saved_active_line = self->cursor.row;
                     self->saved_cursor_pos  = self->cursor.col;
+                    self->parser.state      = PARSER_STATE_LITERAL;
                     return;
 
                 /* Restore cursor (DECRC) */
                 case '8':
-                    self->cursor.row = self->saved_active_line;
-                    self->cursor.col = self->saved_cursor_pos;
+                    self->cursor.row   = self->saved_active_line;
+                    self->cursor.col   = self->saved_cursor_pos;
+                    self->parser.state = PARSER_STATE_LITERAL;
                     return;
 
                 case '\e':
