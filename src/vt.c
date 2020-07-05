@@ -476,7 +476,7 @@ __attribute__((cold)) static char* pty_string_prettyfy(const char* str)
     Vector_char fmt = Vector_new_char();
     for (; *str; ++str) {
         if (seq) {
-            if (isalpha(*str)) {
+            if (!isdigit(*str) && *str != '?' && *str != ';' && *str != ':') {
                 Vector_pushv_char(&fmt, TERMCOLOR_BG_DEFAULT,
                                   strlen(TERMCOLOR_BG_DEFAULT));
                 seq       = false;
@@ -500,13 +500,48 @@ __attribute__((cold)) static char* pty_string_prettyfy(const char* str)
             if (important) {
                 switch (*str) {
                     case 'H':
+                    case 'G':
+                    case 'f':
+                    case '`':
+                    case 'd':
                         Vector_pushv_char(&fmt, TERMCOLOR_BG_GREEN,
                                           strlen(TERMCOLOR_BG_GREEN));
                         break;
+
                     case 'm':
                         Vector_pushv_char(&fmt, TERMCOLOR_BG_BLUE,
                                           strlen(TERMCOLOR_BG_BLUE));
                         break;
+
+                    case 'B':
+                    case 'C':
+                    case 'e':
+                    case 'a':
+                    case 'D':
+                    case 'E':
+                    case 'F':
+                        Vector_pushv_char(&fmt, TERMCOLOR_BG_CYAN,
+                                          strlen(TERMCOLOR_BG_CYAN));
+                        break;
+
+                    case 'M':
+                    case 'T':
+                    case 'X':
+                    case 'S':
+                    case '@':
+                    case 'L':
+                    case 'P':
+                        Vector_pushv_char(&fmt, TERMCOLOR_BG_MAGENTA_LIGHT,
+                                          strlen(TERMCOLOR_BG_MAGENTA_LIGHT));
+                        break;
+
+                    case 'I':
+                    case 'Z':
+                    case 'g':
+                        Vector_pushv_char(&fmt, TERMCOLOR_BG_MAGENTA,
+                                          strlen(TERMCOLOR_BG_MAGENTA));
+                        break;
+
                     default:
                         Vector_pushv_char(&fmt, TERMCOLOR_BG_RED_LIGHT,
                                           strlen(TERMCOLOR_BG_RED_LIGHT));
@@ -590,8 +625,8 @@ static Vector_char line_to_string(Vector_VtRune* line,
 
 /**
  * Split string on any character in @param symbols, filter out any character in
- * @param filter first character of returned string is the immediately preceding
- * delimiter, '\0' if none.
+ * @param filter. first character of returned string is the immediately
+ * preceding delimiter, '\0' if none.
  */
 static Vector_Vector_char string_split_on(const char* str,
                                           const char* symbols,
@@ -3103,6 +3138,13 @@ __attribute__((hot)) inline bool Vt_read(Vt* self, int* last)
                 self->dev_name, rd, out);
             free(out);
         }
+#else
+        if (unlikely(settings.debug_pty) && rd > 0) {
+            self->buf[rd] = 0;
+            char* out     = pty_string_prettyfy(self->buf);
+            fprintf(stderr, "pty.read(%3d)  ~> { %s }\n\n", rd, out);
+            free(out);
+        }
 #endif
 
         if (rd < 0) {
@@ -3164,6 +3206,14 @@ __attribute__((always_inline)) static inline void Vt_write_n(Vt*    self,
         ")" TERMCOLOR_DEFAULT " <~ { bytes: %3ld | %s }\n",
         self->dev_name, strlen(self->out_buf), str);
     free(str);
+#else
+    if (unlikely(settings.debug_pty)) {
+        char* str = pty_string_prettyfy(self->out_buf);
+        fprintf(stderr, "pty.write(%3zu) <~ { %s }\n\n", strlen(self->out_buf),
+                str);
+        free(str);
+    }
+
 #endif
 
     write(self->master, self->out_buf, bytes);

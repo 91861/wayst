@@ -216,13 +216,16 @@ static struct option long_options[] = {
 #define OPT_BIND_KEY_QUIT_IDX 46
     [OPT_BIND_KEY_QUIT_IDX] = { "bind-key-quit", required_argument, 0, 0 },
 
-#define OPT_VERSION_IDX 47
+#define OPT_DEBUG_PTY_IDX 47
+    [OPT_DEBUG_PTY_IDX] = { "debug-pty", no_argument, 0, 'D' },
+
+#define OPT_VERSION_IDX 48
     [OPT_VERSION_IDX] = { "version", no_argument, 0, 'v' },
 
-#define OPT_HELP_IDX 48
+#define OPT_HELP_IDX 49
     [OPT_HELP_IDX] = { "help", no_argument, 0, 'h' },
 
-#define OPT_SENTINEL_IDX 49
+#define OPT_SENTINEL_IDX 50
     [OPT_SENTINEL_IDX] = { 0 }
 };
 
@@ -232,8 +235,8 @@ static const char* long_options_descriptions[][2] = {
     [OPT_XORG_ONLY_IDX]   = { NULL, "Always use X11" },
     [OPT_TERM_IDX]        = { arg_string, "TERM value" },
     [OPT_TITLE_IDX] = { arg_string, "Window title and application class name" },
-    [OPT_DYNAMIC_TITLE_IDX] = { NULL,
-                                "Do not allow programs to change the window title" },
+    [OPT_DYNAMIC_TITLE_IDX] = { NULL, "Do not allow programs to change the "
+                                      "window title" },
     [OPT_TITLE_FORMAT_IDX]  = { arg_string, "Window title format string" },
     [OPT_LOCALE_IDX]        = { arg_string, "Override locale" },
     [OPT_ROWS_IDX]          = { arg_int, "Number of rows" },
@@ -277,13 +280,14 @@ static const char* long_options_descriptions[][2] = {
     [OPT_BIND_KEY_PASTE_IDX]   = { arg_key, "Paste key command" },
     [OPT_BIND_KEY_ENLARGE_IDX] = { arg_key, "Enlagre font key command" },
     [OPT_BIND_KEY_SHRINK_IDX]  = { arg_key, "Shrink font key command" },
-    [OPT_BIND_KEY_UNI_IDX]   = { arg_key, "Unicode entry mode activation "
+    [OPT_BIND_KEY_UNI_IDX]     = { arg_key, "Unicode entry mode activation "
                                         "key command" },
-    [OPT_BIND_KEY_DEBUG_IDX] = { arg_key, "Debug info key command" },
-    [OPT_BIND_KEY_QUIT_IDX]  = { arg_key, "Quit key command" },
+    [OPT_BIND_KEY_DEBUG_IDX]   = { arg_key, "Debug info key command" },
+    [OPT_BIND_KEY_QUIT_IDX]    = { arg_key, "Quit key command" },
 
-    [OPT_VERSION_IDX] = { NULL, "Show version" },
-    [OPT_HELP_IDX]    = { NULL, "Show this message" },
+    [OPT_DEBUG_PTY_IDX] = { NULL, "Output pty communication to stderr" },
+    [OPT_VERSION_IDX]   = { NULL, "Show version" },
+    [OPT_HELP_IDX]      = { NULL, "Show this message" },
 
     [OPT_SENTINEL_IDX] = { NULL, NULL }
 };
@@ -734,6 +738,8 @@ static void settings_make_default()
         .allow_multiple_underlines = false,
 
         .scrollback = 2000,
+
+        .debug_pty = false,
     };
 }
 
@@ -815,7 +821,8 @@ static void handle_option(const char  opt,
                           const int   array_index,
                           const char* value)
 {
-    LOG("settings[%d] (%s) = %s\n",array_index, long_options[array_index].name, value);
+    LOG("settings[%d] (%s) = %s\n", array_index, long_options[array_index].name,
+        value);
 
     // short options
     if (opt) {
@@ -838,6 +845,10 @@ static void handle_option(const char  opt,
 
             case 'v':
                 printf("version: " VERSION "\n");
+                break;
+
+            case 'D':
+                settings.debug_pty = true;
                 break;
 
             case 'h':
@@ -863,6 +874,10 @@ static void handle_option(const char  opt,
 
         case OPT_NO_FLASH_IDX:
             settings.no_flash = value ? strtob(value) : true;
+            break;
+
+        case OPT_DEBUG_PTY_IDX:
+            settings.debug_pty = true;
             break;
 
         case OPT_VERSION_IDX:
@@ -1121,7 +1136,7 @@ static void settings_get_opts(const int    argc,
         opterr = cfg_file_check;
 
         int opid = 0;
-        o        = getopt_long(argc, argv, "XCTfFhv", long_options, &opid);
+        o        = getopt_long(argc, argv, "XCTDfFhv", long_options, &opid);
 
         if (o == -1)
             break;
