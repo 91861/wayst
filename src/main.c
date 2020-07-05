@@ -311,11 +311,11 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
                 self->ksm_cursor.row++;
             }
 
-            if (Vt_visual_bottom_line(&self->vt) == self->vt.lines.size) {
+            if (Vt_visual_bottom_line(&self->vt) == self->vt.lines.size - 1) {
                 Vt_visual_scroll_reset(&self->vt);
             } else {
                 while (Vt_visual_bottom_line(&self->vt) <
-                       self->ksm_cursor.row + 2) {
+                       self->ksm_cursor.row) {
                     Vt_visual_scroll_down(&self->vt);
                 }
             }
@@ -372,6 +372,79 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
             Vt_select_commit(&self->vt);
 
             break;
+
+        case 98: { // b
+            // jump back by word
+            for (bool initial = true;; initial = false) {
+                if (!self->ksm_cursor.col) {
+                    break;
+                }
+                char32_t code = self->vt.lines.buf[self->ksm_cursor.row]
+                                  .data.buf[self->ksm_cursor.col]
+                                  .code,
+                         prev_code = self->vt.lines.buf[self->ksm_cursor.row]
+                                       .data.buf[self->ksm_cursor.col - 1]
+                                       .code;
+
+                if (isblank(prev_code) && !isblank(code) && !initial) {
+                    break;
+                }
+                --self->ksm_cursor.col;
+                App_notify_content_change(self);
+            }
+            Vt_select_set_end_cell(&self->vt, self->ksm_cursor.col,
+                                   self->ksm_cursor.row);
+
+        } break;
+
+        case 119: { // w
+            // jump forward to next word
+            for (bool initial = true;; initial = false) {
+                if (self->ksm_cursor.col + 1 >= self->vt.ws.ws_col ||
+                    self->ksm_cursor.col + 1 >=
+                      self->vt.lines.buf[self->ksm_cursor.row].data.size) {
+                    break;
+                }
+                char32_t code = self->vt.lines.buf[self->ksm_cursor.row]
+                                  .data.buf[self->ksm_cursor.col]
+                                  .code,
+                         next_code = self->vt.lines.buf[self->ksm_cursor.row]
+                                       .data.buf[self->ksm_cursor.col + 1]
+                                       .code;
+                ++self->ksm_cursor.col;
+                App_notify_content_change(self);
+                if ((isblank(code) && !isblank(next_code)) && !initial)
+                    break;
+            }
+            Vt_select_set_end_cell(&self->vt, self->ksm_cursor.col,
+                                   self->ksm_cursor.row);
+        } break;
+
+        case 101: { // e
+            // jump to end of word
+            for (bool initial = true;; initial = false) {
+                if (self->ksm_cursor.col + 1 >= self->vt.ws.ws_col ||
+                    self->ksm_cursor.col + 1 >=
+                      self->vt.lines.buf[self->ksm_cursor.row].data.size) {
+                    break;
+                }
+                char32_t code = self->vt.lines.buf[self->ksm_cursor.row]
+                                  .data.buf[self->ksm_cursor.col]
+                                  .code,
+                         next_code = self->vt.lines.buf[self->ksm_cursor.row]
+                                       .data.buf[self->ksm_cursor.col + 1]
+                                       .code;
+                if ((isblank(next_code) && !isblank(code)) && !initial)
+                    break;
+                ++self->ksm_cursor.col;
+                App_notify_content_change(self);
+            }
+            Vt_select_set_end_cell(&self->vt, self->ksm_cursor.col,
+                                   self->ksm_cursor.row);
+        } break;
+
+        default:
+            LOG("KSM key: %d(%d)\n", key, rawkey);
     }
     return false;
 }
@@ -469,7 +542,7 @@ static void App_update_scrollbar_dims(App* self)
       2.0 * (double)Vt_visual_top_line(vt) / (vt->lines.size - 1);
 
     int64_t ms = TimePoint_is_ms_ahead(self->scrollbar_hide_time);
-    if (ms > 0 && ms < SCROLLBAR_FADE_TIME_MS && !self->vt.scrolling) {
+    if (ms > 0 && ms < SCROLLBAR_FADE_TIME_MS && !self->vt.scrolling_visual) {
         self->ui.scrollbar.opacity = ((float)ms / SCROLLBAR_FADE_TIME_MS);
         App_notify_content_change(self);
     } else {
@@ -590,7 +663,7 @@ static bool App_scrollbar_consume_click(App*     self,
 static void App_update_scrollbar_vis(App* self)
 {
     Vt* vt = &self->vt;
-    if (!vt->scrolling) {
+    if (!vt->scrolling_visual) {
         if (self->last_scrolling) {
             self->scrollbar_hide_time =
               TimePoint_ms_from_now(SCROLLBAR_HIDE_DELAY_MS);
@@ -604,7 +677,7 @@ static void App_update_scrollbar_vis(App* self)
             }
         }
     }
-    self->last_scrolling = vt->scrolling;
+    self->last_scrolling = vt->scrolling_visual;
 }
 
 void App_do_autoscroll(App* self)

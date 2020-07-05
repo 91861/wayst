@@ -188,7 +188,7 @@ typedef struct _Vt
     size_t last_click_y;
     double pixels_per_cell_x, pixels_per_cell_y;
 
-    bool   scrolling;
+    bool   scrolling_visual;
     size_t visual_scroll_top;
 
     struct UnicodeInput
@@ -220,8 +220,8 @@ typedef struct _Vt
         /* selected region */
         size_t begin_line;
         size_t end_line;
-        size_t begin_char_idx;
-        size_t end_char_idx;
+        int32_t begin_char_idx;
+        int32_t end_char_idx;
 
     } selection;
 
@@ -396,13 +396,12 @@ static inline size_t Vt_top_line(const Vt* const self)
 
 static inline size_t Vt_visual_top_line(const Vt* const self)
 {
-    return self->scrolling ? self->visual_scroll_top : Vt_top_line(self);
+    return self->scrolling_visual ? self->visual_scroll_top : Vt_top_line(self);
 }
 
 static inline size_t Vt_visual_bottom_line(const Vt* const self)
 {
-    return self->ws.ws_row + Vt_visual_top_line(self) +
-           (self->scrolling ? 1 : 0);
+    return self->ws.ws_row + Vt_visual_top_line(self) -1;
 }
 
 void Vt_visual_scroll_to(Vt* self, size_t line);
@@ -434,7 +433,7 @@ void Vt_select_end(Vt* self);
 /**
  * Should cell (in screen coordinates) be visually highlighted as selected */
 __attribute__((always_inline, hot)) static inline bool
-Vt_is_cell_selected(const Vt* const self, size_t x, size_t y)
+Vt_is_cell_selected(const Vt* const self, int32_t x, int32_t y)
 {
     switch (expect(self->selection.mode, SELECT_MODE_NONE)) {
         case SELECT_MODE_NONE:

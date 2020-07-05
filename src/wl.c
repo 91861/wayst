@@ -976,9 +976,6 @@ static void data_source_handle_send(void*                  data,
 static void data_source_handle_cancelled(void*                  data,
                                          struct wl_data_source* wl_data_source)
 {
-    WindowWl* w    = data;
-    w->data_source = NULL;
-    wl_data_source_destroy(wl_data_source);
     LOG("wl.data_source::canceled\n");
 }
 

@@ -2325,10 +2325,11 @@ static void GfxOpenGL21_draw_unicode_input(GfxOpenGL21* gfx, const Vt* vt)
 
     int32_t               atlas_offset = Atlas_select(gfx->atlas, 'u');
     struct AtlasCharInfo* g            = &gfx->atlas->char_info[atlas_offset];
-    h                                  = (float)g->rows * gfx->sy;
-    w                                  = (float)g->width * gfx->sx;
-    t                                  = (float)g->top * gfx->sy;
-    l                                  = (float)g->left * gfx->sx;
+
+    h = (float)g->rows * gfx->sy;
+    w = (float)g->width * gfx->sx;
+    t = (float)g->top * gfx->sy;
+    l = (float)g->left * gfx->sx;
     memcpy(tc, g->tex_coords, sizeof tc);
 
     float x3 = -1.0f + (float)col * gfx->glyph_width_pixels * gfx->sx + l;
@@ -2481,7 +2482,7 @@ void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
 
     glEnable(GL_SCISSOR_TEST);
     Pair_uint32_t chars = Gfx_get_char_size(self);
-    if (vt->scrolling) {
+    if (vt->scrolling_visual) {
         glScissor(0, 0, chars.first * gfx->glyph_width_pixels, gfx->win_h);
     } else {
         glScissor(

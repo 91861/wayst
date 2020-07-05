@@ -71,20 +71,18 @@
 
 #define WRN(...)                                                               \
     {                                                                          \
-        fputs("\e[33m", stderr);                                               \
+        fputs("[\e[33mwarning\e[m] ", stderr);                                  \
         fprintf(stderr, __VA_ARGS__);                                          \
-        fputs("\e[m", stderr);                                                 \
     }
 
 #ifdef DEBUG
 
 #define ERR(...)                                                               \
     {                                                                          \
-        fputs("\e[31m", stderr);                                               \
+        fputs("[\e[31merror\e[m] ", stderr);                                               \
         fprintf(stderr, __VA_ARGS__);                                          \
         fprintf(stderr, "\nIn file: \"%s\" function: \"%s\" line: %d\n",       \
                 __FILE__, __func__, __LINE__);                                 \
-        fputs("\e[m", stderr);                                                 \
         exit(EXIT_FAILURE);                                                    \
     }
 #define ASSERT(cond, msg)                                                      \
@@ -135,9 +133,9 @@ static inline void* _call_fp_helper(const char* const msg,
     }
 #define ERR(...)                                                               \
     {                                                                          \
-        fputs("\e[31m", stderr);                                               \
+        fputs("[\e[31merror\e[m] ", stderr);                                               \
         fprintf(stderr, __VA_ARGS__);                                          \
-        fputs("\e[m\n", stderr);                                               \
+        fputs("\n", stderr);                                               \
         exit(EXIT_FAILURE);                                                    \
     }
 
@@ -306,9 +304,8 @@ DEF_PAIR(wchar_t);
 DEF_PAIR(size_t);
 
 /** check string equality case insensitive */
-__attribute__((always_inline)) static inline bool strneqci(const char* restrict s1,
-                                                           const char* restrict s2,
-                                                           const size_t n)
+__attribute__((always_inline)) static inline bool
+strneqci(const char* restrict s1, const char* restrict s2, const size_t n)
 {
     for (size_t i = 0; i < n; ++i)
         if (tolower(s1[i]) != tolower(s2[i]))
@@ -356,4 +353,3 @@ static inline bool strtob(const char* restrict str)
         ;
     return strneqci("true", str, 4) || strneqci("1", str, 1);
 }
-
