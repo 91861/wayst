@@ -70,6 +70,7 @@ static const char* const arg_color   = "#RRGGBB";
 static const char* const arg_color_a = "#RRGGBBAA";
 static const char* const arg_string  = "string";
 static const char* const arg_key     = "key";
+static const char* const arg_name    = "name";
 
 // -e and -x are reserved
 static struct option long_options[] = {
@@ -179,53 +180,62 @@ static struct option long_options[] = {
 #define OPT_FONT_IDX 34
     [OPT_FONT_IDX] = { "font", required_argument, 0, 0 },
 
-#define OPT_FONT_FALLBACK_IDX 35
+#define OPT_FONT_STYLE_REGULAR_IDX 35
+    [OPT_FONT_STYLE_REGULAR_IDX] = { "style-regular", required_argument, 0, 0 },
+
+#define OPT_FONT_STYLE_BOLD_IDX 36
+    [OPT_FONT_STYLE_BOLD_IDX] = { "style-bold", required_argument, 0, 0 },
+
+#define OPT_FONT_STYLE_ITALIC_IDX 37
+    [OPT_FONT_STYLE_ITALIC_IDX] = { "style-italic", required_argument, 0, 0 },
+
+#define OPT_FONT_FALLBACK_IDX 38
     [OPT_FONT_FALLBACK_IDX] = { "font-fallback", required_argument, 0, 0 },
 
-#define OPT_FONT_FALLBACK2_IDX 36
+#define OPT_FONT_FALLBACK2_IDX 39
     [OPT_FONT_FALLBACK2_IDX] = { "font-fallback2", required_argument, 0, 0 },
 
-#define OPT_FONT_SIZE_IDX 37
+#define OPT_FONT_SIZE_IDX 40
     [OPT_FONT_SIZE_IDX] = { "font-size", required_argument, 0, 0 },
 
-#define OPT_DPI_IDX 38
+#define OPT_DPI_IDX 41
     [OPT_DPI_IDX] = { "dpi", required_argument, 0, 0 },
 
-#define OPT_SCROLL_LINES_IDX 39
+#define OPT_SCROLL_LINES_IDX 42
     [OPT_SCROLL_LINES_IDX] = { "scroll-lines", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_COPY_IDX 40
+#define OPT_BIND_KEY_COPY_IDX 43
     [OPT_BIND_KEY_COPY_IDX] = { "bind-key-copy", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_PASTE_IDX 41
+#define OPT_BIND_KEY_PASTE_IDX 44
     [OPT_BIND_KEY_PASTE_IDX] = { "bind-key-paste", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_ENLARGE_IDX 42
+#define OPT_BIND_KEY_ENLARGE_IDX 45
     [OPT_BIND_KEY_ENLARGE_IDX] = { "bind-key-enlarge", required_argument, 0,
                                    0 },
 
-#define OPT_BIND_KEY_SHRINK_IDX 43
+#define OPT_BIND_KEY_SHRINK_IDX 46
     [OPT_BIND_KEY_SHRINK_IDX] = { "bind-key-shrink", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_UNI_IDX 44
+#define OPT_BIND_KEY_UNI_IDX 47
     [OPT_BIND_KEY_UNI_IDX] = { "bind-key-uni", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_DEBUG_IDX 45
+#define OPT_BIND_KEY_DEBUG_IDX 48
     [OPT_BIND_KEY_DEBUG_IDX] = { "bind-key-debug", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_QUIT_IDX 46
+#define OPT_BIND_KEY_QUIT_IDX 49
     [OPT_BIND_KEY_QUIT_IDX] = { "bind-key-quit", required_argument, 0, 0 },
 
-#define OPT_DEBUG_PTY_IDX 47
+#define OPT_DEBUG_PTY_IDX 50
     [OPT_DEBUG_PTY_IDX] = { "debug-pty", no_argument, 0, 'D' },
 
-#define OPT_VERSION_IDX 48
+#define OPT_VERSION_IDX 51
     [OPT_VERSION_IDX] = { "version", no_argument, 0, 'v' },
 
-#define OPT_HELP_IDX 49
+#define OPT_HELP_IDX 52
     [OPT_HELP_IDX] = { "help", no_argument, 0, 'h' },
 
-#define OPT_SENTINEL_IDX 50
+#define OPT_SENTINEL_IDX 53
     [OPT_SENTINEL_IDX] = { 0 }
 };
 
@@ -265,16 +275,21 @@ static const char* long_options_descriptions[][2] = {
     [OPT_H_CHANGE_FG_IDX] = { NULL,
                               "Highligting text changes foreground color" },
     [OPT_NO_FLASH_IDX]    = { NULL, "Disable visual bell" },
-    [OPT_COLORSCHEME_IDX] = { "name", "Colorscheme preset: wayst, linux, "
-                                      "xterm, rxvt, yaru, "
-                                      "tango, orchis, solarized" },
+    [OPT_COLORSCHEME_IDX] = { arg_name, "Colorscheme preset: wayst, linux, "
+                                        "xterm, rxvt, yaru, "
+                                        "tango, orchis, solarized" },
 
-    [OPT_FONT_IDX]           = { "name", "Primary font family" },
-    [OPT_FONT_FALLBACK_IDX]  = { "name", "Fallback font family" },
-    [OPT_FONT_FALLBACK2_IDX] = { "name", "Second fallback font family" },
-    [OPT_FONT_SIZE_IDX]      = { arg_int, "Font size" },
-    [OPT_DPI_IDX]            = { arg_int, "Font dpi" },
-    [OPT_SCROLL_LINES_IDX]   = { arg_int, "Lines scrolled per whell click" },
+    [OPT_FONT_IDX]               = { arg_name, "Primary font family" },
+    [OPT_FONT_STYLE_REGULAR_IDX] = { arg_name, "Font style to use as default" },
+    [OPT_FONT_STYLE_BOLD_IDX]    = { arg_name, "Font style to use as bold" },
+    [OPT_FONT_STYLE_ITALIC_IDX]  = { arg_name, "Font style to use as italic " },
+    [OPT_FONT_FALLBACK_IDX]      = { arg_name, "Fallback font family" },
+    [OPT_FONT_FALLBACK2_IDX]     = { arg_name, "Second fallback font family" },
+
+    [OPT_FONT_SIZE_IDX] = { arg_int, "Font size" },
+    [OPT_DPI_IDX]       = { arg_int, "Font dpi" },
+
+    [OPT_SCROLL_LINES_IDX] = { arg_int, "Lines scrolled per whell click" },
 
     [OPT_BIND_KEY_COPY_IDX]    = { arg_key, "Copy key command" },
     [OPT_BIND_KEY_PASTE_IDX]   = { arg_key, "Paste key command" },
@@ -516,7 +531,9 @@ static void find_font()
 
 #define SZ_DIFF(_ps) fabs(desired_pix_size - (_ps))
 
-            if (!strcmp((const char*)style, "Regular")) {
+            if (!strcmp((const char*)style, settings.font_style_regular
+                                              ? settings.font_style_regular
+                                              : "Regular")) {
                 if (is_bitmap && SZ_DIFF(pix_sz_regular) < SZ_DIFF(pix_size))
                     continue;
                 if (settings.font_name)
@@ -525,8 +542,9 @@ static void find_font()
                 pix_sz_regular     = pix_size;
             }
 
-            if (!strcmp((const char*)style, "Text") ||
-                !strcmp((const char*)style, "Medium")) {
+            if ((!strcmp((const char*)style, "Text") ||
+                 !strcmp((const char*)style, "Medium")) &&
+                !settings.font_style_regular) {
                 if (is_bitmap && SZ_DIFF(pix_sz_regular) < SZ_DIFF(pix_size))
                     continue;
                 if (regular_alternative)
@@ -535,7 +553,9 @@ static void find_font()
                 pix_sz_regular      = pix_size;
             }
 
-            if (!strcmp((const char*)style, "Bold")) {
+            if (!strcmp((const char*)style, settings.font_style_bold
+                                              ? settings.font_style_bold
+                                              : "Bold")) {
                 if (is_bitmap && SZ_DIFF(pix_sz_bold) < SZ_DIFF(pix_size))
                     continue;
                 if (settings.font_name_bold)
@@ -544,7 +564,9 @@ static void find_font()
                 pix_sz_bold             = pix_size;
             }
 
-            if (!strcmp((const char*)style, "Italic")) {
+            if (!strcmp((const char*)style, settings.font_style_italic
+                                              ? settings.font_name_italic
+                                              : "Italic")) {
                 if (is_bitmap && SZ_DIFF(pix_sz_italic) < SZ_DIFF(pix_size))
                     continue;
                 if (settings.font_name_italic)
@@ -613,17 +635,26 @@ static void find_font()
         if (regular_alternative) {
             settings.font_name = regular_alternative;
         } else {
-            ERR("Failed to load font \'%s\'", settings.font);
+            if (settings.font_style_regular) {
+                ERR("No style \'%s\' found for \'%s\'",
+                    settings.font_style_regular, settings.font);
+            } else {
+                ERR("Failed to load font \'%s\'", settings.font);
+            }
         }
     } else if (regular_alternative) {
         free(regular_alternative);
     }
 
-    if (!settings.font_name_bold)
-        WRN("No bold style found for \'%s\'\n", settings.font);
+    if (!settings.font_name_bold && settings.font_style_bold) {
+        WRN("No style \'%s\' found for \'%s\'\n", settings.font_style_bold,
+            settings.font);
+    }
 
-    if (!settings.font_name_italic)
-        WRN("No italic style found for \'%s\'\n", settings.font);
+    if (!settings.font_name_italic && settings.font_style_italic) {
+        WRN("No style \'%s\' found for \'%s\'\n", settings.font_style_italic,
+            settings.font);
+    }
 
     if (!settings.font_name_fallback && settings.font_fallback)
         WRN("Failed to load font \'%s\'\n", settings.font_fallback);
@@ -903,6 +934,21 @@ static void handle_option(const char  opt,
             settings.font_fallback2 = strdup(value);
             break;
 
+        case OPT_FONT_STYLE_REGULAR_IDX:
+            free(settings.font_style_regular);
+            settings.font_style_regular = strdup(value);
+            break;
+
+        case OPT_FONT_STYLE_BOLD_IDX:
+            free(settings.font_style_bold);
+            settings.font_style_bold = strdup(value);
+            break;
+
+        case OPT_FONT_STYLE_ITALIC_IDX:
+            free(settings.font_style_italic);
+            settings.font_style_italic = strdup(value);
+            break;
+
         case OPT_FONT_SIZE_IDX:
             settings.font_size = strtoul(value, NULL, 10);
             break;
@@ -1056,18 +1102,18 @@ static void handle_option(const char  opt,
         case OPT_BIND_KEY_UNI_IDX:
         case OPT_BIND_KEY_DEBUG_IDX:
         case OPT_BIND_KEY_QUIT_IDX: {
-            // point 'name_start' to after the last '-'
+            // point 'name_start' to after the last '+'
             const char* name_start = value;
             while (*name_start)
                 ++name_start;
-            while (*name_start != '-' && name_start >= value)
+            while (*name_start != '+' && name_start >= value)
                 --name_start;
 
             // get modifiers from between 'value' and 'name_start'
             uint32_t    mods          = 0;
             const char* current_begin = value;
             for (const char* i = value; i <= name_start; ++i) {
-                if (*i == '-') {
+                if (*i == '+') {
                     static const char* ctrl_names[]  = { "C", "Ctrl",
                                                         "Control" };
                     static const char* alt_names[]   = { "A", "M", "Alt",
@@ -1075,6 +1121,7 @@ static void handle_option(const char  opt,
                     static const char* shift_names[] = { "S", "Shift" };
 
                     size_t slice_range = i - current_begin;
+
 #define CHECK_NAMES(_array, _mask)                                             \
     for (uint_fast8_t j = 0; j < ARRAY_SIZE(_array); ++j)                      \
         if (strneqci(_array[j], current_begin, slice_range)) {                 \
@@ -1083,6 +1130,7 @@ static void handle_option(const char  opt,
                 current_begin);                                                \
             goto done_parsing;                                                 \
         }
+
                     CHECK_NAMES(ctrl_names, MODIFIER_CONTROL)
                     CHECK_NAMES(alt_names, MODIFIER_ALT)
                     CHECK_NAMES(shift_names, MODIFIER_SHIFT)

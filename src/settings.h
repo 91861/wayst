@@ -119,6 +119,9 @@ typedef struct
 
     /* font files */
     char*          font_name;
+    char*          font_style_regular;
+    char*          font_style_bold;
+    char*          font_style_italic;
     char*          font_name_bold;
     char*          font_name_italic;
     char*          font_name_fallback;
