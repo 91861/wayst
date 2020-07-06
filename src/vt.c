@@ -251,8 +251,9 @@ static inline void Vt_mark_proxies_damaged_in_region(Vt*    self,
 {
     size_t lo = MIN(begin, end);
     size_t hi = MAX(begin, end);
-    for (size_t i = lo; i <= hi; ++i)
+    for (size_t i = lo; i <= hi; ++i) {
         Vt_mark_proxy_damaged(self, i);
+    }
 }
 
 static inline void Vt_clear_proxy(Vt* self, size_t idx)
@@ -291,6 +292,17 @@ static inline void Vt_mark_proxies_damaged_in_selected_region(Vt* self)
 {
     Vt_mark_proxies_damaged_in_region(self, self->selection.begin_line,
                                       self->selection.end_line);
+}
+
+static inline void Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(Vt* self)
+{
+    if (self->selection.mode) {
+        size_t selection_lo = MIN(self->selection.begin_line, self->selection.end_line);
+        size_t selection_hi = MAX(self->selection.begin_line, self->selection.end_line);
+        size_t start = MAX(selection_lo, self->scroll_region_top);
+        size_t end = MIN(MIN(selection_hi, self->scroll_region_bottom), self->lines.size - 1);
+        Vt_mark_proxies_damaged_in_region(self, start ? (start - 1) : 0, end +1);
+    }
 }
 
 /**
@@ -2396,7 +2408,7 @@ __attribute__((always_inline)) static inline void Vt_carriage_return(Vt* self)
 
 /**
  * make a new empty line at cursor position, scroll down contents below */
-__attribute__((always_inline)) static inline void Vt_insert_line(Vt* self)
+static inline void Vt_insert_line(Vt* self)
 {
     Vector_insert_VtLine(&self->lines,
                          Vector_at_VtLine(&self->lines, self->cursor.row),
@@ -2407,11 +2419,13 @@ __attribute__((always_inline)) static inline void Vt_insert_line(Vt* self)
     Vector_remove_at_VtLine(
       &self->lines,
       MIN(Vt_get_scroll_region_bottom(self) + 1, Vt_bottom_line(self)), 1);
+
+    Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
 }
 
 /**
  * the same as insert line, but adds before cursor line */
-__attribute__((always_inline)) static inline void Vt_reverse_line_feed(Vt* self)
+static inline void Vt_reverse_line_feed(Vt* self)
 {
     Vector_remove_at_VtLine(
       &self->lines,
@@ -2420,11 +2434,12 @@ __attribute__((always_inline)) static inline void Vt_reverse_line_feed(Vt* self)
                          Vector_at_VtLine(&self->lines, self->cursor.row),
                          VtLine_new());
     Vt_empty_line_fill_bg(self, self->cursor.row);
+    Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
 }
 
 /**
  * delete active line, content below scrolls up */
-__attribute__((always_inline)) static inline void Vt_delete_line(Vt* self)
+static inline void Vt_delete_line(Vt* self)
 {
     Vector_remove_at_VtLine(&self->lines, self->cursor.row, 1);
 
@@ -2436,9 +2451,11 @@ __attribute__((always_inline)) static inline void Vt_delete_line(Vt* self)
 
     Vt_empty_line_fill_bg(
       self, MIN(Vt_get_scroll_region_bottom(self) + 1, Vt_bottom_line(self)));
+
+    Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
 }
 
-__attribute__((always_inline)) static inline void Vt_scroll_up(Vt* self)
+static inline void Vt_scroll_up(Vt* self)
 {
     Vector_insert_VtLine(
       &self->lines,
@@ -2453,9 +2470,11 @@ __attribute__((always_inline)) static inline void Vt_scroll_up(Vt* self)
 
     Vector_remove_at_VtLine(&self->lines, Vt_get_scroll_region_top(self) - 1,
                             1);
+
+    Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
 }
 
-__attribute__((always_inline)) static inline void Vt_scroll_down(Vt* self)
+static inline void Vt_scroll_down(Vt* self)
 {
     Vector_remove_at_VtLine(
       &self->lines,
@@ -2465,11 +2484,13 @@ __attribute__((always_inline)) static inline void Vt_scroll_down(Vt* self)
       &self->lines,
       Vector_at_VtLine(&self->lines, Vt_get_scroll_region_top(self)),
       VtLine_new());
+
+    Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
 }
 
 /**
  * Move cursor one cell down if possible */
-__attribute__((always_inline)) static inline void Vt_cursor_down(Vt* self)
+static inline void Vt_cursor_down(Vt* self)
 {
     if (self->cursor.row < Vt_bottom_line(self))
         ++self->cursor.row;
@@ -2477,7 +2498,7 @@ __attribute__((always_inline)) static inline void Vt_cursor_down(Vt* self)
 
 /**
  * Move cursor one cell up if possible */
-__attribute__((always_inline)) static inline void Vt_cursor_up(Vt* self)
+static inline void Vt_cursor_up(Vt* self)
 {
     if (self->cursor.row > Vt_top_line(self))
         --self->cursor.row;
@@ -2485,7 +2506,7 @@ __attribute__((always_inline)) static inline void Vt_cursor_up(Vt* self)
 
 /**
  * Move cursor one cell to the left if possible */
-__attribute__((always_inline)) static inline void Vt_cursor_left(Vt* self)
+static inline void Vt_cursor_left(Vt* self)
 {
     if (self->cursor.col)
         --self->cursor.col;
@@ -2493,7 +2514,7 @@ __attribute__((always_inline)) static inline void Vt_cursor_left(Vt* self)
 
 /**
  * Move cursor one cell to the right if possible */
-__attribute__((always_inline)) static inline void Vt_cursor_right(Vt* self)
+static inline void Vt_cursor_right(Vt* self)
 {
     if (self->cursor.col < self->ws.ws_col)
         ++self->cursor.col;
@@ -2785,6 +2806,8 @@ static inline void Vt_insert_new_line(Vt* self)
         }
         ++self->cursor.row;
     }
+
+    Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
 }
 
 /**
