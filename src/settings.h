@@ -143,7 +143,6 @@ typedef struct
     Colorscheme colorscheme;
     bool*       _explicit_colors_set;
 
-    int text_blink_interval;
 
     ColorRGBA bell_flash;
     bool      no_flash;
@@ -158,6 +157,11 @@ typedef struct
     bool debug_pty;
 
     uint32_t scrollback;
+
+    bool enable_cursor_blink;
+    int32_t cursor_blink_interval_ms;
+    int32_t cursor_blink_suspend_ms;
+    int32_t cursor_blink_end_s;
 
 } Settings;
 

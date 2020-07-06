@@ -3121,9 +3121,9 @@ static inline void Vt_shrink_scrollback(Vt* self)
     if (self->alt_lines.buf)
         return;
 
-    size_t ln_cnt = self->lines.size;
+    int64_t ln_cnt = self->lines.size;
     if (unlikely(ln_cnt > MAX(settings.scrollback * 1.1, self->ws.ws_row))) {
-        size_t to_remove = ln_cnt - settings.scrollback;
+        int64_t to_remove = ln_cnt - settings.scrollback - self->ws.ws_row;
         Vector_remove_at_VtLine(&self->lines, 0, to_remove);
         self->cursor.row -= to_remove;
     }

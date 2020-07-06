@@ -304,7 +304,7 @@ DEF_PAIR(wchar_t);
 DEF_PAIR(size_t);
 
 /** check string equality case insensitive */
-__attribute__((always_inline)) static inline bool
+static inline bool
 strneqci(const char* restrict s1, const char* restrict s2, const size_t n)
 {
     for (size_t i = 0; i < n; ++i)
@@ -347,9 +347,8 @@ static bool streq_wildcard(const char* restrict str,
 /** convert string to bool (false if fails) */
 static inline bool strtob(const char* restrict str)
 {
-    if (!str)
+    if (!str) {
         return false;
-    while (!isalnum(*str++))
-        ;
+    }
     return strneqci("true", str, 4) || strneqci("1", str, 1);
 }

@@ -36,21 +36,6 @@
 #define ATLAS_SIZE_LIMIT INT32_MAX
 #endif
 
-/* time to stop cursor blinking after inaction */
-#ifndef ACTION_SUSPEND_BLINK_MS
-#define ACTION_SUSPEND_BLINK_MS 500
-#endif
-
-/* time to suspend cursor blinking for after action */
-#ifndef ACTION_END_BLINK_S
-#define ACTION_END_BLINK_S 10
-#endif
-
-#define SCROLLBAR_FADE_MAX 100
-#define SCROLLBAR_FADE_MIN 0
-#define SCROLLBAR_FADE_INC 1
-#define SCROLLBAR_FADE_DEC 1
-
 #define PROXY_INDEX_TEXTURE       0
 #define PROXY_INDEX_TEXTURE_BLINK 1
 #define PROXY_INDEX_TEXTURE_SIZE  2
@@ -1016,7 +1001,7 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
     gfxOpenGL21(self)->draw_blinking_text = true;
 
     gfxOpenGL21(self)->blink_switch =
-      TimePoint_ms_from_now(settings.text_blink_interval);
+      TimePoint_ms_from_now(settings.cursor_blink_interval_ms);
     gfxOpenGL21(self)->blink_switch_text = TimePoint_now();
 
     gfxOpenGL21(self)->_vec_glyph_buffer =
@@ -1153,13 +1138,13 @@ bool GfxOpenGL21_set_focus(Gfx* self, bool focus)
 void GfxOpenGL21_notify_action(Gfx* self)
 {
     gfxOpenGL21(self)->blink_switch =
-      TimePoint_ms_from_now(settings.text_blink_interval);
+      TimePoint_ms_from_now(settings.cursor_blink_interval_ms);
     gfxOpenGL21(self)->draw_blinking = true;
     gfxOpenGL21(self)->recent_action = true;
     gfxOpenGL21(self)->action        = TimePoint_ms_from_now(
-      settings.text_blink_interval + ACTION_SUSPEND_BLINK_MS);
-
-    gfxOpenGL21(self)->inactive = TimePoint_s_from_now(ACTION_END_BLINK_S);
+      settings.cursor_blink_interval_ms + settings.cursor_blink_suspend_ms);
+    gfxOpenGL21(self)->inactive =
+      TimePoint_s_from_now(settings.cursor_blink_end_s);
 }
 
 bool GfxOpenGL21_update_timers(Gfx* self, Vt* vt, Ui* ui)
@@ -1168,7 +1153,7 @@ bool GfxOpenGL21_update_timers(Gfx* self, Vt* vt, Ui* ui)
 
     if (TimePoint_passed(gfxOpenGL21(self)->blink_switch_text)) {
         gfxOpenGL21(self)->blink_switch_text =
-          TimePoint_ms_from_now(settings.text_blink_interval);
+          TimePoint_ms_from_now(settings.cursor_blink_interval_ms);
         gfxOpenGL21(self)->draw_blinking_text =
           !gfxOpenGL21(self)->draw_blinking_text;
         if (unlikely(gfxOpenGL21(self)->has_blinking_text)) {
@@ -1187,52 +1172,31 @@ bool GfxOpenGL21_update_timers(Gfx* self, Vt* vt, Ui* ui)
         repaint                           = true;
     }
 
-    /* if (ui->scrollbar.visible) { */
-    /*     if (gfxOpenGL21(self)->scrollbar_fade < SCROLLBAR_FADE_MAX) { */
-    /*         gfxOpenGL21(self)->scrollbar_fade = */
-    /*           MIN(gfxOpenGL21(self)->scrollbar_fade + SCROLLBAR_FADE_INC, */
-    /*               SCROLLBAR_FADE_MAX); */
-    /*         repaint = true; */
-    /*     } */
-    /* } else { */
-    /*     if (gfxOpenGL21(self)->scrollbar_fade > SCROLLBAR_FADE_MIN) { */
-    /*         gfxOpenGL21(self)->scrollbar_fade = */
-    /*           MAX(gfxOpenGL21(self)->scrollbar_fade - SCROLLBAR_FADE_DEC, */
-    /*               SCROLLBAR_FADE_MIN); */
-    /*         repaint = true; */
-    /*     } */
-    /* } */
-
     if (gfxOpenGL21(self)->recent_action &&
         TimePoint_passed(gfxOpenGL21(self)->action)) {
         // start blinking cursor
         gfxOpenGL21(self)->recent_action = false;
         gfxOpenGL21(self)->blink_switch =
-          TimePoint_ms_from_now(settings.text_blink_interval);
+          TimePoint_ms_from_now(settings.cursor_blink_interval_ms);
         gfxOpenGL21(self)->draw_blinking = !gfxOpenGL21(self)->draw_blinking;
         repaint                          = true;
     }
 
     if (TimePoint_passed(gfxOpenGL21(self)->inactive) &&
-
-        // all animations finished
-        ((ui->scrollbar.visible &&
-          gfxOpenGL21(self)->scrollbar_fade == SCROLLBAR_FADE_MAX) ||
-         (!ui->scrollbar.visible &&
-          gfxOpenGL21(self)->scrollbar_fade == SCROLLBAR_FADE_MIN)) &&
-
-        gfxOpenGL21(self)->draw_blinking) {
-        // dsiable cursor blinking
+        gfxOpenGL21(self)->draw_blinking && settings.cursor_blink_end_s >= 0) {
         gfxOpenGL21(self)->is_inactive = true;
     } else {
         if (TimePoint_passed(gfxOpenGL21(self)->blink_switch)) {
             gfxOpenGL21(self)->blink_switch =
-              TimePoint_ms_from_now(settings.text_blink_interval);
+              TimePoint_ms_from_now(settings.cursor_blink_interval_ms);
             gfxOpenGL21(self)->draw_blinking =
               !gfxOpenGL21(self)->draw_blinking;
             if (!(gfxOpenGL21(self)->recent_action &&
-                  !gfxOpenGL21(self)->draw_blinking))
+                  !gfxOpenGL21(self)->draw_blinking) &&
+                (settings.enable_cursor_blink ||
+                 gfxOpenGL21(self)->has_blinking_text)) {
                 repaint = true;
+            }
         }
     }
 
@@ -2068,12 +2032,14 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(
     }
 }
 
-__attribute__((always_inline)) static inline void
-GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const Ui* ui)
+static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx,
+                                           const Vt*    vt,
+                                           const Ui*    ui)
 {
-    if ((!vt->cursor.hidden && ((ui->cursor->blinking && gfx->in_focus)
-                                  ? gfx->draw_blinking
-                                  : true || gfx->recent_action))) {
+    if ((!vt->cursor.hidden && (((ui->cursor->blinking && gfx->in_focus)
+                                   ? gfx->draw_blinking
+                                   : true || gfx->recent_action) ||
+                                !settings.enable_cursor_blink))) {
         size_t row        = ui->cursor->row - Vt_visual_top_line(vt),
                col        = ui->cursor->col;
         bool filled_block = false;
@@ -2438,8 +2404,6 @@ static void GfxOpenGL21_draw_overlays(GfxOpenGL21* self,
 {
     if (vt->unicode_input.active) {
         GfxOpenGL21_draw_unicode_input(self, vt);
-    } else if (0 /* ksm */) {
-
     } else {
         GfxOpenGL21_draw_cursor(self, vt, ui);
     }
