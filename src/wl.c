@@ -450,8 +450,29 @@ static void keyboard_handle_keymap(void*               data,
                                    int                 fd,
                                    uint32_t            size)
 {
+    // this is sent when the keyboard configuration changes
+
     ASSERT(globalWl->xkb.ctx,
            "xkb context not created in keyboard::handle_keymap");
+
+    if (globalWl->xkb.keymap) {
+        if (globalWl->xkb.compose_state)
+            xkb_compose_state_unref(globalWl->xkb.compose_state);
+        globalWl->xkb.compose_state = NULL;
+
+        if (globalWl->xkb.compose_table)
+            xkb_compose_table_unref(globalWl->xkb.compose_table);
+        globalWl->xkb.compose_table = NULL;
+
+        xkb_state_unref(globalWl->xkb.state);
+        globalWl->xkb.state = NULL;
+
+        xkb_state_unref(globalWl->xkb.clean_state);
+        globalWl->xkb.clean_state = NULL;
+
+        xkb_keymap_unref(globalWl->xkb.keymap);
+        globalWl->xkb.keymap = NULL;
+    }
 
     char* map_str = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
 
@@ -643,22 +664,21 @@ static void seat_test_capabilities(void*           data,
                                    uint32_t        caps)
 {
     if (caps & WL_SEAT_CAPABILITY_POINTER) {
-        if (!globalWl->pointer) {
-            globalWl->pointer = wl_seat_get_pointer(seat);
-            wl_pointer_add_listener(globalWl->pointer, &pointer_listener, data);
+        if (globalWl->pointer) {
+            wl_pointer_destroy(globalWl->pointer);
         }
+        globalWl->pointer = wl_seat_get_pointer(seat);
+        wl_pointer_add_listener(globalWl->pointer, &pointer_listener, data);
     }
 
     if (caps & WL_SEAT_CAPABILITY_KEYBOARD) {
-        if (!globalWl->keyboard) {
-            globalWl->keyboard = wl_seat_get_keyboard(globalWl->seat);
-            wl_keyboard_add_listener(globalWl->keyboard, &keyboard_listener,
-                                     data);
-        } else {
+        if (globalWl->keyboard) {
             wl_keyboard_destroy(globalWl->keyboard);
-            globalWl->keyboard = NULL;
         }
-    } else {
+
+        globalWl->keyboard = wl_seat_get_keyboard(globalWl->seat);
+        wl_keyboard_add_listener(globalWl->keyboard, &keyboard_listener, data);
+    } else if (!globalWl->keyboard) {
         WRN("No keyboard capability found for seat\n");
     }
 }
