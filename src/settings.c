@@ -303,7 +303,7 @@ static const char* long_options_descriptions[][2] = {
                         "Blinking cursor enable:rate[ms]:suspend[ms]:end[s](<0 "
                         "to disable)" },
 
-    [OPT_SCROLL_LINES_IDX] = { arg_int, "Lines scrolled per whell click" },
+    [OPT_SCROLL_LINES_IDX] = { arg_int, "Lines scrolled per wheel click" },
     [OPT_SCROLLBACK_IDX]   = { arg_int, "Size of scrollback buffer" },
 
     [OPT_BIND_KEY_COPY_IDX]    = { arg_key, "Copy key command" },

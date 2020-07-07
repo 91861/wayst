@@ -882,7 +882,7 @@ void Vt_dump_info(Vt* self)
            self->modes.application_keypad);
     printf("  auto repeat:                      %d\n", self->modes.auto_repeat);
     printf("  bracketed paste:                  %d\n",
-           self->modes.bracket_paste);
+           self->modes.bracketed_paste);
     printf("  send DEL on delete:               %d\n",
            self->modes.del_sends_del);
     printf("  don't send esc on alt:            %d\n",
@@ -1407,7 +1407,7 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
             break;
 
         case 2004:
-            self->modes.bracket_paste = on;
+            self->modes.bracketed_paste = !on;
             break;
 
         case 1051: // Sun function-key mode, xterm.
@@ -3680,23 +3680,39 @@ void Vt_handle_clipboard(void* _self, const char* text)
         return;
 
     size_t len = strlen(text), bi = 0;
-    if (self->modes.bracket_paste) {
+    int skipped = 0;
+    if (self->modes.bracketed_paste) {
         memcpy(self->out_buf, "\e[200~", 6);
         bi += 6;
     }
 
     for (size_t i = 0; i < len;) {
-        int to_cpy = MIN(len - i, sizeof(self->out_buf) - bi);
-        memcpy(self->out_buf + bi, text + i, to_cpy);
+        int to_cpy = MIN(len - i, sizeof(self->out_buf) -1 - bi);
+        char last = '\0';
+        for (int j = 0; j < to_cpy; ++j) {
+            char c = text[i + j];
+            if (c == '\n') {
+                if (last == '\r') {
+                    ++skipped;
+                } else {
+                    self->out_buf[bi + j - skipped] = '\r';
+                }
+            } else {
+                self->out_buf[bi + j - skipped] = c;
+            }
+            last = c;
+        }
+        
         i += to_cpy;
-        bi += to_cpy;
-        if (bi > sizeof(self->out_buf) - (self->modes.bracket_paste ? 7 : 1)) {
+        bi += (to_cpy - skipped);
+        skipped = 0;
+        if (bi > sizeof(self->out_buf) -1 - (self->modes.bracketed_paste ? 7 : 1)) {
             Vt_write(self);
             bi = 0;
         }
     }
 
-    if (self->modes.bracket_paste)
+    if (self->modes.bracketed_paste)
         memcpy(self->out_buf + bi, "\e[201~", 7);
     else
         self->out_buf[bi] = 0;

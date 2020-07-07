@@ -295,7 +295,7 @@ typedef struct _Vt
     /* 'reverse' some modes so default is 0  */
     struct VtModes
     {
-        uint8_t bracket_paste : 1;
+        uint8_t bracketed_paste : 1;
         uint8_t del_sends_del : 1;
         uint8_t no_alt_sends_esc : 1;
         uint8_t x10_mouse_compat : 1;
