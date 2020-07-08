@@ -355,9 +355,15 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
         case 121: // y
         case 99:  // c
         {
-            Vector_char txt = Vt_select_region_to_string(&self->vt);
-            App_clipboard_send(self, txt.buf);
-            Vt_select_end(&self->vt);
+            if (self->vt.selection.mode) {
+                Vector_char txt = Vt_select_region_to_string(&self->vt);
+                if (txt.size) {
+                    App_clipboard_send(self, txt.buf);
+                    Vt_select_end(&self->vt);
+                } else {
+                    Vector_destroy_char(&txt);
+                }
+            }
         } break;
 
         case 13: // Return
@@ -468,8 +474,13 @@ static bool App_maybe_handle_application_key(App*     self,
 
     if (KeyCommand_is_active(&settings.key_commands[KCMD_COPY], key, rawkey,
                              mods)) {
-        Vector_char txt = Vt_select_region_to_string(vt);
-        App_clipboard_send(self, txt.buf);
+        if (vt->selection.mode) {
+            Vector_char txt = Vt_select_region_to_string(vt);
+            if (txt.size)
+                App_clipboard_send(self, txt.buf);
+            else
+                Vector_destroy_char(&txt);
+        }
         return true;
     } else if (KeyCommand_is_active(&settings.key_commands[KCMD_PASTE], key,
                                     rawkey, mods)) {
