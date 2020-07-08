@@ -734,7 +734,7 @@ static void settings_make_default()
                 .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
             },
             [KCMD_DEBUG] = (KeyCommand) {
-                .key.code = 13, // Return
+                .key.code = 100, // d
                 .is_name = false,
                 .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
             },

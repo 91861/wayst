@@ -104,7 +104,7 @@ Keys|Action|
 ```Ctrl```+```Shift```+```-```     | Decrease font size
 ```Ctrl```+```Shift```+```u```     | Unicode entry
 ```Ctrl```+```Shift```+```k```     | Enter vi-like keyboard select mode
-```Ctrl```+```Shift```+```Return```| Output debug information to stdout
+```Ctrl```+```Shift```+```d```     | Output debug information to stdout
 ```LMB```                          | Select text
 ```RMB```                          | Change selected region
 ```Shift```+```LMB```              | Select text in mouse reporting mode
