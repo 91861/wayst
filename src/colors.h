@@ -1,5 +1,12 @@
 /* See LICENSE for license information. */
 
+/**
+ * Utility functions for dealing with colors
+ *
+ * TODO:
+ * - Some way to test if given bg-fg combo is readable and a way to make it so
+ */
+
 #pragma once
 
 #include "util.h"
@@ -25,24 +32,20 @@ typedef struct
 #define COLOR_RGBA_FMT   "rgb(%d, %d, %d, %f)"
 #define COLOR_RGBA_AP(c) (c.r), (c.g), (c.b), (ColorRGBA_get_float(c, 3))
 
-__attribute__((always_inline)) static inline bool ColorRGBA_eq(ColorRGBA a,
-                                                               ColorRGBA b)
+static inline bool ColorRGBA_eq(ColorRGBA a, ColorRGBA b)
 {
     return !memcmp(&a, &b, sizeof(ColorRGBA));
 }
 
-__attribute__((always_inline)) static inline bool ColorRGB_eq(ColorRGB a,
-                                                              ColorRGB b)
+static inline bool ColorRGB_eq(ColorRGB a, ColorRGB b)
 {
     return !memcmp(&a, &b, sizeof(ColorRGB));
 }
 
-__attribute__((always_inline)) static inline uint8_t hex_char(char  c,
-                                                              bool* failed)
+static inline uint8_t hex_char(char c, bool* failed)
 {
-    if (!((c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') ||
-          (c >= '0' && c <= '9'))) {
-        LOG("\'%c\' not a hex code\n", c);
+    if (!isxdigit(c)) {
+        LOG("\'%c\' not a hex digit\n", c);
         *failed = true;
         return 0;
     }
@@ -50,10 +53,9 @@ __attribute__((always_inline)) static inline uint8_t hex_char(char  c,
     return c >= 'A' ? (tolower(c) - 'a' + 10) : c - '0';
 }
 
-/* Generic utility functions */
+/* General utility functions */
 
-__attribute__((always_inline)) static inline const char*
-strstrn(const char* h, const char* n, const size_t h_len)
+static inline const char* strstrn(const char* h, const char* n, const size_t h_len)
 {
     for (size_t i = 0; i < h_len; ++i) {
 
@@ -76,8 +78,7 @@ strstrn(const char* h, const char* n, const size_t h_len)
 
 /**
  * get length of string up to max value */
-__attribute__((always_inline)) static inline size_t strlen_max(const char* s,
-                                                               size_t      max)
+static inline size_t strlen_max(const char* s, size_t max)
 {
     size_t i;
     for (i = 0; *(s++) && i++ < max;)
@@ -124,7 +125,7 @@ fail:
  * doesn't need to start with '#' or be NULL-terminated
  * @param[out] failed - is set ot 1 if input is invalid
  */
-static ColorRGBA ColorGRBA_from_hex(const char* str, bool* failed)
+static ColorRGBA ColorRGBA_from_hex(const char* str, bool* failed)
 {
     size_t len;
     bool   f = false;
@@ -164,8 +165,7 @@ fail:
     return (ColorRGBA){ 0, 0, 0, 0 };
 }
 
-__attribute__((always_inline)) static inline ColorRGB ColorRGB_from_RGBA(
-  const ColorRGBA c)
+static inline ColorRGB ColorRGB_from_RGBA(const ColorRGBA c)
 {
     return (ColorRGB){
         .r = c.r,
@@ -174,8 +174,7 @@ __attribute__((always_inline)) static inline ColorRGB ColorRGB_from_RGBA(
     };
 }
 
-__attribute__((always_inline)) static inline ColorRGBA ColorRGBA_from_RGB(
-  const ColorRGB c)
+static inline ColorRGBA ColorRGBA_from_RGB(const ColorRGB c)
 {
     return (ColorRGBA){
         .r = c.r,
@@ -185,72 +184,94 @@ __attribute__((always_inline)) static inline ColorRGBA ColorRGBA_from_RGB(
     };
 }
 
-__attribute__((always_inline)) static inline float ColorRGB_get_float(
-  const ColorRGB c,
-  const size_t   idx)
+static inline float ColorRGB_get_float(const ColorRGB c, const size_t idx)
 {
     ASSERT(idx <= 2, "bad index");
-
     return (float)(&c.r)[idx] / 255;
 }
 
-__attribute__((always_inline)) static inline float ColorRGBA_get_float(
-  ColorRGBA c,
-  size_t    idx)
+static inline float ColorRGBA_get_float(ColorRGBA c, size_t idx)
 {
     ASSERT(idx <= 3, "bad index");
-
     return (float)(&c.r)[idx] / 255;
 }
 
-__attribute__((always_inline)) static inline float ColorRGB_get_float_blend(
-  const ColorRGB c1,
-  const ColorRGB c2,
-  const double   factor,
-  const size_t   idx)
+static inline float ColorRGB_get_float_blend(const ColorRGB c1,
+                                             const ColorRGB c2,
+                                             const double   factor,
+                                             const size_t   idx)
 {
     ASSERT(idx <= 2, "bad index");
-
-    return ((float)(&c1.r)[idx] * (1.0 - factor) +
-            (float)(&c2.r)[idx] * factor) /
-           255;
+    return ((float)(&c1.r)[idx] * (1.0 - factor) + (float)(&c2.r)[idx] * factor) / 255;
 }
 
-__attribute__((always_inline)) static inline float ColorRGB_get_float_add(
-  const ColorRGB c1,
-  const ColorRGB c2,
-  const double   factor,
-  const size_t   idx)
+static inline float ColorRGB_get_float_add(const ColorRGB c1,
+                                           const ColorRGB c2,
+                                           const double   factor,
+                                           const size_t   idx)
 {
     ASSERT(idx <= 2, "bad index");
-
-    return MIN(1.0, (float)(&c1.r)[idx] * (1.0 - factor) +
-                      (float)(&c2.r)[idx] * factor) /
-           255;
+    return MIN(1.0, (float)(&c1.r)[idx] * (1.0 - factor) + (float)(&c2.r)[idx] * factor) / 255;
 }
 
-__attribute__((always_inline)) static inline float ColorRGBA_get_float_blend(
-  const ColorRGBA c1,
-  const ColorRGBA c2,
-  const double    factor,
-  const size_t    idx)
+static inline float ColorRGBA_get_float_blend(const ColorRGBA c1,
+                                              const ColorRGBA c2,
+                                              const double    factor,
+                                              const size_t    idx)
 {
     ASSERT(idx <= 3, "bad index");
-
-    return ((float)(&c1.r)[idx] * (1.0 - factor) +
-            (float)(&c2.r)[idx] * factor) /
-           255;
+    return ((float)(&c1.r)[idx] * (1.0 - factor) + (float)(&c2.r)[idx] * factor) / 255;
 }
 
-__attribute__((always_inline)) static inline float ColorRGBA_get_float_add(
-  const ColorRGBA c1,
-  const ColorRGBA c2,
-  const double    factor,
-  const size_t    idx)
+static inline float ColorRGBA_get_float_add(const ColorRGBA c1,
+                                            const ColorRGBA c2,
+                                            const double    factor,
+                                            const size_t    idx)
 {
     ASSERT(idx <= 3, "bad index");
+    return MIN(1.0, (float)(&c1.r)[idx] * (1.0 - factor) + (float)(&c2.r)[idx] * factor) / 255;
+}
 
-    return MIN(1.0, (float)(&c1.r)[idx] * (1.0 - factor) +
-                      (float)(&c2.r)[idx] * factor) /
-           255;
+static inline float ColorRGB_get_luma(const ColorRGB c)
+{
+    return ColorRGB_get_float(c, 0) * 0.2126 + ColorRGB_get_float(c, 1) * 0.7152 +
+           ColorRGB_get_float(c, 2) * 0.0722;
+}
+
+static inline float ColorRGB_get_hue(const ColorRGB c)
+{
+    uint8_t max = MAX(c.r, MAX(c.g, c.b)), min = MIN(c.r, MIN(c.g, c.b));
+
+    if (min == max) {
+        return 0.0f;
+    }
+
+    float hue;
+    if (c.r == max) {
+        hue = (float)(c.g - c.b);
+    } else if (c.g == max) {
+        hue = 2.0f + (float)(c.b - c.r) / (max - min);
+    } else {
+        hue = 4.0f + (float)(c.r - c.g) / (max - min);
+    }
+    hue *= 60.0f;
+    return hue > 0.0f ? hue : hue + 360.0f;
+}
+
+static inline float ColorRGB_get_lightness(const ColorRGB c)
+{
+    uint8_t max = MAX(c.r, MAX(c.g, c.b)), min = MIN(c.r, MIN(c.g, c.b));
+    return (float)(max + min) / 255.0f / 2.0f;
+}
+
+static inline float ColorRGB_get_saturation(const ColorRGB c)
+{
+    uint8_t max = MAX(c.r, MAX(c.g, c.b)), min = MIN(c.r, MIN(c.g, c.b));
+    uint8_t delta = max - min;
+
+    if (!delta)
+        return 0.0f;
+
+    float lightness = (float)(max + min) / 2.0f;
+    return ((float)delta / 255.0f) / (1 - ABS(2 * lightness - 1.0));
 }

@@ -58,44 +58,43 @@
 
 #define POW2(_x)            ((_x) * (_x))
 #define POW3(_x)            ((_x) * (_x) * (_X))
+#define ABS(_x)             ((_x) < 0 ? -(_x) : (_x))
 #define MAX(_a, _b)         ((_a) > (_b) ? (_a) : (_b))
 #define MIN(_a, _b)         ((_a) < (_b) ? (_a) : (_b))
 #define CLAMP(_v, _lo, _hi) ((_v) > (_hi) ? (_hi) : (_v) < (_lo) ? (_lo) : (_v))
 
 #define ARRAY_SIZE(_array) (sizeof((_array)) / sizeof((_array[0])))
-#define ARRAY_LAST(_array)                                                     \
-    (_array[(sizeof((_array)) / sizeof((_array[0]))) - 1])
+#define ARRAY_LAST(_array) (_array[(sizeof((_array)) / sizeof((_array[0]))) - 1])
 
-#define STATIC_ASSERT(cond, msg)                                               \
-    typedef char static_assertion_##msg[(cond) ? 1 : -1]
+#define STATIC_ASSERT(cond, msg) typedef char static_assertion_##msg[(cond) ? 1 : -1]
 
-#define WRN(...)                                                               \
-    {                                                                          \
-        fputs("[\e[33mwarning\e[m] ", stderr);                                  \
-        fprintf(stderr, __VA_ARGS__);                                          \
+#define WRN(...)                                                                                   \
+    {                                                                                              \
+        fputs("[\e[33mwarning\e[m] ", stderr);                                                     \
+        fprintf(stderr, __VA_ARGS__);                                                              \
     }
 
 #ifdef DEBUG
 
-#define ERR(...)                                                               \
-    {                                                                          \
-        fputs("[\e[31merror\e[m] ", stderr);                                               \
-        fprintf(stderr, __VA_ARGS__);                                          \
-        fprintf(stderr, "\nIn file: \"%s\" function: \"%s\" line: %d\n",       \
-                __FILE__, __func__, __LINE__);                                 \
-        exit(EXIT_FAILURE);                                                    \
+#define ERR(...)                                                                                   \
+    {                                                                                              \
+        fputs("[\e[31merror\e[m] ", stderr);                                                       \
+        fprintf(stderr, __VA_ARGS__);                                                              \
+        fprintf(stderr, "\nIn file: \"%s\" function: \"%s\" line: %d\n", __FILE__, __func__,       \
+                __LINE__);                                                                         \
+        exit(EXIT_FAILURE);                                                                        \
     }
-#define ASSERT(cond, msg)                                                      \
-    {                                                                          \
-        if ((cond) == false) {                                                 \
-            ERR("Assertion failed: \'%s\', %s", #cond, msg);                   \
-        }                                                                      \
+#define ASSERT(cond, msg)                                                                          \
+    {                                                                                              \
+        if ((cond) == false) {                                                                     \
+            ERR("Assertion failed: \'%s\', %s", #cond, msg);                                       \
+        }                                                                                          \
     }
-#define ASSERT_UNREACHABLE                                                     \
-    {                                                                          \
-        ERR("got to section declared unreachable. file: %s func: %s line: %d", \
-            __FILE__, __func__, __LINE__);                                     \
-        __builtin_unreachable();                                               \
+#define ASSERT_UNREACHABLE                                                                         \
+    {                                                                                              \
+        ERR("got to section declared unreachable. file: %s func: %s line: %d", __FILE__, __func__, \
+            __LINE__);                                                                             \
+        __builtin_unreachable();                                                                   \
     }
 
 #define LOG(...) fprintf(stderr, __VA_ARGS__)
@@ -105,38 +104,38 @@ static inline void* _call_fp_helper(const char* const msg,
                                     const char* const func,
                                     const int         line)
 {
-    fprintf(stderr, "\e[31m%s In File: \"%s\" function: \"%s\" line: %d \e[m\n",
-            msg, fname, func, line);
+    fprintf(stderr, "\e[31m%s In File: \"%s\" function: \"%s\" line: %d \e[m\n", msg, fname, func,
+            line);
     exit(EXIT_FAILURE);
 }
 
 // call function pointer matching T(*)(void*, ...), error if NULL
-#define CALL_FP(_func, _void_ptr, ...)                                         \
-    (_func)((_func) ? (_void_ptr)                                              \
-                    : _call_fp_helper("function \'" #_func "\' is NULL.",      \
-                                      __FILE__, __func__, __LINE__),           \
+#define CALL_FP(_func, _void_ptr, ...)                                                             \
+    (_func)((_func)                                                                                \
+              ? (_void_ptr)                                                                        \
+              : _call_fp_helper("function \'" #_func "\' is NULL.", __FILE__, __func__, __LINE__), \
             ##__VA_ARGS__)
 
 #else
 
-#define ASSERT(...)                                                            \
-    {                                                                          \
-        ;                                                                      \
+#define ASSERT(...)                                                                                \
+    {                                                                                              \
+        ;                                                                                          \
     }
-#define ASSERT_UNREACHABLE                                                     \
-    {                                                                          \
-        __builtin_unreachable();                                               \
+#define ASSERT_UNREACHABLE                                                                         \
+    {                                                                                              \
+        __builtin_unreachable();                                                                   \
     }
-#define LOG(...)                                                               \
-    {                                                                          \
-        ;                                                                      \
+#define LOG(...)                                                                                   \
+    {                                                                                              \
+        ;                                                                                          \
     }
-#define ERR(...)                                                               \
-    {                                                                          \
-        fputs("[\e[31merror\e[m] ", stderr);                                               \
-        fprintf(stderr, __VA_ARGS__);                                          \
-        fputs("\n", stderr);                                               \
-        exit(EXIT_FAILURE);                                                    \
+#define ERR(...)                                                                                   \
+    {                                                                                              \
+        fputs("[\e[31merror\e[m] ", stderr);                                                       \
+        fprintf(stderr, __VA_ARGS__);                                                              \
+        fputs("\n", stderr);                                                                       \
+        exit(EXIT_FAILURE);                                                                        \
     }
 
 #define CALL_FP(_func, _void_ptr, ...) ((_func)((_void_ptr), ##__VA_ARGS__))
@@ -175,8 +174,7 @@ __attribute__((always_inline)) static inline void* smalloc(size_t size)
     return res;
 }
 
-__attribute__((always_inline)) static inline void* scalloc(size_t nmemb,
-                                                           size_t size)
+__attribute__((always_inline)) static inline void* scalloc(size_t nmemb, size_t size)
 {
     void* res = calloc(nmemb, size);
     if (unlikely(!res)) {
@@ -191,8 +189,7 @@ __attribute__((always_inline)) static inline void* scalloc(size_t nmemb,
     return res;
 }
 
-__attribute__((always_inline)) static inline void* srealloc(void*  ptr,
-                                                            size_t size)
+__attribute__((always_inline)) static inline void* srealloc(void* ptr, size_t size)
 {
     void* res = realloc(ptr, size);
     if (unlikely(!res)) {
@@ -217,72 +214,64 @@ __attribute__((always_inline)) static inline void* srealloc(void*  ptr,
 #define BIT_IS_SET(fld, bit)  (fld & (1 << bit))
 
 #define BIN_8_FMT "%c%c%c%c%c%c%c%c"
-#define BIN_8_AP(byte)                                                         \
-    (byte & 0b10000000 ? '1' : '0'), (byte & 0b01000000 ? '1' : '0'),          \
-      (byte & 0b00100000 ? '1' : '0'), (byte & 0b00010000 ? '1' : '0'),        \
-      (byte & 0b00001000 ? '1' : '0'), (byte & 0b00000100 ? '1' : '0'),        \
+#define BIN_8_AP(byte)                                                                             \
+    (byte & 0b10000000 ? '1' : '0'), (byte & 0b01000000 ? '1' : '0'),                              \
+      (byte & 0b00100000 ? '1' : '0'), (byte & 0b00010000 ? '1' : '0'),                            \
+      (byte & 0b00001000 ? '1' : '0'), (byte & 0b00000100 ? '1' : '0'),                            \
       (byte & 0b00000010 ? '1' : '0'), (byte & 0b00000001 ? '1' : '0')
 
 #define BIN_16_FMT BIN_8_FMT " " BIN_8_FMT
-#define BIN_16_AP(byte)                                                        \
-    (byte & 0b1000000000000000 ? '1' : '0'),                                   \
-      (byte & 0b0100000000000000 ? '1' : '0'),                                 \
-      (byte & 0b0010000000000000 ? '1' : '0'),                                 \
-      (byte & 0b0001000000000000 ? '1' : '0'),                                 \
-      (byte & 0b0000100000000000 ? '1' : '0'),                                 \
-      (byte & 0b0000010000000000 ? '1' : '0'),                                 \
-      (byte & 0b0000001000000000 ? '1' : '0'),                                 \
-      (byte & 0b0000000100000000 ? '1' : '0'),                                 \
-      (byte & 0b0000000010000000 ? '1' : '0'),                                 \
-      (byte & 0b0000000001000000 ? '1' : '0'),                                 \
-      (byte & 0b0000000000100000 ? '1' : '0'),                                 \
-      (byte & 0b0000000000010000 ? '1' : '0'),                                 \
-      (byte & 0b0000000000001000 ? '1' : '0'),                                 \
-      (byte & 0b0000000000000100 ? '1' : '0'),                                 \
-      (byte & 0b0000000000000010 ? '1' : '0'),                                 \
-      (byte & 0b0000000000000001 ? '1' : '0')
+#define BIN_16_AP(byte)                                                                            \
+    (byte & 0b1000000000000000 ? '1' : '0'), (byte & 0b0100000000000000 ? '1' : '0'),              \
+      (byte & 0b0010000000000000 ? '1' : '0'), (byte & 0b0001000000000000 ? '1' : '0'),            \
+      (byte & 0b0000100000000000 ? '1' : '0'), (byte & 0b0000010000000000 ? '1' : '0'),            \
+      (byte & 0b0000001000000000 ? '1' : '0'), (byte & 0b0000000100000000 ? '1' : '0'),            \
+      (byte & 0b0000000010000000 ? '1' : '0'), (byte & 0b0000000001000000 ? '1' : '0'),            \
+      (byte & 0b0000000000100000 ? '1' : '0'), (byte & 0b0000000000010000 ? '1' : '0'),            \
+      (byte & 0b0000000000001000 ? '1' : '0'), (byte & 0b0000000000000100 ? '1' : '0'),            \
+      (byte & 0b0000000000000010 ? '1' : '0'), (byte & 0b0000000000000001 ? '1' : '0')
 
 #define BIN_32_FMT BIN_16_FMT " " BIN_16_FMT
-#define BIN_32_AP(byte)                                                        \
-    (byte & 0b10000000000000000000000000000000 ? '1' : '0'),                   \
-      (byte & 0b01000000000000000000000000000000 ? '1' : '0'),                 \
-      (byte & 0b00100000000000000000000000000000 ? '1' : '0'),                 \
-      (byte & 0b00010000000000000000000000000000 ? '1' : '0'),                 \
-      (byte & 0b00001000000000000000000000000000 ? '1' : '0'),                 \
-      (byte & 0b00000100000000000000000000000000 ? '1' : '0'),                 \
-      (byte & 0b00000010000000000000000000000000 ? '1' : '0'),                 \
-      (byte & 0b00000001000000000000000000000000 ? '1' : '0'),                 \
-      (byte & 0b00000000100000000000000000000000 ? '1' : '0'),                 \
-      (byte & 0b00000000010000000000000000000000 ? '1' : '0'),                 \
-      (byte & 0b00000000001000000000000000000000 ? '1' : '0'),                 \
-      (byte & 0b00000000000100000000000000000000 ? '1' : '0'),                 \
-      (byte & 0b00000000000010000000000000000000 ? '1' : '0'),                 \
-      (byte & 0b00000000000001000000000000000000 ? '1' : '0'),                 \
-      (byte & 0b00000000000000100000000000000000 ? '1' : '0'),                 \
-      (byte & 0b00000000000000010000000000000000 ? '1' : '0'),                 \
-      (byte & 0b00000000000000001000000000000000 ? '1' : '0'),                 \
-      (byte & 0b00000000000000000100000000000000 ? '1' : '0'),                 \
-      (byte & 0b00000000000000000010000000000000 ? '1' : '0'),                 \
-      (byte & 0b00000000000000000001000000000000 ? '1' : '0'),                 \
-      (byte & 0b00000000000000000000100000000000 ? '1' : '0'),                 \
-      (byte & 0b00000000000000000000010000000000 ? '1' : '0'),                 \
-      (byte & 0b00000000000000000000001000000000 ? '1' : '0'),                 \
-      (byte & 0b00000000000000000000000100000000 ? '1' : '0'),                 \
-      (byte & 0b00000000000000000000000010000000 ? '1' : '0'),                 \
-      (byte & 0b00000000000000000000000001000000 ? '1' : '0'),                 \
-      (byte & 0b00000000000000000000000000100000 ? '1' : '0'),                 \
-      (byte & 0b00000000000000000000000000010000 ? '1' : '0'),                 \
-      (byte & 0b00000000000000000000000000001000 ? '1' : '0'),                 \
-      (byte & 0b00000000000000000000000000000100 ? '1' : '0'),                 \
-      (byte & 0b00000000000000000000000000000010 ? '1' : '0'),                 \
+#define BIN_32_AP(byte)                                                                            \
+    (byte & 0b10000000000000000000000000000000 ? '1' : '0'),                                       \
+      (byte & 0b01000000000000000000000000000000 ? '1' : '0'),                                     \
+      (byte & 0b00100000000000000000000000000000 ? '1' : '0'),                                     \
+      (byte & 0b00010000000000000000000000000000 ? '1' : '0'),                                     \
+      (byte & 0b00001000000000000000000000000000 ? '1' : '0'),                                     \
+      (byte & 0b00000100000000000000000000000000 ? '1' : '0'),                                     \
+      (byte & 0b00000010000000000000000000000000 ? '1' : '0'),                                     \
+      (byte & 0b00000001000000000000000000000000 ? '1' : '0'),                                     \
+      (byte & 0b00000000100000000000000000000000 ? '1' : '0'),                                     \
+      (byte & 0b00000000010000000000000000000000 ? '1' : '0'),                                     \
+      (byte & 0b00000000001000000000000000000000 ? '1' : '0'),                                     \
+      (byte & 0b00000000000100000000000000000000 ? '1' : '0'),                                     \
+      (byte & 0b00000000000010000000000000000000 ? '1' : '0'),                                     \
+      (byte & 0b00000000000001000000000000000000 ? '1' : '0'),                                     \
+      (byte & 0b00000000000000100000000000000000 ? '1' : '0'),                                     \
+      (byte & 0b00000000000000010000000000000000 ? '1' : '0'),                                     \
+      (byte & 0b00000000000000001000000000000000 ? '1' : '0'),                                     \
+      (byte & 0b00000000000000000100000000000000 ? '1' : '0'),                                     \
+      (byte & 0b00000000000000000010000000000000 ? '1' : '0'),                                     \
+      (byte & 0b00000000000000000001000000000000 ? '1' : '0'),                                     \
+      (byte & 0b00000000000000000000100000000000 ? '1' : '0'),                                     \
+      (byte & 0b00000000000000000000010000000000 ? '1' : '0'),                                     \
+      (byte & 0b00000000000000000000001000000000 ? '1' : '0'),                                     \
+      (byte & 0b00000000000000000000000100000000 ? '1' : '0'),                                     \
+      (byte & 0b00000000000000000000000010000000 ? '1' : '0'),                                     \
+      (byte & 0b00000000000000000000000001000000 ? '1' : '0'),                                     \
+      (byte & 0b00000000000000000000000000100000 ? '1' : '0'),                                     \
+      (byte & 0b00000000000000000000000000010000 ? '1' : '0'),                                     \
+      (byte & 0b00000000000000000000000000001000 ? '1' : '0'),                                     \
+      (byte & 0b00000000000000000000000000000100 ? '1' : '0'),                                     \
+      (byte & 0b00000000000000000000000000000010 ? '1' : '0'),                                     \
       (byte & 0b00000000000000000000000000000001 ? '1' : '0')
 
 /* Pair struct */
-#define DEF_PAIR(a)                                                            \
-    typedef struct                                                             \
-    {                                                                          \
-        a first;                                                               \
-        a second;                                                              \
+#define DEF_PAIR(a)                                                                                \
+    typedef struct                                                                                 \
+    {                                                                                              \
+        a first;                                                                                   \
+        a second;                                                                                  \
     } Pair_##a
 
 DEF_PAIR(uint8_t);
@@ -304,8 +293,7 @@ DEF_PAIR(wchar_t);
 DEF_PAIR(size_t);
 
 /** check string equality case insensitive */
-static inline bool
-strneqci(const char* restrict s1, const char* restrict s2, const size_t n)
+static inline bool strneqci(const char* restrict s1, const char* restrict s2, const size_t n)
 {
     for (size_t i = 0; i < n; ++i)
         if (tolower(s1[i]) != tolower(s2[i]))
@@ -314,8 +302,7 @@ strneqci(const char* restrict s1, const char* restrict s2, const size_t n)
 }
 
 /** match string against wildcard pattern */
-static bool streq_wildcard(const char* restrict str,
-                           const char* restrict pattern)
+static bool streq_wildcard(const char* restrict str, const char* restrict pattern)
 {
     while (*pattern && *str)
         switch (*pattern) {

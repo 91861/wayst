@@ -357,6 +357,7 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
         {
             Vector_char txt = Vt_select_region_to_string(&self->vt);
             App_clipboard_send(self, txt.buf);
+            Vt_select_end(&self->vt);
         } break;
 
         case 13: // Return

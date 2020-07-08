@@ -143,7 +143,6 @@ typedef struct
     Colorscheme colorscheme;
     bool*       _explicit_colors_set;
 
-
     ColorRGBA bell_flash;
     bool      no_flash;
 
@@ -158,7 +157,7 @@ typedef struct
 
     uint32_t scrollback;
 
-    bool enable_cursor_blink;
+    bool    enable_cursor_blink;
     int32_t cursor_blink_interval_ms;
     int32_t cursor_blink_suspend_ms;
     int32_t cursor_blink_end_s;
@@ -188,13 +187,12 @@ static inline void KeyCommand_name_to_code(KeyCommand* cmd)
     ASSERT(settings.callbacks.keycode_from_string, "callback is NULL");
 
     if (cmd->is_name) {
-        uint32_t code = settings.callbacks.keycode_from_string(
-          settings.callbacks.user_data, cmd->key.name);
+        uint32_t code =
+          settings.callbacks.keycode_from_string(settings.callbacks.user_data, cmd->key.name);
         if (!code) {
             WRN("Invalid key name \'%s\'\n", cmd->key.name);
         } else {
-            LOG("Converting key name \'%s\' to keycode %u\n", cmd->key.name,
-                code);
+            LOG("Converting key name \'%s\' to keycode %u\n", cmd->key.name, code);
         }
 
         free(cmd->key.name);
@@ -203,16 +201,12 @@ static inline void KeyCommand_name_to_code(KeyCommand* cmd)
     }
 }
 
-static bool KeyCommand_is_active(KeyCommand* com,
-                                 uint32_t    key,
-                                 uint32_t    rawkey,
-                                 uint32_t    mods)
+static bool KeyCommand_is_active(KeyCommand* com, uint32_t key, uint32_t rawkey, uint32_t mods)
 {
     /*
      * For whatever stupid reason keysym from string returns keysyms obtainable
      * by converting keycodes using a keyboard map for SOME, BUT NOT ALL KEYS!
      * Those need to be compared to a 'non-shifted' keysym.
      */
-    return com->mods == mods &&
-           (rawkey > 65000 ? com->key.code == key : com->key.code == rawkey);
+    return com->mods == mods && (rawkey > 65000 ? com->key.code == key : com->key.code == rawkey);
 }
