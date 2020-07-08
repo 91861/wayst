@@ -516,6 +516,18 @@ static void find_font()
     double pix_sz_regular = 0, pix_sz_bold = 0, pix_sz_italic = 0;
     double desired_pix_size = (double)settings.font_size * PT_AS_INCH * settings.font_dpi;
 
+    bool load_bold = (settings.font_style_regular && settings.font_style_bold)
+                       ? strcmp(settings.font_style_regular, settings.font_style_bold)
+                       : settings.font_style_bold && !settings.font_style_regular
+                           ? (!strcmp(settings.font_style_bold, "Regular"))
+                           : true;
+
+    bool load_italic = (settings.font_style_regular && settings.font_style_italic)
+                         ? strcmp(settings.font_style_regular, settings.font_style_italic)
+                         : settings.font_style_italic && !settings.font_style_regular
+                             ? (!strcmp(settings.font_style_italic, "Regular"))
+                             : true;
+
     for (int_fast32_t i = 0; fs && i < fs->nfont; ++i) {
         FcPattern* font = fs->fonts[i];
         FcChar8 *  file, *style;
@@ -549,22 +561,26 @@ static void find_font()
                 pix_sz_regular      = pix_size;
             }
 
-            if (!strcmp((const char*)style,
-                        settings.font_style_bold ? settings.font_style_bold : "Bold")) {
-                if (is_bitmap && SZ_DIFF(pix_sz_bold) < SZ_DIFF(pix_size))
-                    continue;
-                free(settings.font_name_bold);
-                settings.font_name_bold = strdup((char*)file);
-                pix_sz_bold             = pix_size;
+            if (load_bold) {
+                if (!strcmp((const char*)style,
+                            settings.font_style_bold ? settings.font_style_bold : "Bold")) {
+                    if (is_bitmap && SZ_DIFF(pix_sz_bold) < SZ_DIFF(pix_size))
+                        continue;
+                    free(settings.font_name_bold);
+                    settings.font_name_bold = strdup((char*)file);
+                    pix_sz_bold             = pix_size;
+                }
             }
 
-            if (!strcmp((const char*)style,
-                        settings.font_style_italic ? settings.font_name_italic : "Italic")) {
-                if (is_bitmap && SZ_DIFF(pix_sz_italic) < SZ_DIFF(pix_size))
-                    continue;
-                free(settings.font_name_italic);
-                settings.font_name_italic = strdup((char*)file);
-                pix_sz_italic             = pix_size;
+            if (load_italic) {
+                if (!strcmp((const char*)style,
+                            settings.font_style_italic ? settings.font_name_italic : "Italic")) {
+                    if (is_bitmap && SZ_DIFF(pix_sz_italic) < SZ_DIFF(pix_size))
+                        continue;
+                    free(settings.font_name_italic);
+                    settings.font_name_italic = strdup((char*)file);
+                    pix_sz_italic             = pix_size;
+                }
             }
         }
     }
@@ -635,11 +651,11 @@ static void find_font()
         free(regular_alternative);
     }
 
-    if (!settings.font_name_bold && settings.font_style_bold) {
+    if (!settings.font_name_bold && settings.font_style_bold && load_bold) {
         WRN("No style \'%s\' found for \'%s\'\n", settings.font_style_bold, settings.font);
     }
 
-    if (!settings.font_name_italic && settings.font_style_italic) {
+    if (!settings.font_name_italic && settings.font_style_italic && load_italic) {
         WRN("No style \'%s\' found for \'%s\'\n", settings.font_style_italic, settings.font);
     }
 
