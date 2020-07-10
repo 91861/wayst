@@ -236,13 +236,16 @@ static struct option long_options[] = {
 #define OPT_DEBUG_PTY_IDX 52
     [OPT_DEBUG_PTY_IDX] = { "debug-pty", no_argument, 0, 'D' },
 
-#define OPT_VERSION_IDX 53
+#define OPT_DEBUG_GFX_IDX 53
+    [OPT_DEBUG_GFX_IDX] = { "debug-gfx", no_argument, 0, 'G' },
+
+#define OPT_VERSION_IDX 54
     [OPT_VERSION_IDX] = { "version", no_argument, 0, 'v' },
 
-#define OPT_HELP_IDX 54
+#define OPT_HELP_IDX 55
     [OPT_HELP_IDX] = { "help", no_argument, 0, 'h' },
 
-#define OPT_SENTINEL_IDX 55
+#define OPT_SENTINEL_IDX 56
     [OPT_SENTINEL_IDX] = { 0 }
 };
 
@@ -309,6 +312,7 @@ static const char* long_options_descriptions[][2] = {
     [OPT_BIND_KEY_QUIT_IDX]    = { arg_key, "Quit key command" },
 
     [OPT_DEBUG_PTY_IDX] = { NULL, "Output pty communication to stderr" },
+    [OPT_DEBUG_GFX_IDX] = { NULL, "Run renderer in debug mode" },
     [OPT_VERSION_IDX]   = { NULL, "Show version" },
     [OPT_HELP_IDX]      = { NULL, "Show this message" },
 
@@ -451,7 +455,8 @@ const char* const colors_default[8][18] = {
 
 Settings settings;
 
-/** set default colorscheme  */
+/**
+ * Set default colorscheme  */
 static void settings_colorscheme_default(uint8_t idx)
 {
     if (idx >= ARRAY_SIZE(colors_default)) {
@@ -476,7 +481,8 @@ static void settings_colorscheme_default(uint8_t idx)
         }
 }
 
-/** Initialize 256color colorpallete */
+/**
+* Initialize 256 color palette */
 static void init_color_palette()
 {
     for (int_fast16_t i = 0; i < 257; ++i) {
@@ -501,13 +507,12 @@ static void init_color_palette()
     }
 }
 
-/** Use fontconfig to get font files */
+/**
+ * Use fontconfig to get font files */
 static void find_font()
 {
     FcConfig* cfg = FcInitLoadConfigAndFonts();
-
     FcPattern* pat = FcNameParse((const FcChar8*)settings.font);
-
     FcObjectSet* os = FcObjectSetBuild(FC_FAMILY, FC_STYLE, FC_FILE, FC_PIXEL_SIZE, NULL);
     FcFontSet*   fs = FcFontList(cfg, pat, os);
 
@@ -527,7 +532,6 @@ static void find_font()
                          : settings.font_style_italic && !settings.font_style_regular
                              ? (!strcmp(settings.font_style_italic, "Regular"))
                              : true;
-
     for (int_fast32_t i = 0; fs && i < fs->nfont; ++i) {
         FcPattern* font = fs->fonts[i];
         FcChar8 *  file, *style;
@@ -772,6 +776,7 @@ static void settings_make_default()
         .scrollback = 2000,
 
         .debug_pty = false,
+        .debug_gfx = false,
 
         .enable_cursor_blink = true,
         .cursor_blink_interval_ms = 750,
@@ -883,6 +888,10 @@ static void handle_option(const char opt, const int array_index, const char* val
                 settings.debug_pty = true;
                 break;
 
+            case 'G':
+                settings.debug_gfx = true;
+                break;
+
             case 'h':
                 print_help();
                 break;
@@ -906,6 +915,10 @@ static void handle_option(const char opt, const int array_index, const char* val
 
         case OPT_DEBUG_PTY_IDX:
             settings.debug_pty = true;
+            break;
+
+        case OPT_DEBUG_GFX_IDX:
+            settings.debug_gfx = true;
             break;
 
         case OPT_SCROLLBACK_IDX:
@@ -1214,7 +1227,7 @@ static void settings_get_opts(const int argc, char* const* argv, const bool cfg_
         opterr = cfg_file_check;
 
         int opid = 0;
-        o        = getopt_long(argc, argv, "XCTDFhv", long_options, &opid);
+        o        = getopt_long(argc, argv, "XCTDGFhv", long_options, &opid);
 
         if (o == -1)
             break;
@@ -1410,4 +1423,7 @@ void settings_init(const int argc, char* const* argv)
     init_color_palette();
 }
 
-void settings_cleanup() {}
+void settings_cleanup()
+{
+    
+}

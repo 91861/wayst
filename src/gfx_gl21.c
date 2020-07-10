@@ -1814,6 +1814,26 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
         vt_line->damaged                              = false;
     }
 
+    static float debug_tint = 0.0f;
+    if (unlikely(settings.debug_gfx)) {
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glUseProgram(0);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glBegin(GL_QUADS);
+        if (can_reuse) glColor4f(0,0,0,0);
+        else glColor4f(fabs(sin(debug_tint)), fabs(cos(debug_tint)), sin(debug_tint), 0.3);
+        glVertex2f(1, 1);
+        glVertex2f(-1, 1);
+        glColor4f(fabs(sin(debug_tint)), fabs(cos(debug_tint)), sin(debug_tint), 0.3);
+        glVertex2f(-1, -1);
+        glVertex2f(1, -1);
+        glEnd();
+        glDisable(GL_BLEND);
+        debug_tint += 0.5f;
+        if (debug_tint > M_PI) debug_tint -= M_PI;
+    }
+
     Framebuffer_use(NULL);
     glViewport(0, 0, gfx->win_w, gfx->win_h);
 
@@ -2222,6 +2242,22 @@ void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
 
     if (gfx->flash_fraction != 1.0) {
         GfxOpenGL21_draw_flash(gfx, gfx->flash_fraction);
+    }
+
+    static bool repaint_indicator_visible = true;
+    if (unlikely(settings.debug_gfx)) {
+        if (repaint_indicator_visible) {
+            Shader_use(NULL);
+            glBindTexture(GL_TEXTURE_2D, 0);
+            glBegin(GL_TRIANGLES);
+            glColor4f(1, 1, 1, 0.7);
+            glVertex2f(-1.0, 1);
+            glColor4f(1, 1, 1, 0.0);
+            glVertex2f(-1.0 + gfx->sx * 50, 1);
+            glVertex2f(-1.0,       1.0 - gfx->sy * 50);
+            glEnd();
+        }
+        repaint_indicator_visible = !repaint_indicator_visible;
     }
 }
 

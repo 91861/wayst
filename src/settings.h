@@ -154,6 +154,7 @@ typedef struct
     bool allow_multiple_underlines;
 
     bool debug_pty;
+    bool debug_gfx;
 
     uint32_t scrollback;
 

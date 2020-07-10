@@ -159,51 +159,6 @@ static inline char* _asprintf(const char* fmt, ...)
     return buf;
 }
 
-__attribute__((always_inline)) static inline void* smalloc(size_t size)
-{
-    void* res = malloc(size);
-    if (unlikely(!res)) {
-        usleep(1);
-        if (!(res = malloc(size))) {
-            usleep(5);
-            if (!(res = malloc(size)))
-                ERR("bad alloc");
-        }
-    }
-
-    return res;
-}
-
-__attribute__((always_inline)) static inline void* scalloc(size_t nmemb, size_t size)
-{
-    void* res = calloc(nmemb, size);
-    if (unlikely(!res)) {
-        usleep(1);
-        if (!(res = calloc(nmemb, size))) {
-            usleep(5);
-            if (!(res = calloc(nmemb, size)))
-                ERR("bad alloc");
-        }
-    }
-
-    return res;
-}
-
-__attribute__((always_inline)) static inline void* srealloc(void* ptr, size_t size)
-{
-    void* res = realloc(ptr, size);
-    if (unlikely(!res)) {
-        usleep(1);
-        if (!(res = realloc(ptr, size))) {
-            usleep(5);
-            if (!(res = realloc(ptr, size)))
-                ERR("bad alloc");
-        }
-    }
-
-    return res;
-}
-
 #define FLAG_SET(fld, flg)    (fld |= (flg))
 #define FLAG_UNSET(fld, flg)  (fld &= ~(flg))
 #define FLAG_FLIP(fld, flg)   (fld ^= (flg))

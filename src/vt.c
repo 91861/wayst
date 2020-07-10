@@ -4,15 +4,6 @@
 
 #include "vt.h"
 
-#ifdef __linux
-#include <pty.h>
-#include <utmp.h>
-#elif defined(__OpenBSD__) || defined(__NetBSD__)
-#include <util.h>
-#elif defined(__FreeBSD__) || defined(__DragonFly__)
-#include <libutil.h>
-#endif
-
 #include <fcntl.h>
 #include <limits.h>
 #include <signal.h>
@@ -28,92 +19,64 @@
 
 #include "wcwidth/wcwidth.h"
 
-VtRune space;
+VtRune blank_space;
 
 void (*Vt_destroy_line_proxy)(int32_t proxy[static 4]) = NULL;
 
 static inline size_t Vt_top_line(const Vt* const self);
-
-void Vt_visual_scroll_to(Vt* self, size_t line);
-
-void Vt_visual_scroll_up(Vt* self);
-
-void Vt_visual_scroll_down(Vt* self);
-
-void Vt_visual_scroll_reset(Vt* self);
-
+void                 Vt_visual_scroll_to(Vt* self, size_t line);
+void                 Vt_visual_scroll_up(Vt* self);
+void                 Vt_visual_scroll_down(Vt* self);
+void                 Vt_visual_scroll_reset(Vt* self);
 static inline size_t Vt_get_scroll_region_top(Vt* self);
-
 static inline size_t Vt_get_scroll_region_bottom(Vt* self);
-
-static inline bool Vt_scroll_region_not_default(Vt* self);
-
-static void Vt_alt_buffer_on(Vt* self, bool save_mouse);
-
-static void Vt_alt_buffer_off(Vt* self, bool save_mouse);
-
-static void Vt_handle_prop_seq(Vt* self, Vector_char seq);
-
-static void Vt_reset_text_attribs(Vt* self);
-
-static void Vt_carriage_return(Vt* self);
-
-static void Vt_clear_right(Vt* self);
-
-static void Vt_clear_left(Vt* self);
-
-static inline void Vt_scroll_out_all_content(Vt* self);
-
-static void Vt_empty_line_fill_bg(Vt* self, size_t idx);
-
-static void Vt_cursor_down(Vt* self);
-
-static void Vt_cursor_up(Vt* self);
-
-static void Vt_cursor_left(Vt* self);
-
-static void Vt_cursor_right(Vt* self);
-
-static void Vt_insert_new_line(Vt* self);
-
-static void Vt_scroll_up(Vt* self);
-
-static void Vt_scroll_down(Vt* self);
-
-static void Vt_reverse_line_feed(Vt* self);
-
-static void Vt_delete_line(Vt* self);
-
-static void Vt_delete_chars(Vt* self, size_t n);
-
-static void Vt_erase_chars(Vt* self, size_t n);
-
-static void Vt_clear_above(Vt* self);
-
-static inline void Vt_scroll_out_above(Vt* self);
-
-static void Vt_insert_line(Vt* self);
-
-static void Vt_clear_display_and_scrollback(Vt* self);
-
-static void Vt_erase_to_end(Vt* self);
-
-static void Vt_move_cursor(Vt* self, uint32_t c, uint32_t r);
-
-static void Vt_push_title(Vt* self);
-
-static void Vt_pop_title(Vt* self);
-
-static inline void Vt_insert_char_at_cursor(Vt* self, VtRune c);
-
-static inline void Vt_insert_char_at_cursor_with_shift(Vt* self, VtRune c);
-
-static Vector_char line_to_string(Vector_VtRune* line,
-                                  size_t         begin,
-                                  size_t         end,
-                                  const char*    tail);
-
+static inline bool   Vt_scroll_region_not_default(Vt* self);
+static void          Vt_alt_buffer_on(Vt* self, bool save_mouse);
+static void          Vt_alt_buffer_off(Vt* self, bool save_mouse);
+static void          Vt_handle_SGR_sequence(Vt* self, Vector_char seq);
+static void          Vt_reset_text_attribs(Vt* self);
+static void          Vt_carriage_return(Vt* self);
+static void          Vt_clear_right(Vt* self);
+static void          Vt_clear_left(Vt* self);
+static inline void   Vt_scroll_out_all_content(Vt* self);
+static void          Vt_empty_line_fill_bg(Vt* self, size_t idx);
+static void          Vt_cursor_down(Vt* self);
+static void          Vt_cursor_up(Vt* self);
+static void          Vt_cursor_left(Vt* self);
+static void          Vt_cursor_right(Vt* self);
+static void          Vt_insert_new_line(Vt* self);
+static void          Vt_scroll_up(Vt* self);
+static void          Vt_scroll_down(Vt* self);
+static void          Vt_reverse_line_feed(Vt* self);
+static void          Vt_delete_line(Vt* self);
+static void          Vt_delete_chars(Vt* self, size_t n);
+static void          Vt_erase_chars(Vt* self, size_t n);
+static void          Vt_clear_above(Vt* self);
+static inline void   Vt_scroll_out_above(Vt* self);
+static void          Vt_insert_line(Vt* self);
+static void          Vt_clear_display_and_scrollback(Vt* self);
+static void          Vt_erase_to_end(Vt* self);
+static void          Vt_move_cursor(Vt* self, uint32_t c, uint32_t r);
+static void          Vt_push_title(Vt* self);
+static void          Vt_pop_title(Vt* self);
+static inline void   Vt_insert_char_at_cursor(Vt* self, VtRune c);
+static inline void   Vt_insert_char_at_cursor_with_shift(Vt* self, VtRune c);
+static Vector_char line_to_string(Vector_VtRune* line, size_t begin, size_t end, const char* tail);
 static inline void Vt_mark_proxy_damaged(Vt* self, size_t idx);
+
+static inline VtLine VtLine_new()
+{
+    return (VtLine){ .damaged    = true,
+                     .reflowable = true,
+                     .rejoinable = false,
+                     .data       = Vector_new_VtRune(),
+                     .proxy      = { { 0 } } };
+}
+
+#define Vt_output_formated(vt, fmt, ...)                                                           \
+    char _tmp[64];                                                                                 \
+    int  _len = snprintf(_tmp, sizeof(_tmp), fmt, __VA_ARGS__);                                    \
+    Vector_pushv_char(&(vt)->output, _tmp, _len);
 
 /**
  * Get string from selected region */
@@ -121,18 +84,15 @@ Vector_char Vt_select_region_to_string(Vt* self)
 {
     Vector_char ret, tmp;
     size_t      begin_char_idx, end_char_idx;
-    size_t      begin_line =
-      MIN(self->selection.begin_line, self->selection.end_line);
-    size_t end_line = MAX(self->selection.begin_line, self->selection.end_line);
+    size_t      begin_line = MIN(self->selection.begin_line, self->selection.end_line);
+    size_t      end_line   = MAX(self->selection.begin_line, self->selection.end_line);
 
     if (begin_line == end_line && self->selection.mode != SELECT_MODE_NONE) {
-        begin_char_idx =
-          MIN(self->selection.begin_char_idx, self->selection.end_char_idx);
-        end_char_idx =
-          MAX(self->selection.begin_char_idx, self->selection.end_char_idx);
+        begin_char_idx = MIN(self->selection.begin_char_idx, self->selection.end_char_idx);
+        end_char_idx   = MAX(self->selection.begin_char_idx, self->selection.end_char_idx);
 
-        return line_to_string(&self->lines.buf[begin_line].data, begin_char_idx,
-                              end_char_idx + 1, "");
+        return line_to_string(&self->lines.buf[begin_line].data, begin_char_idx, end_char_idx + 1,
+                              "");
     } else if (self->selection.begin_line < self->selection.end_line) {
         begin_char_idx = self->selection.begin_char_idx;
         end_char_idx   = self->selection.end_char_idx;
@@ -142,25 +102,23 @@ Vector_char Vt_select_region_to_string(Vt* self)
     }
 
     if (self->selection.mode == SELECT_MODE_NORMAL) {
-        ret = line_to_string(&self->lines.buf[begin_line].data, begin_char_idx,
-                             0, "\n");
+        ret = line_to_string(&self->lines.buf[begin_line].data, begin_char_idx, 0, "\n");
         Vector_pop_char(&ret);
         for (size_t i = begin_line + 1; i < end_line; ++i) {
             tmp = line_to_string(&self->lines.buf[i].data, 0, 0, "\n");
             Vector_pushv_char(&ret, tmp.buf, tmp.size - 1);
             Vector_destroy_char(&tmp);
         }
-        tmp = line_to_string(&self->lines.buf[end_line].data, 0,
-                             end_char_idx + 1, "");
+        tmp = line_to_string(&self->lines.buf[end_line].data, 0, end_char_idx + 1, "");
         Vector_pushv_char(&ret, tmp.buf, tmp.size - 1);
         Vector_destroy_char(&tmp);
     } else if (self->selection.mode == SELECT_MODE_BOX) {
-        ret = line_to_string(&self->lines.buf[begin_line].data, begin_char_idx,
-                             end_char_idx + 1, "\n");
+        ret =
+          line_to_string(&self->lines.buf[begin_line].data, begin_char_idx, end_char_idx + 1, "\n");
         Vector_pop_char(&ret);
         for (size_t i = begin_line + 1; i <= end_line; ++i) {
-            tmp = line_to_string(&self->lines.buf[i].data, begin_char_idx,
-                                 end_char_idx + 1, i == end_line ? "" : "\n");
+            tmp = line_to_string(&self->lines.buf[i].data, begin_char_idx, end_char_idx + 1,
+                                 i == end_line ? "" : "\n");
             Vector_pushv_char(&ret, tmp.buf, tmp.size - 1);
             Vector_destroy_char(&tmp);
         }
@@ -205,9 +163,8 @@ void Vt_select_init_word(Vt* self, int32_t x, int32_t y)
     size_t click_x       = (double)x / self->pixels_per_cell_x;
     size_t click_y       = (double)y / self->pixels_per_cell_y;
 
-    Vector_VtRune* ln =
-      &self->lines.buf[Vt_visual_top_line(self) + click_y].data;
-    size_t cmax = ln->size, begin = click_x, end = click_x;
+    Vector_VtRune* ln   = &self->lines.buf[Vt_visual_top_line(self) + click_y].data;
+    size_t         cmax = ln->size, begin = click_x, end = click_x;
 
     while (begin - 1 < cmax && begin > 0 && !isspace(ln->buf[begin - 1].code)) {
         --begin;
@@ -219,8 +176,7 @@ void Vt_select_init_word(Vt* self, int32_t x, int32_t y)
 
     self->selection.begin_char_idx = begin;
     self->selection.end_char_idx   = end;
-    self->selection.begin_line     = self->selection.end_line =
-      Vt_visual_top_line(self) + click_y;
+    self->selection.begin_line = self->selection.end_line = Vt_visual_top_line(self) + click_y;
 
     Vt_mark_proxy_damaged(self, self->selection.begin_line);
 }
@@ -234,20 +190,18 @@ void Vt_select_init_line(Vt* self, int32_t y)
     size_t click_y                 = (double)y / self->pixels_per_cell_y;
     self->selection.begin_char_idx = 0;
     self->selection.end_char_idx   = self->ws.ws_col;
-    self->selection.begin_line     = self->selection.end_line =
-      Vt_visual_top_line(self) + click_y;
+    self->selection.begin_line = self->selection.end_line = Vt_visual_top_line(self) + click_y;
 
     Vt_mark_proxy_damaged(self, self->selection.begin_line);
 }
 
 static inline void Vt_mark_proxy_damaged(Vt* self, size_t idx)
 {
+    CALL_FP(self->callbacks.on_bell_flash, self->callbacks.user_data);
     self->lines.buf[idx].damaged = true;
 }
 
-static inline void Vt_mark_proxies_damaged_in_region(Vt*    self,
-                                                     size_t begin,
-                                                     size_t end)
+static inline void Vt_mark_proxies_damaged_in_region(Vt* self, size_t begin, size_t end)
 {
     size_t lo = MIN(begin, end);
     size_t hi = MAX(begin, end);
@@ -264,14 +218,13 @@ static inline void Vt_clear_proxy(Vt* self, size_t idx)
     }
 }
 
-static inline void Vt_clear_proxies_in_region(Vt*    self,
-                                              size_t begin,
-                                              size_t end)
+static inline void Vt_clear_proxies_in_region(Vt* self, size_t begin, size_t end)
 {
     size_t lo = MIN(begin, end);
     size_t hi = MAX(begin, end);
-    for (size_t i = lo; i <= hi; ++i)
+    for (size_t i = lo; i <= hi; ++i) {
         Vt_clear_proxy(self, i);
+    }
 }
 
 void Vt_clear_all_proxies(Vt* self)
@@ -290,8 +243,7 @@ void Vt_clear_all_proxies(Vt* self)
 
 static inline void Vt_mark_proxies_damaged_in_selected_region(Vt* self)
 {
-    Vt_mark_proxies_damaged_in_region(self, self->selection.begin_line,
-                                      self->selection.end_line);
+    Vt_mark_proxies_damaged_in_region(self, self->selection.begin_line, self->selection.end_line);
 }
 
 static inline void Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(Vt* self)
@@ -299,23 +251,19 @@ static inline void Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(
     if (self->selection.mode) {
         size_t selection_lo = MIN(self->selection.begin_line, self->selection.end_line);
         size_t selection_hi = MAX(self->selection.begin_line, self->selection.end_line);
-        size_t start = MAX(selection_lo, self->scroll_region_top);
+        size_t start        = MAX(selection_lo, self->scroll_region_top);
         size_t end = MIN(MIN(selection_hi, self->scroll_region_bottom), self->lines.size - 1);
-        Vt_mark_proxies_damaged_in_region(self, start ? (start - 1) : 0, end +1);
+        Vt_mark_proxies_damaged_in_region(self, start ? (start - 1) : 0, end + 1);
     }
 }
 
-/**
- * start selection
- */
 void Vt_select_commit(Vt* self)
 {
     if (self->selection.next_mode != SELECT_MODE_NONE) {
         self->selection.mode       = self->selection.next_mode;
         self->selection.next_mode  = SELECT_MODE_NONE;
-        self->selection.begin_line = self->selection.end_line =
-          self->selection.click_begin_line;
-        self->selection.begin_char_idx = self->selection.end_char_idx =
+        self->selection.begin_line = self->selection.end_line = self->selection.click_begin_line;
+        self->selection.begin_char_idx                        = self->selection.end_char_idx =
           self->selection.click_begin_char_idx;
 
         Vt_mark_proxies_damaged_in_selected_region(self);
@@ -323,8 +271,6 @@ void Vt_select_commit(Vt* self)
     }
 }
 
-/**
- * set end glyph for selection by pixel coordinates */
 void Vt_select_set_end(Vt* self, int32_t x, int32_t y)
 {
     if (self->selection.mode != SELECT_MODE_NONE) {
@@ -336,8 +282,6 @@ void Vt_select_set_end(Vt* self, int32_t x, int32_t y)
     }
 }
 
-/**
- * set end glyph for selection by cell coordinates */
 void Vt_select_set_end_cell(Vt* self, int32_t x, int32_t y)
 {
     if (self->selection.mode != SELECT_MODE_NONE) {
@@ -347,18 +291,14 @@ void Vt_select_set_end_cell(Vt* self, int32_t x, int32_t y)
         self->selection.end_line     = Vt_visual_top_line(self) + y;
         self->selection.end_char_idx = x;
 
-        size_t lo = MIN(MIN(old_end, self->selection.end_line),
-                        self->selection.begin_line);
-        size_t hi = MAX(MAX(old_end, self->selection.end_line),
-                        self->selection.begin_line);
+        size_t lo = MIN(MIN(old_end, self->selection.end_line), self->selection.begin_line);
+        size_t hi = MAX(MAX(old_end, self->selection.end_line), self->selection.begin_line);
         Vt_mark_proxies_damaged_in_region(self, hi, lo);
 
         CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
     }
 }
 
-/**
- * set front glyph for selection by pixel coordinates */
 void Vt_select_set_front(Vt* self, int32_t x, int32_t y)
 {
     if (self->selection.mode != SELECT_MODE_NONE) {
@@ -370,8 +310,6 @@ void Vt_select_set_front(Vt* self, int32_t x, int32_t y)
     }
 }
 
-/**
- * set front glyph for selection by cell coordinates */
 void Vt_select_set_front_cell(Vt* self, int32_t x, int32_t y)
 {
     if (self->selection.mode != SELECT_MODE_NONE) {
@@ -381,10 +319,8 @@ void Vt_select_set_front_cell(Vt* self, int32_t x, int32_t y)
         self->selection.begin_line     = Vt_visual_top_line(self) + y;
         self->selection.begin_char_idx = x;
 
-        size_t lo = MIN(MIN(old_front, self->selection.end_line),
-                        self->selection.begin_line);
-        size_t hi = MAX(MAX(old_front, self->selection.end_line),
-                        self->selection.begin_line);
+        size_t lo = MIN(MIN(old_front, self->selection.end_line), self->selection.begin_line);
+        size_t hi = MAX(MAX(old_front, self->selection.end_line), self->selection.begin_line);
         Vt_mark_proxies_damaged_in_region(self, hi, lo);
 
         CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
@@ -405,7 +341,7 @@ static inline char32_t char_sub_uk(char original)
 
 static inline char32_t char_sub_gfx(char original)
 {
-    const char32_t substitutes[] = {
+    static const char32_t substitutes[] = {
         0x2592, // ▒
         0x2409, // ␉
         0x240c, // ␌
@@ -446,83 +382,93 @@ static inline char32_t char_sub_gfx(char original)
 }
 
 /**
- * substitute invisible characters with readable string
- */
-__attribute__((cold)) static char* control_char_get_pretty_string(const char c)
+ * substitute invisible characters with a readable string */
+__attribute__((cold)) static const char* control_char_get_pretty_string(const char c)
 {
-    switch (c) {
-        case '\f':
-            return TERMCOLOR_RED_LIGHT "<FF>" TERMCOLOR_DEFAULT;
-        case '\n':
-            return TERMCOLOR_CYAN "<LF>" TERMCOLOR_DEFAULT;
-        case '\a':
-            return TERMCOLOR_YELLOW "<BELL>" TERMCOLOR_DEFAULT;
-        case '\r':
-            return TERMCOLOR_MAGENTA "<CR>" TERMCOLOR_DEFAULT;
-        case '\t':
-            return TERMCOLOR_BLUE "<TAB>" TERMCOLOR_DEFAULT;
-        case '\v':
-            return TERMCOLOR_BLUE_LIGHT "<V-TAB>" TERMCOLOR_DEFAULT;
-        case '\b':
-            return TERMCOLOR_RED "<BS>" TERMCOLOR_DEFAULT;
-        case '\e':
-            return TERMCOLOR_GREEN_LIGHT "<ESC>" TERMCOLOR_DEFAULT;
-        case 0xE:
-            return TERMCOLOR_CYAN_LIGHT "<SO>" TERMCOLOR_DEFAULT;
-        case 0xF:
-            return TERMCOLOR_MAGENTA_LIGHT "<SI>" TERMCOLOR_DEFAULT;
-        case 127:
-            return TERMCOLOR_MAGENTA_LIGHT "<DEL>" TERMCOLOR_DEFAULT;
-        default:
-            return NULL;
+    static const char* const strings[] = {
+        TERMCOLOR_BG_BLACK TERMCOLOR_RED "␀" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_YELLOW "␁" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_YELLOW_LIGHT "␂" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_CYAN "␃" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_CYAN_LIGHT "␄" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_CYAN "␅" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_CYAN_LIGHT "␆" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_YELLOW "␇" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_RED "␈" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_BLUE "␉" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_CYAN "␊" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_BLUE_LIGHT "␋" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_RED_LIGHT "␌" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_MAGENTA "␍" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_CYAN_LIGHT "␎" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_MAGENTA_LIGHT "␏" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_CYAN_LIGHT "␐" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_MAGENTA_LIGHT "␑" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_CYAN "␒" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_MAGENTA "␓" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_MAGENTA "␔" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_CYAN "␕" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_MAGENTA "␖" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_GREEN "␗" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_BLUE_LIGHT "␘" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_GREEN "␙" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_GREEN_LIGHT "␚" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_GREEN_LIGHT "␛" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_RED_LIGHT "␜" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_MAGENTA "␝" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_MAGENTA "␞" TERMCOLOR_DEFAULT,
+        TERMCOLOR_BG_BLACK TERMCOLOR_CYAN_LIGHT "␟" TERMCOLOR_DEFAULT,
+    };
+
+    if ((uint32_t)c < ARRAY_SIZE(strings)) {
+        return strings[(int)c];
+    } else if (c == 127) {
+        return TERMCOLOR_MAGENTA_LIGHT "␡" TERMCOLOR_DEFAULT;
+    } else {
+        return NULL;
     }
 }
 
 /**
- * make pty messages more readable
- */
-__attribute__((cold)) static char* pty_string_prettyfy(const char* str)
+ * make pty messages more readable */
+__attribute__((cold)) static char* pty_string_prettyfy(const char* str, int32_t max)
 {
     bool esc = false, seq = false, important = false;
 
     Vector_char fmt = Vector_new_char();
-    for (; *str; ++str) {
+    for (const char* s = str; *s && ((s - str) < max); ++s) {
         if (seq) {
-            if (!isdigit(*str) && *str != '?' && *str != ';' && *str != ':') {
-                Vector_pushv_char(&fmt, TERMCOLOR_BG_DEFAULT,
-                                  strlen(TERMCOLOR_BG_DEFAULT));
+            if (!isdigit(*s) && *s != '?' && *s != ';' && *s != ':') {
+                Vector_pushv_char(&fmt, TERMCOLOR_BG_DEFAULT, strlen(TERMCOLOR_BG_DEFAULT));
                 seq       = false;
                 important = true;
             }
         } else {
-            if (*str == '\e') {
+            if (*s == '\e') {
                 esc = true;
-                Vector_pushv_char(&fmt, TERMCOLOR_BG_GRAY_DARK,
-                                  strlen(TERMCOLOR_BG_GRAY_DARK));
-            } else if (*str == '[' && esc) {
+                Vector_pushv_char(&fmt, TERMCOLOR_BG_GRAY_DARK, strlen(TERMCOLOR_BG_GRAY_DARK));
+            } else if (*s == '[' && esc) {
                 seq = true;
                 esc = false;
             }
         }
 
-        char* ctr = control_char_get_pretty_string(*str);
+        const char* ctr = control_char_get_pretty_string(*s);
         if (ctr)
             Vector_pushv_char(&fmt, ctr, strlen(ctr));
         else {
             if (important) {
-                switch (*str) {
+                switch (*s) {
                     case 'H':
                     case 'G':
                     case 'f':
                     case '`':
                     case 'd':
-                        Vector_pushv_char(&fmt, TERMCOLOR_BG_GREEN,
-                                          strlen(TERMCOLOR_BG_GREEN));
+                        Vector_pushv_char(&fmt, TERMCOLOR_BG_GREEN, strlen(TERMCOLOR_BG_GREEN));
                         break;
 
                     case 'm':
-                        Vector_pushv_char(&fmt, TERMCOLOR_BG_BLUE,
-                                          strlen(TERMCOLOR_BG_BLUE));
+                        Vector_pushv_char(&fmt, TERMCOLOR_BG_BLUE, strlen(TERMCOLOR_BG_BLUE));
                         break;
 
                     case 'B':
@@ -532,8 +478,7 @@ __attribute__((cold)) static char* pty_string_prettyfy(const char* str)
                     case 'D':
                     case 'E':
                     case 'F':
-                        Vector_pushv_char(&fmt, TERMCOLOR_BG_CYAN,
-                                          strlen(TERMCOLOR_BG_CYAN));
+                        Vector_pushv_char(&fmt, TERMCOLOR_BG_CYAN, strlen(TERMCOLOR_BG_CYAN));
                         break;
 
                     case 'M':
@@ -550,33 +495,28 @@ __attribute__((cold)) static char* pty_string_prettyfy(const char* str)
                     case 'I':
                     case 'Z':
                     case 'g':
-                        Vector_pushv_char(&fmt, TERMCOLOR_BG_MAGENTA,
-                                          strlen(TERMCOLOR_BG_MAGENTA));
+                        Vector_pushv_char(&fmt, TERMCOLOR_BG_MAGENTA, strlen(TERMCOLOR_BG_MAGENTA));
                         break;
 
                     default:
                         Vector_pushv_char(&fmt, TERMCOLOR_BG_RED_LIGHT,
                                           strlen(TERMCOLOR_BG_RED_LIGHT));
                 }
-                Vector_push_char(&fmt, *str);
-                Vector_pushv_char(&fmt, TERMCOLOR_RESET,
-                                  strlen(TERMCOLOR_RESET));
+                Vector_push_char(&fmt, *s);
+                Vector_pushv_char(&fmt, TERMCOLOR_RESET, strlen(TERMCOLOR_RESET));
 
-            } else if (*str == ';' && seq) {
-                Vector_pushv_char(&fmt, TERMCOLOR_RED_LIGHT,
-                                  strlen(TERMCOLOR_RED_LIGHT));
-                Vector_push_char(&fmt, *str);
-                Vector_pushv_char(&fmt, TERMCOLOR_DEFAULT,
-                                  strlen(TERMCOLOR_DEFAULT));
-            } else if (isdigit(*str) && seq) {
+            } else if (*s == ';' && seq) {
+                Vector_pushv_char(&fmt, TERMCOLOR_RED_LIGHT, strlen(TERMCOLOR_RED_LIGHT));
+                Vector_push_char(&fmt, *s);
+                Vector_pushv_char(&fmt, TERMCOLOR_DEFAULT, strlen(TERMCOLOR_DEFAULT));
+            } else if (isdigit(*s) && seq) {
                 Vector_pushv_char(&fmt, TERMCOLOR_BG_WHITE TERMCOLOR_BLACK,
                                   strlen(TERMCOLOR_BG_WHITE TERMCOLOR_BLACK));
-                Vector_push_char(&fmt, *str);
-                Vector_pushv_char(
-                  &fmt, TERMCOLOR_BG_GRAY_DARK TERMCOLOR_DEFAULT,
-                  strlen(TERMCOLOR_BG_GRAY_DARK TERMCOLOR_DEFAULT));
+                Vector_push_char(&fmt, *s);
+                Vector_pushv_char(&fmt, TERMCOLOR_BG_GRAY_DARK TERMCOLOR_DEFAULT,
+                                  strlen(TERMCOLOR_BG_GRAY_DARK TERMCOLOR_DEFAULT));
             } else {
-                Vector_push_char(&fmt, *str);
+                Vector_push_char(&fmt, *s);
             }
         }
         important = false;
@@ -587,12 +527,8 @@ __attribute__((cold)) static char* pty_string_prettyfy(const char* str)
 }
 
 /**
- * get utf-8 text from @param line in range from @param begin to @param end
- */
-static Vector_char line_to_string(Vector_VtRune* line,
-                                  size_t         begin,
-                                  size_t         end,
-                                  const char*    tail)
+ * get utf-8 text from @param line in range from @param begin to @param end */
+static Vector_char line_to_string(Vector_VtRune* line, size_t begin, size_t end, const char* tail)
 {
     Vector_char res;
 
@@ -618,7 +554,7 @@ static Vector_char line_to_string(Vector_VtRune* line,
 
         if (line->buf[i].code > CHAR_MAX) {
             static mbstate_t mbstate;
-            size_t bytes = c32rtomb(utfbuf, line->buf[i].code, &mbstate);
+            size_t           bytes = c32rtomb(utfbuf, line->buf[i].code, &mbstate);
             if (bytes > 0) {
                 Vector_pushv_char(&res, utfbuf, bytes);
             }
@@ -636,12 +572,12 @@ static Vector_char line_to_string(Vector_VtRune* line,
 }
 
 /**
- * Split string on any character in @param symbols, filter out any character in
- * @param filter. first character of returned string is the immediately
- * preceding delimiter, '\0' if none.
- */
+ * Split string on any character in @param delimiters, filter out any character in @param filter.
+ * first character of returned string is the immediately preceding delimiter, '\0' if none. Multiple
+ * @param greedy_delimiters are treated as a single delimiter */
 static Vector_Vector_char string_split_on(const char* str,
-                                          const char* symbols,
+                                          const char* delimiters,
+                                          const char* greedy_delimiters,
                                           const char* filter)
 {
     Vector_Vector_char ret = Vector_new_with_capacity_Vector_char(8);
@@ -649,28 +585,44 @@ static Vector_Vector_char string_split_on(const char* str,
     Vector_push_char(&ret.buf[0], '\0');
 
     for (; *str; ++str) {
+        /* skip filtered */
         for (const char* i = filter; filter && *i; ++i)
             if (*str == *i)
                 goto continue_outer;
 
-        char any_symbol = 0;
-        for (const char* i = symbols; *i; ++i) {
-            if (*i == *str) {
-                any_symbol = *i;
-                break;
+        bool is_non_greedy = false;
+        char any_symbol    = 0;
+        if (delimiters) {
+            for (const char* i = delimiters; *i; ++i) {
+                if (*i == *str) {
+                    is_non_greedy = true;
+                    any_symbol    = *i;
+                    break;
+                }
+            }
+        }
+        if (greedy_delimiters) {
+            for (const char* i = greedy_delimiters; *i; ++i) {
+                if (*i == *str) {
+                    any_symbol = *i;
+                    break;
+                }
             }
         }
 
         if (any_symbol) {
             Vector_push_char(&ret.buf[ret.size - 1], '\0');
-            if (ret.buf[ret.size - 1].size == 2) {
+
+            if (ret.buf[ret.size - 1].size == 2 && !is_non_greedy) {
                 ret.buf[ret.size - 1].size = 0;
             } else {
                 Vector_push_Vector_char(&ret, Vector_new_with_capacity_char(8));
             }
             Vector_push_char(&ret.buf[ret.size - 1], any_symbol);
-        } else
+        } else {
+            /* record delimiter */
             Vector_push_char(&ret.buf[ret.size - 1], *str);
+        }
     continue_outer:;
     }
     Vector_push_char(&ret.buf[ret.size - 1], '\0');
@@ -678,25 +630,22 @@ static Vector_Vector_char string_split_on(const char* str,
     return ret;
 }
 
-__attribute__((always_inline, hot)) static inline bool
-is_csi_sequence_terminated(const char* seq, const size_t size)
+__attribute__((hot)) static inline bool is_csi_sequence_terminated(const char*  seq,
+                                                                   const size_t size)
 {
     if (!size)
         return false;
 
-    return isalpha(seq[size - 1]) || seq[size - 1] == '@' ||
-           seq[size - 1] == '{' || seq[size - 1] == '}' ||
-           seq[size - 1] == '~' || seq[size - 1] == '|';
+    return isalpha(seq[size - 1]) || seq[size - 1] == '@' || seq[size - 1] == '{' ||
+           seq[size - 1] == '}' || seq[size - 1] == '~' || seq[size - 1] == '|';
 }
 
-static inline bool is_generic_sequence_terminated(const char*  seq,
-                                                  const size_t size)
+static inline bool is_generic_sequence_terminated(const char* seq, const size_t size)
 {
     if (!size)
         return false;
 
-    return seq[size - 1] == '\a' ||
-           (size > 1 && seq[size - 2] == '\e' && seq[size - 1] == '\\');
+    return seq[size - 1] == '\a' || (size > 1 && seq[size - 2] == '\e' && seq[size - 1] == '\\');
 }
 
 Vt Vt_new(uint32_t cols, uint32_t rows)
@@ -704,61 +653,12 @@ Vt Vt_new(uint32_t cols, uint32_t rows)
     Vt self;
     memset(&self, 0, sizeof(Vt));
 
-    self.ws = (struct winsize){ .ws_col = cols, .ws_row = rows };
+    self.ws                   = (struct winsize){ .ws_col = cols, .ws_row = rows };
     self.scroll_region_bottom = rows;
+    self.parser.state         = PARSER_STATE_LITERAL;
+    self.parser.in_mb_seq     = false;
 
-    openpty(&self.master, &self.slave,
-#ifdef DEBUG
-            self.dev_name,
-#else
-            NULL,
-#endif
-            NULL, &self.ws);
-
-    self.pid = fork();
-
-    if (self.pid == 0) {
-
-        close(self.master);
-
-        /* does all required magic and creates a new session id for this
-         * process */
-        login_tty(self.slave);
-
-        unsetenv("COLUMNS");
-        unsetenv("LINES");
-        unsetenv("TERMCAP");
-
-        setenv("COLORTERM", "truecolor", 1);
-
-        setenv("VTE_VERSION", "5602", 1);
-
-        setenv("TERM", settings.term, 1);
-
-        if (execvp(settings.shell, (char* const*)settings.shell_argv)) {
-            /* stdout from here will be displayed in terminal window. */
-            printf(TERMCOLOR_RED "Failed to execute command: \"%s\".\n%s"
-                                 "\n\narguments: ",
-                   settings.shell, strerror(errno));
-            for (int i = 0; i < settings.shell_argc; ++i)
-                printf("%s%s", settings.shell_argv[i],
-                       i == settings.shell_argc - 1 ? "" : ", ");
-            puts("\nPress Ctrl-c to exit");
-
-            for (;;)
-                pause();
-        }
-
-    } else if (self.pid < 0) {
-        int errnocpy = errno;
-        ERR("Failed to fork process %s", strerror(errnocpy));
-    }
-
-    self.is_done          = false;
-    self.parser.state     = PARSER_STATE_LITERAL;
-    self.parser.in_mb_seq = false;
-
-    self.parser.char_state = space = (VtRune){
+    self.parser.char_state = blank_space = (VtRune){
         .code          = ' ',
         .bg            = settings.bg,
         .fg            = settings.fg,
@@ -771,10 +671,8 @@ Vt Vt_new(uint32_t cols, uint32_t rows)
     };
 
     self.parser.active_sequence = Vector_new_char();
-
-    close(self.slave);
-
-    self.lines = Vector_new_VtLine();
+    self.output                 = Vector_new_char();
+    self.lines                  = Vector_new_VtLine();
 
     for (size_t i = 0; i < self.ws.ws_row; ++i) {
         Vector_push_VtLine(&self.lines, VtLine_new());
@@ -794,18 +692,9 @@ Vt Vt_new(uint32_t cols, uint32_t rows)
     return self;
 }
 
-void Vt_kill_program(Vt* self)
-{
-    if (self->pid > 1)
-        kill(self->pid, SIGKILL);
-    self->pid = 0;
-}
-
 static inline size_t Vt_top_line_alt(const Vt* const self)
 {
-    return self->alt_lines.size <= self->ws.ws_row
-             ? 0
-             : self->alt_lines.size - self->ws.ws_row;
+    return self->alt_lines.size <= self->ws.ws_row ? 0 : self->alt_lines.size - self->ws.ws_row;
 }
 
 static inline size_t Vt_bottom_line(const Vt* self)
@@ -818,7 +707,7 @@ static inline size_t Vt_bottom_line_alt(Vt* self)
     return Vt_top_line_alt(self) + self->ws.ws_row - 1;
 }
 
-static inline size_t Vt_active_screen_index(Vt* self)
+static inline size_t Vt_get_cursor_row_screen(Vt* self)
 {
     return self->cursor.row - Vt_top_line(self);
 }
@@ -874,78 +763,57 @@ void Vt_visual_scroll_reset(Vt* self)
 void Vt_dump_info(Vt* self)
 {
     static int dump_index = 0;
-    printf("\n====================[ STATE DUMP %2d ]====================\n",
-           dump_index++);
+    printf("\n====================[ STATE DUMP %2d ]====================\n", dump_index++);
 
     printf("Modes:\n");
-    printf("  application keypad:               %d\n",
-           self->modes.application_keypad);
+    printf("  application keypad:               %d\n", self->modes.application_keypad);
     printf("  auto repeat:                      %d\n", self->modes.auto_repeat);
-    printf("  bracketed paste:                  %d\n",
-           self->modes.bracketed_paste);
-    printf("  send DEL on delete:               %d\n",
-           self->modes.del_sends_del);
-    printf("  don't send esc on alt:            %d\n",
-           self->modes.no_alt_sends_esc);
-    printf("  extended reporting:               %d\n",
-           self->modes.extended_report);
-    printf("  window focus events reporting:    %d\n",
-           self->modes.window_focus_events_report);
-    printf("  mouse button reporting:           %d\n",
-           self->modes.mouse_btn_report);
-    printf("  motion on mouse button reporting: %d\n",
-           self->modes.mouse_motion_on_btn_report);
-    printf("  mouse motion reporting:           %d\n",
-           self->modes.mouse_motion_report);
-    printf("  x10 compat mouse reporting:       %d\n",
-           self->modes.x10_mouse_compat);
-    printf("  no auto wrap:                     %d\n",
-           self->modes.no_auto_wrap);
-    printf("  reverse video:                    %d\n",
-           self->modes.video_reverse);
+    printf("  bracketed paste:                  %d\n", self->modes.bracketed_paste);
+    printf("  send DEL on delete:               %d\n", self->modes.del_sends_del);
+    printf("  don't send esc on alt:            %d\n", self->modes.no_alt_sends_esc);
+    printf("  extended reporting:               %d\n", self->modes.extended_report);
+    printf("  window focus events reporting:    %d\n", self->modes.window_focus_events_report);
+    printf("  mouse button reporting:           %d\n", self->modes.mouse_btn_report);
+    printf("  motion on mouse button reporting: %d\n", self->modes.mouse_motion_on_btn_report);
+    printf("  mouse motion reporting:           %d\n", self->modes.mouse_motion_report);
+    printf("  x10 compat mouse reporting:       %d\n", self->modes.x10_mouse_compat);
+    printf("  no auto wrap:                     %d\n", self->modes.no_auto_wrap);
+    printf("  reverse video:                    %d\n", self->modes.video_reverse);
 
     printf("\n");
     printf("  S S | Number of lines %zu (last index: %zu)\n", self->lines.size,
            Vt_bottom_line(self));
-    printf("  C C | Terminal size %hu x %hu\n", self->ws.ws_col,
-           self->ws.ws_row);
+    printf("  C C | Terminal size %hu x %hu\n", self->ws.ws_col, self->ws.ws_row);
     printf("V R R | \n");
     printf("I O . | Visible region: %zu - %zu\n", Vt_visual_top_line(self),
            Vt_visual_bottom_line(self));
     printf("E L   | \n");
     printf("W L V | Active line:  real: %zu (visible: %zu)\n", self->cursor.row,
-           Vt_active_screen_index(self));
-    printf("P   I | Cursor position: %zu type: %d blink: %d hidden: %d\n",
-           self->cursor.col, self->cursor.type, self->cursor.blinking,
-           self->cursor.hidden);
+           Vt_get_cursor_row_screen(self));
+    printf("P   I | Cursor position: %zu type: %d blink: %d hidden: %d\n", self->cursor.col,
+           self->cursor.type, self->cursor.blinking, self->cursor.hidden);
     printf("O R E | Scroll region: %zu - %zu\n", Vt_get_scroll_region_top(self),
            Vt_get_scroll_region_bottom(self));
     printf("R E W | \n");
     printf("T G . +----------------------------------------------------\n");
-    printf("| | |  BUFFER: %s\n",
-           (self->alt_lines.buf ? "ALTERNATIVE" : "MAIN"));
+    printf("| | |  BUFFER: %s\n", (self->alt_lines.buf ? "ALTERNATIVE" : "MAIN"));
     printf("V V V  \n");
     for (size_t i = 0; i < self->lines.size; ++i) {
         Vector_char str = line_to_string(&self->lines.buf[i].data, 0, 0, "");
-        printf(
-          "%c %c %c %4zu%c sz:%4zu dmg:%d proxy{%3d,%3d,%3d,%3d} reflow{%d,%d} "
-          "data: %.30s\n",
-          i == Vt_top_line(self) ? 'v' : i == Vt_bottom_line(self) ? '^' : ' ',
-          i == Vt_get_scroll_region_top(self) ||
-              i == Vt_get_scroll_region_bottom(self)
-            ? '-'
-            : ' ',
-          i == Vt_visual_top_line(self) || i == Vt_visual_bottom_line(self)
-            ? '*'
-            : ' ',
-          i, i == self->cursor.row ? '*' : ' ', self->lines.buf[i].data.size,
-          self->lines.buf[i].damaged, self->lines.buf[i].proxy.data[0],
-          self->lines.buf[i].proxy.data[1], self->lines.buf[i].proxy.data[2],
-          self->lines.buf[i].proxy.data[3],
+        printf("%c %c %c %4zu%c sz:%4zu dmg:%d proxy{%3d,%3d,%3d,%3d} reflow{%d,%d} "
+               "data: %.30s\n",
+               i == Vt_top_line(self) ? 'v' : i == Vt_bottom_line(self) ? '^' : ' ',
+               i == Vt_get_scroll_region_top(self) || i == Vt_get_scroll_region_bottom(self) ? '-'
+                                                                                             : ' ',
+               i == Vt_visual_top_line(self) || i == Vt_visual_bottom_line(self) ? '*' : ' ', i,
+               i == self->cursor.row ? '*' : ' ', self->lines.buf[i].data.size,
+               self->lines.buf[i].damaged, self->lines.buf[i].proxy.data[0],
+               self->lines.buf[i].proxy.data[1], self->lines.buf[i].proxy.data[2],
+               self->lines.buf[i].proxy.data[3],
 
-          self->lines.buf[i].reflowable, self->lines.buf[i].rejoinable,
+               self->lines.buf[i].reflowable, self->lines.buf[i].rejoinable,
 
-          str.buf);
+               str.buf);
         Vector_destroy_char(&str);
     }
 }
@@ -966,23 +834,19 @@ static void Vt_reflow_expand(Vt* self, uint32_t x)
             int32_t chars_to_move = x - self->lines.buf[i].data.size;
 
             if (i + 1 < bottom_bound && self->lines.buf[i + 1].rejoinable) {
-                chars_to_move =
-                  MIN(chars_to_move, (int32_t)self->lines.buf[i + 1].data.size);
+                chars_to_move = MIN(chars_to_move, (int32_t)self->lines.buf[i + 1].data.size);
 
-                Vector_pushv_VtRune(&self->lines.buf[i].data,
-                                    self->lines.buf[i + 1].data.buf,
+                Vector_pushv_VtRune(&self->lines.buf[i].data, self->lines.buf[i + 1].data.buf,
                                     chars_to_move);
 
-                Vector_remove_at_VtRune(&self->lines.buf[i + 1].data, 0,
-                                        chars_to_move);
+                Vector_remove_at_VtRune(&self->lines.buf[i + 1].data, 0, chars_to_move);
 
                 if (self->selection.mode == SELECT_MODE_NORMAL) {
                     if (self->selection.begin_line == i + 1) {
                         if (self->selection.begin_char_idx <= chars_to_move) {
                             --self->selection.begin_line;
                             self->selection.begin_char_idx =
-                              self->selection.begin_char_idx +
-                              self->lines.buf[i].data.size - 1;
+                              self->selection.begin_char_idx + self->lines.buf[i].data.size - 1;
                         } else {
                             self->selection.begin_char_idx -= chars_to_move;
                         }
@@ -991,8 +855,7 @@ static void Vt_reflow_expand(Vt* self, uint32_t x)
                         if (self->selection.end_char_idx < chars_to_move) {
                             --self->selection.end_line;
                             self->selection.end_char_idx =
-                              self->selection.end_char_idx +
-                              self->lines.buf[i].data.size - 1;
+                              self->selection.end_char_idx + self->lines.buf[i].data.size - 1;
                         } else {
                             self->selection.end_char_idx -= chars_to_move;
                         }
@@ -1011,8 +874,7 @@ static void Vt_reflow_expand(Vt* self, uint32_t x)
                     ++removals;
 
                     // correct scroll region
-                    if (self->scrolling_visual &&
-                        remove_index < Vt_visual_top_line(self)) {
+                    if (self->scrolling_visual && remove_index < Vt_visual_top_line(self)) {
                         Vt_visual_scroll_up(self);
                     }
 
@@ -1038,7 +900,7 @@ static void Vt_reflow_expand(Vt* self, uint32_t x)
     }
 
     // do not scroll past end of screen (self->ws was not updated yet, so
-    // Vt_scroll_down does not work properly)
+    // Vt_scroll_down does prevent this)
     if (Vt_visual_top_line(self) > Vt_top_line(self)) {
         Vt_visual_scroll_reset(self);
     }
@@ -1057,25 +919,21 @@ static void Vt_reflow_shrink(Vt* self, uint32_t x)
         if (self->lines.buf[i].data.size > x && self->lines.buf[i].reflowable) {
             size_t chars_to_move = self->lines.buf[i].data.size - x;
 
-            // move select to next line
+            /* move select to next line */
             bool end_just_moved = false;
             if (self->selection.mode == SELECT_MODE_NORMAL) {
-                if (self->selection.begin_char_idx > (int32_t)x &&
-                    self->selection.begin_line) {
+                if (self->selection.begin_char_idx > (int32_t)x && self->selection.begin_line) {
                     ++self->selection.begin_line;
-                    self->selection.begin_char_idx =
-                      self->selection.begin_char_idx - x - 1;
+                    self->selection.begin_char_idx = self->selection.begin_char_idx - x - 1;
                 }
-                if (self->selection.end_char_idx >= (int32_t)x &&
-                    self->selection.end_line) {
+                if (self->selection.end_char_idx >= (int32_t)x && self->selection.end_line) {
                     ++self->selection.end_line;
-                    self->selection.end_char_idx =
-                      self->selection.end_char_idx - x - 1;
-                    end_just_moved = true;
+                    self->selection.end_char_idx = self->selection.end_char_idx - x - 1;
+                    end_just_moved               = true;
                 }
             }
 
-            // line below is a reflow already
+            /* line below is a reflow already */
             if (i + 1 < bottom_bound && self->lines.buf[i + 1].rejoinable) {
                 for (size_t ii = 0; ii < chars_to_move; ++ii) {
 
@@ -1084,27 +942,23 @@ static void Vt_reflow_shrink(Vt* self, uint32_t x)
                         if (self->selection.begin_line == i + 1) {
                             ++self->selection.begin_char_idx;
                         }
-                        if (self->selection.end_line == i + 1 &&
-                            !end_just_moved) {
+                        if (self->selection.end_line == i + 1 && !end_just_moved) {
                             ++self->selection.end_char_idx;
                         }
                     }
 
-                    Vector_insert_VtRune(&self->lines.buf[i + 1].data,
-                                         self->lines.buf[i + 1].data.buf,
-                                         *(self->lines.buf[i].data.buf + x +
-                                           chars_to_move - ii - 1));
+                    Vector_insert_VtRune(
+                      &self->lines.buf[i + 1].data, self->lines.buf[i + 1].data.buf,
+                      *(self->lines.buf[i].data.buf + x + chars_to_move - ii - 1));
                 }
                 self->lines.buf[i + 1].damaged = true;
             } else if (i < bottom_bound) {
                 ++insertions_made;
                 size_t insert_index = i + 1;
-                Vector_insert_VtLine(
-                  &self->lines, self->lines.buf + insert_index, VtLine_new());
+                Vector_insert_VtLine(&self->lines, self->lines.buf + insert_index, VtLine_new());
 
                 // correct visual scroll region
-                if (self->scrolling_visual &&
-                    Vt_visual_top_line(self) >= insert_index &&
+                if (self->scrolling_visual && Vt_visual_top_line(self) >= insert_index &&
                     Vt_visual_bottom_line(self) < self->lines.size - 1) {
                     Vt_visual_scroll_down(self);
                 }
@@ -1120,8 +974,7 @@ static void Vt_reflow_shrink(Vt* self, uint32_t x)
                 }
                 ++self->cursor.row;
                 ++bottom_bound;
-                Vector_pushv_VtRune(&self->lines.buf[i + 1].data,
-                                    self->lines.buf[i].data.buf + x,
+                Vector_pushv_VtRune(&self->lines.buf[i + 1].data, self->lines.buf[i].data.buf + x,
                                     chars_to_move);
                 self->lines.buf[i].was_reflown    = true;
                 self->lines.buf[i + 1].rejoinable = true;
@@ -1130,18 +983,16 @@ static void Vt_reflow_shrink(Vt* self, uint32_t x)
     }
 
     if (self->lines.size - 1 != self->cursor.row) {
-        size_t overflow = self->lines.size > self->ws.ws_row
-                            ? self->lines.size - self->ws.ws_row
-                            : 0;
+        size_t overflow =
+          self->lines.size > self->ws.ws_row ? self->lines.size - self->ws.ws_row : 0;
         size_t whitespace_below = self->lines.size - 1 - self->cursor.row;
-        size_t to_pop = MIN(overflow, MIN(whitespace_below, insertions_made));
+        size_t to_pop           = MIN(overflow, MIN(whitespace_below, insertions_made));
         Vector_pop_n_VtLine(&self->lines, to_pop);
     }
 }
 
 /**
- * Remove extra columns from all lines
- */
+ * Remove extra columns from all lines */
 static void Vt_trim_columns(Vt* self)
 {
     for (size_t i = 0; i < self->lines.size; ++i) {
@@ -1161,9 +1012,7 @@ static void Vt_trim_columns(Vt* self)
 
             for (blanks = 0; blanks < s; ++blanks) {
                 if (!(self->lines.buf[i].data.buf[s - 1 - blanks].code == ' ' &&
-                      ColorRGBA_eq(
-                        settings.bg,
-                        self->lines.buf[i].data.buf[s - 1 - blanks].bg))) {
+                      ColorRGBA_eq(settings.bg, self->lines.buf[i].data.buf[s - 1 - blanks].bg))) {
                     break;
                 }
             }
@@ -1211,10 +1060,8 @@ void Vt_resize(Vt* self, uint32_t x, uint32_t y)
             if (self->alt_lines.buf) {
                 size_t to_pop_alt = self->ws.ws_row - y;
 
-                if (self->alt_active_line + to_pop_alt >
-                    Vt_bottom_line_alt(self)) {
-                    to_pop_alt -= self->alt_active_line + to_pop_alt -
-                                  Vt_bottom_line_alt(self);
+                if (self->alt_active_line + to_pop_alt > Vt_bottom_line_alt(self)) {
+                    to_pop_alt -= self->alt_active_line + to_pop_alt - Vt_bottom_line_alt(self);
                 }
 
                 Vector_pop_n_VtLine(&self->alt_lines, to_pop_alt);
@@ -1234,60 +1081,41 @@ void Vt_resize(Vt* self, uint32_t x, uint32_t y)
     }
 
     Pair_uint32_t px =
-      CALL_FP(self->callbacks.on_window_size_from_cells_requested,
-              self->callbacks.user_data, x, y);
+      CALL_FP(self->callbacks.on_window_size_from_cells_requested, self->callbacks.user_data, x, y);
 
-    self->ws = (struct winsize){
-        .ws_col = x, .ws_row = y, .ws_xpixel = px.first, .ws_ypixel = px.second
-    };
+    self->ws =
+      (struct winsize){ .ws_col = x, .ws_row = y, .ws_xpixel = px.first, .ws_ypixel = px.second };
 
-    LOG("resized to: %d %d [%d %d]\n", self->ws.ws_col, self->ws.ws_row,
-        self->ws.ws_xpixel, self->ws.ws_ypixel);
+    LOG("resized to: %d %d [%d %d]\n", self->ws.ws_col, self->ws.ws_row, self->ws.ws_xpixel,
+        self->ws.ws_ypixel);
 
     self->pixels_per_cell_x = (double)self->ws.ws_xpixel / self->ws.ws_col;
     self->pixels_per_cell_y = (double)self->ws.ws_ypixel / self->ws.ws_row;
 
-    if (ioctl(self->master, TIOCSWINSZ, &self->ws) < 0) {
-        WRN("ioctl(%d, TIOCSWINSZ, winsize { %d, %d, %d, %d }) failed:  %s\n",
-            self->master, self->ws.ws_col, self->ws.ws_row, self->ws.ws_xpixel,
-            self->ws.ws_ypixel, strerror(errno));
+    if (self->master_fd > 1) {
+        if (ioctl(self->master_fd, TIOCSWINSZ, &self->ws) < 0) {
+            WRN("ioctl(%d, TIOCSWINSZ, winsize { %d, %d, %d, %d }) failed:  %s\n", self->master_fd,
+                self->ws.ws_col, self->ws.ws_row, self->ws.ws_xpixel, self->ws.ws_ypixel,
+                strerror(errno));
+        }
     }
 
     self->scroll_region_top    = 0;
     self->scroll_region_bottom = self->ws.ws_row;
 }
 
-bool Vt_wait(Vt* self)
-{
-    FD_ZERO(&self->rfdset);
-    FD_ZERO(&self->wfdset);
-
-    FD_SET(self->master, &self->rfdset);
-    FD_SET(self->master, &self->wfdset);
-
-    if (0 > pselect(MAX(self->master, self->io) + 1, &self->rfdset,
-                    &self->wfdset, NULL, NULL, NULL)) {
-        if (errno == EINTR || errno == EAGAIN) {
-            errno = 0;
-            return true;
-        } else {
-            WRN("pselect failed: %s\n", strerror(errno));
-        }
-    }
-
-    return false;
-}
-
-__attribute__((always_inline, flatten)) static inline int32_t
-short_sequence_get_int_argument(const char* seq)
+__attribute__((always_inline, flatten)) static inline int32_t short_sequence_get_int_argument(
+  const char* seq)
 {
     return *seq == 0 || seq[1] == 0 ? 1 : strtol(seq, NULL, 10);
 }
 
 static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
 {
+
     switch (code) {
-        /* keypad mode (DECCKM) */
+        /* Application Cursor Keys (DECCKM) */
+        // FIXME: that should be some other separate mode
         case 1:
             self->modes.application_keypad = on;
             break;
@@ -1430,18 +1258,17 @@ static inline void Vt_handle_CSI(Vt* self, char c)
     if (is_csi_sequence_terminated(self->parser.active_sequence.buf,
                                    self->parser.active_sequence.size)) {
 
+        CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
+
         Vector_push_char(&self->parser.active_sequence, '\0');
         char* seq       = self->parser.active_sequence.buf;
-        char  last_char = self->parser.active_sequence
-                           .buf[self->parser.active_sequence.size - 2];
-        bool is_single_arg = !strchr(seq, ';') && !strchr(seq, ':');
+        char  last_char = self->parser.active_sequence.buf[self->parser.active_sequence.size - 2];
+        bool  is_single_arg = !strchr(seq, ';') && !strchr(seq, ':');
 
-#define MULTI_ARG_IS_ERROR                                                     \
-    if (!is_single_arg) {                                                      \
-        WRN("Unexpected additional arguments for CSI "                         \
-            "sequence \'%s\'\n",                                               \
-            seq);                                                              \
-        break;                                                                 \
+#define MULTI_ARG_IS_ERROR                                                                         \
+    if (!is_single_arg) {                                                                          \
+        WRN("Unexpected additional arguments for CSI sequence \'%s\'\n", seq);                     \
+        break;                                                                                     \
     }
 
         if (*seq != '?') {
@@ -1449,20 +1276,18 @@ static inline void Vt_handle_CSI(Vt* self, char c)
             /* sequence without question mark */
             switch (last_char) {
 
-                /* <ESC>[ Ps ; ... m - change one or more text attributes (SGR)
-                 */
+                /* <ESC>[ Ps ; ... m - change one or more text attributes (SGR) */
                 case 'm': {
-                    Vector_pop_n_char(&self->parser.active_sequence, 2);
+                    Vector_pop_n_char(&self->parser.active_sequence, 2); // 'm', '\0'
                     Vector_push_char(&self->parser.active_sequence, '\0');
-                    Vt_handle_prop_seq(self, self->parser.active_sequence);
+                    Vt_handle_SGR_sequence(self, self->parser.active_sequence);
                 } break;
 
                 /* <ESC>[ Ps K - clear(erase) line right of cursor (EL)
                  * none/0 - right 1 - left 2 - all */
                 case 'K': {
                     MULTI_ARG_IS_ERROR
-                    int arg =
-                      *seq == 'K' ? 0 : short_sequence_get_int_argument(seq);
+                    int arg = *seq == 'K' ? 0 : short_sequence_get_int_argument(seq);
                     switch (arg) {
                         case 0:
                             Vt_clear_right(self);
@@ -1485,7 +1310,7 @@ static inline void Vt_handle_CSI(Vt* self, char c)
                     MULTI_ARG_IS_ERROR // TODO: (SL), ECMA-48
                       int arg = short_sequence_get_int_argument(seq);
                     for (int i = 0; i < arg; ++i) {
-                        Vt_insert_char_at_cursor_with_shift(self, space);
+                        Vt_insert_char_at_cursor_with_shift(self, blank_space);
                     }
                 } break;
 
@@ -1539,8 +1364,7 @@ static inline void Vt_handle_CSI(Vt* self, char c)
                 case 'G': {
                     MULTI_ARG_IS_ERROR
                     self->cursor.col =
-                      MIN(short_sequence_get_int_argument(seq) - 1,
-                          self->ws.ws_col);
+                      MIN(short_sequence_get_int_argument(seq) - 1, self->ws.ws_col);
                 } break;
 
                 /* <ESC>[ Ps J - Erase display (ED) - clear... */
@@ -1604,11 +1428,10 @@ static inline void Vt_handle_CSI(Vt* self, char c)
                         --top;
                         --bottom;
                     } else {
-                        top = 0;
-                        bottom =
-                          CALL_FP(self->callbacks.on_number_of_cells_requested,
-                                  self->callbacks.user_data)
-                            .second;
+                        top    = 0;
+                        bottom = CALL_FP(self->callbacks.on_number_of_cells_requested,
+                                         self->callbacks.user_data)
+                                   .second;
                     }
 
                     self->scroll_region_top    = top;
@@ -1663,8 +1486,8 @@ static inline void Vt_handle_CSI(Vt* self, char c)
 
                 /* <ESC>[...c - Send device attributes (Primary DA) */
                 case 'c': {
-                    memcpy(self->out_buf, "\e[?6c", 6); /* report VT 102 */
-                    Vt_write(self);
+                    /* report VT 102 */
+                    Vector_pushv_char(&self->output, "\e[?6c", 5);
                 } break;
 
                 /* <ESC>[...n - Device status report (DSR) */
@@ -1674,13 +1497,11 @@ static inline void Vt_handle_CSI(Vt* self, char c)
                     if (arg == 5) {
                         /* 5 - is terminal ok
                          *  ok - 0, not ok - 3 */
-                        memcpy(self->out_buf, "\e[0n", 5);
-                        Vt_write(self);
+                        Vector_pushv_char(&self->output, "\e[0n", 4);
                     } else if (arg == 6) {
                         /* 6 - report cursor position */
-                        sprintf(self->out_buf, "\e[%zu;%zuR",
-                                Vt_active_screen_index(self) + 1,
-                                self->cursor.col + 1);
+                        Vt_output_formated(self, "\e[%zu;%zuR", Vt_get_cursor_row_screen(self) + 1,
+                                           self->cursor.col + 1);
                     }
                 } break;
 
@@ -1827,8 +1648,7 @@ static inline void Vt_handle_CSI(Vt* self, char c)
                             /* maximize window */
                             else if (args[1] == 1 && nargs >= 2) {
                             } else {
-                                WRN("Invalid CSI(WindowOps) sequence: %s\n",
-                                    seq);
+                                WRN("Invalid CSI(WindowOps) sequence: %s\n", seq);
                             }
                         } break;
 
@@ -1842,46 +1662,38 @@ static inline void Vt_handle_CSI(Vt* self, char c)
 
                         /* Report window position */
                         case 13: {
-                            Pair_uint32_t pos = CALL_FP(
-                              self->callbacks.on_window_position_requested,
-                              self->callbacks.user_data);
-                            snprintf(self->out_buf, sizeof self->out_buf,
-                                     "\e[3;%d;%d;t", pos.first, pos.second);
-                            Vt_write(self);
+                            Pair_uint32_t pos =
+                              CALL_FP(self->callbacks.on_window_position_requested,
+                                      self->callbacks.user_data);
+                            Vt_output_formated(self, "\e[3;%d;%d;t", pos.first, pos.second);
                         } break;
 
                         /* Report window size in pixels */
                         case 14: {
-                            snprintf(self->out_buf, sizeof self->out_buf,
-                                     "\e[4;%d;%d;t", self->ws.ws_xpixel,
-                                     self->ws.ws_ypixel);
-                            Vt_write(self);
+                            Vt_output_formated(self, "\e[4;%d;%d;t", self->ws.ws_xpixel,
+                                               self->ws.ws_ypixel);
                         } break;
 
                         /* Report text area size in chars */
-                        case 18:
-                            snprintf(self->out_buf, sizeof self->out_buf,
-                                     "\e[8;%d;%d;t", self->ws.ws_col,
-                                     self->ws.ws_row);
-                            Vt_write(self);
-                            break;
+                        case 18: {
+                            Vt_output_formated(self, "\e[8;%d;%d;t", self->ws.ws_col,
+                                               self->ws.ws_row);
+
+                        } break;
 
                         /* Report window size in chars */
-                        case 19:
-                            snprintf(self->out_buf, sizeof self->out_buf,
-                                     "\e[9;%d;%d;t", self->ws.ws_col,
-                                     self->ws.ws_row);
-                            Vt_write(self);
-                            break;
+                        case 19: {
+                            Vt_output_formated(self, "\e[9;%d;%d;t", self->ws.ws_col,
+                                               self->ws.ws_row);
+
+                        } break;
 
                         /* Report icon name */
                         case 20:
-                        /* Report window title */
-                        case 21:
-                            snprintf(self->out_buf, sizeof self->out_buf,
-                                     "\e]L%s\e\\", self->title);
-                            Vt_write(self);
-                            break;
+                            /* Report window title */
+                        case 21: {
+                            Vt_output_formated(self, "\e]L%s\e\\", self->title);
+                        } break;
 
                         /* push title to stack */
                         case 22:
@@ -1915,8 +1727,7 @@ static inline void Vt_handle_CSI(Vt* self, char c)
                 /* DEC Private Mode Reset (DECRST) */
                 case 'l': {
                     bool               is_enable = last_char == 'l';
-                    Vector_Vector_char tokens =
-                      string_split_on(seq + 1, ";:", NULL);
+                    Vector_Vector_char tokens    = string_split_on(seq + 1, ";:", NULL, NULL);
                     for (Vector_char* token = NULL;
                          (token = Vector_iter_Vector_char(&tokens, token));) {
                         errno     = 0;
@@ -1924,8 +1735,7 @@ static inline void Vt_handle_CSI(Vt* self, char c)
                         if (code && !errno) {
                             Vt_handle_dec_mode(self, code, is_enable);
                         } else {
-                            WRN("Invalid %s argument: \'%s\'\n",
-                                is_enable ? "DECSET" : "DECRST",
+                            WRN("Invalid %s argument: \'%s\'\n", is_enable ? "DECSET" : "DECRST",
                                 token->buf + 1);
                         }
                     }
@@ -1940,15 +1750,15 @@ static inline void Vt_handle_CSI(Vt* self, char c)
     }
 }
 
-static void Vt_handle_simple_prop_cmd(Vt* self, char* command)
+static void Vt_handle_SGR_code(Vt* self, char* command)
 {
     int cmd = *command ? strtol(command, NULL, 10) : 0;
 
-#define MAYBE_DISABLE_ALL_UNDERLINES                                           \
-    if (!settings.allow_multiple_underlines) {                                 \
-        self->parser.char_state.underlined      = false;                       \
-        self->parser.char_state.doubleunderline = false;                       \
-        self->parser.char_state.curlyunderline  = false;                       \
+#define MAYBE_DISABLE_ALL_UNDERLINES                                                               \
+    if (!settings.allow_multiple_underlines) {                                                     \
+        self->parser.char_state.underlined      = false;                                           \
+        self->parser.char_state.doubleunderline = false;                                           \
+        self->parser.char_state.curlyunderline  = false;                                           \
     }
 
     switch (cmd) {
@@ -2049,14 +1859,12 @@ static void Vt_handle_simple_prop_cmd(Vt* self, char* command)
 
         default:
             if (30 <= cmd && cmd <= 37) {
-                self->parser.char_state.fg =
-                  settings.colorscheme.color[cmd - 30];
+                self->parser.char_state.fg = settings.colorscheme.color[cmd - 30];
             } else if (40 <= cmd && cmd <= 47) {
                 self->parser.char_state.bg =
                   ColorRGBA_from_RGB(settings.colorscheme.color[cmd - 40]);
             } else if (90 <= cmd && cmd <= 97) {
-                self->parser.char_state.fg =
-                  settings.colorscheme.color[cmd - 82];
+                self->parser.char_state.fg = settings.colorscheme.color[cmd - 82];
             } else if (100 <= cmd && cmd <= 107) {
                 self->parser.char_state.bg =
                   ColorRGBA_from_RGB(settings.colorscheme.color[cmd - 92]);
@@ -2097,16 +1905,14 @@ static inline void Vt_alt_buffer_off(Vt* self, bool save_mouse)
 }
 
 /**
- * SGR codes are separated by one or multiple ';' or ':',
- * some values require a set number of following 'arguments'.
- * 'Commands' may be combined into a single sequence.
- */
-static void Vt_handle_prop_seq(Vt* self, Vector_char seq)
+ * SGR codes are separated by one ';' or ':', some values require a set number of following
+ * 'arguments'. 'Commands' may be combined into a single sequence. A ';' without any text should be
+ * interpreted as a 0 (CSI ; 3 m == CSI 0 ; 3 m), but ':' should not
+ * (CSI 58:2::130:110:255 m == CSI 58:2:130:110:255 m)" */
+static void Vt_handle_SGR_sequence(Vt* self, Vector_char seq)
 {
-    Vector_Vector_char tokens = string_split_on(seq.buf, ";:", NULL);
-
-    for (Vector_char* token = NULL;
-         (token = Vector_iter_Vector_char(&tokens, token));) {
+    Vector_Vector_char tokens = string_split_on(seq.buf, ";", ":", NULL);
+    for (Vector_char* token = NULL; (token = Vector_iter_Vector_char(&tokens, token));) {
         Vector_char* args[] = { token, NULL, NULL, NULL, NULL };
 
         /* color change 'commands' */
@@ -2126,33 +1932,27 @@ static void Vt_handle_prop_seq(Vt* self, Vector_char seq)
                         self->parser.char_state.fg = color_palette_256[idx];
 
                     else if (args[0]->buf[1] == '4')
-                        self->parser.char_state.bg =
-                          ColorRGBA_from_RGB(color_palette_256[idx]);
+                        self->parser.char_state.bg = ColorRGBA_from_RGB(color_palette_256[idx]);
 
                     else if (args[0]->buf[1] == '5') {
                         self->parser.char_state.linecolornotdefault = true;
-                        self->parser.char_state.line = color_palette_256[idx];
+                        self->parser.char_state.line                = color_palette_256[idx];
                     }
 
                 } else if (!strcmp(args[1]->buf + 1, "2")) {
                     /* sent as 24-bit rgb (three arguments) */
-                    if ((args[3] =
-                           (token = Vector_iter_Vector_char(&tokens, token))) &&
-                        (args[4] =
-                           (token = Vector_iter_Vector_char(&tokens, token)))) {
-                        long c[3] = {
-                            MIN(strtol(args[2]->buf + 1, NULL, 10), 255),
-                            MIN(strtol(args[3]->buf + 1, NULL, 10), 255),
-                            MIN(strtol(args[4]->buf + 1, NULL, 10), 255)
-                        };
+                    if ((args[3] = (token = Vector_iter_Vector_char(&tokens, token))) &&
+                        (args[4] = (token = Vector_iter_Vector_char(&tokens, token)))) {
+                        long c[3] = { MIN(strtol(args[2]->buf + 1, NULL, 10), 255),
+                                      MIN(strtol(args[3]->buf + 1, NULL, 10), 255),
+                                      MIN(strtol(args[4]->buf + 1, NULL, 10), 255) };
 
                         if (args[0]->buf[1] == '3') {
                             self->parser.char_state.fg =
                               (ColorRGB){ .r = c[0], .g = c[1], .b = c[2] };
                         } else if (args[0]->buf[1] == '4') {
-                            self->parser.char_state.bg = (ColorRGBA){
-                                .r = c[0], .g = c[1], .b = c[2], .a = 255
-                            };
+                            self->parser.char_state.bg =
+                              (ColorRGBA){ .r = c[0], .g = c[1], .b = c[2], .a = 255 };
                         } else if (args[0]->buf[1] == '5') {
                             self->parser.char_state.linecolornotdefault = true;
                             self->parser.char_state.line =
@@ -2176,16 +1976,16 @@ static void Vt_handle_prop_seq(Vt* self, Vector_char seq)
 
                     self->parser.char_state.curlyunderline = true;
                 } else {
-                    Vt_handle_simple_prop_cmd(self, args[0]->buf + 1);
-                    Vt_handle_simple_prop_cmd(self, args[1]->buf + 1);
+                    Vt_handle_SGR_code(self, args[0]->buf + 1);
+                    Vt_handle_SGR_code(self, args[1]->buf + 1);
                 }
             } else {
-                Vt_handle_simple_prop_cmd(self, args[0]->buf + 1);
+                Vt_handle_SGR_code(self, args[0]->buf + 1);
                 break; // end of sequence
             }
 
         } else {
-            Vt_handle_simple_prop_cmd(self, token->buf + 1);
+            Vt_handle_SGR_code(self, token->buf + 1);
         }
     } // end for
 
@@ -2201,7 +2001,7 @@ static void Vt_handle_APC(Vt* self, char c)
         Vector_push_char(&self->parser.active_sequence, '\0');
 
         const char* seq = self->parser.active_sequence.buf;
-        char*       str = pty_string_prettyfy(seq);
+        char*       str = pty_string_prettyfy(seq, strlen(seq));
         WRN("Unknown application programming command: %s\n", str);
         free(str);
 
@@ -2232,7 +2032,8 @@ static void Vt_handle_DCS(Vt* self, char c)
             default:;
         }
 
-        char* str = pty_string_prettyfy(self->parser.active_sequence.buf);
+        char* str =
+          pty_string_prettyfy(self->parser.active_sequence.buf, self->parser.active_sequence.size);
         WRN("Unknown device control string: %s\n", str);
         free(str);
 
@@ -2264,7 +2065,7 @@ static void Vt_handle_OSC(Vt* self, char c)
         Vector_push_char(&self->parser.active_sequence, '\0');
 
         char*              seq    = self->parser.active_sequence.buf;
-        Vector_Vector_char tokens = string_split_on(seq, ";:", "\a\b\n\t\v");
+        Vector_Vector_char tokens = string_split_on(seq, ";:", NULL, "\a\b\n\t\v");
 
         int arg = strtol(tokens.buf[0].buf + 1, NULL, 10);
 
@@ -2279,8 +2080,8 @@ static void Vt_handle_OSC(Vt* self, char c)
                 if (tokens.size >= 2) {
                     free(self->title);
                     self->title = strdup(tokens.buf[1].buf + 1);
-                    CALL_FP(self->callbacks.on_title_changed,
-                            self->callbacks.user_data, tokens.buf[1].buf + 1);
+                    CALL_FP(self->callbacks.on_title_changed, self->callbacks.user_data,
+                            tokens.buf[1].buf + 1);
                 }
                 break;
 
@@ -2410,15 +2211,13 @@ __attribute__((always_inline)) static inline void Vt_carriage_return(Vt* self)
  * make a new empty line at cursor position, scroll down contents below */
 static inline void Vt_insert_line(Vt* self)
 {
-    Vector_insert_VtLine(&self->lines,
-                         Vector_at_VtLine(&self->lines, self->cursor.row),
+    Vector_insert_VtLine(&self->lines, Vector_at_VtLine(&self->lines, self->cursor.row),
                          VtLine_new());
 
     Vt_empty_line_fill_bg(self, self->cursor.row);
 
-    Vector_remove_at_VtLine(
-      &self->lines,
-      MIN(Vt_get_scroll_region_bottom(self) + 1, Vt_bottom_line(self)), 1);
+    Vector_remove_at_VtLine(&self->lines,
+                            MIN(Vt_get_scroll_region_bottom(self) + 1, Vt_bottom_line(self)), 1);
 
     Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
 }
@@ -2427,11 +2226,9 @@ static inline void Vt_insert_line(Vt* self)
  * the same as insert line, but adds before cursor line */
 static inline void Vt_reverse_line_feed(Vt* self)
 {
-    Vector_remove_at_VtLine(
-      &self->lines,
-      MIN(Vt_bottom_line(self), Vt_get_scroll_region_bottom(self) + 1), 1);
-    Vector_insert_VtLine(&self->lines,
-                         Vector_at_VtLine(&self->lines, self->cursor.row),
+    Vector_remove_at_VtLine(&self->lines,
+                            MIN(Vt_bottom_line(self), Vt_get_scroll_region_bottom(self) + 1), 1);
+    Vector_insert_VtLine(&self->lines, Vector_at_VtLine(&self->lines, self->cursor.row),
                          VtLine_new());
     Vt_empty_line_fill_bg(self, self->cursor.row);
     Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
@@ -2443,14 +2240,12 @@ static inline void Vt_delete_line(Vt* self)
 {
     Vector_remove_at_VtLine(&self->lines, self->cursor.row, 1);
 
-    Vector_insert_VtLine(
-      &self->lines,
-      Vector_at_VtLine(&self->lines, MIN(Vt_get_scroll_region_bottom(self) + 1,
-                                         Vt_bottom_line(self))),
-      VtLine_new());
+    Vector_insert_VtLine(&self->lines,
+                         Vector_at_VtLine(&self->lines, MIN(Vt_get_scroll_region_bottom(self) + 1,
+                                                            Vt_bottom_line(self))),
+                         VtLine_new());
 
-    Vt_empty_line_fill_bg(
-      self, MIN(Vt_get_scroll_region_bottom(self) + 1, Vt_bottom_line(self)));
+    Vt_empty_line_fill_bg(self, MIN(Vt_get_scroll_region_bottom(self) + 1, Vt_bottom_line(self)));
 
     Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
 }
@@ -2459,31 +2254,25 @@ static inline void Vt_scroll_up(Vt* self)
 {
     Vector_insert_VtLine(
       &self->lines,
-      Vector_at_VtLine(
-        &self->lines,
-        MIN(Vt_bottom_line(self), Vt_get_scroll_region_bottom(self) + 1) + 1),
+      Vector_at_VtLine(&self->lines,
+                       MIN(Vt_bottom_line(self), Vt_get_scroll_region_bottom(self) + 1) + 1),
       VtLine_new());
 
-    Vt_empty_line_fill_bg(
-      self,
-      MIN(Vt_bottom_line(self), Vt_get_scroll_region_bottom(self) + 1) + 1);
+    Vt_empty_line_fill_bg(self,
+                          MIN(Vt_bottom_line(self), Vt_get_scroll_region_bottom(self) + 1) + 1);
 
-    Vector_remove_at_VtLine(&self->lines, Vt_get_scroll_region_top(self) - 1,
-                            1);
+    Vector_remove_at_VtLine(&self->lines, Vt_get_scroll_region_top(self) - 1, 1);
 
     Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
 }
 
 static inline void Vt_scroll_down(Vt* self)
 {
-    Vector_remove_at_VtLine(
-      &self->lines,
-      MAX(Vt_top_line(self), Vt_get_scroll_region_bottom(self) + 1), 1);
+    Vector_remove_at_VtLine(&self->lines,
+                            MAX(Vt_top_line(self), Vt_get_scroll_region_bottom(self) + 1), 1);
 
     Vector_insert_VtLine(
-      &self->lines,
-      Vector_at_VtLine(&self->lines, Vt_get_scroll_region_top(self)),
-      VtLine_new());
+      &self->lines, Vector_at_VtLine(&self->lines, Vt_get_scroll_region_top(self)), VtLine_new());
 
     Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
 }
@@ -2529,10 +2318,10 @@ static inline void Vt_erase_to_end(Vt* self)
     Vt_clear_right(self);
 }
 
-static inline void Pty_backspace(Vt* self)
+static inline void Vt_handle_backspace(Vt* self)
 {
-    if (self->cursor.col)
-        --self->cursor.col;
+    CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
+    Vt_cursor_left(self);
 }
 
 /**
@@ -2542,16 +2331,13 @@ static inline void Vt_erase_chars(Vt* self, size_t n)
     for (size_t i = 0; i < n; ++i) {
         size_t idx = self->cursor.col + i;
         if (idx >= self->lines.buf[self->cursor.row].data.size) {
-            Vector_push_VtRune(&self->lines.buf[self->cursor.row].data,
-                               self->parser.char_state);
+            Vector_push_VtRune(&self->lines.buf[self->cursor.row].data, self->parser.char_state);
         } else {
-            self->lines.buf[self->cursor.row].data.buf[idx] =
-              self->parser.char_state;
+            self->lines.buf[self->cursor.row].data.buf[idx] = self->parser.char_state;
         }
     }
 
     self->lines.buf[self->cursor.row].damaged = true;
-    Vt_destroy_line_proxy(self->lines.buf[self->cursor.row].proxy.data);
 }
 
 /**
@@ -2561,16 +2347,14 @@ static void Vt_delete_chars(Vt* self, size_t n)
     /* Trim if line is longer than screen area */
     if (self->lines.buf[self->cursor.row].data.size > self->ws.ws_col) {
         Vector_pop_n_VtRune(&self->lines.buf[self->cursor.row].data,
-                            self->lines.buf[self->cursor.row].data.size -
-                              self->ws.ws_col);
+                            self->lines.buf[self->cursor.row].data.size - self->ws.ws_col);
     }
 
-    Vector_remove_at_VtRune(
-      &self->lines.buf[self->cursor.row].data, self->cursor.col,
-      MIN(self->lines.buf[self->cursor.row].data.size == self->cursor.col
-            ? self->lines.buf[self->cursor.row].data.size - self->cursor.col
-            : self->lines.buf[self->cursor.row].data.size,
-          n));
+    Vector_remove_at_VtRune(&self->lines.buf[self->cursor.row].data, self->cursor.col,
+                            MIN(self->lines.buf[self->cursor.row].data.size == self->cursor.col
+                                  ? self->lines.buf[self->cursor.row].data.size - self->cursor.col
+                                  : self->lines.buf[self->cursor.row].data.size,
+                                n));
 
     /* Fill line to the cursor position with spaces with original propreties
      * before scolling so we get the expected result, when we... */
@@ -2581,18 +2365,15 @@ static void Vt_delete_chars(Vt* self, size_t n)
     self->parser.color_inverted = false;
 
     if (self->lines.buf[self->cursor.row].data.size >= 2) {
-        self->parser.char_state.bg =
-          self->lines.buf[self->cursor.row]
-            .data.buf[self->lines.buf[self->cursor.row].data.size - 2]
-            .bg;
+        self->parser.char_state.bg = self->lines.buf[self->cursor.row]
+                                       .data.buf[self->lines.buf[self->cursor.row].data.size - 2]
+                                       .bg;
     } else {
         self->parser.char_state.bg = settings.bg;
     }
 
-    for (size_t i = self->lines.buf[self->cursor.row].data.size - 1;
-         i < self->ws.ws_col; ++i) {
-        Vector_push_VtRune(&self->lines.buf[self->cursor.row].data,
-                           self->parser.char_state);
+    for (size_t i = self->lines.buf[self->cursor.row].data.size - 1; i < self->ws.ws_col; ++i) {
+        Vector_push_VtRune(&self->lines.buf[self->cursor.row].data, self->parser.char_state);
     }
 
     self->parser.char_state     = tmp;
@@ -2600,32 +2381,27 @@ static void Vt_delete_chars(Vt* self, size_t n)
 
     if (self->lines.buf[self->cursor.row].data.size > self->ws.ws_col) {
         Vector_pop_n_VtRune(&self->lines.buf[self->cursor.row].data,
-                            self->lines.buf[self->cursor.row].data.size -
-                              self->ws.ws_col);
+                            self->lines.buf[self->cursor.row].data.size - self->ws.ws_col);
     }
 
     /* ...add n spaces with currently set attributes to the end */
     for (size_t i = 0; i < n && self->cursor.col + i < self->ws.ws_col; ++i) {
-        Vector_push_VtRune(&self->lines.buf[self->cursor.row].data,
-                           self->parser.char_state);
+        Vector_push_VtRune(&self->lines.buf[self->cursor.row].data, self->parser.char_state);
     }
 
     /* Trim to screen size again */
     if (self->lines.buf[self->cursor.row].data.size > self->ws.ws_col) {
         Vector_pop_n_VtRune(&self->lines.buf[self->cursor.row].data,
-                            self->lines.buf[self->cursor.row].data.size -
-                              self->ws.ws_col);
+                            self->lines.buf[self->cursor.row].data.size - self->ws.ws_col);
     }
 
     self->lines.buf[self->cursor.row].damaged = true;
-    Vt_destroy_line_proxy(self->lines.buf[self->cursor.row].proxy.data);
 }
 
 static inline void Vt_scroll_out_all_content(Vt* self)
 {
     int64_t to_add = 0;
-    for (size_t i = Vt_visual_bottom_line(self); i >= Vt_visual_top_line(self);
-         --i) {
+    for (size_t i = Vt_visual_bottom_line(self); i >= Vt_visual_top_line(self); --i) {
         if (self->lines.buf[i].data.size) {
             to_add += i;
             break;
@@ -2644,7 +2420,7 @@ static inline void Vt_scroll_out_all_content(Vt* self)
 
 static inline void Vt_scroll_out_above(Vt* self)
 {
-    size_t to_add = Vt_active_screen_index(self);
+    size_t to_add = Vt_get_cursor_row_screen(self);
     for (size_t i = 0; i < to_add; ++i) {
         Vector_push_VtLine(&self->lines, VtLine_new());
         Vt_empty_line_fill_bg(self, self->lines.size - 1);
@@ -2681,15 +2457,12 @@ static inline void Vt_clear_left(Vt* self)
 {
     for (size_t i = 0; i <= self->cursor.col; ++i) {
         if (i < self->lines.buf[self->cursor.row].data.size)
-            self->lines.buf[self->cursor.row].data.buf[i] =
-              self->parser.char_state;
+            self->lines.buf[self->cursor.row].data.buf[i] = self->parser.char_state;
         else
-            Vector_push_VtRune(&self->lines.buf[self->cursor.row].data,
-                               self->parser.char_state);
+            Vector_push_VtRune(&self->lines.buf[self->cursor.row].data, self->parser.char_state);
     }
 
     self->lines.buf[self->cursor.row].damaged = true;
-    Vt_destroy_line_proxy(self->lines.buf[self->cursor.row].proxy.data);
 }
 
 /**
@@ -2697,26 +2470,23 @@ static inline void Vt_clear_left(Vt* self)
  * attributes are set */
 static inline void Vt_clear_right(Vt* self)
 {
-    for (size_t i = self->cursor.col; i <= self->ws.ws_col; ++i) {
-        if (i + 1 <= self->lines.buf[self->cursor.row].data.size)
-            self->lines.buf[self->cursor.row].data.buf[i] =
-              self->parser.char_state;
-        else
-            Vector_push_VtRune(&self->lines.buf[self->cursor.row].data,
-                               self->parser.char_state);
+    for (int32_t i = self->cursor.col; i <= (int32_t)self->ws.ws_col; ++i) {
+        if (i + 1 <= (int32_t)self->lines.buf[self->cursor.row].data.size) {
+            self->lines.buf[self->cursor.row].data.buf[i] = self->parser.char_state;
+        } else {
+            Vector_push_VtRune(&self->lines.buf[self->cursor.row].data, self->parser.char_state);
+        }
     }
 
     self->lines.buf[self->cursor.row].damaged = true;
-    Vt_destroy_line_proxy(self->lines.buf[self->cursor.row].proxy.data);
 }
 
 /**
- * Insert character literal at cursor position, deal with reaching column limit
- */
-__attribute__((always_inline, hot)) static inline void Vt_insert_char_at_cursor(
-  Vt*    self,
-  VtRune c)
+ * Insert character literal at cursor position, deal with reaching column limit */
+__attribute__((hot)) static inline void Vt_insert_char_at_cursor(Vt* self, VtRune c)
 {
+    CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
+
     if (unlikely(self->cursor.col >= (size_t)self->ws.ws_col)) {
         if (unlikely(self->modes.no_auto_wrap)) {
             --self->cursor.col;
@@ -2728,7 +2498,7 @@ __attribute__((always_inline, hot)) static inline void Vt_insert_char_at_cursor(
     }
 
     while (self->lines.buf[self->cursor.row].data.size <= self->cursor.col)
-        Vector_push_VtRune(&self->lines.buf[self->cursor.row].data, space);
+        Vector_push_VtRune(&self->lines.buf[self->cursor.row].data, blank_space);
 
     if (unlikely(self->parser.color_inverted)) {
         ColorRGB tmp = c.fg;
@@ -2744,10 +2514,9 @@ __attribute__((always_inline, hot)) static inline void Vt_insert_char_at_cursor(
 
     if (unlikely(wcwidth(c.code) == 2)) {
         if (self->lines.buf[self->cursor.row].data.size <= self->cursor.col) {
-            Vector_push_VtRune(&self->lines.buf[self->cursor.row].data, space);
+            Vector_push_VtRune(&self->lines.buf[self->cursor.row].data, blank_space);
         } else {
-            self->lines.buf[self->cursor.row].data.buf[self->cursor.col] =
-              space;
+            self->lines.buf[self->cursor.row].data.buf[self->cursor.col] = blank_space;
         }
 
         ++self->cursor.col;
@@ -2766,10 +2535,9 @@ static inline void Vt_insert_char_at_cursor_with_shift(Vt* self, VtRune c)
         }
     }
 
-    VtRune* insert_point = Vector_at_VtRune(
-      &self->lines.buf[self->cursor.row].data, self->cursor.col);
-    Vector_insert_VtRune(&self->lines.buf[self->cursor.row].data, insert_point,
-                         c);
+    VtRune* insert_point =
+      Vector_at_VtRune(&self->lines.buf[self->cursor.row].data, self->cursor.col);
+    Vector_insert_VtRune(&self->lines.buf[self->cursor.row].data, insert_point, c);
 
     Vt_mark_proxy_damaged(self, self->cursor.row);
 }
@@ -2780,23 +2548,20 @@ static inline void Vt_empty_line_fill_bg(Vt* self, size_t idx)
 
     self->lines.buf[idx].damaged = true;
 
-    Vt_destroy_line_proxy(self->lines.buf[idx].proxy.data);
-
     if (!ColorRGBA_eq(self->parser.char_state.bg, settings.bg))
         for (size_t i = 0; i < self->ws.ws_col; ++i)
-            Vector_push_VtRune(&self->lines.buf[idx].data,
-                               self->parser.char_state);
+            Vector_push_VtRune(&self->lines.buf[idx].data, self->parser.char_state);
 }
 
 /**
  * Move one line down or insert a new one, scrolls if region is set */
 static inline void Vt_insert_new_line(Vt* self)
 {
+    Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
+
     if (self->cursor.row == Vt_get_scroll_region_bottom(self) + 1) {
-        Vector_remove_at_VtLine(&self->lines, Vt_get_scroll_region_top(self),
-                                1);
-        Vector_insert_VtLine(&self->lines,
-                             Vector_at_VtLine(&self->lines, self->cursor.row),
+        Vector_remove_at_VtLine(&self->lines, Vt_get_scroll_region_top(self), 1);
+        Vector_insert_VtLine(&self->lines, Vector_at_VtLine(&self->lines, self->cursor.row),
                              VtLine_new());
         Vt_empty_line_fill_bg(self, self->cursor.row);
     } else {
@@ -2806,23 +2571,17 @@ static inline void Vt_insert_new_line(Vt* self)
         }
         ++self->cursor.row;
     }
-
-    Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
 }
 
 /**
  * Move cursor to given location */
-__attribute__((hot)) static inline void Vt_move_cursor(Vt*      self,
-                                                       uint32_t columns,
-                                                       uint32_t rows)
+__attribute__((hot)) static inline void Vt_move_cursor(Vt* self, uint32_t columns, uint32_t rows)
 {
-    self->cursor.row =
-      MIN(rows, (uint32_t)self->ws.ws_row - 1) + Vt_top_line(self);
+    self->cursor.row = MIN(rows, (uint32_t)self->ws.ws_row - 1) + Vt_top_line(self);
     self->cursor.col = MIN(columns, (uint32_t)self->ws.ws_col);
 }
 
-__attribute__((always_inline, hot, flatten)) static inline void
-Vt_handle_literal(Vt* self, char c)
+__attribute__((always_inline, hot, flatten)) static inline void Vt_handle_literal(Vt* self, char c)
 {
     if (unlikely(self->parser.in_mb_seq)) {
 
@@ -2848,13 +2607,12 @@ Vt_handle_literal(Vt* self, char c)
         switch (c) {
             case '\a':
                 if (!settings.no_flash) {
-                    CALL_FP(self->callbacks.on_bell_flash,
-                            self->callbacks.user_data);
+                    CALL_FP(self->callbacks.on_bell_flash, self->callbacks.user_data);
                 }
                 break;
 
             case '\b':
-                Pty_backspace(self);
+                Vt_handle_backspace(self);
                 break;
 
             case '\r':
@@ -2875,8 +2633,7 @@ Vt_handle_literal(Vt* self, char c)
                 size_t cp = self->cursor.col;
 
                 // TODO: do this properly
-                for (size_t i = 0; i < self->tabstop - (cp % self->tabstop);
-                     ++i)
+                for (size_t i = 0; i < self->tabstop - (cp % self->tabstop); ++i)
                     Vt_cursor_right(self);
             } break;
 
@@ -2902,8 +2659,7 @@ Vt_handle_literal(Vt* self, char c)
     }
 }
 
-__attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt*  self,
-                                                                      char c)
+__attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, char c)
 {
     switch (self->parser.state) {
 
@@ -2973,8 +2729,7 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt*  self,
 
                 case 'g':
                     if (!settings.no_flash) {
-                        CALL_FP(self->callbacks.on_bell_flash,
-                                self->callbacks.user_data);
+                        CALL_FP(self->callbacks.on_bell_flash, self->callbacks.user_data);
                     }
                     self->parser.state = PARSER_STATE_LITERAL;
                     break;
@@ -3005,8 +2760,7 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt*  self,
                               self->callbacks.user_data)
                         .second;
 
-                    for (size_t* i = NULL;
-                         Vector_iter_size_t(&self->title_stack, i);)
+                    for (size_t* i = NULL; Vector_iter_size_t(&self->title_stack, i);)
                         free((char*)*i);
                     Vector_destroy_size_t(&self->title_stack);
                     self->title_stack = Vector_new_size_t();
@@ -3030,8 +2784,8 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt*  self,
                     return;
 
                 default: {
-                    char* cs    = control_char_get_pretty_string(c);
-                    char  cb[2] = { c, 0 };
+                    const char* cs    = control_char_get_pretty_string(c);
+                    char        cb[2] = { c, 0 };
                     WRN("Unknown escape sequence: %s (%d)\n", cs ? cs : cb, c);
 
                     self->parser.state = PARSER_STATE_LITERAL;
@@ -3133,120 +2887,25 @@ static inline void Vt_clear_proxies(Vt* self)
 {
     if (self->scrolling_visual) {
         if (self->visual_scroll_top > self->ws.ws_row * 5) {
-            Vt_clear_proxies_in_region(
-              self, Vt_visual_bottom_line(self) + 4 * self->ws.ws_row,
-              self->lines.size - 1);
+            Vt_clear_proxies_in_region(self, Vt_visual_bottom_line(self) + 4 * self->ws.ws_row,
+                                       self->lines.size - 1);
         }
     } else if (self->lines.size > self->ws.ws_row) {
-        Vt_clear_proxies_in_region(self, 0, Vt_visual_top_line(self));
+        Vt_clear_proxies_in_region(self, 0,
+                                   Vt_visual_top_line(self) ? Vt_visual_top_line(self) - 1 : 0);
     }
 }
 
-__attribute__((hot)) inline bool Vt_read(Vt* self, int* last)
+inline void Vt_interpret(Vt* self, char* buf, size_t bytes)
 {
-    if (FD_ISSET(self->master, &self->rfdset)) {
-        int rd = read(self->master, self->buf, sizeof(self->buf) - 2);
-
-        if (rd >= 0 && settings.scroll_on_output) {
-            Vt_visual_scroll_reset(self);
-        }
-
-#ifdef DEBUG
-        if (rd > 0) {
-            self->buf[rd] = 0;
-            char* out     = pty_string_prettyfy(self->buf);
-            LOG("PTY." TERMCOLOR_MAGENTA_LIGHT "READ(" TERMCOLOR_DEFAULT
-                "%s" TERMCOLOR_MAGENTA_LIGHT ")" TERMCOLOR_DEFAULT
-                "  ~> { bytes: %3d | %s } \n",
-                self->dev_name, rd, out);
-            free(out);
-        }
-#else
-        if (unlikely(settings.debug_pty) && rd > 0) {
-            self->buf[rd] = 0;
-            char* out     = pty_string_prettyfy(self->buf);
-            fprintf(stderr, "pty.read(%3d)  ~> { %s }\n\n", rd, out);
-            free(out);
-        }
-#endif
-
-        if (rd < 0) {
-            LOG("Program finished\n");
-            self->is_done = true;
-        } else if (rd == 0) {
-            /* nothing more to read */
-            if (last) {
-                /* if we get 0 twice the program is done or something went
-                 * really wrong */
-                if (!*last)
-                    self->is_done = true;
-                *last = 0;
-            }
-            return false;
-        } else {
-            for (int i = 0; i < rd; ++i) {
-                Vt_handle_char(self, self->buf[i]);
-            }
-
-            CALL_FP(self->callbacks.on_repaint_required,
-                    self->callbacks.user_data);
-
-            if ((uint32_t)rd < (sizeof self->buf - 2)) {
-                /* nothing more to read */
-                static bool first = true;
-                if (first) {
-                    first = false;
-
-                    Pair_uint32_t px = CALL_FP(
-                      self->callbacks.on_window_size_from_cells_requested,
-                      self->callbacks.user_data, self->ws.ws_col,
-                      self->ws.ws_row);
-
-                    self->ws.ws_xpixel = px.first;
-                    self->ws.ws_ypixel = px.second;
-                    if (ioctl(self->master, TIOCSWINSZ, &self->ws) < 0)
-                        WRN("IO operation failed %s\n", strerror(errno));
-                }
-
-                Vt_shrink_scrollback(self);
-                Vt_clear_proxies(self);
-                return false;
-            }
-        }
-        return true;
-    }
-    return false;
-}
-
-/**
- * write @param bytes from out buffer to pty */
-__attribute__((always_inline)) static inline void Vt_write_n(Vt*    self,
-                                                             size_t bytes)
-{
-#ifdef DEBUG
-    char* str = pty_string_prettyfy(self->out_buf);
-    LOG("PTY." TERMCOLOR_YELLOW "WRITE(" TERMCOLOR_DEFAULT "%s" TERMCOLOR_YELLOW
-        ")" TERMCOLOR_DEFAULT " <~ { bytes: %3ld | %s }\n",
-        self->dev_name, strlen(self->out_buf), str);
-    free(str);
-#else
     if (unlikely(settings.debug_pty)) {
-        char* str = pty_string_prettyfy(self->out_buf);
-        fprintf(stderr, "pty.write(%3zu) <~ { %s }\n\n", strlen(self->out_buf),
-                str);
+        char* str = pty_string_prettyfy(buf, bytes);
+        fprintf(stderr, "pty.read (%3zu) ~> { %s }\n\n", bytes, str);
         free(str);
     }
-
-#endif
-
-    write(self->master, self->out_buf, bytes);
-}
-
-/**
- * Write null-terminated string from out buffer to pty */
-__attribute__((always_inline)) static inline void Vt_write(Vt* self)
-{
-    Vt_write_n(self, strlen(self->out_buf));
+    for (size_t i = 0; i < bytes; ++i) {
+        Vt_handle_char(self, buf[i]);
+    }
 }
 
 void Vt_get_visible_lines(const Vt* self, VtLine** out_begin, VtLine** out_end)
@@ -3260,31 +2919,29 @@ void Vt_get_visible_lines(const Vt* self, VtLine** out_begin, VtLine** out_end)
     }
 }
 
-__attribute__((always_inline)) static inline const char* normal_keypad_response(
-  const uint32_t key)
+static inline const char* normal_keypad_response(const uint32_t key)
 {
     switch (key) {
         case XKB_KEY_Up:
-            return "\e[A\0";
+            return "\e[A";
         case XKB_KEY_Down:
-            return "\e[B\0";
+            return "\e[B";
         case XKB_KEY_Right:
-            return "\e[C\0";
+            return "\e[C";
         case XKB_KEY_Left:
-            return "\e[D\0";
+            return "\e[D";
         case XKB_KEY_End:
-            return "\e[F\0";
+            return "\e[F";
         case XKB_KEY_Home:
-            return "\e[H\0";
+            return "\e[H";
         case 127:
-            return "\e[P\0";
+            return "\e[P";
         default:
             return NULL;
     }
 }
 
-__attribute__((always_inline)) static inline const char*
-application_keypad_response(const uint32_t key)
+static inline const char* application_keypad_response(const uint32_t key)
 {
     switch (key) {
         case XKB_KEY_Up:
@@ -3320,8 +2977,7 @@ application_keypad_response(const uint32_t key)
 
 /**
  * Get response format string in normal keypad mode */
-__attribute__((always_inline)) static inline const char*
-normal_mod_keypad_response(const uint32_t key)
+static inline const char* normal_mod_keypad_response(const uint32_t key)
 {
     switch (key) {
         case XKB_KEY_Up:
@@ -3343,8 +2999,7 @@ normal_mod_keypad_response(const uint32_t key)
 
 /**
  * Get response format string in application keypad mode */
-__attribute__((always_inline)) static inline const char*
-application_mod_keypad_response(const uint32_t key)
+static inline const char* application_mod_keypad_response(const uint32_t key)
 {
     switch (key) {
         case XKB_KEY_Up:
@@ -3385,17 +3040,16 @@ static bool Vt_maybe_handle_unicode_input_key(Vt*      self,
             // Enter
             Vector_push_char(&self->unicode_input.buffer, 0);
             self->unicode_input.active = false;
-            char32_t result = strtol(self->unicode_input.buffer.buf, NULL, 16);
+            char32_t result            = strtol(self->unicode_input.buffer.buf, NULL, 16);
             Vector_clear_char(&self->unicode_input.buffer);
             if (result) {
-                LOG("unicode input \'%s\' -> %d\n",
-                    self->unicode_input.buffer.buf, result);
+                LOG("unicode input \'%s\' -> %d\n", self->unicode_input.buffer.buf, result);
 
+                char             tmp[32];
                 static mbstate_t mbstate;
-                size_t seq_len = c32rtomb(Vt_buffer(self), result, &mbstate);
-                if (seq_len) {
-                    Vt_buffer(self)[seq_len] = '\0';
-                    Vt_write(self);
+                int              mb_len = c32rtomb(tmp, result, &mbstate);
+                if (mb_len) {
+                    Vector_pushv_char(&self->output, tmp, mb_len);
                 }
             } else {
                 WRN("Failed to parse \'%s\'\n", self->unicode_input.buffer.buf);
@@ -3404,8 +3058,7 @@ static bool Vt_maybe_handle_unicode_input_key(Vt*      self,
             // Escape
             self->unicode_input.buffer.size = 0;
             self->unicode_input.active      = false;
-            CALL_FP(self->callbacks.on_repaint_required,
-                    self->callbacks.user_data);
+            CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
         } else if (key == 8) {
             // Backspace
             if (self->unicode_input.buffer.size) {
@@ -3414,16 +3067,13 @@ static bool Vt_maybe_handle_unicode_input_key(Vt*      self,
                 self->unicode_input.buffer.size = 0;
                 self->unicode_input.active      = false;
             }
-            CALL_FP(self->callbacks.on_repaint_required,
-                    self->callbacks.user_data);
+            CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
         } else if (isxdigit(key)) {
             if (self->unicode_input.buffer.size > 8) {
-                CALL_FP(self->callbacks.on_bell_flash,
-                        self->callbacks.user_data);
+                CALL_FP(self->callbacks.on_bell_flash, self->callbacks.user_data);
             } else {
                 Vector_push_char(&self->unicode_input.buffer, key);
-                CALL_FP(self->callbacks.on_repaint_required,
-                        self->callbacks.user_data);
+                CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
             }
         } else {
             CALL_FP(self->callbacks.on_bell_flash, self->callbacks.user_data);
@@ -3436,29 +3086,21 @@ static bool Vt_maybe_handle_unicode_input_key(Vt*      self,
 /**
  * Respond to key event if it is a keypad key
  * @return keypress was consumed */
-static inline bool Vt_maybe_handle_keypad_key(Vt*      self,
-                                              uint32_t key,
-                                              uint32_t mods)
+static inline bool Vt_maybe_handle_keypad_key(Vt* self, uint32_t key, uint32_t mods)
 {
     const char* resp = NULL;
     if (mods) {
-        resp = self->modes.application_keypad
-                 ? application_mod_keypad_response(key)
-                 : normal_mod_keypad_response(key);
-
+        resp = self->modes.application_keypad ? application_mod_keypad_response(key)
+                                              : normal_mod_keypad_response(key);
         if (resp) {
-            sprintf(self->out_buf, resp, mods + 1);
-            Vt_write(self);
+            Vt_output_formated(self, resp, mods + 1);
             return true;
         }
-
     } else {
-        resp = self->modes.application_keypad ? application_keypad_response(key)
-                                              : normal_keypad_response(key);
-
+        bool appl_key = self->modes.application_keypad;
+        resp          = appl_key ? application_keypad_response(key) : normal_keypad_response(key);
         if (resp) {
-            memcpy(self->out_buf, resp, 5);
-            Vt_write(self);
+            Vector_pushv_char(&self->output, resp, 3 + appl_key);
             return true;
         }
     }
@@ -3469,40 +3111,37 @@ static inline bool Vt_maybe_handle_keypad_key(Vt*      self,
 /**
  * Respond to key event if it is a function key
  * @return keypress was consumed */
-static inline bool Vt_maybe_handle_function_key(Vt*      self,
-                                                uint32_t key,
-                                                uint32_t mods)
+static inline bool Vt_maybe_handle_function_key(Vt* self, uint32_t key, uint32_t mods)
 {
     if (key >= XKB_KEY_F1 && key <= XKB_KEY_F35) {
         int f_num = key - XKB_KEY_F1;
         if (mods) {
-            if (f_num < 4)
-                sprintf(self->out_buf, "\e[[1;%u%c", mods + 1, f_num + 'P');
-            else
-                sprintf(self->out_buf, "\e[%d;%u~", f_num + 12, mods + 1);
+            if (f_num < 4) {
+                Vt_output_formated(self, "\e[[1;%u%c", mods + 1, f_num + 'P');
+            } else {
+                Vt_output_formated(self, "\e[%d;%u~", f_num + 12, mods + 1);
+            }
         } else {
-            if (f_num < 4)
-                sprintf(self->out_buf, "\eO%c", f_num + 'P');
-            else
-                sprintf(self->out_buf, "\e[%d~", f_num + 12);
+            if (f_num < 4) {
+                Vt_output_formated(self, "\eO%c", f_num + 'P');
+            } else {
+                Vt_output_formated(self, "\e[%d~", f_num + 12);
+            }
         }
-        Vt_write(self);
         return true;
     } else if (key == XKB_KEY_Insert) {
-        memcpy(self->out_buf, "\e[2~", 5);
-        Vt_write(self);
+        Vector_pushv_char(&self->output, "\e[2~", 4);
         return true;
     } else if (key == XKB_KEY_Page_Up) {
-        memcpy(self->out_buf, "\e[5~", 5);
-        Vt_write(self);
+        Vector_pushv_char(&self->output, "\e[5~", 4);
         return true;
     } else if (key == XKB_KEY_Page_Down) {
-        memcpy(self->out_buf, "\e[6~", 5);
-        Vt_write(self);
+        Vector_pushv_char(&self->output, "\e[6~", 4);
         return true;
     } else if (key == ' ' && FLAG_IS_SET(mods, MODIFIER_CONTROL)) {
-        memcpy(self->out_buf, "", 1);
-        Vt_write_n(self, 1);
+        // TODO: ?!
+        /* memcpy(self->out_buf, "", 1); */
+        /* Vt_write_n(self, 1); */
         return true;
     }
 
@@ -3511,8 +3150,7 @@ static inline bool Vt_maybe_handle_function_key(Vt*      self,
 
 /**
  *  Substitute keypad keys with normal ones */
-__attribute__((always_inline)) static inline uint32_t numpad_key_convert(
-  uint32_t key)
+static inline uint32_t numpad_key_convert(uint32_t key)
 {
     switch (key) {
         case XKB_KEY_KP_Add:
@@ -3568,37 +3206,27 @@ void Vt_handle_key(void* _self, uint32_t key, uint32_t rawkey, uint32_t mods)
         !Vt_maybe_handle_function_key(self, key, mods)) {
         key = numpad_key_convert(key);
 
-        uint8_t offset = 0;
         if (FLAG_IS_SET(mods, MODIFIER_ALT) && !self->modes.no_alt_sends_esc) {
-            Vt_buffer(self)[0] = '\e';
-            offset             = 1;
+            Vector_push_char(&self->output, '\e');
         }
 
         if (unlikely(key == '\b') && settings.bsp_sends_del)
             key = 127;
 
+        char             tmp[32];
         static mbstate_t mbstate;
-        size_t mb_len = c32rtomb(Vt_buffer(self) + offset, key, &mbstate);
+        size_t           mb_len = c32rtomb(tmp, key, &mbstate);
 
         if (mb_len) {
-            Vt_buffer(self)[mb_len] = '\0';
-            Vt_write(self);
+            Vector_pushv_char(&self->output, tmp, mb_len);
         }
     }
 
     if (settings.scroll_on_key) {
         Vt_visual_scroll_reset(self);
     }
-
-    CALL_FP(self->callbacks.on_action_performed, self->callbacks.user_data);
 }
 
-/**
- * Respond to mouse button event
- * @param button  - X11 button code
- * @param state   - press/release
- * @param ammount - for non-discrete scroll
- * @param mods    - modifier keys depressed */
 void Vt_handle_button(void*    _self,
                       uint32_t button,
                       bool     state,
@@ -3607,13 +3235,10 @@ void Vt_handle_button(void*    _self,
                       int32_t  ammount,
                       uint32_t mods)
 {
-    Vt* self = _self;
+    Vt*  self      = _self;
+    bool in_window = x >= 0 && x <= self->ws.ws_xpixel && y >= 0 && y <= self->ws.ws_ypixel;
 
-    bool in_window =
-      x >= 0 && x <= self->ws.ws_xpixel && y >= 0 && y <= self->ws.ws_ypixel;
-
-    if ((self->modes.extended_report ||
-         self->modes.mouse_motion_on_btn_report ||
+    if ((self->modes.extended_report || self->modes.mouse_motion_on_btn_report ||
          self->modes.mouse_btn_report) &&
         in_window) {
         if (!self->scrolling_visual) {
@@ -3627,95 +3252,94 @@ void Vt_handle_button(void*    _self,
             }
 
             if (self->modes.extended_report) {
-                sprintf(self->out_buf, "\e[<%u;%lu;%lu%c", button - 1,
-                        self->last_click_x + 1, self->last_click_y + 1,
-                        state ? 'M' : 'm');
+                Vt_output_formated(self, "\e[<%u;%lu;%lu%c", button - 1, self->last_click_x + 1,
+                                   self->last_click_y + 1, state ? 'M' : 'm');
             } else if (self->modes.mouse_btn_report) {
-                sprintf(self->out_buf, "\e[M%c%c%c",
-                        32 + button - 1 + !state * 3,
-                        (char)(32 + self->last_click_x + 1),
-                        (char)(32 + self->last_click_y + 1));
+                Vt_output_formated(self, "\e[M%c%c%c", 32 + button - 1 + !state * 3,
+                                   (char)(32 + self->last_click_x + 1),
+                                   (char)(32 + self->last_click_y + 1));
             }
-            Vt_write(self);
         }
     }
-
-    CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
 }
 
-/**
- * Respond to pointer motion event
- * @param button - button beeing held down */
 void Vt_handle_motion(void* _self, uint32_t button, int32_t x, int32_t y)
 {
     Vt* self = _self;
+
     if (self->modes.extended_report) {
         if (!self->scrolling_visual) {
             x              = CLAMP(x, 0, self->ws.ws_xpixel);
             y              = CLAMP(y, 0, self->ws.ws_ypixel);
             size_t click_x = (double)x / self->pixels_per_cell_x;
             size_t click_y = (double)y / self->pixels_per_cell_y;
-
-            if (click_x != self->last_click_x ||
-                click_y != self->last_click_y) {
+            if (click_x != self->last_click_x || click_y != self->last_click_y) {
                 self->last_click_x = click_x;
                 self->last_click_y = click_y;
-
-                sprintf(self->out_buf, "\e[<%d;%zu;%zuM", (int)button - 1 + 32,
-                        click_x + 1, click_y + 1);
-
-                Vt_write(self);
+                Vt_output_formated(self, "\e[<%d;%zu;%zuM", (int)button - 1 + 32, click_x + 1,
+                                   click_y + 1);
             }
         }
     }
 }
 
-/**
- * Respond to clipboard paste */
-void Vt_handle_clipboard(void* _self, const char* text)
+void Vt_handle_clipboard(void* self, const char* text)
 {
-    Vt* self = _self;
+    Vt* vt = self;
 
     if (!text)
         return;
 
-    size_t len = strlen(text), bi = 0;
-    int skipped = 0;
-    if (self->modes.bracketed_paste) {
-        memcpy(self->out_buf, "\e[200~", 6);
-        bi += 6;
+    size_t len = strlen(text);
+
+    if (vt->modes.bracketed_paste) {
+        Vector_pushv_char(&vt->output, "\e[200~", 6);
     }
 
-    for (size_t i = 0; i < len;) {
-        int to_cpy = MIN(len - i, sizeof(self->out_buf) -1 - bi);
-        char last = '\0';
-        for (int j = 0; j < to_cpy; ++j) {
-            char c = text[i + j];
-            if (c == '\n') {
-                if (last == '\r') {
-                    ++skipped;
-                } else {
-                    self->out_buf[bi + j - skipped] = '\r';
-                }
-            } else {
-                self->out_buf[bi + j - skipped] = c;
+    char last = '\0';
+    for (size_t i = 0; i < len; ++i) {
+        char c = text[i];
+        if (c == '\n') {
+            if (last != '\r') {
+                Vector_push_char(&vt->output, '\r');
             }
-            last = c;
+        } else {
+            Vector_push_char(&vt->output, c);
         }
-        
-        i += to_cpy;
-        bi += (to_cpy - skipped);
-        skipped = 0;
-        if (bi > sizeof(self->out_buf) -1 - (self->modes.bracketed_paste ? 7 : 1)) {
-            Vt_write(self);
-            bi = 0;
-        }
+        last = c;
     }
 
-    if (self->modes.bracketed_paste)
-        memcpy(self->out_buf + bi, "\e[201~", 7);
-    else
-        self->out_buf[bi] = 0;
+    if (vt->modes.bracketed_paste) {
+        Vector_pushv_char(&vt->output, "\e[201~", 6);
+    }
+}
 
-    Vt_write(self);
+void Vt_destroy(Vt* self)
+{
+    Vector_destroy_VtLine(&self->lines);
+    if (self->alt_lines.buf)
+        Vector_destroy_VtLine(&self->alt_lines);
+
+    Vector_destroy_char(&self->parser.active_sequence);
+
+    for (size_t* i = NULL; Vector_iter_size_t(&self->title_stack, i);)
+        free((char*)*i);
+
+    Vector_destroy_size_t(&self->title_stack);
+    free(self->work_dir);
+}
+
+void Vt_get_output(Vt* self, char** out_buf, size_t* out_bytes)
+{
+    ASSERT(out_buf && out_bytes, "");
+
+    if (unlikely(settings.debug_pty) && self->output.size) {
+        char* str = pty_string_prettyfy(self->output.buf, self->output.size);
+        fprintf(stderr, "pty.write(%3zu) <~ { %s }\n\n", self->output.size, str);
+        free(str);
+    }
+
+    *out_buf   = self->output.buf;
+    *out_bytes = self->output.size;
+    Vector_clear_char(&self->output);
 }

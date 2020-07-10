@@ -5,8 +5,8 @@
 #ifdef __linux
 #include <pty.h>
 #elif defined(__OpenBSD__) || defined(__NetBSD__)
-#include <util.h>
 #include <termios.h>
+#include <util.h>
 #elif defined(__FreeBSD__) || defined(__DragonFly__)
 #include <libutil.h>
 #include <termios.h>
@@ -22,24 +22,11 @@
 #include <unistd.h>
 
 #include "colors.h"
+#include "monitor.h"
 #include "settings.h"
 #include "timing.h"
 #include "util.h"
 #include "vector.h"
-
-typedef struct
-{
-    int32_t data[4];
-} VtLineProxy;
-
-extern void (*Vt_destroy_line_proxy)(int32_t proxy[static 4]);
-
-enum CursorType
-{
-    CURSOR_BLOCK = 0,
-    CURSOR_BEAM,
-    CURSOR_UNDERLINE,
-};
 
 enum MouseButton
 {
@@ -52,19 +39,20 @@ enum MouseButton
 
 typedef struct Cursor
 {
-    enum CursorType type : 2;
-    uint8_t         blinking : 1;
-    uint8_t         hidden : 1;
-    size_t          col, row;
+    enum CursorType
+    {
+        CURSOR_BLOCK = 0,
+        CURSOR_BEAM,
+        CURSOR_UNDERLINE,
+    } type : 2;
+
+    uint8_t blinking : 1;
+    uint8_t hidden : 1;
+    size_t  col, row;
 } Cursor;
 
-enum __attribute__((packed)) VtRuneStyle
-{
-    VT_RUNE_NORMAL = 0,
-    VT_RUNE_BOLD,
-    VT_RUNE_ITALIC,
-};
-
+/**
+ * Represents a single character */
 typedef struct __attribute__((packed))
 {
     char32_t code;
@@ -73,16 +61,22 @@ typedef struct __attribute__((packed))
     ColorRGB  line;
     ColorRGBA bg;
 
-    enum VtRuneStyle state : 3;
-    uint8_t          linecolornotdefault : 1;
-    uint8_t          dim : 1;
-    uint8_t          hidden : 1;
-    uint8_t          blinkng : 1;
-    uint8_t          underlined : 1;
-    uint8_t          strikethrough : 1;
-    uint8_t          doubleunderline : 1;
-    uint8_t          curlyunderline : 1;
-    uint8_t          overline : 1;
+    enum __attribute__((packed)) VtRuneStyle
+    {
+        VT_RUNE_NORMAL = 0,
+        VT_RUNE_BOLD,
+        VT_RUNE_ITALIC,
+    } state : 3;
+
+    uint8_t linecolornotdefault : 1;
+    uint8_t dim : 1;
+    uint8_t hidden : 1;
+    uint8_t blinkng : 1;
+    uint8_t underlined : 1;
+    uint8_t strikethrough : 1;
+    uint8_t doubleunderline : 1;
+    uint8_t curlyunderline : 1;
+    uint8_t overline : 1;
 
 } VtRune;
 
@@ -96,7 +90,8 @@ DEF_VECTOR(Vector_VtRune, Vector_destroy_VtRune)
 
 DEF_VECTOR(Vector_char, Vector_destroy_char)
 
-// represents a clickable range of text linked to a URL
+/**
+ * represents a clickable range of text linked to a URL */
 typedef struct
 {
     size_t begin, end;
@@ -109,6 +104,13 @@ static void VtUriRange_destroy(VtUriRange* self)
 }
 
 DEF_VECTOR(VtUriRange, VtUriRange_destroy)
+
+typedef struct
+{
+    int32_t data[4];
+} VtLineProxy;
+
+extern void (*Vt_destroy_line_proxy)(int32_t proxy[static 4]);
 
 typedef struct
 {
@@ -133,23 +135,24 @@ typedef struct
     /* Proxy resources need to be regenerated */
     bool damaged : 1;
 
+    /*
+     * TODO: something like this
+     * struct Damage {
+     *     enum Type { NONE, FULL, PARTIAL } type;
+     *     int8_t shift, region_front, region_end;
+     * };
+     */
+
 } VtLine;
 
+/* TODO: Make a version of Vector that can bind an additional destructor argument, so
+ * Vt_destroy_line_proxy doesn't have to be a global */
 static inline void VtLine_destroy(VtLine* self)
 {
     if (Vt_destroy_line_proxy)
         Vt_destroy_line_proxy(self->proxy.data);
 
     Vector_destroy_VtRune(&self->data);
-}
-
-static inline VtLine VtLine_new()
-{
-    return (VtLine){ .damaged    = true,
-                     .reflowable = true,
-                     .rejoinable = false,
-                     .data       = Vector_new_VtRune(),
-                     .proxy      = { { 0 } } };
 }
 
 DEF_VECTOR(VtLine, VtLine_destroy)
@@ -161,9 +164,7 @@ typedef struct _Vt
         void* user_data;
 
         Pair_uint32_t (*on_window_size_requested)(void*);
-        Pair_uint32_t (*on_window_size_from_cells_requested)(void*,
-                                                             uint32_t r,
-                                                             uint32_t c);
+        Pair_uint32_t (*on_window_size_from_cells_requested)(void*, uint32_t r, uint32_t c);
         Pair_uint32_t (*on_number_of_cells_requested)(void*);
         void (*on_window_resize_requested)(void*, uint32_t w, uint32_t h);
         Pair_uint32_t (*on_window_position_requested)(void*);
@@ -178,11 +179,6 @@ typedef struct _Vt
         void (*on_clipboard_sent)(void*, const char*);
 
     } callbacks;
-
-    /* Related to window interaction and gui */
-
-    /* Controlled program has quit */
-    bool is_done;
 
     size_t last_click_x;
     size_t last_click_y;
@@ -218,8 +214,8 @@ typedef struct _Vt
         size_t click_begin_char_idx;
 
         /* selected region */
-        size_t begin_line;
-        size_t end_line;
+        size_t  begin_line;
+        size_t  end_line;
         int32_t begin_char_idx;
         int32_t end_char_idx;
 
@@ -228,16 +224,8 @@ typedef struct _Vt
     /* Related to terminal */
     struct winsize ws;
     struct termios tios;
-
-    int master, slave, io;
-
-#ifdef DEBUG
-    char dev_name[64];
-#endif
-
-    fd_set wfdset, rfdset;
-
-    pid_t pid;
+    int            master_fd;
+    Vector_char    output;
 
     struct Parser
     {
@@ -259,14 +247,12 @@ typedef struct _Vt
         bool      in_mb_seq;
         mbstate_t input_mbstate;
 
-        VtRune char_state; // records character properties
+        VtRune char_state; // records currently selected character properties
         bool   color_inverted;
 
         Vector_char active_sequence;
     } parser;
 
-    char          out_buf[128];
-    char          buf[1024];
     char*         title;
     char*         work_dir;
     Vector_size_t title_stack;
@@ -284,11 +270,8 @@ typedef struct _Vt
 
     size_t alt_cursor_pos;
     size_t saved_cursor_pos;
-
-    /* size_t active_line; */
     size_t alt_active_line;
     size_t saved_active_line;
-
     size_t scroll_region_top;
     size_t scroll_region_bottom;
 
@@ -312,71 +295,52 @@ typedef struct _Vt
 
 } Vt;
 
+/**
+ * Make a new interpreter with a given size */
 Vt Vt_new(uint32_t cols, uint32_t rows);
 
 /**
- * set window system connection fd to monitor for activity */
-static inline void Vt_watch_fd(Vt* const self, const int fd)
-{
-    self->io = fd;
-}
-
-static inline char* Vt_buffer(Vt* const self)
-{
-    return self->out_buf;
-}
+ * Interpret a range od bytes */
+void Vt_interpret(Vt* self, char* buf, size_t bytes);
 
 /**
- * @return requires retry */
-bool Vt_wait(Vt* self);
+ * Ger response message */
+void Vt_get_output(Vt* self, char** out_buf, size_t* out_bytes);
 
 /**
- * @return requires retry */
-bool Vt_read(Vt* self, int* rd);
-
-static void Vt_write(Vt* self);
-
-void Vt_kill_program(Vt* self);
-
+ * Get lines that should be visible */
 void vt_get_visible_lines(const Vt* self, VtLine** out_begin, VtLine** out_end);
 
+/**
+ * Change terminal size */
 void Vt_resize(Vt* self, uint32_t x, uint32_t y);
 
-Vector_char Vt_select_region_to_string(Vt* self);
-
-void Vt_select_set_front(Vt* self, int32_t x, int32_t y);
-
-void Vt_select_set_front_cell(Vt* self, int32_t x, int32_t y);
-
+/**
+ * Destroy all renderer line 'proxy' objects */
 void Vt_clear_all_proxies(Vt* self);
 
+/**
+ * Print state info to stdout */
 void Vt_dump_info(Vt* self);
 
+/**
+ * Enable unicode input prompt */
 void Vt_start_unicode_input(Vt* self);
 
-static void Vt_destroy(Vt* self)
-{
-    Vt_kill_program(self);
-
-    Vector_destroy_VtLine(&self->lines);
-
-    if (self->alt_lines.buf)
-        Vector_destroy_VtLine(&self->alt_lines);
-
-    Vector_destroy_char(&self->parser.active_sequence);
-
-    for (size_t* i = NULL; Vector_iter_size_t(&self->title_stack, i);)
-        free((char*)*i);
-
-    Vector_destroy_size_t(&self->title_stack);
-
-    free(self->work_dir);
-}
-
+/**
+ * Respond to keypress event */
 void Vt_handle_key(void* self, uint32_t key, uint32_t rawkey, uint32_t mods);
 
+/**
+ * Respond to clipboard paste */
 void Vt_handle_clipboard(void* self, const char* text);
 
+/**
+ * Respond to mouse button event
+ * @param button  - X11 button code
+ * @param state   - press/release
+ * @param ammount - for non-discrete scroll
+ * @param mods    - modifier keys depressed */
 void Vt_handle_button(void*    self,
                       uint32_t button,
                       bool     state,
@@ -385,13 +349,14 @@ void Vt_handle_button(void*    self,
                       int32_t  ammount,
                       uint32_t mods);
 
+/**
+ * Respond to pointer motion event
+ * @param button - button being held down */
 void Vt_handle_motion(void* self, uint32_t button, int32_t x, int32_t y);
 
 static inline size_t Vt_top_line(const Vt* const self)
 {
-    return self->lines.size <= self->ws.ws_row
-             ? 0
-             : self->lines.size - self->ws.ws_row;
+    return self->lines.size <= self->ws.ws_row ? 0 : self->lines.size - self->ws.ws_row;
 }
 
 static inline size_t Vt_visual_top_line(const Vt* const self)
@@ -401,54 +366,83 @@ static inline size_t Vt_visual_top_line(const Vt* const self)
 
 static inline size_t Vt_visual_bottom_line(const Vt* const self)
 {
-    return self->ws.ws_row + Vt_visual_top_line(self) -1;
+    return self->ws.ws_row + Vt_visual_top_line(self) - 1;
 }
 
 void Vt_visual_scroll_to(Vt* self, size_t line);
-
-void Vt_visual_scroll_down(Vt* self);
-
 void Vt_visual_scroll_up(Vt* self);
-
+void Vt_visual_scroll_down(Vt* self);
 void Vt_visual_scroll_reset(Vt* self);
 
+/**
+ * Get a range of lines that should be visible */
 void Vt_get_visible_lines(const Vt* self, VtLine** out_begin, VtLine** out_end);
 
+/**
+ * Initialize selection region to word by pixel in screen coordinates */
 void Vt_select_init_word(Vt* self, int32_t x, int32_t y);
 
-void Vt_select_init(Vt* self, enum SelectMode mode, int32_t x, int32_t y);
-
-void Vt_select_init_cell(Vt* self, enum SelectMode mode, int32_t x, int32_t y);
-
+/**
+ * Initialize selection region to line by pixel in screen coordinates */
 void Vt_select_init_line(Vt* self, int32_t y);
 
+/**
+ * Initialize selection region to character by pixel in screen coordinates */
+void Vt_select_init(Vt* self, enum SelectMode mode, int32_t x, int32_t y);
+
+/**
+ * Initialize selection region to character by cell in screen coordinates */
+void Vt_select_init_cell(Vt* self, enum SelectMode mode, int32_t x, int32_t y);
+
+/**
+ * Replace existing selection with the initialized selection */
 void Vt_select_commit(Vt* self);
 
+/**
+ * Get selected text as utf8 string */
+Vector_char Vt_select_region_to_string(Vt* self);
+
+/**
+ * Set selection begin point to pixel in screen coordinates */
+void Vt_select_set_front(Vt* self, int32_t x, int32_t y);
+
+/**
+ * Set selection begin point to cell in screen coordinates */
+void Vt_select_set_front_cell(Vt* self, int32_t x, int32_t y);
+
+/**
+ * Set selection end point to pixel in screen coordinates */
 void Vt_select_set_end(Vt* self, int32_t x, int32_t y);
 
+/**
+ * Set selection end point to cell in screen coordinates */
 void Vt_select_set_end_cell(Vt* self, int32_t x, int32_t y);
 
+/**
+ * End selection */
 void Vt_select_end(Vt* self);
 
 /**
- * Should cell (in screen coordinates) be visually highlighted as selected */
-__attribute__((always_inline, hot)) static inline bool
-Vt_is_cell_selected(const Vt* const self, int32_t x, int32_t y)
+ * Destroy the interpreter */
+void Vt_destroy(Vt* self);
+
+/**
+ * Should a cell (in screen coordinates) be visually highlighted as selected */
+__attribute__((always_inline, hot)) static inline bool Vt_is_cell_selected(const Vt* const self,
+                                                                           int32_t         x,
+                                                                           int32_t         y)
 {
     switch (expect(self->selection.mode, SELECT_MODE_NONE)) {
         case SELECT_MODE_NONE:
             return false;
 
         case SELECT_MODE_BOX:
-            return !(
-              Vt_visual_top_line(self) + y <
-                MIN(self->selection.end_line, self->selection.begin_line) ||
-              (Vt_visual_top_line(self) + y >
-               MAX(self->selection.end_line, self->selection.begin_line)) ||
-              (MAX(self->selection.begin_char_idx,
-                   self->selection.end_char_idx) < x) ||
-              (MIN(self->selection.begin_char_idx,
-                   self->selection.end_char_idx) > x));
+            return !(Vt_visual_top_line(self) + y <
+                       MIN(self->selection.end_line, self->selection.begin_line) ||
+                     (Vt_visual_top_line(self) + y >
+                      MAX(self->selection.end_line, self->selection.begin_line)) ||
+                     (MAX(self->selection.begin_char_idx, self->selection.end_char_idx) < x) ||
+                     (MIN(self->selection.begin_char_idx, self->selection.end_char_idx) > x));
 
         case SELECT_MODE_NORMAL:
             if (Vt_visual_top_line(self) + y >
@@ -458,20 +452,16 @@ Vt_is_cell_selected(const Vt* const self, int32_t x, int32_t y)
                 return true;
             } else {
                 if (self->selection.begin_line == self->selection.end_line) {
-                    return (self->selection.begin_line ==
-                            Vt_visual_top_line(self) + y) &&
-                           (x >= MIN(self->selection.begin_char_idx,
-                                     self->selection.end_char_idx) &&
-                            x <= MAX(self->selection.begin_char_idx,
-                                     self->selection.end_char_idx));
-                } else if (Vt_visual_top_line(self) + y ==
-                           self->selection.begin_line) {
+                    return (self->selection.begin_line == Vt_visual_top_line(self) + y) &&
+                           (x >=
+                              MIN(self->selection.begin_char_idx, self->selection.end_char_idx) &&
+                            x <= MAX(self->selection.begin_char_idx, self->selection.end_char_idx));
+                } else if (Vt_visual_top_line(self) + y == self->selection.begin_line) {
                     return self->selection.begin_line < self->selection.end_line
                              ? x >= self->selection.begin_char_idx
                              : x <= self->selection.begin_char_idx;
 
-                } else if (Vt_visual_top_line(self) + y ==
-                           self->selection.end_line) {
+                } else if (Vt_visual_top_line(self) + y == self->selection.end_line) {
                     return self->selection.begin_line > self->selection.end_line
                              ? x >= self->selection.end_char_idx
                              : x <= self->selection.end_char_idx;
