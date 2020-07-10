@@ -1472,15 +1472,13 @@ static inline void Vt_handle_CSI(Vt* self, char c)
                 case 'f':
                 /* <ESC>[ Py ; Px H - move cursor to Px-Py (CUP) */
                 case 'H': {
-                    uint32_t x = 0, y = 0;
-                    if (*seq != 'H') {
-                        if (sscanf(seq, "%u;%u", &y, &x) == EOF) {
-                            WRN("invalid CSI(CUP) sequence %s\n", seq);
-                            break;
-                        }
-                        --x;
-                        --y;
+                    uint32_t x = 1, y = 1;
+                    if (*seq != 'H' && sscanf(seq, "%u;%u", &y, &x) == EOF) {
+                        WRN("invalid CSI(CUP) sequence %s\n", seq);
+                        break;
                     }
+                    --x;
+                    --y;
                     Vt_move_cursor(self, x, y);
                 } break;
 
