@@ -6,16 +6,17 @@
 #include <sys/select.h>
 #include <utmp.h>
 
-#include <errno.h> 
+#include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
 
-Monitor Monitor_fork_new_pty(struct winsize* ws)
+Monitor Monitor_fork_new_pty(uint32_t cols, uint32_t rows)
 {
-    Monitor self;
-    self.exit = false;
+    struct winsize ws = { .ws_col = cols, .ws_row = rows };
+    Monitor        self;
+    self.exit  = false;
     self.extra = 0;
-    openpty(&self.master, &self.slave, NULL, NULL, ws);
+    openpty(&self.master, &self.slave, NULL, NULL, &ws);
     self.pid = fork();
     if (self.pid == 0) {
         close(self.master);
@@ -25,12 +26,21 @@ Monitor Monitor_fork_new_pty(struct winsize* ws)
         unsetenv("TERMCAP");
         setenv("COLORTERM", "truecolor", 1);
         setenv("VTE_VERSION", "5602", 1);
-        setenv("TERM", settings.term, 1);
-        if (execvp(settings.shell, (char* const*)settings.shell_argv))
-            printf(TERMCOLOR_RED "Failed to execute command");
-    } else if (self.pid < 0)
-        ERR("Failed to fork process %s", strerror(errno));
+        setenv("TERM", settings.term.str, 1);
+        settings_cleanup();
 
+        if (execvp(settings.shell.str, (char**)settings.shell_argv)) {
+            printf(TERMCOLOR_RED "Failed to execute command: \'%s\'.\n%s\n\narguments: ",
+                   settings.shell.str, strerror(errno));
+            for (int i = 0; i < settings.shell_argc; ++i) {
+                printf("\'%s\'%s", settings.shell_argv[i], i == settings.shell_argc - 1 ? "" : ", ");
+            }
+            puts("\nPress Ctrl-c to exit");
+            for (;;) pause();
+        }
+    } else if (self.pid < 0) {
+        ERR("Failed to fork process %s", strerror(errno));
+    }
     close(self.slave);
     return self;
 }
@@ -38,7 +48,7 @@ Monitor Monitor_fork_new_pty(struct winsize* ws)
 bool Monitor_wait(Monitor* self)
 {
     // TODO: poll()
-    
+
     FD_ZERO(&self->rfdset);
     FD_ZERO(&self->wfdset);
     FD_SET(self->master, &self->rfdset);

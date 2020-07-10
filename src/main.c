@@ -1,12 +1,13 @@
 /* See LICENSE for license information. */
 
 /**
- * App links Vt, Window, Gfx modules together and deals with ui
+ * App links Vt, Monitor, Window, Gfx modules together and deals with ui
  *
  * TODO:
+ * - Some way to get the next closest event timer to pass to monitor as pool() timeout
  * - Minimum scrollbar size
  * - It makes more sense for the unicode input prompt to be here
- *
+ * - Move flash animations here
  */
 
 #define _GNU_SOURCE
@@ -28,10 +29,21 @@
 #include "ui.h"
 #include "vt.h"
 
+#ifndef SCROLLBAR_HIDE_DELAY_MS
 #define SCROLLBAR_HIDE_DELAY_MS 1500
-#define SCROLLBAR_FADE_TIME_MS  150
-#define DOUBLE_CLICK_DELAY_MS   300
-#define AUTOSCROLL_DELAY_MS     50
+#endif
+
+#ifndef SCROLLBAR_FADE_TIME_MS
+#define SCROLLBAR_FADE_TIME_MS 150
+#endif
+
+#ifndef DOUBLE_CLICK_DELAY_MS
+#define DOUBLE_CLICK_DELAY_MS 300
+#endif
+
+#ifndef AUTOSCROLL_DELAY_MS
+#define AUTOSCROLL_DELAY_MS 50
+#endif
 
 typedef struct
 {
@@ -85,21 +97,19 @@ static void App_set_callbacks(App* self);
 void* App_load_gl_ext(const char* name)
 {
     void* addr = Window_get_proc_adress(instance.win, name);
-
     if (!addr) {
         ERR("Failed to load extension proc adress for: %s", name);
     }
-
     return addr;
 }
 
 void App_init(App* self)
 {
-    self->vt           = Vt_new(settings.cols, settings.rows);
-    self->monitor      = Monitor_fork_new_pty(&self->vt.ws);
-    self->vt.master_fd = self->monitor.master;
 
-    self->gfx = Gfx_new_OpenGL21();
+    self->monitor      = Monitor_fork_new_pty(settings.cols, settings.rows);
+    self->vt           = Vt_new(settings.cols, settings.rows);
+    self->vt.master_fd = self->monitor.master;
+    self->gfx          = Gfx_new_OpenGL21();
 
     if (!settings.x11_is_default)
 #ifndef NOWL
@@ -110,7 +120,6 @@ void App_init(App* self)
         self->win = Window_new_x11(Gfx_pixels(self->gfx, settings.cols, settings.rows));
 #endif
     }
-
     if (!self->win) {
         ERR("Failed to create window"
 #ifdef NOX
@@ -118,36 +127,25 @@ void App_init(App* self)
 #endif
         );
     }
-
     App_set_callbacks(self);
-
     settings_after_window_system_connected();
-
     Window_set_swap_interval(self->win, 0);
-
     gl_load_ext = App_load_gl_ext;
-
     Gfx_init_with_context_activated(self->gfx);
-
     Pair_uint32_t size = Window_size(self->win);
     Gfx_resize(self->gfx, size.first, size.second);
-
     Pair_uint32_t chars = Gfx_get_char_size(self->gfx);
     Vt_resize(&self->vt, chars.first, chars.second);
-
     Monitor_watch_fd(&self->monitor, Window_get_connection_fd(self->win));
-
     self->ui.scrollbar.width = 10;
-
-    self->resolution = size;
+    self->resolution         = size;
 }
 
 void App_run(App* self)
 {
     while (!Window_closed(self->win) && !self->monitor.exit) {
         Window_events(self->win);
-
-        char* buf;
+        char*  buf;
         size_t len;
         Vt_get_output(&self->vt, &buf, &len);
         if (len) {
@@ -170,10 +168,7 @@ void App_run(App* self)
             Monitor_wait(&self->monitor);
             Monitor_write(&self->monitor, buf, len);
         }
-
-
         Pair_uint32_t newres = Window_size(self->win);
-
         if (newres.first != self->resolution.first || newres.second != self->resolution.second) {
             self->resolution = newres;
             Gfx_resize(self->gfx, self->resolution.first, self->resolution.second);
@@ -182,24 +177,19 @@ void App_run(App* self)
             Window_notify_content_change(self->win);
             Vt_resize(&self->vt, chars.first, chars.second);
         }
-
         App_do_autoscroll(self);
         App_update_scrollbar_vis(self);
         App_update_scrollbar_dims(self);
         App_update_cursor(self);
-
         if (!!Gfx_update_timers(self->gfx, &self->vt, &self->ui) +
             !!Gfx_set_focus(self->gfx, FLAG_IS_SET(self->win->state_flags, WINDOW_IN_FOCUS))) {
             Window_notify_content_change(self->win);
         }
-
         if (Window_needs_repaint(self->win)) {
             Gfx_draw(self->gfx, &self->vt, &self->ui);
         }
-
         Window_maybe_swap(self->win);
     }
-
     Vt_destroy(&self->vt);
     Gfx_destroy(self->gfx);
     Window_destroy(self->win);

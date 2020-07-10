@@ -197,7 +197,7 @@ void Vt_select_init_line(Vt* self, int32_t y)
 
 static inline void Vt_mark_proxy_damaged(Vt* self, size_t idx)
 {
-    CALL_FP(self->callbacks.on_bell_flash, self->callbacks.user_data);
+    CALL_FP(self->callbacks.on_action_performed, self->callbacks.user_data);
     self->lines.buf[idx].damaged = true;
 }
 
@@ -1467,7 +1467,7 @@ static inline void Vt_handle_CSI(Vt* self, char c)
 
                 } break;
 
-                /* no args: 1:1 */
+                /* no args: 1:1, one arg: x:1 */
                 /* <ESC>[ Py ; Px f - move cursor to Px-Py (HVP) */
                 case 'f':
                 /* <ESC>[ Py ; Px H - move cursor to Px-Py (CUP) */

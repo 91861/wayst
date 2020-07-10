@@ -29,7 +29,7 @@ typedef struct
     char   input_buffer[MONITOR_INPUT_BUFFER_SZ];
 } Monitor;
 
-Monitor Monitor_fork_new_pty(struct winsize* ws);
+Monitor Monitor_fork_new_pty(uint32_t cols, uint32_t rows);
 bool Monitor_wait(Monitor* self);
 ssize_t Monitor_read(Monitor* self);
 int Monitor_write(Monitor* self, char* buffer, size_t bytes);

@@ -62,6 +62,7 @@
 #define MAX(_a, _b)         ((_a) > (_b) ? (_a) : (_b))
 #define MIN(_a, _b)         ((_a) < (_b) ? (_a) : (_b))
 #define CLAMP(_v, _lo, _hi) ((_v) > (_hi) ? (_hi) : (_v) < (_lo) ? (_lo) : (_v))
+#define OR(_obj, _alt)      ((_obj) ? (_obj) : (_alt))
 
 #define ARRAY_SIZE(_array) (sizeof((_array)) / sizeof((_array[0])))
 #define ARRAY_LAST(_array) (_array[(sizeof((_array)) / sizeof((_array[0]))) - 1])
@@ -293,4 +294,78 @@ static inline bool strtob(const char* restrict str)
         return false;
     }
     return strneqci("true", str, 4) || strneqci("1", str, 1);
+}
+
+/**
+ * string that keep track if it was malloc()-ed */
+typedef struct
+{
+    char* str;
+    __attribute__((packed)) enum AStringState {
+        ASTRING_UNINITIALIZED = 0,
+        ASTRING_DYNAMIC,
+        ASTRING_STATIC
+    } state;
+} AString;
+
+#define AString_UNINIT (AString)
+
+
+static AString AString_new_uninitialized()
+{
+    return (AString){ .str = NULL, .state = ASTRING_UNINITIALIZED };
+}
+
+static AString AString_new_static(char* str)
+{
+    return (AString){ .str = str, .state = ASTRING_STATIC };
+}
+
+static AString AString_new_dynamic(char* str)
+{
+    return (AString){ .str = str, .state = ASTRING_DYNAMIC };
+}
+
+static void AString_destroy(AString* self)
+{
+    if (self->state == ASTRING_DYNAMIC) {
+        free(self->str);
+    }
+    self->state = ASTRING_UNINITIALIZED;
+    self->str   = NULL;
+}
+
+static void AString_replace_with_static(AString* self, char* str)
+{
+    AString_destroy(self);
+    self->str   = str;
+    self->state = ASTRING_STATIC;
+}
+
+static void AString_replace_with_dynamic(AString* self, char* str)
+{
+    if (!str)
+        return;
+    AString_destroy(self);
+    self->str   = str;
+    self->state = ASTRING_DYNAMIC;
+}
+
+static size_t AString_len(AString* self)
+{
+    return strlen(self->str);
+}
+
+static char* AString_dup(AString* self)
+{
+    return strdup(self->str);
+}
+
+static AString AString_new_copy(AString* other)
+{
+    if (other->state == ASTRING_UNINITIALIZED || other->state == ASTRING_STATIC) {
+        return *other;
+    } else {
+        return (AString){ .str = strdup(other->str), .state = ASTRING_DYNAMIC };
+    }
 }

@@ -731,10 +731,10 @@ void GfxOpenGL21_load_font(Gfx* self)
         }
     }
 
-    if ((ft_err =
-           FT_New_Face(gfxOpenGL21(self)->ft, settings.font_name, 0, &gfxOpenGL21(self)->face))) {
-        ERR("Font error, failed to load font file: %s. error: %s", settings.font_name,
-            stringify_ft_error(ft_err));
+    if ((ft_err = FT_New_Face(gfxOpenGL21(self)->ft, settings.font_file_name_regular.str, 0,
+                              &gfxOpenGL21(self)->face))) {
+        ERR("Font error, failed to load font file: %s. error: %s",
+            settings.font_file_name_regular.str, stringify_ft_error(ft_err));
     }
 
     if ((ft_err =
@@ -748,7 +748,7 @@ void GfxOpenGL21_load_font(Gfx* self)
 
             if ((ft_err = FT_Select_Size(gfxOpenGL21(self)->face, strike_idx - 1))) {
                 ERR("Failed to set main font bitmap strike, file %s. error: %s\n",
-                    settings.font_name, stringify_ft_error(ft_err));
+                    settings.font_file_name_regular.str, stringify_ft_error(ft_err));
             }
         }
     }
@@ -757,23 +757,23 @@ void GfxOpenGL21_load_font(Gfx* self)
         WRN("Main font is not fixed width\n");
     }
 
-    if (settings.font_name_bold) {
-        if ((ft_err = FT_New_Face(gfxOpenGL21(self)->ft, settings.font_name_bold, 0,
+    if (settings.font_file_name_bold.str) {
+        if ((ft_err = FT_New_Face(gfxOpenGL21(self)->ft, settings.font_file_name_bold.str, 0,
                                   &gfxOpenGL21(self)->face_bold)))
-            ERR("Font error, failed to load font file: %s. error: %s", settings.font_name_bold,
-                stringify_ft_error(ft_err));
+            ERR("Font error, failed to load font file: %s. error: %s",
+                settings.font_file_name_bold.str, stringify_ft_error(ft_err));
 
         if (strike_idx >= 0) {
             if ((ft_err = FT_Select_Size(gfxOpenGL21(self)->face_bold, strike_idx - 1))) {
                 WRN("Failed to set main font bitmap strike, file %s. error: %s\n",
-                    settings.font_name_bold, stringify_ft_error(ft_err));
+                    settings.font_file_name_bold.str, stringify_ft_error(ft_err));
             }
         } else {
             if ((ft_err = FT_Set_Char_Size(gfxOpenGL21(self)->face_bold, settings.font_size * 64,
                                            settings.font_size * 64, settings.font_dpi,
                                            settings.font_dpi))) {
-                WRN("Failed to set font size, file %s. error: %s\n", settings.font_name_bold,
-                    stringify_ft_error(ft_err));
+                WRN("Failed to set font size, file %s. error: %s\n",
+                    settings.font_file_name_bold.str, stringify_ft_error(ft_err));
             }
         }
 
@@ -782,23 +782,23 @@ void GfxOpenGL21_load_font(Gfx* self)
         }
     }
 
-    if (settings.font_name_italic) {
-        if ((ft_err = FT_New_Face(gfxOpenGL21(self)->ft, settings.font_name_italic, 0,
+    if (settings.font_file_name_italic.str) {
+        if ((ft_err = FT_New_Face(gfxOpenGL21(self)->ft, settings.font_file_name_italic.str, 0,
                                   &gfxOpenGL21(self)->face_italic)))
-            ERR("Font error, failed to load font file: %s. error: %s", settings.font_name_italic,
-                stringify_ft_error(ft_err));
+            ERR("Font error, failed to load font file: %s. error: %s",
+                settings.font_file_name_italic.str, stringify_ft_error(ft_err));
 
         if (strike_idx >= 0) {
             if ((ft_err = FT_Select_Size(gfxOpenGL21(self)->face_italic, strike_idx - 1))) {
                 WRN("Failed to set font bitmap strike, file %s. error: %s\n",
-                    settings.font_name_italic, stringify_ft_error(ft_err));
+                    settings.font_file_name_italic.str, stringify_ft_error(ft_err));
             }
         } else {
             if ((ft_err = FT_Set_Char_Size(gfxOpenGL21(self)->face_italic, settings.font_size * 64,
                                            settings.font_size * 64, settings.font_dpi,
                                            settings.font_dpi))) {
-                WRN("Failed to set font size, file %s. error: %s\n", settings.font_name_italic,
-                    stringify_ft_error(ft_err));
+                WRN("Failed to set font size, file %s. error: %s\n",
+                    settings.font_file_name_italic.str, stringify_ft_error(ft_err));
             }
         }
 
@@ -807,27 +807,27 @@ void GfxOpenGL21_load_font(Gfx* self)
         }
     }
 
-    if (settings.font_name_fallback) {
-        if (FT_New_Face(gfxOpenGL21(self)->ft, settings.font_name_fallback, 0,
+    if (settings.font_file_name_fallback.str) {
+        if (FT_New_Face(gfxOpenGL21(self)->ft, settings.font_file_name_fallback.str, 0,
                         &gfxOpenGL21(self)->face_fallback))
-            WRN("Font error, failed to load font file: %s", settings.font_name_fallback);
+            WRN("Font error, failed to load font file: %s", settings.font_file_name_fallback.str);
 
         if ((ft_err =
                FT_Set_Char_Size(gfxOpenGL21(self)->face_fallback, settings.font_size * 64,
                                 settings.font_size * 64, settings.font_dpi, settings.font_dpi))) {
-            WRN("Failed to set font size, file %s. error: %s\n", settings.font_name_fallback,
-                stringify_ft_error(ft_err));
+            WRN("Failed to set font size, file %s. error: %s\n",
+                settings.font_file_name_fallback.str, stringify_ft_error(ft_err));
         }
     }
 
-    if (settings.font_name_fallback2) {
-        if (FT_New_Face(gfxOpenGL21(self)->ft, settings.font_name_fallback2, 0,
+    if (settings.font_file_name_fallback2.str) {
+        if (FT_New_Face(gfxOpenGL21(self)->ft, settings.font_file_name_fallback2.str, 0,
                         &gfxOpenGL21(self)->face_fallback2))
-            ERR("Font error, failed to load font file: %s", settings.font_name_fallback2);
+            ERR("Font error, failed to load font file: %s", settings.font_file_name_fallback2.str);
 
         if ((ft_err = FT_Select_Size(gfxOpenGL21(self)->face_fallback2, 0))) {
-            WRN("Failed to set font size, file %s. error: %s\n", settings.font_name_fallback2,
-                stringify_ft_error(ft_err));
+            WRN("Failed to set font size, file %s. error: %s\n",
+                settings.font_file_name_fallback2.str, stringify_ft_error(ft_err));
         }
     }
 
@@ -941,7 +941,7 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
     gfxOpenGL21(self)->_vec_glyph_buffer_italic = Vector_new_with_capacity_GlyphBufferData(20);
 
     // if font styles don't exist point their resources to deaults
-    if (settings.font_name_bold) {
+    if (settings.font_file_name_bold.str) {
         gfxOpenGL21(self)->_atlas_bold = Atlas_new(gfxOpenGL21(self), gfxOpenGL21(self)->face_bold);
         gfxOpenGL21(self)->atlas_bold  = &gfxOpenGL21(self)->_atlas_bold;
 
@@ -956,7 +956,7 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
         gfxOpenGL21(self)->vec_glyph_buffer_bold = &gfxOpenGL21(self)->_vec_glyph_buffer;
     }
 
-    if (settings.font_name_italic) {
+    if (settings.font_file_name_italic.str) {
         gfxOpenGL21(self)->_atlas_italic =
           Atlas_new(gfxOpenGL21(self), gfxOpenGL21(self)->face_italic);
         gfxOpenGL21(self)->atlas_italic = &gfxOpenGL21(self)->_atlas_italic;
@@ -1006,13 +1006,13 @@ void GfxOpenGL21_reload_font(Gfx* self)
         Cache_destroy(&gfxOpenGL21(self)->_cache_italic);
 
     FT_Done_Face(gfxOpenGL21(self)->face);
-    if (settings.font_name_bold)
+    if (settings.font_file_name_bold.str)
         FT_Done_Face(gfxOpenGL21(self)->face_bold);
-    if (settings.font_name_italic)
+    if (settings.font_file_name_italic.str)
         FT_Done_Face(gfxOpenGL21(self)->face_italic);
-    if (settings.font_name_fallback)
+    if (settings.font_file_name_fallback.str)
         FT_Done_Face(gfxOpenGL21(self)->face_fallback);
-    if (settings.font_name_fallback2)
+    if (settings.font_file_name_fallback2.str)
         FT_Done_Face(gfxOpenGL21(self)->face_fallback2);
 
     GfxOpenGL21_load_font(self);
@@ -1022,12 +1022,12 @@ void GfxOpenGL21_reload_font(Gfx* self)
     gfxOpenGL21(self)->_atlas = Atlas_new(gfxOpenGL21(self), gfxOpenGL21(self)->face);
     Cache_init(&gfxOpenGL21(self)->_cache);
 
-    if (settings.font_name_bold) {
+    if (settings.font_file_name_bold.str) {
         gfxOpenGL21(self)->_atlas_bold = Atlas_new(gfxOpenGL21(self), gfxOpenGL21(self)->face_bold);
         Cache_init(&gfxOpenGL21(self)->_cache_bold);
     }
 
-    if (settings.font_name_italic) {
+    if (settings.font_file_name_italic.str) {
         gfxOpenGL21(self)->_atlas_italic =
           Atlas_new(gfxOpenGL21(self), gfxOpenGL21(self)->face_italic);
         Cache_init(&gfxOpenGL21(self)->_cache_italic);
@@ -1713,7 +1713,6 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
             }
 
             if (drawing[4]) {
-
                 float cw      = gfx->glyph_width_pixels * scalex;
                 int   n_cells = round((end[4] - begin[4]) / cw);
                 float t_y     = 1.0f - gfx->squiggle_texture.h * scaley;
@@ -1821,8 +1820,10 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glBegin(GL_QUADS);
-        if (can_reuse) glColor4f(0,0,0,0);
-        else glColor4f(fabs(sin(debug_tint)), fabs(cos(debug_tint)), sin(debug_tint), 0.3);
+        if (can_reuse)
+            glColor4f(0, 0, 0, 0);
+        else
+            glColor4f(fabs(sin(debug_tint)), fabs(cos(debug_tint)), sin(debug_tint), 0.3);
         glVertex2f(1, 1);
         glVertex2f(-1, 1);
         glColor4f(fabs(sin(debug_tint)), fabs(cos(debug_tint)), sin(debug_tint), 0.3);
@@ -1831,7 +1832,8 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
         glEnd();
         glDisable(GL_BLEND);
         debug_tint += 0.5f;
-        if (debug_tint > M_PI) debug_tint -= M_PI;
+        if (debug_tint > M_PI)
+            debug_tint -= M_PI;
     }
 
     Framebuffer_use(NULL);
@@ -2254,7 +2256,7 @@ void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
             glVertex2f(-1.0, 1);
             glColor4f(1, 1, 1, 0.0);
             glVertex2f(-1.0 + gfx->sx * 50, 1);
-            glVertex2f(-1.0,       1.0 - gfx->sy * 50);
+            glVertex2f(-1.0, 1.0 - gfx->sy * 50);
             glEnd();
         }
         repaint_indicator_visible = !repaint_indicator_visible;
@@ -2292,13 +2294,13 @@ void GfxOpenGL21_destroy(Gfx* self)
     Cache_destroy(gfxOpenGL21(self)->cache);
     Atlas_destroy(gfxOpenGL21(self)->atlas);
 
-    if (settings.font_name_bold) {
+    if (settings.font_file_name_bold.str) {
         Cache_destroy(&gfxOpenGL21(self)->_cache_bold);
         Atlas_destroy(&gfxOpenGL21(self)->_atlas_bold);
         FT_Done_Face(gfxOpenGL21(self)->face_bold);
     }
 
-    if (settings.font_name_italic) {
+    if (settings.font_file_name_italic.str) {
         Cache_destroy(&gfxOpenGL21(self)->_cache_italic);
         Atlas_destroy(&gfxOpenGL21(self)->_atlas_italic);
         FT_Done_Face(gfxOpenGL21(self)->face_italic);
@@ -2328,11 +2330,11 @@ void GfxOpenGL21_destroy(Gfx* self)
 
     FT_Done_Face(gfxOpenGL21(self)->face);
 
-    if (settings.font_name_fallback) {
+    if (settings.font_file_name_fallback.str) {
         FT_Done_Face(gfxOpenGL21(self)->face_fallback);
     }
 
-    if (settings.font_name_fallback2) {
+    if (settings.font_file_name_fallback2.str) {
         FT_Done_Face(gfxOpenGL21(self)->face_fallback2);
     }
 

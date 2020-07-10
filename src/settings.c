@@ -12,6 +12,8 @@
 
 #include <fontconfig/fontconfig.h>
 
+#include "fontconfig.h"
+#include "opts.h"
 #include "settings.h"
 #include "util.h"
 #include "vector.h"
@@ -36,19 +38,6 @@
 #define APP_NAME "Wayst"
 #endif
 
-// default font families
-#ifndef DFT_FONT_NAME
-#define DFT_FONT_NAME "Noto Sans Mono"
-#endif
-
-#ifndef DFT_FONT_NAME_FALLBACK
-#define DFT_FONT_NAME_FALLBACK NULL
-#endif
-
-#ifndef DFT_FONT_NAME_FALLBACK2
-#define DFT_FONT_NAME_FALLBACK2 NULL
-#endif
-
 // default title format
 #ifndef DFT_TITLE_FMT
 #define DFT_TITLE_FMT "%2$s - %1$s"
@@ -65,259 +54,6 @@
 DEF_VECTOR(char, NULL);
 
 ColorRGB color_palette_256[257];
-
-static const char* const arg_path    = "path";
-static const char* const arg_int     = "number";
-static const char* const arg_color   = "#RRGGBB";
-static const char* const arg_color_a = "#RRGGBBAA";
-static const char* const arg_string  = "string";
-static const char* const arg_key     = "key";
-static const char* const arg_name    = "name";
-
-// -e and -x are reserved
-static struct option long_options[] = {
-
-#define OPT_CONFIG_FILE_IDX 0
-    [OPT_CONFIG_FILE_IDX] = { "config-file", required_argument, 0, 0 },
-
-#define OPT_SKIP_CONFIG_IDX 1
-    [OPT_SKIP_CONFIG_IDX] = { "skip-config", no_argument, 0, 'C' },
-
-#define OPT_XORG_ONLY_IDX 2
-    [OPT_XORG_ONLY_IDX] = { "xorg-only", no_argument, 0, 'X' },
-
-#define OPT_TERM_IDX 3
-    [OPT_TERM_IDX] = { "term", required_argument, 0, 0 },
-
-#define OPT_TITLE_IDX 4
-    [OPT_TITLE_IDX] = { "title", required_argument, 0, 0 },
-
-#define OPT_DYNAMIC_TITLE_IDX 5
-    [OPT_DYNAMIC_TITLE_IDX] = { "no-dynamic-title", no_argument, 0, 'T' },
-
-#define OPT_TITLE_FORMAT_IDX 6
-    [OPT_TITLE_FORMAT_IDX] = { "title-format", required_argument, 0, 0 },
-
-#define OPT_LOCALE_IDX 7
-    [OPT_LOCALE_IDX] = { "locale", required_argument, 0, 0 },
-
-#define OPT_ROWS_IDX 8
-    [OPT_ROWS_IDX] = { "rows", required_argument, 0, 0 },
-
-#define OPT_COLUMNS_IDX 9
-    [OPT_COLUMNS_IDX] = { "columns", required_argument, 0, 0 },
-
-#define OPT_BG_COLOR_IDX 10
-    [OPT_BG_COLOR_IDX] = { "bg-color", required_argument, 0, 0 },
-
-#define OPT_FG_COLOR_IDX 11
-    [OPT_FG_COLOR_IDX] = { "fg-color", required_argument, 0, 0 },
-
-#define OPT_COLOR_0_IDX 12
-    [OPT_COLOR_0_IDX] = { "color-0", required_argument, 0, 0 },
-
-#define OPT_COLOR_1_IDX 13
-    [OPT_COLOR_1_IDX] = { "color-1", required_argument, 0, 0 },
-
-#define OPT_COLOR_2_IDX 14
-    [OPT_COLOR_2_IDX] = { "color-2", required_argument, 0, 0 },
-
-#define OPT_COLOR_3_IDX 15
-    [OPT_COLOR_3_IDX] = { "color-3", required_argument, 0, 0 },
-
-#define OPT_COLOR_4_IDX 16
-    [OPT_COLOR_4_IDX] = { "color-4", required_argument, 0, 0 },
-
-#define OPT_COLOR_5_IDX 17
-    [OPT_COLOR_5_IDX] = { "color-5", required_argument, 0, 0 },
-
-#define OPT_COLOR_6_IDX 18
-    [OPT_COLOR_6_IDX] = { "color-6", required_argument, 0, 0 },
-
-#define OPT_COLOR_7_IDX 19
-    [OPT_COLOR_7_IDX] = { "color-7", required_argument, 0, 0 },
-
-#define OPT_COLOR_8_IDX 20
-    [OPT_COLOR_8_IDX] = { "color-8", required_argument, 0, 0 },
-
-#define OPT_COLOR_9_IDX 21
-    [OPT_COLOR_9_IDX] = { "color-9", required_argument, 0, 0 },
-
-#define OPT_COLOR_10_IDX 22
-    [OPT_COLOR_10_IDX] = { "color-10", required_argument, 0, 0 },
-
-#define OPT_COLOR_11_IDX 23
-    [OPT_COLOR_11_IDX] = { "color-11", required_argument, 0, 0 },
-
-#define OPT_COLOR_12_IDX 24
-    [OPT_COLOR_12_IDX] = { "color-12", required_argument, 0, 0 },
-
-#define OPT_COLOR_13_IDX 25
-    [OPT_COLOR_13_IDX] = { "color-13", required_argument, 0, 0 },
-
-#define OPT_COLOR_14_IDX 26
-    [OPT_COLOR_14_IDX] = { "color-14", required_argument, 0, 0 },
-
-#define OPT_COLOR_15_IDX 27
-    [OPT_COLOR_15_IDX] = { "color-15", required_argument, 0, 0 },
-
-#define OPT_FG_COLOR_DIM_IDX 28
-    [OPT_FG_COLOR_DIM_IDX] = { "fg-color-dim", required_argument, 0, 0 },
-
-#define OPT_H_BG_COLOR_IDX 29
-    [OPT_H_BG_COLOR_IDX] = { "h-bg-color", required_argument, 0, 0 },
-
-#define OPT_H_FG_COLOR_IDX 30
-    [OPT_H_FG_COLOR_IDX] = { "h-fg-color", required_argument, 0, 0 },
-
-#define OPT_NO_FLASH_IDX 31
-    [OPT_NO_FLASH_IDX] = { "no-flash", no_argument, 0, 'F' },
-
-#define OPT_COLORSCHEME_IDX 32
-    [OPT_COLORSCHEME_IDX] = { "colorscheme", required_argument, 0, 0 },
-
-#define OPT_FONT_IDX 33
-    [OPT_FONT_IDX] = { "font", required_argument, 0, 0 },
-
-#define OPT_FONT_STYLE_REGULAR_IDX 34
-    [OPT_FONT_STYLE_REGULAR_IDX] = { "style-regular", required_argument, 0, 0 },
-
-#define OPT_FONT_STYLE_BOLD_IDX 35
-    [OPT_FONT_STYLE_BOLD_IDX] = { "style-bold", required_argument, 0, 0 },
-
-#define OPT_FONT_STYLE_ITALIC_IDX 36
-    [OPT_FONT_STYLE_ITALIC_IDX] = { "style-italic", required_argument, 0, 0 },
-
-#define OPT_FONT_FALLBACK_IDX 37
-    [OPT_FONT_FALLBACK_IDX] = { "font-fallback", required_argument, 0, 0 },
-
-#define OPT_FONT_FALLBACK2_IDX 38
-    [OPT_FONT_FALLBACK2_IDX] = { "font-fallback2", required_argument, 0, 0 },
-
-#define OPT_FONT_SIZE_IDX 39
-    [OPT_FONT_SIZE_IDX] = { "font-size", required_argument, 0, 0 },
-
-#define OPT_DPI_IDX 40
-    [OPT_DPI_IDX] = { "dpi", required_argument, 0, 0 },
-
-#define OPT_BLINK_IDX 41
-    [OPT_BLINK_IDX] = { "blink", required_argument, 0, 0 },
-
-#define OPT_SCROLL_LINES_IDX 42
-    [OPT_SCROLL_LINES_IDX] = { "scroll-lines", required_argument, 0, 0 },
-
-#define OPT_SCROLLBACK_IDX 43
-    [OPT_SCROLLBACK_IDX] = { "scrollback", required_argument, 0, 0 },
-
-#define OPT_BIND_KEY_COPY_IDX 44
-    [OPT_BIND_KEY_COPY_IDX] = { "bind-key-copy", required_argument, 0, 0 },
-
-#define OPT_BIND_KEY_PASTE_IDX 45
-    [OPT_BIND_KEY_PASTE_IDX] = { "bind-key-paste", required_argument, 0, 0 },
-
-#define OPT_BIND_KEY_ENLARGE_IDX 46
-    [OPT_BIND_KEY_ENLARGE_IDX] = { "bind-key-enlarge", required_argument, 0, 0 },
-
-#define OPT_BIND_KEY_SHRINK_IDX 47
-    [OPT_BIND_KEY_SHRINK_IDX] = { "bind-key-shrink", required_argument, 0, 0 },
-
-#define OPT_BIND_KEY_UNI_IDX 48
-    [OPT_BIND_KEY_UNI_IDX] = { "bind-key-uni", required_argument, 0, 0 },
-
-#define OPT_BIND_KEY_KSM_IDX 49
-    [OPT_BIND_KEY_KSM_IDX] = { "bind-key-ksm", required_argument, 0, 0 },
-
-#define OPT_BIND_KEY_DEBUG_IDX 50
-    [OPT_BIND_KEY_DEBUG_IDX] = { "bind-key-debug", required_argument, 0, 0 },
-
-#define OPT_BIND_KEY_QUIT_IDX 51
-    [OPT_BIND_KEY_QUIT_IDX] = { "bind-key-quit", required_argument, 0, 0 },
-
-#define OPT_DEBUG_PTY_IDX 52
-    [OPT_DEBUG_PTY_IDX] = { "debug-pty", no_argument, 0, 'D' },
-
-#define OPT_DEBUG_GFX_IDX 53
-    [OPT_DEBUG_GFX_IDX] = { "debug-gfx", no_argument, 0, 'G' },
-
-#define OPT_VERSION_IDX 54
-    [OPT_VERSION_IDX] = { "version", no_argument, 0, 'v' },
-
-#define OPT_HELP_IDX 55
-    [OPT_HELP_IDX] = { "help", no_argument, 0, 'h' },
-
-#define OPT_SENTINEL_IDX 56
-    [OPT_SENTINEL_IDX] = { 0 }
-};
-
-static const char* long_options_descriptions[][2] = {
-    [OPT_CONFIG_FILE_IDX]   = { arg_path, "Use configuration file" },
-    [OPT_SKIP_CONFIG_IDX]   = { NULL, "Ignore default configuration file" },
-    [OPT_XORG_ONLY_IDX]     = { NULL, "Always use X11" },
-    [OPT_TERM_IDX]          = { arg_string, "TERM value" },
-    [OPT_TITLE_IDX]         = { arg_string, "Window title and application class name" },
-    [OPT_DYNAMIC_TITLE_IDX] = { NULL, "Do not allow programs to change the "
-                                      "window title" },
-    [OPT_TITLE_FORMAT_IDX]  = { arg_string, "Window title format string" },
-    [OPT_LOCALE_IDX]        = { arg_string, "Override locale" },
-    [OPT_ROWS_IDX]          = { arg_int, "Number of rows" },
-    [OPT_COLUMNS_IDX]       = { arg_int, "Number of columns" },
-    [OPT_BG_COLOR_IDX]      = { arg_color_a, "Background color" },
-    [OPT_FG_COLOR_IDX]      = { arg_color, "Foreground color" },
-    [OPT_COLOR_0_IDX]       = { arg_color, "Palette color black" },
-    [OPT_COLOR_1_IDX]       = { arg_color, "Palette color red" },
-    [OPT_COLOR_2_IDX]       = { arg_color, "Palette color green" },
-    [OPT_COLOR_3_IDX]       = { arg_color, "Palette color yellow" },
-    [OPT_COLOR_4_IDX]       = { arg_color, "Palette color blue" },
-    [OPT_COLOR_5_IDX]       = { arg_color, "Palette color magenta" },
-    [OPT_COLOR_6_IDX]       = { arg_color, "Palette color cyan" },
-    [OPT_COLOR_7_IDX]       = { arg_color, "Palette color grey" },
-    [OPT_COLOR_8_IDX]       = { arg_color, "Palette color bright black" },
-    [OPT_COLOR_9_IDX]       = { arg_color, "Palette color bright red" },
-    [OPT_COLOR_10_IDX]      = { arg_color, "Palette color bright green" },
-    [OPT_COLOR_11_IDX]      = { arg_color, "Palette color bright yellow" },
-    [OPT_COLOR_12_IDX]      = { arg_color, "Palette color bright blue" },
-    [OPT_COLOR_13_IDX]      = { arg_color, "Palette color bright magenta" },
-    [OPT_COLOR_14_IDX]      = { arg_color, "Palette color bright cyan" },
-    [OPT_COLOR_15_IDX]      = { arg_color, "Palette color bright grey" },
-    [OPT_FG_COLOR_DIM_IDX]  = { arg_color, "Dim/faint text color" },
-    [OPT_H_BG_COLOR_IDX]    = { arg_color_a, "Highlighted text background color" },
-    [OPT_H_FG_COLOR_IDX]    = { arg_color, "Highlighted text foreground color" },
-    [OPT_NO_FLASH_IDX]      = { NULL, "Disable visual bell" },
-    [OPT_COLORSCHEME_IDX]   = { arg_name, "Colorscheme preset: wayst, linux, xterm, rxvt, yaru, "
-                                        "tango, orchis, solarized" },
-
-    [OPT_FONT_IDX]               = { arg_name, "Primary font family" },
-    [OPT_FONT_STYLE_REGULAR_IDX] = { arg_name, "Font style to use as default" },
-    [OPT_FONT_STYLE_BOLD_IDX]    = { arg_name, "Font style to use as bold" },
-    [OPT_FONT_STYLE_ITALIC_IDX]  = { arg_name, "Font style to use as italic " },
-    [OPT_FONT_FALLBACK_IDX]      = { arg_name, "Fallback font family" },
-    [OPT_FONT_FALLBACK2_IDX]     = { arg_name, "Second fallback font family" },
-
-    [OPT_FONT_SIZE_IDX] = { arg_int, "Font size" },
-    [OPT_DPI_IDX]       = { arg_int, "Font dpi" },
-    [OPT_BLINK_IDX]     = { "bool:R?:S?:E?",
-                        "Blinking cursor enable:rate[ms]:suspend[ms]:end[s](<0 to disable)" },
-
-    [OPT_SCROLL_LINES_IDX] = { arg_int, "Lines scrolled per wheel click" },
-    [OPT_SCROLLBACK_IDX]   = { arg_int, "Size of scrollback buffer" },
-
-    [OPT_BIND_KEY_COPY_IDX]    = { arg_key, "Copy key command" },
-    [OPT_BIND_KEY_PASTE_IDX]   = { arg_key, "Paste key command" },
-    [OPT_BIND_KEY_ENLARGE_IDX] = { arg_key, "Enlagre font key command" },
-    [OPT_BIND_KEY_SHRINK_IDX]  = { arg_key, "Shrink font key command" },
-    [OPT_BIND_KEY_UNI_IDX]     = { arg_key, "Unicode entry mode activation "
-                                        "key command" },
-    [OPT_BIND_KEY_KSM_IDX]     = { arg_key, "Enter keyboard select mode key command" },
-    [OPT_BIND_KEY_DEBUG_IDX]   = { arg_key, "Debug info key command" },
-    [OPT_BIND_KEY_QUIT_IDX]    = { arg_key, "Quit key command" },
-
-    [OPT_DEBUG_PTY_IDX] = { NULL, "Output pty communication to stderr" },
-    [OPT_DEBUG_GFX_IDX] = { NULL, "Run renderer in debug mode" },
-    [OPT_VERSION_IDX]   = { NULL, "Show version" },
-    [OPT_HELP_IDX]      = { NULL, "Show this message" },
-
-    [OPT_SENTINEL_IDX] = { NULL, NULL }
-};
 
 const char* const colors_default[8][18] = {
     {
@@ -482,7 +218,7 @@ static void settings_colorscheme_default(uint8_t idx)
 }
 
 /**
-* Initialize 256 color palette */
+ * Initialize 256 color palette */
 static void init_color_palette()
 {
     for (int_fast16_t i = 0; i < 257; ++i) {
@@ -511,175 +247,80 @@ static void init_color_palette()
  * Use fontconfig to get font files */
 static void find_font()
 {
-    FcConfig* cfg = FcInitLoadConfigAndFonts();
-    FcPattern* pat = FcNameParse((const FcChar8*)settings.font);
-    FcObjectSet* os = FcObjectSetBuild(FC_FAMILY, FC_STYLE, FC_FILE, FC_PIXEL_SIZE, NULL);
-    FcFontSet*   fs = FcFontList(cfg, pat, os);
-
-    char*  regular_alternative = NULL;
-    bool   is_bitmap           = false;
-    double pix_sz_regular = 0, pix_sz_bold = 0, pix_sz_italic = 0;
-    double desired_pix_size = (double)settings.font_size * PT_AS_INCH * settings.font_dpi;
-
-    bool load_bold = (settings.font_style_regular && settings.font_style_bold)
-                       ? strcmp(settings.font_style_regular, settings.font_style_bold)
-                       : settings.font_style_bold && !settings.font_style_regular
-                           ? (!strcmp(settings.font_style_bold, "Regular"))
-                           : true;
-
-    bool load_italic = (settings.font_style_regular && settings.font_style_italic)
-                         ? strcmp(settings.font_style_regular, settings.font_style_italic)
-                         : settings.font_style_italic && !settings.font_style_regular
-                             ? (!strcmp(settings.font_style_italic, "Regular"))
-                             : true;
-    for (int_fast32_t i = 0; fs && i < fs->nfont; ++i) {
-        FcPattern* font = fs->fonts[i];
-        FcChar8 *  file, *style;
-
-        if (FcPatternGetString(font, FC_FILE, 0, &file) == FcResultMatch &&
-            FcPatternGetString(font, FC_STYLE, 0, &style) == FcResultMatch) {
-
-            double pix_size = 0;
-            FcPatternGetDouble(font, FC_PIXEL_SIZE, 0, &pix_size);
-
-            if (pix_size)
-                is_bitmap = true;
-
-#define SZ_DIFF(_ps) fabs(desired_pix_size - (_ps))
-
-            if (!strcmp((const char*)style,
-                        settings.font_style_regular ? settings.font_style_regular : "Regular")) {
-                if (is_bitmap && SZ_DIFF(pix_sz_regular) < SZ_DIFF(pix_size))
-                    continue;
-                free(settings.font_name);
-                settings.font_name = strdup((char*)file);
-                pix_sz_regular     = pix_size;
-            }
-
-            if ((!strcmp((const char*)style, "Text") || !strcmp((const char*)style, "Medium")) &&
-                !settings.font_style_regular) {
-                if (is_bitmap && SZ_DIFF(pix_sz_regular) < SZ_DIFF(pix_size))
-                    continue;
-                free(regular_alternative);
-                regular_alternative = strdup((char*)file);
-                pix_sz_regular      = pix_size;
-            }
-
-            if (load_bold) {
-                if (!strcmp((const char*)style,
-                            settings.font_style_bold ? settings.font_style_bold : "Bold")) {
-                    if (is_bitmap && SZ_DIFF(pix_sz_bold) < SZ_DIFF(pix_size))
-                        continue;
-                    free(settings.font_name_bold);
-                    settings.font_name_bold = strdup((char*)file);
-                    pix_sz_bold             = pix_size;
-                }
-            }
-
-            if (load_italic) {
-                if (!strcmp((const char*)style,
-                            settings.font_style_italic ? settings.font_name_italic : "Italic")) {
-                    if (is_bitmap && SZ_DIFF(pix_sz_italic) < SZ_DIFF(pix_size))
-                        continue;
-                    free(settings.font_name_italic);
-                    settings.font_name_italic = strdup((char*)file);
-                    pix_sz_italic             = pix_size;
-                }
-            }
-        }
+#define L_DROP_IF_SAME(file1, file2)                                                               \
+    if (file2 && file1 && !strcmp(file1, file2)) {                                                 \
+        free(file1);                                                                               \
+        file1 = NULL;                                                                              \
     }
 
+    FontconfigContext fc_context = FontconfigContext_new();
+    bool              is_bitmap  = false;
+
+    char* default_file =
+      FontconfigContext_get_file(&fc_context, NULL, NULL, settings.font_size, NULL);
+
+    char* main_family = OR(settings.font.str, "Monospace");
+
+    char* regular_file = FontconfigContext_get_file(
+      &fc_context, main_family, settings.font_style_regular.str, settings.font_size, &is_bitmap);
     if (is_bitmap) {
         settings.lcd_filter = LCD_FILTER_NONE;
     }
 
-    FcFontSetDestroy(fs);
-    FcObjectSetDestroy(os);
-    FcPatternDestroy(pat);
+    char* bold_file = FontconfigContext_get_file(
+      &fc_context, main_family, OR(settings.font_style_bold.str, "Bold"), settings.font_size, NULL);
+    L_DROP_IF_SAME(bold_file, regular_file);
 
-    if (settings.font_fallback) {
-        pat = FcNameParse((const FcChar8*)settings.font_fallback);
-        os  = FcObjectSetBuild(FC_FAMILY, FC_STYLE, FC_FILE, NULL);
-        fs  = FcFontList(cfg, pat, os);
+    char* italic_file = FontconfigContext_get_file(&fc_context, main_family,
+                                                   OR(settings.font_style_italic.str, "Italic"),
+                                                   settings.font_size, NULL);
+    L_DROP_IF_SAME(italic_file, regular_file);
 
-        for (int_fast32_t i = 0; fs && i < fs->nfont; ++i) {
-            FcPattern* font = fs->fonts[i];
-            FcChar8 *  file, *style;
+    char* fallback_file = FontconfigContext_get_file(&fc_context, settings.font_fallback.str, NULL,
+                                                     settings.font_size, NULL);
+    L_DROP_IF_SAME(fallback_file, regular_file);
+    L_DROP_IF_SAME(fallback_file, default_file);
 
-            if (FcPatternGetString(font, FC_FILE, 0, &file) == FcResultMatch &&
-                FcPatternGetString(font, FC_STYLE, 0, &style) == FcResultMatch) {
-                free(settings.font_name_fallback);
-                settings.font_name_fallback = strdup((char*)file);
-            }
-        }
+    char* fallback2_file = FontconfigContext_get_file(&fc_context, settings.font_fallback2.str,
+                                                      NULL, settings.font_size, NULL);
+    L_DROP_IF_SAME(fallback2_file, regular_file);
+    L_DROP_IF_SAME(fallback2_file, default_file);
 
-        FcFontSetDestroy(fs);
-        FcObjectSetDestroy(os);
-        FcPatternDestroy(pat);
+    if (fallback_file) {
+        L_DROP_IF_SAME(fallback2_file, fallback_file);
     }
 
-    if (settings.font_fallback2) {
-        pat = FcNameParse((const FcChar8*)settings.font_fallback2);
-        os  = FcObjectSetBuild(FC_FAMILY, FC_STYLE, FC_FILE, NULL);
-        fs  = FcFontList(cfg, pat, os);
-
-        for (int_fast32_t i = 0; fs && i < fs->nfont; ++i) {
-            FcPattern* font = fs->fonts[i];
-            FcChar8 *  file, *style;
-
-            if (FcPatternGetString(font, FC_FILE, 0, &file) == FcResultMatch &&
-                FcPatternGetString(font, FC_STYLE, 0, &style) == FcResultMatch) {
-                free(settings.font_name_fallback2);
-                settings.font_name_fallback2 = strdup((char*)file);
-            }
-        }
-
-        FcFontSetDestroy(fs);
-        FcObjectSetDestroy(os);
-        FcPatternDestroy(pat);
+    if (fallback2_file && !fallback_file) {
+        fallback_file  = fallback2_file;
+        fallback2_file = NULL;
     }
 
-    FcConfigDestroy(cfg);
+    free(default_file);
+    FontconfigContext_destroy(&fc_context);
 
-    if (!settings.font_name) {
-        if (regular_alternative) {
-            settings.font_name = regular_alternative;
-        } else {
-            if (settings.font_style_regular) {
-                ERR("No style \'%s\' found for \'%s\'", settings.font_style_regular, settings.font);
-            } else {
-                ERR("Failed to load font \'%s\'", settings.font);
-            }
-        }
-    } else if (regular_alternative) {
-        free(regular_alternative);
+    if (regular_file) {
+        AString_replace_with_dynamic(&settings.font_file_name_regular, regular_file);
+    }
+    if (bold_file) {
+        AString_replace_with_dynamic(&settings.font_file_name_bold, bold_file);
+    }
+    if (italic_file) {
+        AString_replace_with_dynamic(&settings.font_file_name_italic, italic_file);
+    }
+    if (fallback_file) {
+        AString_replace_with_dynamic(&settings.font_file_name_fallback, fallback_file);
+    }
+    if (fallback2_file) {
+        AString_replace_with_dynamic(&settings.font_file_name_fallback2, fallback2_file);
     }
 
-    if (!settings.font_name_bold && settings.font_style_bold && load_bold) {
-        WRN("No style \'%s\' found for \'%s\'\n", settings.font_style_bold, settings.font);
-    }
-
-    if (!settings.font_name_italic && settings.font_style_italic && load_italic) {
-        WRN("No style \'%s\' found for \'%s\'\n", settings.font_style_italic, settings.font);
-    }
-
-    if (!settings.font_name_fallback && settings.font_fallback)
-        WRN("Failed to load font \'%s\'\n", settings.font_fallback);
-
-    if (!settings.font_name_fallback2 && settings.font_fallback2) {
-        WRN("Failed to load font \'%s\'\n", settings.font_fallback2);
-    } else if (!settings.font_name_fallback) {
-        // if fallback is not found but fallback2 is, swap them
-        settings.font_name_fallback  = settings.font_name_fallback2;
-        settings.font_name_fallback2 = NULL;
-    }
-
-    LOG("font files:\n  normal: %s\n  bold: %s\n  italic: %s\n"
-        "  fallback/symbol: %s\n  fallback/symbol: %s\n",
-        settings.font_name, settings.font_name_bold ? settings.font_name_bold : "(none)",
-        settings.font_name_italic ? settings.font_name_italic : "(none)",
-        settings.font_name_fallback ? settings.font_name_fallback : "(none)",
-        settings.font_name_fallback2 ? settings.font_name_fallback2 : "(none)");
+    LOG("Loaded font files:\n  normal: %s\n  bold: %s\n  italic: %s\n fallback/symbol: %s\n  "
+        "fallback/symbol: %s\n",
+        OR(settings.font_file_name_regular.str, "(none)"),
+        OR(settings.font_file_name_bold.str, "(none)"),
+        OR(settings.font_file_name_italic.str, "(none)"),
+        OR(settings.font_file_name_fallback.str, "(none)"),
+        OR(settings.font_file_name_fallback2.str, "(none)"));
 }
 
 static void settings_make_default()
@@ -729,19 +370,29 @@ static void settings_make_default()
             },
         },
 
-        .config_path    = NULL,
         .skip_config    = false,
         .x11_is_default = false,
-        .shell          = NULL,
         .shell_argc     = 0,
-        .shell_argv     = NULL,
-        .term           = NULL,
-        .locale         = NULL,
-        .bsp_sends_del  = true,
 
-        .font           = NULL,
-        .font_fallback  = NULL,
-        .font_fallback2 = NULL,
+
+        .shell=                AString_new_uninitialized(), 
+        .title_format=         AString_new_static(DFT_TITLE_FMT),
+        .font=                 AString_new_uninitialized(),
+        .font_fallback=        AString_new_uninitialized(),
+        .font_fallback2=       AString_new_uninitialized(),
+        .term=                 AString_new_static(DFT_TERM),
+        .locale=               AString_new_uninitialized(),
+        .title=                AString_new_static(APP_NAME),
+        .font_file_name_regular=            AString_new_uninitialized(),
+        .font_style_regular=   AString_new_uninitialized(),
+        .font_style_bold=      AString_new_uninitialized(),
+        .font_style_italic=    AString_new_uninitialized(),
+        .font_file_name_bold=       AString_new_uninitialized(),
+        .font_file_name_italic=     AString_new_uninitialized(),
+        .font_file_name_fallback=   AString_new_uninitialized(),
+        .font_file_name_fallback2=  AString_new_uninitialized(),
+
+        .bsp_sends_del  = true,
         .font_size      = 10,
         .font_dpi       = 96,
         .lcd_filter     = LCD_FILTER_UNDEFINED,
@@ -753,9 +404,7 @@ static void settings_make_default()
         .fg_dim = { .r = 150, .g = 150, .b = 150 },
 
         .highlight_change_fg = false,
-        .title               = NULL,
         .dynamic_title       = true,
-        .title_format        = NULL,
 
         .cols = 80,
         .rows = 24,
@@ -787,30 +436,10 @@ static void settings_make_default()
 
 static void settings_complete_defaults()
 {
-    // set up fonts
-    if (!settings.font)
-        settings.font = DFT_FONT_NAME;
-
-    if (!settings.font_fallback)
-        settings.font_fallback = DFT_FONT_NAME_FALLBACK;
-
-    if (!settings.font_fallback2)
-        settings.font_fallback2 = DFT_FONT_NAME_FALLBACK2;
-
     find_font();
 
-    // other strings
-    if (!settings.title_format)
-        settings.title_format = DFT_TITLE_FMT;
-
-    if (!settings.term)
-        settings.term = DFT_TERM;
-
-    if (!settings.title)
-        settings.title = APP_NAME;
-
     // set up locale
-    if (!settings.locale) {
+    if (!settings.locale.str) {
         char* locale;
         locale = getenv("LC_ALL");
         if (!locale || !*locale)
@@ -819,13 +448,13 @@ static void settings_complete_defaults()
             locale = getenv("LANG");
         if (!locale || !*locale)
             locale = "C";
-        settings.locale = locale;
+
+        AString_replace_with_static(&settings.locale, locale);
     }
 
-    setlocale(LC_CTYPE, settings.locale);
-    LOG("Using locale: %s\n", settings.locale);
+    setlocale(LC_CTYPE, settings.locale.str);
+    LOG("Using locale: %s\n", settings.locale.str);
 
-    // load colorscheme
     settings_colorscheme_default(settings.colorscheme_preset);
     free(settings._explicit_colors_set);
     settings._explicit_colors_set = NULL;
@@ -968,33 +597,27 @@ static void handle_option(const char opt, const int array_index, const char* val
             break;
 
         case OPT_FONT_IDX:
-            free(settings.font);
-            settings.font = strdup(value);
+            AString_replace_with_dynamic(&settings.font, strdup(value));
             break;
 
         case OPT_FONT_FALLBACK_IDX:
-            free(settings.font_fallback);
-            settings.font_fallback = strdup(value);
+            AString_replace_with_dynamic(&settings.font_fallback, strdup(value));
             break;
 
         case OPT_FONT_FALLBACK2_IDX:
-            free(settings.font_fallback2);
-            settings.font_fallback2 = strdup(value);
+            AString_replace_with_dynamic(&settings.font_fallback2, strdup(value));
             break;
 
         case OPT_FONT_STYLE_REGULAR_IDX:
-            free(settings.font_style_regular);
-            settings.font_style_regular = strdup(value);
+            AString_replace_with_dynamic(&settings.font_style_regular, strdup(value));
             break;
 
         case OPT_FONT_STYLE_BOLD_IDX:
-            free(settings.font_style_bold);
-            settings.font_style_bold = strdup(value);
+            AString_replace_with_dynamic(&settings.font_style_bold, strdup(value));
             break;
 
         case OPT_FONT_STYLE_ITALIC_IDX:
-            free(settings.font_style_italic);
-            settings.font_style_italic = strdup(value);
+            AString_replace_with_dynamic(&settings.font_style_italic, strdup(value));
             break;
 
         case OPT_FONT_SIZE_IDX:
@@ -1028,8 +651,7 @@ static void handle_option(const char opt, const int array_index, const char* val
             break;
 
         case OPT_TITLE_IDX:
-            free(settings.title);
-            settings.title = strdup(value);
+            AString_replace_with_dynamic(&settings.title, strdup(value));
             break;
 
         case OPT_COLUMNS_IDX:
@@ -1041,13 +663,11 @@ static void handle_option(const char opt, const int array_index, const char* val
             break;
 
         case OPT_TERM_IDX:
-            free(settings.term);
-            settings.term = strdup(value);
+            AString_replace_with_dynamic(&settings.term, strdup(value));
             break;
 
         case OPT_LOCALE_IDX:
-            free(settings.locale);
-            settings.locale = strdup(value);
+            AString_replace_with_dynamic(&settings.locale, strdup(value));
             break;
 
         case OPT_SCROLL_LINES_IDX:
@@ -1055,8 +675,7 @@ static void handle_option(const char opt, const int array_index, const char* val
             break;
 
         case OPT_TITLE_FORMAT_IDX:
-            free(settings.title_format);
-            settings.title_format = strdup(value);
+            AString_replace_with_dynamic(&settings.title_format, strdup(value));
             break;
 
         case OPT_BG_COLOR_IDX: {
@@ -1219,10 +838,10 @@ static void handle_option(const char opt, const int array_index, const char* val
 
 static void settings_get_opts(const int argc, char* const* argv, const bool cfg_file_check)
 {
-
     optind = 1;
     for (int o; (optind < argc && optind >= 0 && strcmp(argv[optind], "-e") &&
                  strcmp(argv[optind], "-x"));) {
+
         /* print 'invalid option' error message only once */
         opterr = cfg_file_check;
 
@@ -1233,10 +852,11 @@ static void settings_get_opts(const int argc, char* const* argv, const bool cfg_
             break;
 
         if (cfg_file_check) {
-            if (o == 'C')
+            if (o == 'C') {
                 settings.skip_config = true;
-            else if (opid == OPT_CONFIG_FILE_IDX && optarg)
-                settings.config_path = strdup(optarg);
+            } else if (opid == OPT_CONFIG_FILE_IDX && optarg) {
+                AString_replace_with_dynamic(&settings.config_path, strdup(optarg));
+            }
         } else {
             handle_option(o, opid, optarg);
         }
@@ -1247,12 +867,12 @@ static void settings_get_opts(const int argc, char* const* argv, const bool cfg_
         for (int i = 0; i < argc; ++i) {
             if (!strcmp(argv[i], "-e") || !strcmp(argv[i], "-x")) {
                 if (argc > (i++ + 1)) {
-                    settings.shell      = strdup(argv[i]);
+                    AString_replace_with_dynamic(&settings.shell, strdup(argv[i]));
                     settings.shell_argc = argc - i;
                     settings.shell_argv = calloc((settings.shell_argc + 1), sizeof(char*));
 
-                    for (int i2 = 0; i2 < settings.shell_argc; ++i2) {
-                        settings.shell_argv[i2] = strdup(argv[i + i2]);
+                    for (int j = 0; j < settings.shell_argc; ++j) {
+                        settings.shell_argv[j] = strdup(argv[i + j]);
                     }
                 }
                 break;
@@ -1260,21 +880,19 @@ static void settings_get_opts(const int argc, char* const* argv, const bool cfg_
         }
 
         /* no -e or -x option was passed - find shell from env or use default */
-        if (!settings.shell) {
-            settings.shell = getenv("SHELL");
-            if (!settings.shell)
-                settings.shell = "/bin/sh";
+        if (!settings.shell.str) {
+            AString_replace_with_static(&settings.shell, getenv("SHELL"));
+            if (!settings.shell.str) {
+                AString_replace_with_static(&settings.shell, "/bin/sh");
+            }
             settings.shell_argv    = calloc(2, sizeof(char*));
-            settings.shell_argv[0] = strdup(settings.shell);
+            settings.shell_argv[0] = strdup(settings.shell.str);
             settings.shell_argc    = 1;
         }
     }
 }
 
-static void handle_config_option(const char*  key,
-                                 const char*  val,
-                                 const int    argc,
-                                 char* const* argv)
+static void handle_config_option(const char* key, const char* val)
 {
     if (key) {
         for (int i = 0;; ++i) {
@@ -1293,8 +911,7 @@ static void handle_config_option(const char*  key,
 
 static void settings_file_parse(FILE* f, const int argc, char* const* argv)
 {
-    if (!f)
-        return;
+    ASSERT(f, "valid FILE*");
 
     bool in_comment = false;
     bool in_value   = false;
@@ -1322,7 +939,7 @@ static void settings_file_parse(FILE* f, const int argc, char* const* argv)
                     in_comment = true;
                     in_value   = false;
                     Vector_push_char(&value, 0);
-                    handle_config_option(key.buf, value.buf, argc, argv);
+                    handle_config_option(key.buf, value.buf);
                     value.size = 0;
                     continue;
                 }
@@ -1337,7 +954,7 @@ static void settings_file_parse(FILE* f, const int argc, char* const* argv)
                     in_value  = false;
                     in_string = false;
                     Vector_push_char(&value, 0);
-                    handle_config_option(key.buf, value.buf, argc, argv);
+                    handle_config_option(key.buf, value.buf);
                     value.size = 0;
                 } else {
                     if (!isblank(buf[i]) || in_string || escaped) {
@@ -1353,7 +970,7 @@ static void settings_file_parse(FILE* f, const int argc, char* const* argv)
                 } else if (buf[i] == '\n' && !escaped) {
                     if (key.size) {
                         Vector_push_char(&key, '\0');
-                        handle_config_option(key.buf, NULL, argc, argv);
+                        handle_config_option(key.buf, NULL);
                     }
                     Vector_clear_char(&key);
                 } else {
@@ -1372,20 +989,21 @@ static void settings_file_parse(FILE* f, const int argc, char* const* argv)
     Vector_destroy_char(&value);
 }
 
-static const char* find_config_path()
+static void find_config_path()
 {
-    if (settings.config_path)
-        return settings.config_path;
+    AString retval = AString_new_copy(&settings.config_path);
+    if (retval.str)
+        return;
 
     char* tmp = NULL;
     if ((tmp = getenv("XDG_CONFIG_HOME"))) {
-        return asprintf("%s/%s/%s", tmp, CFG_SDIR_NAME, CFG_FNAME);
+        AString_replace_with_dynamic(&settings.config_path,
+                                     asprintf("%s/%s/%s", tmp, CFG_SDIR_NAME, CFG_FNAME));
     } else if ((tmp = getenv("HOME"))) {
-        return asprintf("%s/.config/%s/%s", tmp, CFG_SDIR_NAME, CFG_FNAME);
-        ;
+        AString_replace_with_dynamic(&settings.config_path,
+                                     asprintf("%s/.config/%s/%s", tmp, CFG_SDIR_NAME, CFG_FNAME));
     } else {
         WRN("Could not find config directory\n");
-        return NULL;
     }
 }
 
@@ -1393,11 +1011,9 @@ static FILE* open_config(const char* path)
 {
     if (path) {
         FILE* f = fopen(path, "r");
-
         if (!f) {
-            WRN("\"%s\" - %s\n", path, strerror(errno));
+            WRN("\'%s\' - %s\n", path, strerror(errno));
         }
-
         return f;
     }
     return NULL;
@@ -1407,17 +1023,14 @@ void settings_init(const int argc, char* const* argv)
 {
     settings_make_default();
     settings_get_opts(argc, argv, true);
-
-    if (!settings.skip_config) {
-        const char* cfg_path = find_config_path();
-        FILE*       cfg      = open_config(cfg_path);
-        settings_file_parse(cfg, argc, argv);
-        if (cfg)
+    find_config_path();
+    if (!settings.skip_config && settings.config_path.str) {
+        FILE* cfg = open_config(settings.config_path.str);
+        if (cfg) {
+            settings_file_parse(cfg, argc, argv);
             fclose(cfg);
-        if (cfg_path)
-            free((void*)cfg_path);
+        }
     }
-
     settings_get_opts(argc, argv, false);
     settings_complete_defaults();
     init_color_palette();
@@ -1425,5 +1038,20 @@ void settings_init(const int argc, char* const* argv)
 
 void settings_cleanup()
 {
-    
+    AString_destroy(&settings.config_path);
+    AString_destroy(&settings.title_format);
+    AString_destroy(&settings.font);
+    AString_destroy(&settings.font_fallback);
+    AString_destroy(&settings.font_fallback2);
+    AString_destroy(&settings.term);
+    AString_destroy(&settings.locale);
+    AString_destroy(&settings.title);
+    AString_destroy(&settings.font_file_name_regular);
+    AString_destroy(&settings.font_style_regular);
+    AString_destroy(&settings.font_style_bold);
+    AString_destroy(&settings.font_style_italic);
+    AString_destroy(&settings.font_file_name_bold);
+    AString_destroy(&settings.font_file_name_italic);
+    AString_destroy(&settings.font_file_name_fallback);
+    AString_destroy(&settings.font_file_name_fallback2);
 }

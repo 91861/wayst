@@ -21,7 +21,6 @@
 #define MOUSE_BUTTON_2       (1 << 2)
 #define MOUSE_BUTTON_3       (1 << 3)
 
-
 typedef struct
 {
     uint32_t target_frame_time_ms;
@@ -75,10 +74,7 @@ typedef struct WindowBase
                                int32_t  ammount,
                                uint32_t mods);
 
-        void (*motion_handler)(void*    user_data,
-                               uint32_t code,
-                               int32_t  x,
-                               int32_t  y);
+        void (*motion_handler)(void* user_data, uint32_t code, int32_t x, int32_t y);
 
         void (*clipboard_handler)(void* user_data, const char* text);
 
@@ -96,138 +92,112 @@ typedef struct WindowBase
 static void Window_update_title(void* self, const char* title)
 {
     if (settings.dynamic_title) {
-        char* tmp = asprintf(settings.title_format, settings.title, title);
+        char* tmp = asprintf(settings.title_format.str, settings.title.str, title);
         ((struct WindowBase*)self)->interface->set_title(self, tmp);
         free(tmp);
     }
 }
 
 /* Froward interface functions */
-__attribute__((always_inline)) static inline void* Window_get_proc_adress(
-  struct WindowBase* self,
-  const char*        procname)
+static inline void* Window_get_proc_adress(struct WindowBase* self, const char* procname)
 {
     return self->interface->get_gl_ext_proc_adress(self, procname);
 }
 
-__attribute__((always_inline)) static inline void Window_set_fullscreen(
-  struct WindowBase* self,
-  bool               fullscreen)
+static inline void Window_set_fullscreen(struct WindowBase* self, bool fullscreen)
 {
     self->interface->set_fullscreen(self, fullscreen);
 }
 
-__attribute__((always_inline)) static inline void Window_set_swap_interval(
-  struct WindowBase* self,
-  bool               value)
+static inline void Window_set_swap_interval(struct WindowBase* self, bool value)
 {
     self->interface->set_swap_interval(self, value);
 }
 
-__attribute__((always_inline)) static inline void Window_resize(void*    self,
-                                                                uint32_t w,
-                                                                uint32_t h)
+static inline void Window_resize(void* self, uint32_t w, uint32_t h)
 {
     ((struct WindowBase*)self)->interface->resize(self, w, h);
 }
 
-__attribute__((always_inline)) static inline void Window_events(
-  struct WindowBase* self)
+static inline void Window_events(struct WindowBase* self)
 {
     self->interface->events(self);
 }
 
-__attribute__((always_inline)) static inline void Window_set_title(
-  struct WindowBase* self,
-  const char*        title)
+static inline void Window_set_title(struct WindowBase* self, const char* title)
 {
     self->interface->set_title(self, title);
 }
 
-__attribute__((always_inline)) static inline void Window_set_app_id(
-  struct WindowBase* self,
-  const char*        app_id)
+static inline void Window_set_app_id(struct WindowBase* self, const char* app_id)
 {
     self->interface->set_app_id(self, app_id);
 }
 
-__attribute__((always_inline)) static inline void Window_maybe_swap(
-  struct WindowBase* self)
+static inline void Window_maybe_swap(struct WindowBase* self)
 {
     self->interface->maybe_swap(self);
 }
 
-__attribute__((always_inline)) static inline void Window_destroy(
-  struct WindowBase* self)
+static inline void Window_destroy(struct WindowBase* self)
 {
     self->interface->destroy(self);
 }
 
-__attribute__((always_inline)) static inline int get_connection_fd(
-  struct WindowBase* self)
+static inline int get_connection_fd(struct WindowBase* self)
 {
     return self->interface->get_connection_fd(self);
 }
 
-__attribute__((always_inline)) static inline void Window_clipboard_get(
-  void* self)
+static inline void Window_clipboard_get(void* self)
 {
     ((struct WindowBase*)self)->interface->clipboard_get(self);
 }
 
-__attribute__((always_inline)) static inline void Window_clipboard_send(
-  void*       self,
-  const char* text)
+static inline void Window_clipboard_send(void* self, const char* text)
 {
     ((struct WindowBase*)self)->interface->clipboard_send(self, text);
 }
 
 /* Trivial base functions */
-__attribute__((always_inline)) static inline void* Window_subclass_data_ptr(
-  struct WindowBase* self)
+static inline void* Window_subclass_data_ptr(struct WindowBase* self)
 {
     return &self->extend_data;
 }
 
-__attribute__((always_inline)) static inline int Window_get_connection_fd(
-  struct WindowBase* self)
+static inline int Window_get_connection_fd(struct WindowBase* self)
 {
     return self->interface->get_connection_fd(self);
 }
 
-__attribute__((always_inline)) static inline bool Window_closed(
-  struct WindowBase* self)
+static inline bool Window_closed(struct WindowBase* self)
 {
     return FLAG_IS_SET(self->state_flags, WINDOW_CLOSED);
 }
 
-__attribute__((always_inline)) static inline bool Window_needs_repaint(
-  struct WindowBase* self)
+static inline bool Window_needs_repaint(struct WindowBase* self)
 {
     return self->paint;
 }
 
-__attribute__((always_inline)) static inline Pair_uint32_t Window_size(
-  void* self)
+static inline Pair_uint32_t Window_size(void* self)
 {
     return (Pair_uint32_t){ .first  = ((struct WindowBase*)self)->w,
                             .second = ((struct WindowBase*)self)->h };
 }
 
-__attribute__((always_inline)) static inline Pair_uint32_t Window_position(
-  void* self)
+static inline Pair_uint32_t Window_position(void* self)
 {
     return (Pair_uint32_t){ .first  = ((struct WindowBase*)self)->x,
                             .second = ((struct WindowBase*)self)->y };
 }
 
-__attribute__((always_inline)) static inline void Window_notify_content_change(
-  void* self)
+static inline void Window_notify_content_change(void* self)
 {
     ((struct WindowBase*)self)->paint = true;
 }
 
-__attribute__((always_inline)) static inline uint32_t Window_get_keysym_from_name(struct WindowBase* self, char* name)
+static inline uint32_t Window_get_keysym_from_name(struct WindowBase* self, char* name)
 {
     return self->interface->get_keycode_from_name(self, name);
 }

@@ -72,60 +72,33 @@ typedef struct
 
     KeyCommand key_commands[NUM_KEY_COMMANDS];
 
-    const char* config_path;
-    bool        skip_config;
-
-    /* Prefer x11 over wayland */
+    bool skip_config;
     bool x11_is_default;
+    int  shell_argc;
 
-    /* Shell */
-    char*        shell;
-    int          shell_argc;
-    const char** shell_argv;
-
-    /* TERM value */
-    char* term;
-
-    /* override locale */
-    char* locale;
-
-    /* main title (application name) */
-    char* title;
-
-    /* allow applications to set their own window title (uses title format) */
-    bool dynamic_title;
-
-    bool bsp_sends_del;
-
-    /* printf-style format string used when window title is set by the
-     * shell/program. Has two string arguments, title and title set by the
-     * shell.
-     *
-     * title_format = "%2$s"            -> user@host:~
-     * title_format = "%s - %s"         -> wayst - user@host:~
-     * title_format = "Terminal (%2$s)" -> Terminal (user@host:~)
-     */
-    char* title_format;
-
-    /* initial window size */
+    bool     dynamic_title;
+    bool     bsp_sends_del;
     uint32_t rows, cols;
 
-    /* font family */
-    char* font;
+    const char** shell_argv;
 
-    /* font family for symbol font */
-    char* font_fallback;
-    char* font_fallback2;
-
-    /* font files */
-    char*          font_name;
-    char*          font_style_regular;
-    char*          font_style_bold;
-    char*          font_style_italic;
-    char*          font_name_bold;
-    char*          font_name_italic;
-    char*          font_name_fallback;
-    char*          font_name_fallback2;
+    AString        config_path;
+    AString        shell;
+    AString        title_format;
+    AString        font;
+    AString        font_fallback;
+    AString        font_fallback2;
+    AString        term;
+    AString        locale;
+    AString        title;
+    AString        font_file_name_regular;
+    AString        font_style_regular;
+    AString        font_style_bold;
+    AString        font_style_italic;
+    AString        font_file_name_bold;
+    AString        font_file_name_italic;
+    AString        font_file_name_fallback;
+    AString        font_file_name_fallback2;
     uint16_t       font_size;
     uint16_t       font_dpi;
     enum LcdFilter lcd_filter;
@@ -162,7 +135,6 @@ typedef struct
     int32_t cursor_blink_interval_ms;
     int32_t cursor_blink_suspend_ms;
     int32_t cursor_blink_end_s;
-
 } Settings;
 
 extern ColorRGB color_palette_256[257];
