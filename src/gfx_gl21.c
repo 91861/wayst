@@ -334,8 +334,8 @@ static Atlas Atlas_new(GfxOpenGL21* gfx, FT_Face face_)
     glTexImage2D(GL_TEXTURE_2D, 0, gfx->is_main_font_rgb ? GL_RGBA : GL_RED, self.w, self.h, 0,
                  gfx->is_main_font_rgb ? GL_RGB : GL_RED, GL_UNSIGNED_BYTE, 0);
 
-    hline       = 0;
-    uint32_t ox = 0, oy = 0;
+    hline                 = 0;
+    uint32_t offset_x_pix = 0, offset_y_pix = 0;
 
     FT_Bitmap conversion_map;
 
@@ -373,32 +373,34 @@ static Atlas Atlas_new(GfxOpenGL21* gfx, FT_Face face_)
                               (gfx->is_main_font_rgb ? 3 : 1);
         uint32_t char_height = bitmap_is_packed ? conversion_map.rows : gfx->g->bitmap.rows;
 
-        if (ox + char_width > self.w) {
-            oy += hline;
-            ox    = 0;
-            hline = char_height;
-        } else
+        if (offset_x_pix + char_width > self.w) {
+            offset_y_pix += hline;
+            offset_x_pix = 0;
+            hline        = char_height;
+        } else {
             hline = char_height > hline ? char_height : hline;
+        }
 
-        glTexSubImage2D(GL_TEXTURE_2D, 0, ox, oy, char_width, char_height,
+        glTexSubImage2D(GL_TEXTURE_2D, 0, offset_x_pix, offset_y_pix, char_width, char_height,
                         gfx->is_main_font_rgb ? GL_RGB : GL_RED, GL_UNSIGNED_BYTE,
                         bitmap_is_packed ? conversion_map.buffer : gfx->g->bitmap.buffer);
 
         self.char_info[i - ATLAS_RENDERABLE_START] = (struct AtlasCharInfo){
             .rows       = char_height,
             .width      = char_width,
-            .left       = (float)gfx->g->bitmap_left * 1.15,
-            .top        = (float)gfx->g->bitmap_top - 0.01,
-            .tex_coords = { (float)ox / self.w,
+            .left       = (float)gfx->g->bitmap_left,
+            .top        = (float)gfx->g->bitmap_top,
+            .tex_coords = { ((float)offset_x_pix + 0.01) / self.w,
 
-                            1.0f - ((float)(self.h - oy) / self.h),
+                            1.0f - (((float)self.h - ((float)offset_y_pix + 0.01)) / self.h),
 
-                            (float)ox / self.w + (float)char_width / self.w,
+                            ((float)offset_x_pix + 0.01) / self.w + (float)char_width / self.w,
 
-                            1.0f - ((float)(self.h - oy) / self.h - (float)char_height / self.h) }
+                            1.0f - (((float)self.h - ((float)offset_y_pix + 0.01)) / self.h -
+                                    (float)char_height / self.h) }
         };
 
-        ox += char_width;
+        offset_x_pix += char_width;
     }
 
     if (bitmap_is_packed) {
@@ -551,11 +553,9 @@ __attribute__((hot, flatten)) static GlyphMapEntry* Cache_get_glyph(GfxOpenGL21*
       (GlyphMapEntry){
         .code  = code,
         .color = color ? GLYPH_COLOR_COLOR : bitmap_is_packed ? GLYPH_COLOR_MONO : GLYPH_COLOR_LCD,
-
-        // for whatever reason this fixes some alignment problems
-        .left = (float)gfx->g->bitmap_left * 1.15,
-        .top  = (float)gfx->g->bitmap_top - 0.01,
-        .tex  = tex,
+        .left  = (float)gfx->g->bitmap_left,
+        .top   = (float)gfx->g->bitmap_top,
+        .tex   = tex,
       });
 
     return Vector_at_GlyphMapEntry(block, block->size - 1);
@@ -660,8 +660,8 @@ void GfxOpenGL21_resize(Gfx* self, uint32_t w, uint32_t h)
 
     gfxOpenGL21(self)->line_height = (float)height * gfxOpenGL21(self)->sy / 64.0;
 
-    gfxOpenGL21(self)->pen_begin = +gfxOpenGL21(self)->sy * (height / 64.0 / 1.75) +
-                                   gfxOpenGL21(self)->sy * ((hber) / 2.0 / 64.0);
+    gfxOpenGL21(self)->pen_begin =
+      gfxOpenGL21(self)->sy * (height / 64.0 / 2.0) + gfxOpenGL21(self)->sy * ((hber) / 2.0 / 64.0);
     gfxOpenGL21(self)->pen_begin_pixels =
       (float)(height / 64.0 / 1.75) + (float)((hber) / 2.0 / 64.0);
 
@@ -1228,6 +1228,7 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
 #define BOUND_RESOURCES_FONT_MONO 5
     int_fast8_t bound_resources = BOUND_RESOURCES_NONE;
 
+    /* Scale from pixels to GL coordinates */
     float scalex = 2.0f / texture_width;
     float scaley = 2.0f / texture_height;
 
@@ -1246,13 +1247,15 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
     Vt_is_cell_selected(vt, idx_each_rune, visual_line_index) ? settings.bghl : each_rune->bg
 
         if (idx_each_rune == length || !ColorRGBA_eq(L_CALC_BG_COLOR, bg_color)) {
+
             int extra_width = 0;
 
             // fb was cleared with settings.bg
             if (!ColorRGBA_eq(bg_color, settings.bg)) {
 
-                if (idx_each_rune > 1)
+                if (idx_each_rune > 1) {
                     extra_width = wcwidth(vt_line->data.buf[idx_each_rune - 1].code) - 1;
+                }
 
                 buffer[4] = buffer[6] = -1.0f + (idx_each_rune + extra_width) * scalex *
                                                   gfx->glyph_width_pixels; // set buffer end
@@ -1276,7 +1279,7 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
                 glDrawArrays(GL_QUADS, 0, 4);
             }
 
-            { // for each block with the same background color
+            { // for each block of characters with the same background color
                 ColorRGB      fg_color                     = settings.fg;
                 const VtRune* same_colors_block_begin_rune = same_bg_block_begin_rune;
 
@@ -1352,9 +1355,13 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
                                     float t = (float)g->top * scaley;
                                     float l = (float)g->left * scalex;
 
-                                    float x3 =
-                                      -1.0f + (float)column * gfx->glyph_width_pixels * scalex + l;
-                                    float y3 = -1.0f + gfx->pen_begin_pixels * scaley - t;
+                                    /* (scalex/y * 0.5) at the end to put it in the middle of the
+                                     * pixel */
+                                    float x3 = -1.0f +
+                                               (float)column * gfx->glyph_width_pixels * scalex +
+                                               l + (scalex * 0.5);
+                                    float y3 =
+                                      -1.0f + gfx->pen_begin_pixels * scaley - t + (scaley * 0.5);
 
                                     Vector_push_GlyphBufferData(
                                       target,
@@ -1475,8 +1482,12 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
 
                                     float h = scaley * g->tex.h;
                                     float w = scalex * g->tex.w;
-                                    float t = scaley * g->top;
                                     float l = scalex * g->left;
+                                    float t = scaley * g->top;
+
+                                    /* why does this even work?! */
+                                    float gsx = -0.1 / g->tex.w;
+                                    float gsy = -0.05 / g->tex.h;
 
                                     if (unlikely(h > 2.0f)) {
                                         const float scale = h / 2.0f;
@@ -1484,11 +1495,15 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
                                         w /= scale;
                                         t /= scale;
                                         l /= scale;
+                                        gsx = 0;
+                                        gsy = 0;
                                     }
 
-                                    float x3 =
-                                      -1.0f + (double)column * gfx->glyph_width_pixels * scalex + l;
-                                    float y3 = -1.0f + gfx->pen_begin_pixels * scaley - t;
+                                    float x3 = -1.0f +
+                                               (double)column * gfx->glyph_width_pixels * scalex +
+                                               l + (scalex * 0.5);
+                                    float y3 = -1.0f + (double)gfx->pen_begin_pixels * scaley - t +
+                                               (scaley * 0.5);
 
                                     Vector_GlyphBufferData* target = &gfx->_vec_glyph_buffer;
 
@@ -1501,10 +1516,11 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
                                     // used to draw tables and borders. Render
                                     // all repeating characters in one call.
                                     Vector_push_GlyphBufferData(
-                                      target, (GlyphBufferData){ { { x3, y3, 0.0f, 0.0f },
-                                                                   { x3 + w, y3, 1.0f, 0.0f },
-                                                                   { x3 + w, y3 + h, 1.0f, 1.0f },
-                                                                   { x3, y3 + h, 0.0f, 1.0f } } });
+                                      target, (GlyphBufferData){
+                                                { { x3, y3, 0.0f - gsx, 0.0f - gsy },
+                                                  { x3 + w, y3, 1.0f - gsx, 0.0f - gsy },
+                                                  { x3 + w, y3 + h, 1.0f - gsx, 1.0f - gsy },
+                                                  { x3, y3 + h, 0.0f - gsx, 1.0f - gsy } } });
 
                                     // needs to change texture on next iteration
                                     if ((z + 1 != each_rune_same_bg && z->code != (z + 1)->code) ||
@@ -1628,6 +1644,10 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
             // set background buffer start
             buffer[0] = buffer[2] =
               -1.0f + (idx_each_rune + extra_width) * scalex * gfx->glyph_width_pixels;
+
+            int clip_begin = idx_each_rune * gfx->glyph_width_pixels;
+            glEnable(GL_SCISSOR_TEST);
+            glScissor(clip_begin, 0, texture_width, texture_height);
 
             if (idx_each_rune != vt_line->data.size) {
                 same_bg_block_begin_rune = each_rune;
@@ -1838,6 +1858,7 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
 
     Framebuffer_use(NULL);
     glViewport(0, 0, gfx->win_w, gfx->win_h);
+    glDisable(GL_SCISSOR_TEST);
 
     if (unlikely(has_blinking_chars && !is_for_blinking)) {
         GfxOpenGL21_rasterize_line(gfx, vt, vt_line, visual_line_index, true);
@@ -1931,8 +1952,7 @@ static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const
                          ColorRGB_get_float(*clr, 2), 1.0f);
             glClear(GL_COLOR_BUFFER_BIT);
 
-            if (cursor_char) {
-
+            if (cursor_char && cursor_char->code > ' ') {
                 glBindBuffer(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
                 glVertexAttribPointer(gfx->font_shader.attribs->location, 4, GL_FLOAT, GL_FALSE, 0,
                                       0);
@@ -1955,7 +1975,7 @@ static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const
                     default:;
                 }
 
-                float h, w, t, l;
+                float h, w, t, l, gsx = 0.0, gsy = 0.0;
                 float tc[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
 
                 int32_t atlas_offset = Atlas_select(source_atlas, cursor_char->code);
@@ -1970,10 +1990,14 @@ static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const
                 } else {
                     GlyphMapEntry* g =
                       Cache_get_glyph(gfx, source_cache, source_face, cursor_char->code);
-                    h     = (float)g->tex.h * gfx->sy;
-                    w     = (float)g->tex.w * gfx->sx;
-                    t     = (float)g->top * gfx->sy;
-                    l     = (float)g->left * gfx->sx;
+                    h = (float)g->tex.h * gfx->sy;
+                    w = (float)g->tex.w * gfx->sx;
+                    t = (float)g->top * gfx->sy;
+                    l = (float)g->left * gfx->sx;
+
+                    gsx = -0.1 / g->tex.w;
+                    gsy = -0.05 / g->tex.h;
+
                     color = g->color;
                     if (unlikely(h > gfx->line_height)) {
                         const float scale = h / gfx->line_height;
@@ -1984,17 +2008,18 @@ static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const
                     }
                 }
 
-                float x3 = -1.0f + (float)col * gfx->glyph_width_pixels * gfx->sx + l;
+                float x3 =
+                  -1.0f + (float)col * gfx->glyph_width_pixels * gfx->sx + l + (gfx->sx * 0.5);
                 float y3 = +1.0f - gfx->pen_begin_pixels * gfx->sy -
-                           (float)row * gfx->line_height_pixels * gfx->sy + t;
+                           (float)row * gfx->line_height_pixels * gfx->sy + t - (gfx->sy * 0.5);
 
                 Vector_clear_GlyphBufferData(gfx->vec_glyph_buffer);
                 Vector_push_GlyphBufferData(gfx->vec_glyph_buffer,
                                             (GlyphBufferData){ {
-                                              { x3, y3, tc[0], tc[1] },
-                                              { x3 + w, y3, tc[2], tc[1] },
-                                              { x3 + w, y3 - h, tc[2], tc[3] },
-                                              { x3, y3 - h, tc[0], tc[3] },
+                                              { x3, y3, tc[0] - gsx, tc[1] - gsy },
+                                              { x3 + w, y3, tc[2] - gsx, tc[1] - gsy },
+                                              { x3 + w, y3 - h, tc[2] - gsx, tc[3] - gsy },
+                                              { x3, y3 - h, tc[0] - gsx, tc[3] - gsy },
                                             } });
 
                 size_t newsize = gfx->vec_glyph_buffer->size * sizeof(GlyphBufferData);
