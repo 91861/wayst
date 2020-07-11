@@ -1672,6 +1672,7 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
     ColorRGB line_color =
       vt_line->data.buf->linecolornotdefault ? vt_line->data.buf->line : vt_line->data.buf->fg;
 
+    glDisable(GL_SCISSOR_TEST);
     for (const VtRune* each_rune = vt_line->data.buf;
          each_rune <= vt_line->data.buf + vt_line->data.size; ++each_rune) {
         size_t column = each_rune - vt_line->data.buf;
@@ -1858,7 +1859,6 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
 
     Framebuffer_use(NULL);
     glViewport(0, 0, gfx->win_w, gfx->win_h);
-    glDisable(GL_SCISSOR_TEST);
 
     if (unlikely(has_blinking_chars && !is_for_blinking)) {
         GfxOpenGL21_rasterize_line(gfx, vt, vt_line, visual_line_index, true);
