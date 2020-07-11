@@ -73,10 +73,15 @@ static inline VtLine VtLine_new()
                      .proxy      = { { 0 } } };
 }
 
+static void Vt_output(Vt* self, const char* buf, size_t len)
+{
+    Vector_pushv_char(&self->output, buf, len);
+}
+
 #define Vt_output_formated(vt, fmt, ...)                                                           \
     char _tmp[64];                                                                                 \
     int  _len = snprintf(_tmp, sizeof(_tmp), fmt, __VA_ARGS__);                                    \
-    Vector_pushv_char(&(vt)->output, _tmp, _len);
+    Vt_output((vt), _tmp, _len);
 
 /**
  * Get string from selected region */
@@ -1263,7 +1268,13 @@ static inline void Vt_handle_CSI(Vt* self, char c)
         Vector_push_char(&self->parser.active_sequence, '\0');
         char* seq       = self->parser.active_sequence.buf;
         char  last_char = self->parser.active_sequence.buf[self->parser.active_sequence.size - 2];
-        bool  is_single_arg = !strchr(seq, ';') && !strchr(seq, ':');
+
+        /* char  second_last_char = */
+        /*   self->parser.active_sequence.size < 3 */
+        /*     ? '\0' */
+        /*     : self->parser.active_sequence.buf[self->parser.active_sequence.size - 3]; */
+
+        bool is_single_arg = !strchr(seq, ';') && !strchr(seq, ':');
 
 #define MULTI_ARG_IS_ERROR                                                                         \
     if (!is_single_arg) {                                                                          \
@@ -1271,11 +1282,109 @@ static inline void Vt_handle_CSI(Vt* self, char c)
         break;                                                                                     \
     }
 
-        if (*seq != '?') {
-
-            /* sequence without question mark */
+        if (*seq == '?') {
+            /* sequence starts with question mark */
             switch (last_char) {
+                /* <ESC>[? Pm h - DEC Private Mode Set (DECSET) */
+                case 'h':
+                /* <ESC>[? Pm l - DEC Private Mode Reset (DECRST) */
+                case 'l': {
+                    bool               is_enable = last_char == 'l';
+                    Vector_Vector_char tokens    = string_split_on(seq + 1, ";:", NULL, NULL);
+                    for (Vector_char* token = NULL;
+                         (token = Vector_iter_Vector_char(&tokens, token));) {
+                        errno     = 0;
+                        long code = strtol(token->buf + 1, NULL, 10);
+                        if (code && !errno) {
+                            Vt_handle_dec_mode(self, code, is_enable);
+                        } else {
+                            WRN("Invalid %s argument: \'%s\'\n", is_enable ? "DECSET" : "DECRST",
+                                token->buf + 1);
+                        }
+                    }
+                    Vector_destroy_Vector_char(&tokens);
+                } break;
 
+                /* <ESC>[? Ps i -  Media Copy (MC), DEC-specific */
+                case 'i':
+                    break;
+
+                    /* <ESC>[? Ps n Device Status Report (DSR, DEC-specific) */
+                case 'n': {
+                    int arg = short_sequence_get_int_argument(seq);
+                    /* 6 - report cursor position */
+                    if (arg == 6) {
+                        Vt_output_formated(self, "\e[%zu;%zuR", Vt_get_cursor_row_screen(self) + 1,
+                                           self->cursor.col + 1);
+                    } else {
+                        WRN("Unimplemented DSR(DEC) code: %d\n", arg);
+                    }
+                } break;
+
+                default:
+                    WRN("Unknown CSI sequence: %s\n", seq);
+            }
+        } else if (*seq == '>') {
+            switch (last_char) {
+                /* <ESC>[> Pp m / <ESC>[> Pp ; Pv m - Set/reset key modifier options (XTMODKEYS)
+                 * Pp = 0 - modifyKeyboard.
+                 * Pp = 1 - modifyCursorKeys.
+                 * Pp = 2 - modifyFunctionKeys.
+                 * Pp = 4 - modifyOtherKeys.
+                 */
+                case 'm':
+                    // TODO:
+                    break;
+
+                /* <ESC>[> Ps n - Disable key modifier options, xterm
+                 * Pp = 0 - modifyKeyboard.
+                 * Pp = 1 - modifyCursorKeys.
+                 * Pp = 2 - modifyFunctionKeys.
+                 * Pp = 4 - modifyOtherKeys.
+                 */
+                case 'n':
+                    // TODO:
+                    break;
+
+                /* <ESC>[ > Ps c - Send Device Attributes (Secondary DA) */
+                case 'c': {
+                    MULTI_ARG_IS_ERROR
+                    int arg = short_sequence_get_int_argument(seq);
+                    if (arg == 0) {
+                        /* report VT100, firmware ver. 0, ROM number 0 */
+                        Vt_output(self, "\e[>0;0;0c", 9);
+                    }
+                } break;
+
+                default:
+                    WRN("Unknown CSI sequence: %s\n", seq);
+            }
+        } else if (*seq == '#') {
+            switch (last_char) {
+                case '}':
+                case '{': {
+                    WRN("XTPUSHSGR/XTPOPSGR not implemented\n");
+                } break;
+
+                default:
+                    WRN("Unknown CSI sequence: %s\n", seq);
+            }
+        } else if (*seq == '=') {
+            switch (last_char) {
+                /* <ESC>[ = Ps c - Send Device Attributes (Tertiary DA). */
+                case 'c': {
+                    MULTI_ARG_IS_ERROR
+                    int arg = short_sequence_get_int_argument(seq);
+                    if (arg == 0) {
+                        Vt_output(self, "\e[?6c", 5);
+                    }
+                } break;
+
+                default:
+                    WRN("Unknown CSI sequence: %s\n", seq);
+            }
+        } else {
+            switch (last_char) {
                 /* <ESC>[ Ps ; ... m - change one or more text attributes (SGR) */
                 case 'm': {
                     Vector_pop_n_char(&self->parser.active_sequence, 2); // 'm', '\0'
@@ -1485,7 +1594,7 @@ static inline void Vt_handle_CSI(Vt* self, char c)
                 /* <ESC>[...c - Send device attributes (Primary DA) */
                 case 'c': {
                     /* report VT 102 */
-                    Vector_pushv_char(&self->output, "\e[?6c", 5);
+                    Vt_output(self, "\e[?6c", 5);
                 } break;
 
                 /* <ESC>[...n - Device status report (DSR) */
@@ -1495,11 +1604,13 @@ static inline void Vt_handle_CSI(Vt* self, char c)
                     if (arg == 5) {
                         /* 5 - is terminal ok
                          *  ok - 0, not ok - 3 */
-                        Vector_pushv_char(&self->output, "\e[0n", 4);
+                        Vt_output(self, "\e[0n", 4);
                     } else if (arg == 6) {
                         /* 6 - report cursor position */
                         Vt_output_formated(self, "\e[%zu;%zuR", Vt_get_cursor_row_screen(self) + 1,
                                            self->cursor.col + 1);
+                    } else {
+                        WRN("Unimplemented DSR code: %d\n", arg);
                     }
                 } break;
 
@@ -1539,7 +1650,7 @@ static inline void Vt_handle_CSI(Vt* self, char c)
                     Vt_delete_chars(self, short_sequence_get_int_argument(seq));
                     break;
 
-                /* <ESC>[ Ps i - Local printing related commands */
+                /* <ESC>[ Ps i -  Media Copy (MC) Local printing related commands */
                 case 'i':
                     break;
 
@@ -1589,7 +1700,22 @@ static inline void Vt_handle_CSI(Vt* self, char c)
                     }
                 } break;
 
-                /* <ESC>[ Ps ; ... t - WindowOps */
+                /* <ESC>[u - Restore cursor (SCORC, also ANSI.SYS) */
+                /* <ESC>[Ps SP u - Set margin-bell volume (DECSMBV), VT520 */
+                case 'u':
+                    if (*seq == 'u') {
+                        //TODO: cursor restore
+                    } else {
+                        WRN("DECSMBV not implemented\n");
+                    }
+                    break;
+
+                /* <ESC>[s - Save cursor (SCOSC, also ANSI.SYS) available only when DECLRMM is disabled */
+                case 's': {
+                    //TODO: save cursor
+                } break;
+
+                /* <ESC>[ Ps ; Ps ; Ps t - xterm windowOps (XTWINOPS)*/
                 case 't': {
                     int nargs;
                     int args[4];
@@ -1714,32 +1840,6 @@ static inline void Vt_handle_CSI(Vt* self, char c)
                     WRN("Unknown CSI sequence: %s\n", seq);
 
             } // end switch
-
-        } else {
-
-            /* sequence starts with question mark */
-            switch (last_char) {
-
-                /* DEC Private Mode Set (DECSET) */
-                case 'h':
-                /* DEC Private Mode Reset (DECRST) */
-                case 'l': {
-                    bool               is_enable = last_char == 'l';
-                    Vector_Vector_char tokens    = string_split_on(seq + 1, ";:", NULL, NULL);
-                    for (Vector_char* token = NULL;
-                         (token = Vector_iter_Vector_char(&tokens, token));) {
-                        errno     = 0;
-                        long code = strtol(token->buf + 1, NULL, 10);
-                        if (code && !errno) {
-                            Vt_handle_dec_mode(self, code, is_enable);
-                        } else {
-                            WRN("Invalid %s argument: \'%s\'\n", is_enable ? "DECSET" : "DECRST",
-                                token->buf + 1);
-                        }
-                    }
-                    Vector_destroy_Vector_char(&tokens);
-                } break;
-            }
         }
 
         Vector_destroy_char(&self->parser.active_sequence);
@@ -3047,7 +3147,7 @@ static bool Vt_maybe_handle_unicode_input_key(Vt*      self,
                 static mbstate_t mbstate;
                 int              mb_len = c32rtomb(tmp, result, &mbstate);
                 if (mb_len) {
-                    Vector_pushv_char(&self->output, tmp, mb_len);
+                    Vt_output(self, tmp, mb_len);
                 }
             } else {
                 WRN("Failed to parse \'%s\'\n", self->unicode_input.buffer.buf);
@@ -3098,7 +3198,7 @@ static inline bool Vt_maybe_handle_keypad_key(Vt* self, uint32_t key, uint32_t m
         bool appl_key = self->modes.application_keypad;
         resp          = appl_key ? application_keypad_response(key) : normal_keypad_response(key);
         if (resp) {
-            Vector_pushv_char(&self->output, resp, 3 + appl_key);
+            Vt_output(self, resp, strlen(resp));
             return true;
         }
     }
@@ -3128,13 +3228,13 @@ static inline bool Vt_maybe_handle_function_key(Vt* self, uint32_t key, uint32_t
         }
         return true;
     } else if (key == XKB_KEY_Insert) {
-        Vector_pushv_char(&self->output, "\e[2~", 4);
+        Vt_output(self, "\e[2~", 4);
         return true;
     } else if (key == XKB_KEY_Page_Up) {
-        Vector_pushv_char(&self->output, "\e[5~", 4);
+        Vt_output(self, "\e[5~", 4);
         return true;
     } else if (key == XKB_KEY_Page_Down) {
-        Vector_pushv_char(&self->output, "\e[6~", 4);
+        Vt_output(self, "\e[6~", 4);
         return true;
     } else if (key == ' ' && FLAG_IS_SET(mods, MODIFIER_CONTROL)) {
         // TODO: ?!
@@ -3216,7 +3316,7 @@ void Vt_handle_key(void* _self, uint32_t key, uint32_t rawkey, uint32_t mods)
         size_t           mb_len = c32rtomb(tmp, key, &mbstate);
 
         if (mb_len) {
-            Vector_pushv_char(&self->output, tmp, mb_len);
+            Vt_output(self, tmp, mb_len);
         }
     }
 
@@ -3291,7 +3391,7 @@ void Vt_handle_clipboard(void* self, const char* text)
     size_t len = strlen(text);
 
     if (vt->modes.bracketed_paste) {
-        Vector_pushv_char(&vt->output, "\e[200~", 6);
+        Vt_output(vt, "\e[200~", 6);
     }
 
     char last = '\0';
@@ -3308,7 +3408,7 @@ void Vt_handle_clipboard(void* self, const char* text)
     }
 
     if (vt->modes.bracketed_paste) {
-        Vector_pushv_char(&vt->output, "\e[201~", 6);
+        Vt_output(vt, "\e[201~", 6);
     }
 }
 
