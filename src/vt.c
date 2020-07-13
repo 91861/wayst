@@ -805,8 +805,7 @@ void Vt_dump_info(Vt* self)
     printf("V V V  \n");
     for (size_t i = 0; i < self->lines.size; ++i) {
         Vector_char str = line_to_string(&self->lines.buf[i].data, 0, 0, "");
-        printf("%c %c %c %4zu%c sz:%4zu dmg:%d proxy{%3d,%3d,%3d,%3d} reflow{%d,%d} "
-               "data: %.30s\n",
+        printf("%c %c %c %4zu%c sz:%4zu dmg:%d proxy{%3d,%3d,%3d,%3d} reflow{%d,%d} data: %.30s\n",
                i == Vt_top_line(self) ? 'v' : i == Vt_bottom_line(self) ? '^' : ' ',
                i == Vt_get_scroll_region_top(self) || i == Vt_get_scroll_region_bottom(self) ? '-'
                                                                                              : ' ',
@@ -814,11 +813,8 @@ void Vt_dump_info(Vt* self)
                i == self->cursor.row ? '*' : ' ', self->lines.buf[i].data.size,
                self->lines.buf[i].damaged, self->lines.buf[i].proxy.data[0],
                self->lines.buf[i].proxy.data[1], self->lines.buf[i].proxy.data[2],
-               self->lines.buf[i].proxy.data[3],
-
-               self->lines.buf[i].reflowable, self->lines.buf[i].rejoinable,
-
-               str.buf);
+               self->lines.buf[i].proxy.data[3], self->lines.buf[i].reflowable,
+               self->lines.buf[i].rejoinable, str.buf);
         Vector_destroy_char(&str);
     }
 }
@@ -1704,15 +1700,16 @@ static inline void Vt_handle_CSI(Vt* self, char c)
                 /* <ESC>[Ps SP u - Set margin-bell volume (DECSMBV), VT520 */
                 case 'u':
                     if (*seq == 'u') {
-                        //TODO: cursor restore
+                        // TODO: cursor restore
                     } else {
                         WRN("DECSMBV not implemented\n");
                     }
                     break;
 
-                /* <ESC>[s - Save cursor (SCOSC, also ANSI.SYS) available only when DECLRMM is disabled */
+                /* <ESC>[s - Save cursor (SCOSC, also ANSI.SYS) available only when DECLRMM is
+                 * disabled */
                 case 's': {
-                    //TODO: save cursor
+                    // TODO: save cursor
                 } break;
 
                 /* <ESC>[ Ps ; Ps ; Ps t - xterm windowOps (XTWINOPS)*/
@@ -1867,7 +1864,11 @@ static void Vt_handle_SGR_code(Vt* self, char* command)
             break;
 
         case 1:
-            self->parser.char_state.state = VT_RUNE_BOLD;
+            if (self->parser.char_state.state == VT_RUNE_ITALIC) {
+                self->parser.char_state.state = VT_RUNE_BOLD_ITALIC;
+            } else {
+                self->parser.char_state.state = VT_RUNE_BOLD;
+            }
             break;
 
         case 2:
@@ -1875,7 +1876,11 @@ static void Vt_handle_SGR_code(Vt* self, char* command)
             break;
 
         case 3:
-            self->parser.char_state.state = VT_RUNE_ITALIC;
+            if (self->parser.char_state.state == VT_RUNE_BOLD) {
+                self->parser.char_state.state = VT_RUNE_BOLD_ITALIC;
+            } else {
+                self->parser.char_state.state = VT_RUNE_ITALIC;
+            }
             break;
 
         case 4:
@@ -2075,7 +2080,7 @@ static void Vt_handle_SGR_sequence(Vt* self, Vector_char seq)
                     self->parser.char_state.curlyunderline = true;
                 } else {
                     Vt_handle_SGR_code(self, args[0]->buf + 1);
-                    Vt_handle_SGR_code(self, args[1]->buf + 1);
+                    token = Vector_iter_back_Vector_char(&tokens, token);
                 }
             } else {
                 Vt_handle_SGR_code(self, args[0]->buf + 1);
@@ -3043,29 +3048,29 @@ static inline const char* application_keypad_response(const uint32_t key)
 {
     switch (key) {
         case XKB_KEY_Up:
-            return "\eOA\0";
+            return "\eOA";
         case XKB_KEY_Down:
-            return "\eOB\0";
+            return "\eOB";
         case XKB_KEY_Right:
-            return "\eOC\0";
+            return "\eOC";
         case XKB_KEY_Left:
-            return "\eOD\0";
+            return "\eOD";
         case XKB_KEY_End:
-            return "\eOF\0";
+            return "\eOF";
         case XKB_KEY_Home:
-            return "\eOH\0";
+            return "\eOH";
         case XKB_KEY_KP_Enter:
-            return "\eOM\0";
+            return "\eOM";
         case XKB_KEY_KP_Multiply:
-            return "\eOj\0";
+            return "\eOj";
         case XKB_KEY_KP_Add:
-            return "\eOk\0";
+            return "\eOk";
         case XKB_KEY_KP_Separator:
-            return "\eOl\0";
+            return "\eOl";
         case XKB_KEY_KP_Subtract:
-            return "\eOm\0";
+            return "\eOm";
         case XKB_KEY_KP_Divide:
-            return "\eOo\0";
+            return "\eOo";
         case 127:
             return "\e[3~";
         default:

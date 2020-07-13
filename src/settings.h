@@ -6,7 +6,7 @@
 #include "util.h"
 
 #ifndef VERSION
-#define VERSION "unknown"
+#define VERSION "0.0.0"
 #endif
 
 // default lcd filter
@@ -82,23 +82,28 @@ typedef struct
 
     const char** shell_argv;
 
-    AString        config_path;
-    AString        shell;
-    AString        title_format;
-    AString        font;
-    AString        font_fallback;
-    AString        font_fallback2;
-    AString        term;
-    AString        locale;
-    AString        title;
-    AString        font_file_name_regular;
-    AString        font_style_regular;
-    AString        font_style_bold;
-    AString        font_style_italic;
-    AString        font_file_name_bold;
-    AString        font_file_name_italic;
-    AString        font_file_name_fallback;
-    AString        font_file_name_fallback2;
+    AString config_path;
+    AString shell;
+    AString title_format;
+    AString font;
+    AString font_fallback;
+    AString font_fallback2;
+    AString term;
+    AString locale;
+    AString title;
+
+    AString font_style_regular;
+    AString font_style_bold;
+    AString font_style_italic;
+    AString font_style_bold_italic;
+
+    AString font_file_name_regular;
+    AString font_file_name_bold;
+    AString font_file_name_italic;
+    AString font_file_name_bold_italic;
+    AString font_file_name_fallback;
+    AString font_file_name_fallback2;
+
     uint16_t       font_size;
     uint16_t       font_dpi;
     enum LcdFilter lcd_filter;
@@ -106,9 +111,6 @@ typedef struct
     /* colors - normal, highlight */
     ColorRGBA bg, bghl;
     ColorRGB  fg, fghl;
-
-    /* color for 'dim' text */
-    ColorRGB fg_dim;
 
     bool highlight_change_fg;
 
@@ -118,6 +120,9 @@ typedef struct
 
     ColorRGBA bell_flash;
     bool      no_flash;
+
+    bool    padding_center;
+    uint8_t padding;
 
     bool    allow_scrollback_clear;
     bool    scroll_on_output;
@@ -165,7 +170,7 @@ static inline void KeyCommand_name_to_code(KeyCommand* cmd)
         if (!code) {
             WRN("Invalid key name \'%s\'\n", cmd->key.name);
         } else {
-            LOG("Converting key name \'%s\' to keycode %u\n", cmd->key.name, code);
+            LOG("Converting key name \'%s\' to keysym %u\n", cmd->key.name, code);
         }
 
         free(cmd->key.name);

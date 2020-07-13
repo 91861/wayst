@@ -66,6 +66,7 @@ typedef struct __attribute__((packed))
         VT_RUNE_NORMAL = 0,
         VT_RUNE_BOLD,
         VT_RUNE_ITALIC,
+        VT_RUNE_BOLD_ITALIC,
     } state : 3;
 
     uint8_t linecolornotdefault : 1;

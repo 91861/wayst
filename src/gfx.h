@@ -14,6 +14,21 @@
 #include "util.h"
 #include "vt.h"
 
+
+/*
+typedef struct {
+    enum ContextType {
+        CONTEXT_TYPE_GL_COMPAT,
+        CONTEXT_TYPE_GL_CORE,
+        CONTEXT_TYPE_GL_ES,
+        CONTEXT_TYPE_VK,
+    } type;
+    
+    uint8_t major;
+    uint8_t minor;
+} ContextInfo;
+*/
+
 typedef struct
 {
     struct IGfx* interface;
@@ -43,16 +58,22 @@ static void Gfx_draw(Gfx* self, const Vt* vt, Ui* ui)
     self->interface->draw(self, vt, ui);
 }
 
+/**
+ * Set window dimensions */
 static void Gfx_resize(Gfx* self, uint32_t w, uint32_t h)
 {
     self->interface->resize(self, w, h);
 }
 
+/**
+ * Get the number of cells that can be drawn on the window with current dimensions */
 static Pair_uint32_t Gfx_get_char_size(Gfx* self)
 {
     return self->interface->get_char_size(self);
 }
 
+/**
+ * Initialize renderer (requires an activated graphics context) */
 static void Gfx_init_with_context_activated(Gfx* self)
 {
     self->interface->init_with_context_activated(self);
@@ -83,6 +104,8 @@ static void Gfx_flash(Gfx* self)
     self->interface->flash(self);
 }
 
+/**
+ * Get the number pixels required to fit a given number of cells */
 static Pair_uint32_t Gfx_pixels(Gfx* self, uint32_t rows, uint32_t columns)
 {
     return self->interface->pixels(self, rows, columns);
@@ -94,6 +117,8 @@ static void Gfx_destroy(Gfx* self)
     free(self);
 }
 
+/**
+ * Destroy the generated line 'proxy' object */
 static void Gfx_destroy_proxy(Gfx* self,  int32_t proxy[static 4])
 {
     self->interface->destroy_proxy(self, proxy);

@@ -93,6 +93,7 @@ void        App_do_autoscroll(App* self);
 void        App_notify_content_change(void* self);
 static void App_clamp_cursor(App* self, Pair_uint32_t chars);
 static void App_set_callbacks(App* self);
+static void App_maybe_resize(App* self, Pair_uint32_t newres);
 
 void* App_load_gl_ext(const char* name)
 {
@@ -137,7 +138,10 @@ void App_init(App* self)
     Pair_uint32_t chars = Gfx_get_char_size(self->gfx);
     Vt_resize(&self->vt, chars.first, chars.second);
     Monitor_watch_fd(&self->monitor, Window_get_connection_fd(self->win));
+
     self->ui.scrollbar.width = 10;
+    self->ui.pixel_offset_x  = 0;
+    self->ui.pixel_offset_y  = 0;
     self->resolution         = size;
 }
 
@@ -168,15 +172,9 @@ void App_run(App* self)
             Monitor_wait(&self->monitor);
             Monitor_write(&self->monitor, buf, len);
         }
-        Pair_uint32_t newres = Window_size(self->win);
-        if (newres.first != self->resolution.first || newres.second != self->resolution.second) {
-            self->resolution = newres;
-            Gfx_resize(self->gfx, self->resolution.first, self->resolution.second);
-            Pair_uint32_t chars = Gfx_get_char_size(self->gfx);
-            App_clamp_cursor(self, chars);
-            Window_notify_content_change(self->win);
-            Vt_resize(&self->vt, chars.first, chars.second);
-        }
+
+        App_maybe_resize(self, Window_size(self->win));
+
         App_do_autoscroll(self);
         App_update_scrollbar_vis(self);
         App_update_scrollbar_dims(self);
@@ -193,6 +191,32 @@ void App_run(App* self)
     Vt_destroy(&self->vt);
     Gfx_destroy(self->gfx);
     Window_destroy(self->win);
+}
+
+static void App_maybe_resize(App* self, Pair_uint32_t newres)
+{
+    if (newres.first != self->resolution.first || newres.second != self->resolution.second) {
+        self->resolution = newres;
+
+        Gfx_resize(self->gfx, self->resolution.first, self->resolution.second);
+        Pair_uint32_t chars = Gfx_get_char_size(self->gfx);
+        Pair_uint32_t used_pixels =  Gfx_pixels(self->gfx, chars.first, chars.second);
+
+        if (settings.padding_center) {
+            self->ui.pixel_offset_x = (self->resolution.first - used_pixels.first) / 2;
+            self->ui.pixel_offset_y = (self->resolution.second - used_pixels.second) / 2;
+        } else {
+            self->ui.pixel_offset_x = 0;
+            self->ui.pixel_offset_y = 0;
+        }
+
+        self->ui.pixel_offset_x += settings.padding;
+        self->ui.pixel_offset_y += settings.padding;
+        
+        App_clamp_cursor(self, chars);
+        Window_notify_content_change(self->win);
+        Vt_resize(&self->vt, chars.first, chars.second);
+    }
 }
 
 void App_clipboard_handler(void* self, const char* text)
@@ -691,8 +715,9 @@ static bool App_consume_drag(App* self, uint32_t button, int32_t x, int32_t y)
     self->click_count = 0;
 
     if (button == MOUSE_BTN_LEFT && self->selection_dragging_left) {
-        if (vt->selection.next_mode)
+        if (vt->selection.next_mode) {
             Vt_select_commit(vt);
+        }
         Vt_select_set_end(vt, x, y);
         return true;
     } else if (button == MOUSE_BTN_RIGHT && self->selection_dragging_right) {
@@ -708,24 +733,21 @@ static bool App_consume_drag(App* self, uint32_t button, int32_t x, int32_t y)
 
 /**
  * @return does text field consume click event */
-static bool App_consume_click(App*     self,
-                              uint32_t button,
-                              uint32_t state,
-                              int32_t  x,
-                              int32_t  y,
-                              uint32_t mods)
+static bool App_maybe_consume_click(App*     self,
+                                    uint32_t button,
+                                    uint32_t state,
+                                    int32_t  x,
+                                    int32_t  y,
+                                    uint32_t mods)
 {
     Vt* vt = &self->vt;
-
     if (!state) {
         self->selection_dragging_left  = false;
         self->selection_dragging_right = SELECT_DRAG_RIGHT_NONE;
     }
-
     if (vt->modes.x10_mouse_compat) {
         return false;
     }
-
     bool no_left_report = (!(vt->modes.extended_report || vt->modes.mouse_btn_report ||
                              vt->modes.mouse_motion_on_btn_report) ||
                            FLAG_IS_SET(mods, MODIFIER_SHIFT));
@@ -738,16 +760,13 @@ static bool App_consume_click(App*     self,
         if (!state && vt->selection.mode == SELECT_MODE_NONE) {
             return false;
         }
-
         if (state) {
             if (!TimePoint_passed(self->next_click_limit)) {
                 ++self->click_count;
             } else {
                 self->click_count = 0;
             }
-
             self->next_click_limit = TimePoint_ms_from_now(DOUBLE_CLICK_DELAY_MS);
-
             if (self->click_count == 0) {
                 Vt_select_end(vt);
                 Vt_select_init(
@@ -769,7 +788,6 @@ static bool App_consume_click(App*     self,
 
         /* extend selection */
     } else if (button == MOUSE_BTN_RIGHT && state && no_middle_report && vt->selection.mode) {
-
         size_t clicked_line = Vt_visual_top_line(vt) + y / vt->pixels_per_cell_y;
 
         if (vt->selection.begin_line == vt->selection.end_line) {
@@ -829,6 +847,9 @@ void App_button_handler(void*    self,
 {
     App* app = self;
     Vt*  vt  = &app->vt;
+    x = CLAMP(x - app->ui.pixel_offset_x, 0, (int32_t)app->resolution.first);
+    y = CLAMP(y - app->ui.pixel_offset_y, 0, (int32_t)app->resolution.second);
+
     if (button == MOUSE_BTN_WHEEL_DOWN && state) {
         uint8_t lines             = ammount ? ammount : settings.scroll_discrete_lines;
         app->ui.scrollbar.visible = true;
@@ -849,15 +870,20 @@ void App_button_handler(void*    self,
         App_update_scrollbar_dims(self);
         App_notify_content_change(self);
     } else if (!App_scrollbar_consume_click(self, button, state, x, y) &&
-               !App_consume_click(self, button, state, x, y, mods)) {
+               !App_maybe_consume_click(self, button, state, x, y, mods)) {
         Vt_handle_button(vt, button, state, x, y, ammount, mods);
     }
 }
 
 void App_motion_handler(void* self, uint32_t button, int32_t x, int32_t y)
 {
-    if (!App_scrollbar_consume_drag(self, button, x, y) && !App_consume_drag(self, button, x, y))
-        Vt_handle_motion(&((App*)self)->vt, button, x, y);
+    App* app = self;
+    x = CLAMP(x - app->ui.pixel_offset_x, 0, (int32_t)app->resolution.first);
+    y = CLAMP(y - app->ui.pixel_offset_y, 0, (int32_t)app->resolution.second);
+    
+    if (!App_scrollbar_consume_drag(self, button, x, y) && !App_consume_drag(self, button, x, y)) {
+        Vt_handle_motion(&app->vt, button, x, y);
+    }
 }
 
 static void App_set_callbacks(App* self)

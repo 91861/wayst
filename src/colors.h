@@ -184,6 +184,15 @@ static inline ColorRGBA ColorRGBA_from_RGB(const ColorRGB c)
     };
 }
 
+static ColorRGB ColorRGB_new_from_blend(ColorRGB base, ColorRGB blend, float factor)
+{
+    return (ColorRGB){
+        .r = CLAMP(base.r * (1.0f - factor) + factor * blend.r, 0, 255),
+        .g = CLAMP(base.g * (1.0f - factor) + factor * blend.g, 0, 255),
+        .b = CLAMP(base.b * (1.0f - factor) + factor * blend.b, 0, 255),
+    };
+}
+
 static inline float ColorRGB_get_float(const ColorRGB c, const size_t idx)
 {
     ASSERT(idx <= 2, "bad index");

@@ -21,6 +21,7 @@ typedef struct
 
 typedef struct
 {
+    uint8_t pixel_offset_x, pixel_offset_y;
     Scrollbar scrollbar;
     struct Cursor* cursor;
 } Ui;
