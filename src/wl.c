@@ -271,6 +271,21 @@ void WindowWl_clipboard_get(struct WindowBase* self)
     }
 }
 
+void wl_surface_handle_enter(void* data, struct wl_surface* wl_surface, struct wl_output* output)
+{
+    FLAG_SET(((struct WindowBase*)data)->state_flags, WINDOW_IS_MAPPED);
+}
+
+void wl_surface_handle_leave(void* data, struct wl_surface* wl_surface, struct wl_output* output)
+{
+    FLAG_UNSET(((struct WindowBase*)data)->state_flags, WINDOW_IS_MAPPED);
+}
+
+struct wl_surface_listener wl_surface_listener = {
+    .enter = wl_surface_handle_enter,
+    .leave = wl_surface_handle_leave,
+};
+
 /* Pointer listener */
 static void pointer_handle_enter(void*              data,
                                  struct wl_pointer* pointer,
@@ -691,19 +706,18 @@ static void xdg_toplevel_handle_configure(void*                data,
                                           struct wl_array*     states)
 {
     struct WindowBase*       win       = data;
-    bool                     is_mapped = false;
+    bool                     is_active = false;
     enum xdg_toplevel_state* s;
     wl_array_for_each(s, states)
     {
         if (*s == XDG_TOPLEVEL_STATE_ACTIVATED) {
-            is_mapped = true;
+            is_active = true;
         }
     }
-    if (is_mapped) {
+    if (is_active) {
         FLAG_SET(win->state_flags, WINDOW_IS_MAPPED);
-    } else {
-        FLAG_UNSET(win->state_flags, WINDOW_IS_MAPPED);
     }
+
     if (!width && !height) {
         wl_egl_window_resize(windowWl(win)->egl_window, win->w, win->h, 0, 0);
         Window_notify_content_change(win);
@@ -1154,11 +1168,11 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h)
             WRN("Wayland compositor does not provide window decorations\n");
 
         wl_surface_commit(windowWl(win)->surface);
+        wl_surface_add_listener(windowWl(win)->surface, &wl_surface_listener, win);
 
         wl_display_roundtrip(globalWl->display);
     } else {
-        WRN("xdg_shell_v1 not supported by compositor, falling back to "
-            "wl_shell\n");
+        WRN("xdg_shell_v1 not supported by compositor, falling back to wl_shell\n");
 
         windowWl(win)->shell_surface =
           wl_shell_get_shell_surface(globalWl->wl_shell, windowWl(win)->surface);
@@ -1307,23 +1321,11 @@ static void WindowWl_dont_swap_buffers(struct WindowBase* self)
 static void WindowWl_swap_buffers(struct WindowBase* self)
 {
     self->paint = false;
-
-    // swapping a window that is unmapped will block
-    //
-    // make sure we do 2 initial buffer swaps no matter what the compositor said about window
-    // mapping to get it on the screen. Otherwise no toplevel reconfigure saying the window
-    // is now 'active' will be sent. There is probably something wrong with this.
-    if (FLAG_IS_SET(self->state_flags, WINDOW_IS_MAPPED) || windowWl(self)->swaps < 2) {
-        if (windowWl(self)->swaps < 2)
-            ++windowWl(self)->swaps;
-
+    if (FLAG_IS_SET(self->state_flags, WINDOW_IS_MAPPED)) {
         EGLBoolean result = eglSwapBuffers(globalWl->egl_display, windowWl(self)->egl_surface);
-        if (result == EGL_FALSE) {
+        if (result != EGL_TRUE) {
             ERR("buffer swap failed EGL Error %s\n", egl_get_error_string(eglGetError()));
         }
-    } else {
-        wl_display_prepare_read(globalWl->display);
-        wl_display_read_events(globalWl->display);
     }
 }
 
