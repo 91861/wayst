@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <uchar.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -294,6 +295,20 @@ static inline bool strtob(const char* restrict str)
         return false;
     }
     return strneqci("true", str, 4) || strneqci("1", str, 1);
+}
+
+
+static inline bool unicode_is_combinable(char32_t codepoint)
+{
+    switch (codepoint) {
+    case 688 ... 767 :
+    case 0x1AB0 ... 0x1AFF:
+    case 0x1DC0 ... 0x1DFF:
+    case 0x20D0 ... 0x20FF:
+        return true;
+    default:
+        return false;
+    }
 }
 
 /**

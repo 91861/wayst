@@ -658,33 +658,28 @@ void GfxOpenGL21_resize(Gfx* self, uint32_t w, uint32_t h)
 {
     GfxOpenGL21_destroy_recycled_proxies(gfxOpenGL21(self));
 
-    if (FT_Load_Char(gfxOpenGL21(self)->face, '>', FT_LOAD_TARGET_LCD) ||
+    if (FT_Load_Char(gfxOpenGL21(self)->face, '(', FT_LOAD_TARGET_LCD) ||
         FT_Render_Glyph(gfxOpenGL21(self)->face->glyph, FT_RENDER_MODE_LCD)) {
         WRN("Glyph error\n");
     }
-
     if (!gfxOpenGL21(self)->face->size->metrics.height ||
         !gfxOpenGL21(self)->face->glyph->advance.x) {
         ERR("Font error, reported size is NULL");
     }
-
     gfxOpenGL21(self)->win_w = w;
     gfxOpenGL21(self)->win_h = h;
-
     gfxOpenGL21(self)->sx = 2.0f / gfxOpenGL21(self)->win_w;
     gfxOpenGL21(self)->sy = 2.0f / gfxOpenGL21(self)->win_h;
 
-    uint32_t height = gfxOpenGL21(self)->face->size->metrics.height + 128;
-    uint32_t hber   = gfxOpenGL21(self)->face->glyph->metrics.horiBearingY - 128;
+    uint32_t height = gfxOpenGL21(self)->face->size->metrics.height;
+    uint32_t hber   = gfxOpenGL21(self)->face->glyph->metrics.horiBearingY / 64 / 2 / 2 + 1;
 
     gfxOpenGL21(self)->line_height_pixels = height / 64.0;
-
-    gfxOpenGL21(self)->line_height = (float)height * gfxOpenGL21(self)->sy / 64.0;
+    gfxOpenGL21(self)->line_height        = (float)height * gfxOpenGL21(self)->sy / 64.0;
 
     gfxOpenGL21(self)->pen_begin =
-      gfxOpenGL21(self)->sy * (height / 64.0 / 2.0) + gfxOpenGL21(self)->sy * ((hber) / 2.0 / 64.0);
-    gfxOpenGL21(self)->pen_begin_pixels =
-      (float)(height / 64.0 / 1.75) + (float)((hber) / 2.0 / 64.0);
+      gfxOpenGL21(self)->sy * (height / 64.0 / 2.0) + gfxOpenGL21(self)->sy * hber;
+    gfxOpenGL21(self)->pen_begin_pixels = (float)(height / 64.0 / 1.75) + (float)hber;
 
     gfxOpenGL21(self)->gw                 = gfxOpenGL21(self)->face->glyph->advance.x;
     gfxOpenGL21(self)->glyph_width_pixels = gfxOpenGL21(self)->gw / 64;
@@ -735,7 +730,7 @@ Pair_uint32_t GfxOpenGL21_get_char_size(Gfx* self)
 Pair_uint32_t GfxOpenGL21_pixels(Gfx* self, uint32_t c, uint32_t r)
 {
     if (!gfxOpenGL21(self)->gw) {
-        if (FT_Load_Char(gfxOpenGL21(self)->face, '>', FT_LOAD_TARGET_LCD) ||
+        if (FT_Load_Char(gfxOpenGL21(self)->face, '(', FT_LOAD_TARGET_LCD) ||
             FT_Render_Glyph(gfxOpenGL21(self)->face->glyph, FT_RENDER_MODE_LCD)) {
             WRN("Glyph load error\n");
         }
@@ -743,8 +738,8 @@ Pair_uint32_t GfxOpenGL21_pixels(Gfx* self, uint32_t c, uint32_t r)
     }
 
     float x, y;
-    x = c * gfxOpenGL21(self)->gw + (gfxOpenGL21(self)->is_main_font_rgb ? 0 : 64);
-    y = r * (gfxOpenGL21(self)->face->size->metrics.height + 128);
+    x = c * gfxOpenGL21(self)->gw;
+    y = r * gfxOpenGL21(self)->face->size->metrics.height;
 
     return (Pair_uint32_t){ .first  = x / 64.0 + 2 * settings.padding,
                             .second = y / 64.0 + 2 * settings.padding };
@@ -2373,6 +2368,7 @@ static void GfxOpenGL21_draw_overlays(GfxOpenGL21* self, const Vt* vt, const Ui*
 static void GfxOpenGL21_draw_flash(GfxOpenGL21* self, float fraction)
 {
     // TODO: use VBOs
+    glViewport(0, 0, self->win_w, self->win_h);
     Shader_use(NULL);
     glBindTexture(GL_TEXTURE_2D, 0);
     glBegin(GL_QUADS);

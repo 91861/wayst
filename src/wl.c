@@ -185,6 +185,8 @@ typedef struct
 
     bool got_discrete_axis_event;
 
+    int swaps;
+
 } WindowWl;
 
 static inline xkb_keysym_t keysym_filter_compose(xkb_keysym_t sym)
@@ -207,6 +209,8 @@ static inline xkb_keysym_t keysym_filter_compose(xkb_keysym_t sym)
             return xkb_compose_state_get_one_sym(globalWl->xkb.compose_state);
     }
 }
+
+static void WindowWl_swap_buffers(struct WindowBase* self);
 
 void WindowWl_clipboard_send(struct WindowBase* self, const char* text)
 {
@@ -686,21 +690,28 @@ static void xdg_toplevel_handle_configure(void*                data,
                                           int32_t              height,
                                           struct wl_array*     states)
 {
-    struct WindowBase* win = data;
-
+    struct WindowBase*       win       = data;
+    bool                     is_mapped = false;
+    enum xdg_toplevel_state* s;
+    wl_array_for_each(s, states)
+    {
+        if (*s == XDG_TOPLEVEL_STATE_ACTIVATED) {
+            is_mapped = true;
+        }
+    }
+    if (is_mapped) {
+        FLAG_SET(win->state_flags, WINDOW_IS_MAPPED);
+    } else {
+        FLAG_UNSET(win->state_flags, WINDOW_IS_MAPPED);
+    }
     if (!width && !height) {
         wl_egl_window_resize(windowWl(win)->egl_window, win->w, win->h, 0, 0);
-
-        glViewport(0, 0, win->w, win->h);
-
         Window_notify_content_change(win);
     } else {
         win->w = width;
         win->h = height;
     }
-
     wl_egl_window_resize(windowWl(win)->egl_window, win->w, win->h, 0, 0);
-    glViewport(0, 0, win->w, win->h);
 }
 
 static const struct xdg_toplevel_listener xdg_toplevel_listener = {
@@ -1042,6 +1053,7 @@ static void cursor_set(struct wl_cursor* what, uint32_t serial)
 struct WindowBase* WindowWl_new(uint32_t w, uint32_t h)
 {
     global = calloc(1, sizeof(WindowStatic) + sizeof(GlobalWl) - sizeof(uint8_t));
+    global->target_frame_time_ms = 16;
 
     /* passing NULL grabs WAYLAND_DISPLAY from env */
     globalWl->display = wl_display_connect(NULL);
@@ -1060,6 +1072,7 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h)
     win->w = w;
     win->h = h;
     FLAG_SET(win->state_flags, WINDOW_IN_FOCUS);
+    FLAG_SET(win->state_flags, WINDOW_IS_MAPPED);
 
     win->interface = &window_interface_wayland;
 
@@ -1189,7 +1202,7 @@ struct WindowBase* Window_new_wayland(Pair_uint32_t res)
     WindowWl_set_title(win, settings.title.str);
     WindowWl_set_wm_name(win, settings.title.str);
 
-    WindowWl_dont_swap_buffers(win);
+    WindowWl_swap_buffers(win);
     WindowWl_events(win);
 
     return win;
@@ -1293,11 +1306,24 @@ static void WindowWl_dont_swap_buffers(struct WindowBase* self)
 
 static void WindowWl_swap_buffers(struct WindowBase* self)
 {
-    self->paint       = false;
-    EGLBoolean result = eglSwapBuffers(globalWl->egl_display, windowWl(self)->egl_surface);
+    self->paint = false;
 
-    if (result == EGL_FALSE) {
-        ERR("buffer swap failed EGL Error %s\n", egl_get_error_string(eglGetError()));
+    // swapping a window that is unmapped will block
+    //
+    // make sure we do 2 initial buffer swaps no matter what the compositor said about window
+    // mapping to get it on the screen. Otherwise no toplevel reconfigure saying the window
+    // is now 'active' will be sent. There is probably something wrong with this.
+    if (FLAG_IS_SET(self->state_flags, WINDOW_IS_MAPPED) || windowWl(self)->swaps < 2) {
+        if (windowWl(self)->swaps < 2)
+            ++windowWl(self)->swaps;
+
+        EGLBoolean result = eglSwapBuffers(globalWl->egl_display, windowWl(self)->egl_surface);
+        if (result == EGL_FALSE) {
+            ERR("buffer swap failed EGL Error %s\n", egl_get_error_string(eglGetError()));
+        }
+    } else {
+        wl_display_prepare_read(globalWl->display);
+        wl_display_read_events(globalWl->display);
     }
 }
 

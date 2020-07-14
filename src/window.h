@@ -15,6 +15,7 @@
 #define WINDOW_IN_FOCUS       (1 << 3)
 #define WINDOW_MAXIMIZED      (1 << 4)
 #define WINDOW_POINTER_HIDDEN (1 << 5)
+#define WINDOW_IS_MAPPED      (1 << 6)
 
 #define MOUSE_BUTTON_RELEASE (1 << 0)
 #define MOUSE_BUTTON_1       (1 << 1)

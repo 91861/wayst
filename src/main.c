@@ -13,6 +13,7 @@
 #define _GNU_SOURCE
 
 #include <stdio.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "gfx_gl21.h"
@@ -44,6 +45,7 @@
 #ifndef AUTOSCROLL_DELAY_MS
 #define AUTOSCROLL_DELAY_MS 50
 #endif
+
 
 typedef struct
 {
@@ -83,6 +85,7 @@ typedef struct
         AUTOSCROLL_DN   = -1,
 
     } autoscroll;
+
 } App;
 
 static App  instance = { NULL };

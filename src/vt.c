@@ -901,7 +901,7 @@ static void Vt_reflow_expand(Vt* self, uint32_t x)
     }
 
     // do not scroll past end of screen (self->ws was not updated yet, so
-    // Vt_scroll_down does prevent this)
+    // Vt_scroll_down does not prevent this)
     if (Vt_visual_top_line(self) > Vt_top_line(self)) {
         Vt_visual_scroll_reset(self);
     }
@@ -2687,7 +2687,6 @@ __attribute__((hot)) static inline void Vt_move_cursor(Vt* self, uint32_t column
 __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_literal(Vt* self, char c)
 {
     if (unlikely(self->parser.in_mb_seq)) {
-
         char32_t res;
         size_t   rd = mbrtoc32(&res, &c, 1, &self->parser.input_mbstate);
 
@@ -2701,10 +2700,14 @@ __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_litera
             memset(&self->parser.input_mbstate, 0, sizeof(mbstate_t));
         } else if (rd != (size_t)-2) {
             // sequence is complete
+            self->parser.in_mb_seq = false;
+            if (unlikely(unicode_is_combinable(res))) {
+                WRN("Combining unicodce diacritical marks not supported\n");
+                return;
+            }
             VtRune new_rune = self->parser.char_state;
             new_rune.code   = res;
             Vt_insert_char_at_cursor(self, new_rune);
-            self->parser.in_mb_seq = false;
         }
     } else {
         switch (c) {
@@ -2741,21 +2744,17 @@ __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_litera
             } break;
 
             default: {
-
                 if (c & (1 << 7)) {
                     mbrtoc32(NULL, &c, 1, &self->parser.input_mbstate);
                     self->parser.in_mb_seq = true;
                     break;
                 }
-
                 VtRune new_char = self->parser.char_state;
                 new_char.code   = c;
-
                 if (unlikely((bool)self->charset_g0))
                     new_char.code = self->charset_g0(c);
                 if (unlikely((bool)self->charset_g1))
                     new_char.code = self->charset_g1(c);
-
                 Vt_insert_char_at_cursor(self, new_char);
             }
         }
