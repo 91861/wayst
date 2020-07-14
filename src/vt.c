@@ -57,6 +57,7 @@ static void          Vt_insert_line(Vt* self);
 static void          Vt_clear_display_and_scrollback(Vt* self);
 static void          Vt_erase_to_end(Vt* self);
 static void          Vt_move_cursor(Vt* self, uint32_t c, uint32_t r);
+static void          Vt_move_cursor_to_column(Vt* self, uint32_t c);
 static void          Vt_push_title(Vt* self);
 static void          Vt_pop_title(Vt* self);
 static inline void   Vt_insert_char_at_cursor(Vt* self, VtRune c);
@@ -1468,8 +1469,7 @@ static inline void Vt_handle_CSI(Vt* self, char c)
                 /* <ESC>[ Ps G - move cursor to column Ps (CHA)*/
                 case 'G': {
                     MULTI_ARG_IS_ERROR
-                    self->cursor.col =
-                      MIN(short_sequence_get_int_argument(seq) - 1, self->ws.ws_col);
+                    Vt_move_cursor_to_column(self, short_sequence_get_int_argument(seq) - 1);
                 } break;
 
                 /* <ESC>[ Ps J - Erase display (ED) - clear... */
@@ -2305,9 +2305,9 @@ static inline void Vt_reset_text_attribs(Vt* self)
 
 /**
  * Move cursor to first column */
-__attribute__((always_inline)) static inline void Vt_carriage_return(Vt* self)
+static inline void Vt_carriage_return(Vt* self)
 {
-    self->cursor.col = 0;
+    Vt_move_cursor_to_column(self, 0);
 }
 
 /**
@@ -2386,6 +2386,7 @@ static inline void Vt_cursor_down(Vt* self)
 {
     if (self->cursor.row < Vt_bottom_line(self))
         ++self->cursor.row;
+    CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
 }
 
 /**
@@ -2394,6 +2395,7 @@ static inline void Vt_cursor_up(Vt* self)
 {
     if (self->cursor.row > Vt_top_line(self))
         --self->cursor.row;
+    CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
 }
 
 /**
@@ -2402,6 +2404,7 @@ static inline void Vt_cursor_left(Vt* self)
 {
     if (self->cursor.col)
         --self->cursor.col;
+    CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
 }
 
 /**
@@ -2410,6 +2413,7 @@ static inline void Vt_cursor_right(Vt* self)
 {
     if (self->cursor.col < self->ws.ws_col)
         ++self->cursor.col;
+    CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
 }
 
 static inline void Vt_erase_to_end(Vt* self)
@@ -2677,11 +2681,20 @@ static inline void Vt_insert_new_line(Vt* self)
 }
 
 /**
- * Move cursor to given location */
-__attribute__((hot)) static inline void Vt_move_cursor(Vt* self, uint32_t columns, uint32_t rows)
+ * Move cursor to given location (@param rows is relative to the screen!) */
+static inline void Vt_move_cursor(Vt* self, uint32_t columns, uint32_t rows)
 {
     self->cursor.row = MIN(rows, (uint32_t)self->ws.ws_row - 1) + Vt_top_line(self);
     self->cursor.col = MIN(columns, (uint32_t)self->ws.ws_col);
+    CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
+}
+
+/**
+ * Move cursor to given column */
+static inline void Vt_move_cursor_to_column(Vt* self, uint32_t columns)
+{
+    self->cursor.col = MIN(columns, (uint32_t)self->ws.ws_col);
+    CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
 }
 
 __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_literal(Vt* self, char c)
