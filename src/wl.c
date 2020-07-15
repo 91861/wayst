@@ -6,6 +6,8 @@
 
 #include "wl.h"
 #include "timing.h"
+#include "util.h"
+#include "vector.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -166,6 +168,15 @@ typedef struct
 
 typedef struct
 {
+    struct wl_output* output;
+    bool              is_active;
+    int32_t           target_frame_time_ms;
+} WlOutputInfo;
+
+DEF_VECTOR(WlOutputInfo, NULL)
+
+typedef struct
+{
     struct wl_surface*       surface;
     struct wl_shell_surface* shell_surface;
 
@@ -185,7 +196,9 @@ typedef struct
 
     bool got_discrete_axis_event;
 
-    int swaps;
+    Vector_WlOutputInfo outputs;
+    WlOutputInfo*       active_output;
+    bool                draw_next_frame;
 
 } WindowWl;
 
@@ -271,17 +284,55 @@ void WindowWl_clipboard_get(struct WindowBase* self)
     }
 }
 
-void wl_surface_handle_enter(void* data, struct wl_surface* wl_surface, struct wl_output* output)
+static void frame_handle_done(void* data, struct wl_callback* callback, uint32_t time)
 {
-    FLAG_SET(((struct WindowBase*)data)->state_flags, WINDOW_IS_MAPPED);
+    wl_callback_destroy(callback);
+    windowWl(((struct WindowBase*)data))->draw_next_frame = true;
 }
 
-void wl_surface_handle_leave(void* data, struct wl_surface* wl_surface, struct wl_output* output)
+static struct wl_callback_listener frame_listener = {
+    .done = &frame_handle_done,
+};
+
+static void wl_surface_handle_enter(void*              data,
+                                    struct wl_surface* wl_surface,
+                                    struct wl_output*  output)
 {
-    FLAG_UNSET(((struct WindowBase*)data)->state_flags, WINDOW_IS_MAPPED);
+    struct WindowBase* win_base = data;
+    WindowWl*          win      = windowWl(win_base);
+
+    for (WlOutputInfo* i = NULL; (i = Vector_iter_WlOutputInfo(&win->outputs, i));) {
+        if (output == i->output) {
+            i->is_active                 = true;
+            global->target_frame_time_ms = i->target_frame_time_ms;
+            win->active_output           = i;
+            break;
+        }
+    }
+    FLAG_UNSET(win_base->state_flags, WINDOW_IS_MINIMIZED);
 }
 
-struct wl_surface_listener wl_surface_listener = {
+static void wl_surface_handle_leave(void*              data,
+                                    struct wl_surface* wl_surface,
+                                    struct wl_output*  output)
+{
+    struct WindowBase* win_base = data;
+    WindowWl*          win      = windowWl(win_base);
+
+    win->active_output = NULL;
+    for (WlOutputInfo* i = NULL; (i = Vector_iter_WlOutputInfo(&win->outputs, i));) {
+        if (output == i->output) {
+            i->is_active = false;
+        } else if (i->is_active) {
+            win->active_output = i;
+        }
+    }
+    if (!win->active_output) {
+        FLAG_SET(win_base->state_flags, WINDOW_IS_MINIMIZED);
+    }
+}
+
+static struct wl_surface_listener wl_surface_listener = {
     .enter = wl_surface_handle_enter,
     .leave = wl_surface_handle_leave,
 };
@@ -715,16 +766,16 @@ static void xdg_toplevel_handle_configure(void*                data,
         }
     }
     if (is_active) {
-        FLAG_SET(win->state_flags, WINDOW_IS_MAPPED);
+        windowWl(win)->draw_next_frame = true;
     }
 
     if (!width && !height) {
         wl_egl_window_resize(windowWl(win)->egl_window, win->w, win->h, 0, 0);
-        Window_notify_content_change(win);
     } else {
         win->w = width;
         win->h = height;
     }
+    Window_notify_content_change(win);
     wl_egl_window_resize(windowWl(win)->egl_window, win->w, win->h, 0, 0);
 }
 
@@ -803,8 +854,13 @@ static void output_handle_mode(void*             data,
                                int32_t           refresh)
 {
     if (flags & WL_OUTPUT_MODE_CURRENT) {
-        global->target_frame_time_ms = 1000000 / refresh;
-        LOG("Detected target frame time: %d ms\n", 1000000 / refresh);
+        WindowWl* win           = windowWl(((struct WindowBase*)data));
+        int32_t   frame_time_ms = 1000000 / refresh;
+        Vector_push_WlOutputInfo(&win->outputs, (WlOutputInfo){
+                                                  .output               = wl_output,
+                                                  .is_active            = false,
+                                                  .target_frame_time_ms = frame_time_ms,
+                                                });
     }
 }
 
@@ -1083,10 +1139,11 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h)
     struct WindowBase* win =
       calloc(1, sizeof(struct WindowBase) + sizeof(WindowWl) + sizeof(uint8_t));
 
-    win->w = w;
-    win->h = h;
+    win->w                 = w;
+    win->h                 = h;
+    windowWl(win)->outputs = Vector_new_WlOutputInfo();
     FLAG_SET(win->state_flags, WINDOW_IN_FOCUS);
-    FLAG_SET(win->state_flags, WINDOW_IS_MAPPED);
+    FLAG_SET(win->state_flags, WINDOW_IS_MINIMIZED);
 
     win->interface = &window_interface_wayland;
 
@@ -1201,6 +1258,9 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h)
     if (eglerror != EGL_SUCCESS)
         WRN("EGL Error %s\n", egl_get_error_string(eglerror));
 
+    struct wl_callback* frame_callback = wl_surface_frame(windowWl(win)->surface);
+    wl_callback_add_listener(frame_callback, &frame_listener, win);
+
     return win;
 }
 
@@ -1268,13 +1328,12 @@ void WindowWl_resize(struct WindowBase* self, uint32_t w, uint32_t h)
 
 static inline void WindowWl_repeat_check(struct WindowBase* self)
 {
-    if (globalWl->keycode_to_repeat && TimePoint_passed(globalWl->repeat_point)) {
-        globalWl->repeat_point =
-          TimePoint_ms_from_now(globalWl->kbd_repeat_rate > self->repeat_count / 2
-                                  ? globalWl->kbd_repeat_rate - self->repeat_count / 2
-                                  : 2);
-        self->repeat_count = MIN(self->repeat_count + 1, INT32_MAX - 1);
-
+    WindowWl* win = windowWl(self);
+    if (globalWl->keycode_to_repeat && TimePoint_passed(globalWl->repeat_point) &&
+        win->active_output) {
+        uint32_t ft            = win->active_output->target_frame_time_ms;
+        int32_t  time_offset   = (globalWl->kbd_repeat_rate / ft) * ft + ft / 2;
+        globalWl->repeat_point = TimePoint_ms_from_now(time_offset);
         keyboard_handle_key(self, NULL, 0, 0, globalWl->keycode_to_repeat,
                             WL_KEYBOARD_KEY_STATE_PRESSED);
     }
@@ -1320,21 +1379,25 @@ static void WindowWl_dont_swap_buffers(struct WindowBase* self)
 
 static void WindowWl_swap_buffers(struct WindowBase* self)
 {
-    self->paint = false;
-    if (FLAG_IS_SET(self->state_flags, WINDOW_IS_MAPPED)) {
-        EGLBoolean result = eglSwapBuffers(globalWl->egl_display, windowWl(self)->egl_surface);
-        if (result != EGL_TRUE) {
-            ERR("buffer swap failed EGL Error %s\n", egl_get_error_string(eglGetError()));
-        }
+    self->paint                     = false;
+    windowWl(self)->draw_next_frame = false;
+    if (self->callbacks.on_redraw_requested) {
+        self->callbacks.on_redraw_requested(self->callbacks.user_data);
     }
+    if (eglSwapBuffers(globalWl->egl_display, windowWl(self)->egl_surface) != EGL_TRUE) {
+        ERR("buffer swap failed EGL Error %s\n", egl_get_error_string(eglGetError()));
+    }
+    struct wl_callback* frame_callback = wl_surface_frame(windowWl(self)->surface);
+    wl_callback_add_listener(frame_callback, &frame_listener, self);
 }
 
 void WindowWl_maybe_swap(struct WindowBase* self)
 {
-    if (self->paint)
+    if (windowWl(self)->draw_next_frame && self->paint) {
         WindowWl_swap_buffers(self);
-    else
+    } else {
         WindowWl_dont_swap_buffers(self);
+    }
 }
 
 void WindowWl_set_swap_interval(struct WindowBase* self, int32_t ival)
@@ -1404,6 +1467,8 @@ void WindowWl_destroy(struct WindowBase* self)
 
     if (windowWl(self)->data_offer_mime)
         free((void*)windowWl(self)->data_offer_mime);
+
+    Vector_destroy_WlOutputInfo(&windowWl(self)->outputs);
 
     free(self);
 }

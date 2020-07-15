@@ -46,7 +46,6 @@
 #define AUTOSCROLL_DELAY_MS 50
 #endif
 
-
 typedef struct
 {
     Window_* win;
@@ -141,7 +140,6 @@ void App_init(App* self)
     Pair_uint32_t chars = Gfx_get_char_size(self->gfx);
     Vt_resize(&self->vt, chars.first, chars.second);
     Monitor_watch_fd(&self->monitor, Window_get_connection_fd(self->win));
-
     self->ui.scrollbar.width = 10;
     self->ui.pixel_offset_x  = 0;
     self->ui.pixel_offset_y  = 0;
@@ -186,14 +184,17 @@ void App_run(App* self)
             !!Gfx_set_focus(self->gfx, FLAG_IS_SET(self->win->state_flags, WINDOW_IN_FOCUS))) {
             Window_notify_content_change(self->win);
         }
-        if (Window_needs_repaint(self->win)) {
-            Gfx_draw(self->gfx, &self->vt, &self->ui);
-        }
         Window_maybe_swap(self->win);
     }
     Vt_destroy(&self->vt);
     Gfx_destroy(self->gfx);
     Window_destroy(self->win);
+}
+
+static void App_redraw(void* self)
+{
+    App* app = self;
+    Gfx_draw(app->gfx, &app->vt, &app->ui);
 }
 
 static void App_maybe_resize(App* self, Pair_uint32_t newres)
@@ -202,8 +203,8 @@ static void App_maybe_resize(App* self, Pair_uint32_t newres)
         self->resolution = newres;
 
         Gfx_resize(self->gfx, self->resolution.first, self->resolution.second);
-        Pair_uint32_t chars = Gfx_get_char_size(self->gfx);
-        Pair_uint32_t used_pixels =  Gfx_pixels(self->gfx, chars.first, chars.second);
+        Pair_uint32_t chars       = Gfx_get_char_size(self->gfx);
+        Pair_uint32_t used_pixels = Gfx_pixels(self->gfx, chars.first, chars.second);
 
         if (settings.padding_center) {
             self->ui.pixel_offset_x = (self->resolution.first - used_pixels.first) / 2;
@@ -215,7 +216,7 @@ static void App_maybe_resize(App* self, Pair_uint32_t newres)
 
         self->ui.pixel_offset_x += settings.padding;
         self->ui.pixel_offset_y += settings.padding;
-        
+
         App_clamp_cursor(self, chars);
         Window_notify_content_change(self->win);
         Vt_resize(&self->vt, chars.first, chars.second);
@@ -850,8 +851,8 @@ void App_button_handler(void*    self,
 {
     App* app = self;
     Vt*  vt  = &app->vt;
-    x = CLAMP(x - app->ui.pixel_offset_x, 0, (int32_t)app->resolution.first);
-    y = CLAMP(y - app->ui.pixel_offset_y, 0, (int32_t)app->resolution.second);
+    x        = CLAMP(x - app->ui.pixel_offset_x, 0, (int32_t)app->resolution.first);
+    y        = CLAMP(y - app->ui.pixel_offset_y, 0, (int32_t)app->resolution.second);
 
     if (button == MOUSE_BTN_WHEEL_DOWN && state) {
         uint8_t lines             = ammount ? ammount : settings.scroll_discrete_lines;
@@ -881,9 +882,9 @@ void App_button_handler(void*    self,
 void App_motion_handler(void* self, uint32_t button, int32_t x, int32_t y)
 {
     App* app = self;
-    x = CLAMP(x - app->ui.pixel_offset_x, 0, (int32_t)app->resolution.first);
-    y = CLAMP(y - app->ui.pixel_offset_y, 0, (int32_t)app->resolution.second);
-    
+    x        = CLAMP(x - app->ui.pixel_offset_x, 0, (int32_t)app->resolution.first);
+    y        = CLAMP(y - app->ui.pixel_offset_y, 0, (int32_t)app->resolution.second);
+
     if (!App_scrollbar_consume_drag(self, button, x, y) && !App_consume_drag(self, button, x, y)) {
         Vt_handle_motion(&app->vt, button, x, y);
     }
@@ -913,6 +914,7 @@ static void App_set_callbacks(App* self)
     self->win->callbacks.motion_handler          = App_motion_handler;
     self->win->callbacks.clipboard_handler       = App_clipboard_handler;
     self->win->callbacks.activity_notify_handler = App_action;
+    self->win->callbacks.on_redraw_requested     = App_redraw;
 
     settings.callbacks.user_data           = self;
     settings.callbacks.keycode_from_string = App_get_key_code;

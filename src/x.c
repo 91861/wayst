@@ -240,7 +240,7 @@ struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
         .override_redirect = True,
         .event_mask        = KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask |
                       SubstructureRedirectMask | StructureNotifyMask | PointerMotionMask |
-                      ExposureMask | FocusChangeMask | KeymapStateMask | VisibilityChangeMask
+        ExposureMask | FocusChangeMask | KeymapStateMask | VisibilityChangeMask,
     };
 
     windowX11(win)->glx_context = NULL;
@@ -374,7 +374,12 @@ void WindowX11_events(struct WindowBase* self)
 
         switch (e->type) {
             case MapNotify:
+                FLAG_UNSET(self->state_flags, WINDOW_IS_MINIMIZED);
                 Window_notify_content_change(self);
+                break;
+
+            case UnmapNotify:
+                FLAG_SET(self->state_flags, WINDOW_IS_MINIMIZED);
                 break;
 
             case FocusIn:
@@ -618,8 +623,13 @@ void WindowX11_set_wm_name(struct WindowBase* self, const char* title)
 
 void WindowX11_maybe_swap(struct WindowBase* self)
 {
-    if (self->paint) {
+    if (self->paint && !FLAG_IS_SET(self->state_flags, WINDOW_IS_MINIMIZED)) {
         self->paint = false;
+        
+        if (self->callbacks.on_redraw_requested) {
+            self->callbacks.on_redraw_requested(self->callbacks.user_data);
+        }
+        
         glXSwapBuffers(globalX11->display, windowX11(self)->window);
     } else {
         usleep(1000 * (FLAG_IS_SET(self->state_flags, WINDOW_IN_FOCUS)
