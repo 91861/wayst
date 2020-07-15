@@ -197,26 +197,29 @@ static void App_redraw(void* self)
     Gfx_draw(app->gfx, &app->vt, &app->ui);
 }
 
+static void App_update_padding(App* self)
+{
+    Pair_uint32_t chars       = Gfx_get_char_size(self->gfx);
+    Pair_uint32_t used_pixels = Gfx_pixels(self->gfx, chars.first, chars.second);
+    if (settings.padding_center) {
+        self->ui.pixel_offset_x = (self->resolution.first - used_pixels.first) / 2;
+        self->ui.pixel_offset_y = (self->resolution.second - used_pixels.second) / 2;
+    } else {
+        self->ui.pixel_offset_x = 0;
+        self->ui.pixel_offset_y = 0;
+    }
+    self->ui.pixel_offset_x += settings.padding;
+    self->ui.pixel_offset_y += settings.padding;
+}
+
 static void App_maybe_resize(App* self, Pair_uint32_t newres)
 {
     if (newres.first != self->resolution.first || newres.second != self->resolution.second) {
         self->resolution = newres;
 
         Gfx_resize(self->gfx, self->resolution.first, self->resolution.second);
-        Pair_uint32_t chars       = Gfx_get_char_size(self->gfx);
-        Pair_uint32_t used_pixels = Gfx_pixels(self->gfx, chars.first, chars.second);
-
-        if (settings.padding_center) {
-            self->ui.pixel_offset_x = (self->resolution.first - used_pixels.first) / 2;
-            self->ui.pixel_offset_y = (self->resolution.second - used_pixels.second) / 2;
-        } else {
-            self->ui.pixel_offset_x = 0;
-            self->ui.pixel_offset_y = 0;
-        }
-
-        self->ui.pixel_offset_x += settings.padding;
-        self->ui.pixel_offset_y += settings.padding;
-
+        Pair_uint32_t chars = Gfx_get_char_size(self->gfx);
+        App_update_padding(self);
         App_clamp_cursor(self, chars);
         Window_notify_content_change(self->win);
         Vt_resize(&self->vt, chars.first, chars.second);
@@ -233,6 +236,7 @@ void App_reload_font(void* self)
     App* app = self;
     Gfx_reload_font(app->gfx);
     Gfx_draw(app->gfx, &app->vt, &app->ui);
+    App_update_padding(self);
     Window_notify_content_change(app->win);
     Window_maybe_swap(app->win);
 }
