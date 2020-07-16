@@ -96,7 +96,8 @@ int      WindowWl_get_connection_fd(struct WindowBase* self);
 void     WindowWl_clipboard_send(struct WindowBase* self, const char* text);
 void     WindowWl_clipboard_get(struct WindowBase* self);
 void*    WindowWl_get_gl_ext_proc_adress(struct WindowBase* self, const char* name);
-uint32_t WindowWl_get_keycode_from_name(void* self, char* name);
+uint32_t WindowWl_get_keycode_from_name(struct WindowBase* self, char* name);
+void     WindowWl_set_pointer_style(struct WindowBase* self, enum MousePointerStyle style);
 
 static struct IWindow window_interface_wayland = {
     .set_fullscreen         = WindowWl_set_fullscreen,
@@ -111,6 +112,7 @@ static struct IWindow window_interface_wayland = {
     .set_swap_interval      = WindowWl_set_swap_interval,
     .get_gl_ext_proc_adress = WindowWl_get_gl_ext_proc_adress,
     .get_keycode_from_name  = WindowWl_get_keycode_from_name,
+    .set_pointer_style      = WindowWl_set_pointer_style,
 };
 
 typedef struct
@@ -345,17 +347,13 @@ static void pointer_handle_enter(void*              data,
                                  wl_fixed_t         x,
                                  wl_fixed_t         y)
 {
-    FLAG_UNSET(((struct WindowBase*)data)->state_flags, WINDOW_POINTER_HIDDEN);
+    struct WindowBase* win = data;
+    FLAG_UNSET(win->state_flags, WINDOW_IS_POINTER_HIDDEN);
     cursor_set(globalWl->cursor_arrow, serial);
-
-    ((struct WindowBase*)data)->pointer_x = wl_fixed_to_int(x);
-    ((struct WindowBase*)data)->pointer_y = wl_fixed_to_int(y);
-
-    ((struct WindowBase*)data)
-      ->callbacks.activity_notify_handler(((struct WindowBase*)data)->callbacks.user_data);
-
+    win->pointer_x = wl_fixed_to_int(x);
+    win->pointer_y = wl_fixed_to_int(y);
+    win->callbacks.activity_notify_handler(win->callbacks.user_data);
     globalWl->serial = serial;
-
     Window_notify_content_change(data);
 }
 
@@ -373,21 +371,17 @@ static void pointer_handle_motion(void*              data,
                                   wl_fixed_t         x,
                                   wl_fixed_t         y)
 {
-    globalWl->serial = serial;
-
-    if (FLAG_IS_SET(((struct WindowBase*)data)->state_flags, WINDOW_POINTER_HIDDEN)) {
-        FLAG_UNSET(((struct WindowBase*)data)->state_flags, WINDOW_POINTER_HIDDEN);
-        cursor_set(globalWl->cursor_arrow, serial);
+    globalWl->serial       = serial;
+    struct WindowBase* win = data;
+    win->pointer_x = wl_fixed_to_int(x);
+    win->pointer_y = wl_fixed_to_int(y);
+    if (FLAG_IS_SET(win->state_flags, WINDOW_IS_POINTER_HIDDEN)) {
+        cursor_set(globalWl->cursor_arrow, 0);
+        FLAG_UNSET(win->state_flags, WINDOW_IS_POINTER_HIDDEN);
     }
-
-    ((struct WindowBase*)data)->pointer_x = wl_fixed_to_int(x);
-    ((struct WindowBase*)data)->pointer_y = wl_fixed_to_int(y);
-
     if (globalWl->last_button_pressed) {
-        ((struct WindowBase*)data)
-          ->callbacks.motion_handler(
-            ((struct WindowBase*)data)->callbacks.user_data, globalWl->last_button_pressed,
-            ((struct WindowBase*)data)->pointer_x, ((struct WindowBase*)data)->pointer_y);
+        win->callbacks.motion_handler(win->callbacks.user_data, globalWl->last_button_pressed,
+                                      win->pointer_x, win->pointer_y);
     }
 }
 
@@ -567,7 +561,7 @@ static void keyboard_handle_enter(void*               data,
 {
     ((struct WindowBase*)data)
       ->callbacks.activity_notify_handler(((struct WindowBase*)data)->callbacks.user_data);
-    FLAG_SET(((struct WindowBase*)data)->state_flags, WINDOW_IN_FOCUS);
+    FLAG_SET(((struct WindowBase*)data)->state_flags, WINDOW_IS_IN_FOCUS);
 }
 
 static void keyboard_handle_leave(void*               data,
@@ -576,7 +570,7 @@ static void keyboard_handle_leave(void*               data,
                                   struct wl_surface*  surface)
 {
     globalWl->serial = serial;
-    FLAG_UNSET(((struct WindowBase*)data)->state_flags, WINDOW_IN_FOCUS);
+    FLAG_UNSET(((struct WindowBase*)data)->state_flags, WINDOW_IS_IN_FOCUS);
     globalWl->keycode_to_repeat = 0;
 }
 
@@ -595,10 +589,6 @@ static void keyboard_handle_key(void*               data,
     if (!is_repeat_event) {
         globalWl->serial = serial;
         FLAG_SET(win->state_flags, WINDOW_NEEDS_SWAP);
-        if (!FLAG_IS_SET(win->state_flags, WINDOW_POINTER_HIDDEN)) {
-            FLAG_SET(win->state_flags, WINDOW_POINTER_HIDDEN);
-            cursor_set(NULL, serial);
-        }
     }
 
     sym = composed_sym = xkb_state_key_get_one_sym(globalWl->xkb.state, code);
@@ -639,7 +629,6 @@ static void keyboard_handle_key(void*               data,
         globalWl->keycode_to_repeat = key;
 
         if (!is_repeat_event) {
-            win->repeat_count      = 0;
             globalWl->repeat_point = TimePoint_ms_from_now(globalWl->kbd_repeat_dealy);
         }
 
@@ -747,7 +736,7 @@ static const struct xdg_surface_listener xdg_surface_listener = { .configure =
 /* xdg_toplevel_listener */
 static void xdg_toplevel_handle_close(void* data, struct xdg_toplevel* xdg_surface)
 {
-    FLAG_SET(((struct WindowBase*)data)->state_flags, WINDOW_CLOSED);
+    FLAG_SET(((struct WindowBase*)data)->state_flags, WINDOW_IS_CLOSED);
 }
 
 static void xdg_toplevel_handle_configure(void*                data,
@@ -1110,8 +1099,9 @@ static void cursor_set(struct wl_cursor* what, uint32_t serial)
     globalWl->serial = serial;
     struct wl_buffer*       b;
     struct wl_cursor_image* img = (what ? what : globalWl->cursor_arrow)->images[0];
-    if (what)
+    if (what) {
         b = wl_cursor_image_get_buffer(img);
+    }
     wl_pointer_set_cursor(globalWl->pointer, serial, globalWl->cursor_surface, img->hotspot_x,
                           img->hotspot_y);
     wl_surface_attach(globalWl->cursor_surface, what ? b : NULL, 0, 0);
@@ -1142,7 +1132,7 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h)
     win->w                 = w;
     win->h                 = h;
     windowWl(win)->outputs = Vector_new_WlOutputInfo();
-    FLAG_SET(win->state_flags, WINDOW_IN_FOCUS);
+    FLAG_SET(win->state_flags, WINDOW_IS_IN_FOCUS);
     FLAG_SET(win->state_flags, WINDOW_IS_MINIMIZED);
 
     win->interface = &window_interface_wayland;
@@ -1307,14 +1297,14 @@ void WindowWl_set_fullscreen(struct WindowBase* self, bool fullscreen)
                                             0, /* fps in mHz 0 - don't care */
                                             globalWl->output);
         }
-        FLAG_SET(self->state_flags, WINDOW_FULLSCREEN);
+        FLAG_SET(self->state_flags, WINDOW_IS_FULLSCREEN);
     } else {
         if (globalWl->xdg_shell)
             xdg_toplevel_unset_fullscreen(windowWl(self)->xdg_toplevel);
         else
             wl_shell_surface_set_toplevel(windowWl(self)->shell_surface);
 
-        FLAG_UNSET(self->state_flags, WINDOW_FULLSCREEN);
+        FLAG_UNSET(self->state_flags, WINDOW_IS_FULLSCREEN);
     }
 }
 
@@ -1372,7 +1362,7 @@ static void WindowWl_dont_swap_buffers(struct WindowBase* self)
     wl_display_prepare_read(globalWl->display);
     wl_display_read_events(globalWl->display);
 
-    usleep(1000 * (FLAG_IS_SET(self->state_flags, WINDOW_IN_FOCUS)
+    usleep(1000 * (FLAG_IS_SET(self->state_flags, WINDOW_IS_IN_FOCUS)
                      ? global->target_frame_time_ms - 10
                      : global->target_frame_time_ms * 3));
 }
@@ -1483,10 +1473,30 @@ void* WindowWl_get_gl_ext_proc_adress(struct WindowBase* self, const char* name)
     return eglGetProcAddress(name);
 }
 
-uint32_t WindowWl_get_keycode_from_name(void* self, char* name)
+uint32_t WindowWl_get_keycode_from_name(struct WindowBase* self, char* name)
 {
     xkb_keysym_t xkb_keysym = xkb_keysym_from_name(name, XKB_KEYSYM_CASE_INSENSITIVE);
     return xkb_keysym == XKB_KEY_NoSymbol ? 0 : xkb_keysym_to_utf32(xkb_keysym);
+}
+
+void WindowWl_set_pointer_style(struct WindowBase* self, enum MousePointerStyle style)
+{
+    switch (style) {
+        case MOUSE_POINTER_HIDDEN:
+            FLAG_SET(self->state_flags, WINDOW_IS_POINTER_HIDDEN);
+            cursor_set(0, 0);
+            break;
+
+        case MOUSE_POINTER_ARROW:
+            FLAG_UNSET(self->state_flags, WINDOW_IS_POINTER_HIDDEN);
+            cursor_set(globalWl->cursor_arrow, 0);
+            break;
+
+        case MOUSE_POINTER_I_BEAM:
+            FLAG_UNSET(self->state_flags, WINDOW_IS_POINTER_HIDDEN);
+            cursor_set(globalWl->cursor_beam, 0);
+            break;
+    }
 }
 
 #endif

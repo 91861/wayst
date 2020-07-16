@@ -88,7 +88,7 @@ typedef struct
     size_t size;
 } VBO;
 
-__attribute__((packed)) enum TextureFormat {
+enum __attribute__((packed)) TextureFormat {
     TEX_FMT_RGBA,
     TEX_FMT_RGB,
     TEX_FMT_MONO,

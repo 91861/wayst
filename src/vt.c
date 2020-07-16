@@ -437,7 +437,7 @@ __attribute__((cold)) static const char* control_char_get_pretty_string(const ch
 
 /**
  * make pty messages more readable */
-__attribute__((cold)) static char* pty_string_prettyfy(const char* str, int32_t max)
+__attribute__((cold)) char* pty_string_prettyfy(const char* str, int32_t max)
 {
     bool esc = false, seq = false, important = false;
 
@@ -3254,9 +3254,7 @@ static inline bool Vt_maybe_handle_function_key(Vt* self, uint32_t key, uint32_t
         Vt_output(self, "\e[6~", 4);
         return true;
     } else if (key == ' ' && FLAG_IS_SET(mods, MODIFIER_CONTROL)) {
-        // TODO: ?!
-        /* memcpy(self->out_buf, "", 1); */
-        /* Vt_write_n(self, 1); */
+        Vt_output(self, "", 1);
         return true;
     }
 
@@ -3292,19 +3290,8 @@ static inline uint32_t numpad_key_convert(uint32_t key)
             return XKB_KEY_End;
         case XKB_KEY_KP_Tab:
             return XKB_KEY_Tab;
-
-        case XKB_KEY_KP_0:
-        case XKB_KEY_KP_1:
-        case XKB_KEY_KP_2:
-        case XKB_KEY_KP_3:
-        case XKB_KEY_KP_4:
-        case XKB_KEY_KP_5:
-        case XKB_KEY_KP_6:
-        case XKB_KEY_KP_7:
-        case XKB_KEY_KP_8:
-        case XKB_KEY_KP_9:
+        case XKB_KEY_KP_0 ... XKB_KEY_KP_9:
             return '0' + key - XKB_KEY_KP_0;
-
         default:
             return key;
     }
@@ -3350,12 +3337,11 @@ void Vt_handle_button(void*    _self,
                       int32_t  ammount,
                       uint32_t mods)
 {
-    Vt*  self      = _self;
-    bool in_window = x >= 0 && x <= self->ws.ws_xpixel && y >= 0 && y <= self->ws.ws_ypixel;
+    Vt*  self        = _self;
+    bool in_window   = x >= 0 && x <= self->ws.ws_xpixel && y >= 0 && y <= self->ws.ws_ypixel;
+    bool btn_reports = Vt_reports_mouse(self);
 
-    if ((self->modes.extended_report || self->modes.mouse_motion_on_btn_report ||
-         self->modes.mouse_btn_report) &&
-        in_window) {
+    if (btn_reports && in_window) {
         if (!self->scrolling_visual) {
             self->last_click_x = (double)x / self->pixels_per_cell_x;
             self->last_click_y = (double)y / self->pixels_per_cell_y;
@@ -3365,7 +3351,6 @@ void Vt_handle_button(void*    _self,
                           (FLAG_IS_SET(mods, MODIFIER_ALT) ? 8 : 0) +
                           (FLAG_IS_SET(mods, MODIFIER_CONTROL) ? 16 : 0);
             }
-
             if (self->modes.extended_report) {
                 Vt_output_formated(self, "\e[<%u;%lu;%lu%c", button - 1, self->last_click_x + 1,
                                    self->last_click_y + 1, state ? 'M' : 'm');

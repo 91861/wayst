@@ -1,4 +1,4 @@
-CC = gcc
+CC?= cc
 EXEC = wayst
 INSTALL_DIR = /usr/local/bin
 
@@ -25,7 +25,7 @@ else ifeq ($(mode),debugoptimized)
 	LDFLAGS = -O2 -g
 	LDLIBS += -lGLU
 else
-	CFLAGS = -std=c18 -s -O2 -ftree-loop-vectorize -mtune=generic -ffast-math
+	CFLAGS = -std=c18 -O2 -mtune=generic -ffast-math
 	LDFLAGS = -s -O2 -flto
 endif
 

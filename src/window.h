@@ -9,12 +9,12 @@
 #include "settings.h"
 #include "util.h"
 
-#define WINDOW_CLOSED         (1 << 0)
-#define WINDOW_FULLSCREEN     (1 << 1)
-#define WINDOW_NEEDS_SWAP     (1 << 2)
-#define WINDOW_IN_FOCUS       (1 << 3)
-#define WINDOW_MAXIMIZED      (1 << 4)
-#define WINDOW_POINTER_HIDDEN (1 << 5)
+#define WINDOW_IS_CLOSED         (1 << 0)
+#define WINDOW_IS_FULLSCREEN     (1 << 1)
+#define WINDOW_NEEDS_SWAP        (1 << 2)
+#define WINDOW_IS_IN_FOCUS       (1 << 3)
+#define WINDOW_IS_MAXIMIZED      (1 << 4)
+#define WINDOW_IS_POINTER_HIDDEN (1 << 5)
 #define WINDOW_IS_MINIMIZED      (1 << 6)
 
 #define MOUSE_BUTTON_RELEASE (1 << 0)
@@ -29,6 +29,13 @@ typedef struct
     __attribute__((aligned(8))) uint8_t subclass_data;
 
 } WindowStatic;
+
+enum MousePointerStyle
+{
+    MOUSE_POINTER_HIDDEN,
+    MOUSE_POINTER_ARROW,
+    MOUSE_POINTER_I_BEAM,
+};
 
 struct WindowBase;
 
@@ -45,28 +52,21 @@ struct IWindow
     void (*clipboard_send)(struct WindowBase* self, const char* text);
     void (*clipboard_get)(struct WindowBase* self);
     void (*set_swap_interval)(struct WindowBase* self, int val);
+    void (*set_pointer_style)(struct WindowBase* self, enum MousePointerStyle);
     void* (*get_gl_ext_proc_adress)(struct WindowBase* self, const char* name);
-    uint32_t (*get_keycode_from_name)(void* self, char* name);
+    uint32_t (*get_keycode_from_name)(struct WindowBase* self, char* name);
 };
 
 typedef struct WindowBase
 {
-    int32_t w, h, x, y;
-
-    int32_t pointer_x, pointer_y;
-
+    int32_t  w, h, x, y;
+    int32_t  pointer_x, pointer_y;
     uint16_t state_flags;
-
-    bool paint;
-
-    int32_t repeat_count;
-
+    bool     paint;
     struct window_external_data
     {
         void* user_data;
-
         void (*key_handler)(void* user_data, uint32_t code, uint32_t rawcode, uint32_t mods);
-
         void (*button_handler)(void*    user_data,
                                uint32_t code,
                                bool     state,
@@ -74,15 +74,10 @@ typedef struct WindowBase
                                int32_t  y,
                                int32_t  ammount,
                                uint32_t mods);
-
         void (*motion_handler)(void* user_data, uint32_t code, int32_t x, int32_t y);
-
         void (*clipboard_handler)(void* user_data, const char* text);
-
         void (*activity_notify_handler)(void* user_data);
-
         void (*on_redraw_requested)(void* user_data);
-
     } callbacks;
 
     char* title;
@@ -93,11 +88,11 @@ typedef struct WindowBase
 
 } Window_;
 
-static void Window_update_title(void* self, const char* title)
+static void Window_update_title(struct WindowBase* self, const char* title)
 {
     if (settings.dynamic_title) {
         char* tmp = asprintf(settings.title_format.str, settings.title.str, title);
-        ((struct WindowBase*)self)->interface->set_title(self, tmp);
+        self->interface->set_title(self, tmp);
         free(tmp);
     }
 }
@@ -118,9 +113,9 @@ static inline void Window_set_swap_interval(struct WindowBase* self, bool value)
     self->interface->set_swap_interval(self, value);
 }
 
-static inline void Window_resize(void* self, uint32_t w, uint32_t h)
+static inline void Window_resize(struct WindowBase* self, uint32_t w, uint32_t h)
 {
-    ((struct WindowBase*)self)->interface->resize(self, w, h);
+    self->interface->resize(self, w, h);
 }
 
 static inline void Window_events(struct WindowBase* self)
@@ -148,19 +143,27 @@ static inline void Window_destroy(struct WindowBase* self)
     self->interface->destroy(self);
 }
 
-static inline int get_connection_fd(struct WindowBase* self)
+static inline void Window_clipboard_get(struct WindowBase* self)
 {
-    return self->interface->get_connection_fd(self);
+    self->interface->clipboard_get(self);
 }
 
-static inline void Window_clipboard_get(void* self)
+static inline void Window_clipboard_send(struct WindowBase* self, const char* text)
 {
-    ((struct WindowBase*)self)->interface->clipboard_get(self);
+    self->interface->clipboard_send(self, text);
 }
 
-static inline void Window_clipboard_send(void* self, const char* text)
+static inline void Window_set_pointer_style(struct WindowBase* self, enum MousePointerStyle style)
 {
-    ((struct WindowBase*)self)->interface->clipboard_send(self, text);
+    if (style == MOUSE_POINTER_HIDDEN && FLAG_IS_SET(self->state_flags, WINDOW_IS_POINTER_HIDDEN)) {
+        return;
+    }
+    self->interface->set_pointer_style(self, style);
+}
+
+static inline uint32_t Window_get_keysym_from_name(struct WindowBase* self, char* name)
+{
+    return self->interface->get_keycode_from_name(self, name);
 }
 
 /* Trivial base functions */
@@ -174,9 +177,29 @@ static inline int Window_get_connection_fd(struct WindowBase* self)
     return self->interface->get_connection_fd(self);
 }
 
-static inline bool Window_closed(struct WindowBase* self)
+static inline bool Window_is_closed(struct WindowBase* self)
 {
-    return FLAG_IS_SET(self->state_flags, WINDOW_CLOSED);
+    return FLAG_IS_SET(self->state_flags, WINDOW_IS_CLOSED);
+}
+
+static inline bool Window_is_minimized(struct WindowBase* self)
+{
+    return FLAG_IS_SET(self->state_flags, WINDOW_IS_MINIMIZED);
+}
+
+static inline bool Window_is_focused(struct WindowBase* self)
+{
+    return FLAG_IS_SET(self->state_flags, WINDOW_IS_IN_FOCUS);
+}
+
+static inline bool Window_is_fullscreen(struct WindowBase* self)
+{
+    return FLAG_IS_SET(self->state_flags, WINDOW_IS_FULLSCREEN);
+}
+
+static inline bool Window_is_pointer_hidden(struct WindowBase* self)
+{
+    return FLAG_IS_SET(self->state_flags, WINDOW_IS_POINTER_HIDDEN);
 }
 
 static inline bool Window_needs_repaint(struct WindowBase* self)
@@ -184,24 +207,17 @@ static inline bool Window_needs_repaint(struct WindowBase* self)
     return self->paint;
 }
 
-static inline Pair_uint32_t Window_size(void* self)
+static inline Pair_uint32_t Window_size(struct WindowBase* self)
 {
-    return (Pair_uint32_t){ .first  = ((struct WindowBase*)self)->w,
-                            .second = ((struct WindowBase*)self)->h };
+    return (Pair_uint32_t){ .first = self->w, .second = self->h };
 }
 
-static inline Pair_uint32_t Window_position(void* self)
+static inline Pair_uint32_t Window_position(struct WindowBase* self)
 {
-    return (Pair_uint32_t){ .first  = ((struct WindowBase*)self)->x,
-                            .second = ((struct WindowBase*)self)->y };
+    return (Pair_uint32_t){ .first = self->x, .second = self->y };
 }
 
-static inline void Window_notify_content_change(void* self)
+static inline void Window_notify_content_change(struct WindowBase* self)
 {
-    ((struct WindowBase*)self)->paint = true;
-}
-
-static inline uint32_t Window_get_keysym_from_name(struct WindowBase* self, char* name)
-{
-    return self->interface->get_keycode_from_name(self, name);
+    self->paint = true;
 }

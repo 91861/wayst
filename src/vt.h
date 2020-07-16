@@ -424,6 +424,14 @@ void Vt_select_set_end_cell(Vt* self, int32_t x, int32_t y);
 void Vt_select_end(Vt* self);
 
 /**
+ * Terminal listens for scroll wheel button presses */
+static bool Vt_reports_mouse(Vt* self)
+{
+    return self->modes.extended_report || self->modes.mouse_motion_on_btn_report ||
+           self->modes.mouse_btn_report;
+}
+
+/**
  * Destroy the interpreter */
 void Vt_destroy(Vt* self);
 

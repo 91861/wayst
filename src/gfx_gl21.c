@@ -991,8 +991,8 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
     gfxOpenGL21(self)->_vec_glyph_buffer = Vector_new_with_capacity_GlyphBufferData(80);
     gfxOpenGL21(self)->vec_glyph_buffer  = &gfxOpenGL21(self)->_vec_glyph_buffer;
 
-    gfxOpenGL21(self)->_vec_glyph_buffer_italic = Vector_new_GlyphBufferData(20);
-    gfxOpenGL21(self)->_vec_glyph_buffer_bold   = Vector_new_with_capacity_GlyphBufferData(20);
+    gfxOpenGL21(self)->_vec_glyph_buffer_italic = Vector_new_GlyphBufferData();
+    gfxOpenGL21(self)->_vec_glyph_buffer_bold   = Vector_new_GlyphBufferData();
 
     // if font styles don't exist point their resources to deaults
     if (settings.font_file_name_bold.str) {

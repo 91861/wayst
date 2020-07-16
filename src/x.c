@@ -38,19 +38,20 @@ static WindowStatic* global;
 #define windowX11(base) ((WindowX11*)&base->extend_data)
 
 struct WindowBase* WindowX11_new(uint32_t w, uint32_t h);
-void WindowX11_set_fullscreen(struct WindowBase* self, bool fullscreen);
-void WindowX11_resize(struct WindowBase* self, uint32_t w, uint32_t h);
-void WindowX11_events(struct WindowBase* self);
-void WindowX11_set_wm_name(struct WindowBase* self, const char* title);
-void WindowX11_set_title(struct WindowBase* self, const char* title);
-void WindowX11_set_swap_interval(struct WindowBase* self, int32_t ival);
-void WindowX11_maybe_swap(struct WindowBase* self);
-void WindowX11_destroy(struct WindowBase* self);
-int WindowX11_get_connection_fd(struct WindowBase* self);
-void WindowX11_clipboard_get(struct WindowBase* self);
-void WindowX11_clipboard_send(struct WindowBase* self, const char* text);
-void* WindowX11_get_gl_ext_proc_adress(struct WindowBase* self, const char* name);
-uint32_t WindowX11_get_keycode_from_name(void* self, char* name);
+void               WindowX11_set_fullscreen(struct WindowBase* self, bool fullscreen);
+void               WindowX11_resize(struct WindowBase* self, uint32_t w, uint32_t h);
+void               WindowX11_events(struct WindowBase* self);
+void               WindowX11_set_wm_name(struct WindowBase* self, const char* title);
+void               WindowX11_set_title(struct WindowBase* self, const char* title);
+void               WindowX11_set_swap_interval(struct WindowBase* self, int32_t ival);
+void               WindowX11_maybe_swap(struct WindowBase* self);
+void               WindowX11_destroy(struct WindowBase* self);
+int                WindowX11_get_connection_fd(struct WindowBase* self);
+void               WindowX11_clipboard_get(struct WindowBase* self);
+void               WindowX11_clipboard_send(struct WindowBase* self, const char* text);
+void     WindowX11_set_pointer_style(struct WindowBase* self, enum MousePointerStyle style);
+void*    WindowX11_get_gl_ext_proc_adress(struct WindowBase* self, const char* name);
+uint32_t WindowX11_get_keycode_from_name(struct WindowBase* self, char* name);
 
 static struct IWindow window_interface_x11 = {
     .set_fullscreen         = WindowX11_set_fullscreen,
@@ -66,6 +67,7 @@ static struct IWindow window_interface_x11 = {
     .set_swap_interval      = WindowX11_set_swap_interval,
     .get_gl_ext_proc_adress = WindowX11_get_gl_ext_proc_adress,
     .get_keycode_from_name  = WindowX11_get_keycode_from_name,
+    .set_pointer_style      = WindowX11_set_pointer_style,
 };
 
 typedef struct
@@ -75,6 +77,7 @@ typedef struct
     Atom         wm_delete;
 
     Cursor cursor_hidden;
+    Cursor cursor_beam;
 
     XIM im;
     XIC ic;
@@ -122,25 +125,24 @@ static void WindowX11_setup_pointer(struct WindowBase* self)
 {
     XColor      c       = { .red = 0, .green = 0, .blue = 0 };
     static char data[8] = { 0 };
-
     Pixmap pmp = XCreateBitmapFromData(globalX11->display, windowX11(self)->window, data, 8, 8);
-
     globalX11->cursor_hidden = XCreatePixmapCursor(globalX11->display, pmp, pmp, &c, &c, 0, 0);
+    globalX11->cursor_beam = XCreateFontCursor(globalX11->display, XC_xterm);
 }
 
 static void WindowX11_pointer(struct WindowBase* self, bool hide)
 {
-    if (hide && !FLAG_IS_SET(self->state_flags, WINDOW_POINTER_HIDDEN)) {
+    if (hide && !FLAG_IS_SET(self->state_flags, WINDOW_IS_POINTER_HIDDEN)) {
 
         XDefineCursor(globalX11->display, windowX11(self)->window, globalX11->cursor_hidden);
 
-        FLAG_SET(self->state_flags, WINDOW_POINTER_HIDDEN);
+        FLAG_SET(self->state_flags, WINDOW_IS_POINTER_HIDDEN);
 
-    } else if (!hide && FLAG_IS_SET(self->state_flags, WINDOW_POINTER_HIDDEN)) {
+    } else if (!hide && FLAG_IS_SET(self->state_flags, WINDOW_IS_POINTER_HIDDEN)) {
 
         XUndefineCursor(globalX11->display, windowX11(self)->window);
 
-        FLAG_UNSET(self->state_flags, WINDOW_POINTER_HIDDEN);
+        FLAG_UNSET(self->state_flags, WINDOW_IS_POINTER_HIDDEN);
     }
 }
 
@@ -240,7 +242,7 @@ struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
         .override_redirect = True,
         .event_mask        = KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask |
                       SubstructureRedirectMask | StructureNotifyMask | PointerMotionMask |
-        ExposureMask | FocusChangeMask | KeymapStateMask | VisibilityChangeMask,
+                      ExposureMask | FocusChangeMask | KeymapStateMask | VisibilityChangeMask,
     };
 
     windowX11(win)->glx_context = NULL;
@@ -343,12 +345,12 @@ static inline void WindowX11_fullscreen_change_state(struct WindowBase* self, co
 
 void WindowX11_set_fullscreen(struct WindowBase* self, bool fullscreen)
 {
-    if (fullscreen && !FLAG_IS_SET(self->state_flags, WINDOW_FULLSCREEN)) {
+    if (fullscreen && !FLAG_IS_SET(self->state_flags, WINDOW_IS_FULLSCREEN)) {
         WindowX11_fullscreen_change_state(self, _NET_WM_STATE_ADD);
-        FLAG_SET(self->state_flags, WINDOW_FULLSCREEN);
-    } else if (!fullscreen && FLAG_IS_SET(self->state_flags, WINDOW_FULLSCREEN)) {
+        FLAG_SET(self->state_flags, WINDOW_IS_FULLSCREEN);
+    } else if (!fullscreen && FLAG_IS_SET(self->state_flags, WINDOW_IS_FULLSCREEN)) {
         WindowX11_fullscreen_change_state(self, _NET_WM_STATE_REMOVE);
-        FLAG_UNSET(self->state_flags, WINDOW_FULLSCREEN);
+        FLAG_UNSET(self->state_flags, WINDOW_IS_FULLSCREEN);
     }
 }
 
@@ -383,16 +385,19 @@ void WindowX11_events(struct WindowBase* self)
                 break;
 
             case FocusIn:
-                FLAG_SET(self->state_flags, WINDOW_IN_FOCUS);
+                FLAG_SET(self->state_flags, WINDOW_IS_IN_FOCUS);
                 self->callbacks.activity_notify_handler(self->callbacks.user_data);
                 Window_notify_content_change(self);
+                if (Window_is_pointer_hidden(self)) {
+                    WindowX11_set_pointer_style(self, MOUSE_POINTER_ARROW);
+                }
                 break;
 
             case FocusOut:
-                if (FLAG_IS_SET(self->state_flags, WINDOW_POINTER_HIDDEN))
-                    WindowX11_pointer(self, false);
-
-                FLAG_UNSET(self->state_flags, WINDOW_IN_FOCUS);
+                if (Window_is_pointer_hidden(self)) {
+                    WindowX11_set_pointer_style(self, MOUSE_POINTER_ARROW);
+                }
+                FLAG_UNSET(self->state_flags, WINDOW_IS_IN_FOCUS);
                 break;
 
             case Expose:
@@ -412,7 +417,7 @@ void WindowX11_events(struct WindowBase* self)
 
             case ClientMessage:
                 if ((Atom)e->xclient.data.l[0] == globalX11->wm_delete)
-                    FLAG_SET(self->state_flags, WINDOW_CLOSED);
+                    FLAG_SET(self->state_flags, WINDOW_IS_CLOSED);
                 break;
 
             case MappingNotify:
@@ -465,13 +470,9 @@ void WindowX11_events(struct WindowBase* self)
                     self->callbacks.key_handler(self->callbacks.user_data, stat == 4 ? code : ret,
                                                 always_lower, windowX11(self)->mods);
                 }
-
-                WindowX11_pointer(self, true);
                 break;
 
             case KeyRelease:
-                WindowX11_pointer(self, true);
-
                 switch (XLookupKeysym(&e->xkey, 0)) {
                     case XK_Control_L:
                     case XK_Control_R:
@@ -495,7 +496,6 @@ void WindowX11_events(struct WindowBase* self)
                                                    false, e->xbutton.x, e->xbutton.y, 0, 0);
                 }
                 windowX11(self)->last_button_pressed = 0;
-                WindowX11_pointer(self, false);
                 break;
 
             case ButtonPress:
@@ -515,16 +515,17 @@ void WindowX11_events(struct WindowBase* self)
                                                    true, e->xbutton.x, e->xbutton.y, 0,
                                                    windowX11(self)->mods);
                 }
-                WindowX11_pointer(self, false);
                 break;
 
             case MotionNotify:
+                if (Window_is_pointer_hidden(self)) {
+                    WindowX11_set_pointer_style(self, MOUSE_POINTER_ARROW);
+                }
                 if (windowX11(self)->last_button_pressed) {
                     self->callbacks.motion_handler(self->callbacks.user_data,
                                                    windowX11(self)->last_button_pressed,
                                                    e->xmotion.x, e->xmotion.y);
                 }
-                WindowX11_pointer(self, false);
                 break;
 
             case SelectionClear:
@@ -625,14 +626,14 @@ void WindowX11_maybe_swap(struct WindowBase* self)
 {
     if (self->paint && !FLAG_IS_SET(self->state_flags, WINDOW_IS_MINIMIZED)) {
         self->paint = false;
-        
+
         if (self->callbacks.on_redraw_requested) {
             self->callbacks.on_redraw_requested(self->callbacks.user_data);
         }
-        
+
         glXSwapBuffers(globalX11->display, windowX11(self)->window);
     } else {
-        usleep(1000 * (FLAG_IS_SET(self->state_flags, WINDOW_IN_FOCUS)
+        usleep(1000 * (FLAG_IS_SET(self->state_flags, WINDOW_IS_IN_FOCUS)
                          ? global->target_frame_time_ms - 3
                          : global->target_frame_time_ms));
     }
@@ -640,6 +641,10 @@ void WindowX11_maybe_swap(struct WindowBase* self)
 
 void WindowX11_destroy(struct WindowBase* self)
 {
+    XUndefineCursor(globalX11->display, windowX11(self)->window);
+    XFreeCursor(globalX11->display, globalX11->cursor_beam);
+    XFreeCursor(globalX11->display, globalX11->cursor_hidden);
+
     XUnmapWindow(globalX11->display, windowX11(self)->window);
 
     glXMakeCurrent(globalX11->display, 0, 0);
@@ -664,10 +669,31 @@ int WindowX11_get_connection_fd(struct WindowBase* self)
     return ConnectionNumber(globalX11->display);
 }
 
-uint32_t WindowX11_get_keycode_from_name(void* self, char* name)
+uint32_t WindowX11_get_keycode_from_name(struct WindowBase* self, char* name)
 {
     KeyCode kcode = XStringToKeysym(name);
     return kcode == NoSymbol ? 0 : kcode;
+}
+
+void WindowX11_set_pointer_style(struct WindowBase* self, enum MousePointerStyle style)
+{
+    switch (style) {
+        case MOUSE_POINTER_HIDDEN:
+            XDefineCursor(globalX11->display, windowX11(self)->window, globalX11->cursor_hidden);
+            FLAG_SET(self->state_flags, WINDOW_IS_POINTER_HIDDEN);
+            break;
+
+        case MOUSE_POINTER_ARROW:
+            /* use root window's cursor */
+            XUndefineCursor(globalX11->display, windowX11(self)->window);
+            FLAG_UNSET(self->state_flags, WINDOW_IS_POINTER_HIDDEN);
+            break;
+
+        case MOUSE_POINTER_I_BEAM:
+            XDefineCursor(globalX11->display, windowX11(self)->window, globalX11->cursor_beam);
+            FLAG_UNSET(self->state_flags, WINDOW_IS_POINTER_HIDDEN);
+            break;
+    }
 }
 
 #endif

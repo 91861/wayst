@@ -612,7 +612,7 @@ static void handle_option(const char opt, const int array_index, const char* val
                             settings.padding_center = strtob(buf.buf);
                             break;
                         case 1:
-                            settings.padding = CLAMP(strtol(buf.buf, NULL, 10), 0, UINT16_MAX);
+                            settings.padding = CLAMP(strtol(buf.buf, NULL, 10), 0, UINT8_MAX);
                             break;
                         default:
                             L_UNEXPECTED_EXTRA_ARG_FOR_LONG_OPT(buf.buf);
