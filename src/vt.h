@@ -122,7 +122,33 @@ typedef struct
     VtLineProxy proxy;
 
     /* Clickable link ranges */
-    Vector_VtUriRange uris;
+    // Vector_VtUriRange uris;
+
+    struct VtLineDamage
+    {
+        /* Range of cells that should be repainted if type == RANGE or
+         * not repainted if type == SHIFT */
+        uint8_t front, end;
+
+        /* Number of cells the existing contents should be moved right */
+        int8_t shift;
+
+        enum __attribute__((packed)) VtLineDamageType
+        {
+            /* Proxy objects are up to date */
+            VT_LINE_DAMAGE_NONE = 0,
+
+            /* The entire line needs to be refreshed */
+            VT_LINE_DAMAGE_FULL,
+
+            /* Line contents were shifted 'shift' number of cells. Cells before 'front' and after
+               'end' may have changed */
+            VT_LINE_DAMAGE_SHIFT,
+
+            /* The characters between 'front' and 'end' need to be refreshed */
+            VT_LINE_DAMAGE_RANGE,
+        } type;
+    } damage;
 
     /* Can be split by resizing window */
     bool reflowable : 1;
@@ -132,18 +158,6 @@ typedef struct
 
     /* Part of this line was moved to the next one */
     bool was_reflown : 1;
-
-    /* Proxy resources need to be regenerated */
-    bool damaged : 1;
-
-    /*
-     * TODO: something like this
-     * struct Damage {
-     *     enum Type { NONE, FULL, PARTIAL } type;
-     *     int8_t shift, region_front, region_end;
-     * };
-     */
-
 } VtLine;
 
 /* TODO: Make a version of Vector that can bind an additional destructor argument, so
