@@ -286,11 +286,11 @@ void GfxOpenGL21_flash(Gfx* self)
  * @return offset into info buffer */
 __attribute__((always_inline, hot)) static inline int32_t Atlas_select(Atlas* self, char32_t code)
 {
-    if (code < 32 || code > CHAR_MAX)
+    if (unlikely(code < ATLAS_RENDERABLE_START || code > ATLAS_RENDERABLE_END)) {
         return -1;
-    else {
+    } else {
         glBindTexture(GL_TEXTURE_2D, self->tex);
-        return code - 32;
+        return code - ATLAS_RENDERABLE_START;
     }
 }
 
@@ -327,23 +327,22 @@ static Atlas Atlas_new(GfxOpenGL21* gfx, FT_Face face_)
         }
     }
 
-    // monochrome bitmap uses 1 bit per pixel
+    /* monochrome bitmaps use 1 bit per pixel */
     bitmap_is_packed = gfx->output_glyph->bitmap.pixel_mode == FT_PIXEL_MODE_MONO;
 
-    if (wline > self.w)
+    if (wline > self.w) {
         self.w = wline;
-
+    }
     self.h += hline;
-
-    if (self.h > (uint32_t)gfx->max_tex_res)
+    if (self.h > (uint32_t)gfx->max_tex_res) {
         ERR("Failed to generate font atlas, target texture to small");
-
+    }
     glActiveTexture(GL_TEXTURE0);
     glPixelStorei(GL_UNPACK_ALIGNMENT, gfx->is_main_font_rgb ? 4 : 1);
     glGenTextures(1, &self.tex);
     glBindTexture(GL_TEXTURE_2D, self.tex);
 
-    // faster than clamp
+    /* faster than clamp */
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
@@ -363,28 +362,21 @@ static Atlas Atlas_new(GfxOpenGL21* gfx, FT_Face face_)
     }
 
     for (int i = ATLAS_RENDERABLE_START + 1; i < ATLAS_RENDERABLE_END; i++) {
-
         if (FT_Load_Char(face_, i,
                          gfx->is_main_font_rgb ? FT_LOAD_TARGET_LCD : FT_LOAD_TARGET_NORMAL)) {
             WRN("glyph render error\n");
         }
-
         if (FT_Render_Glyph(face_->glyph,
                             gfx->is_main_font_rgb ? FT_RENDER_MODE_LCD : FT_RENDER_MODE_NORMAL)) {
             WRN("glyph render error\n");
         }
-
         gfx->output_glyph = face_->glyph;
-
         if (bitmap_is_packed) {
             if (FT_Bitmap_Convert(gfx->ft, &gfx->output_glyph->bitmap, &conversion_map, 1)) {
                 WRN("FT bitmap conversion failed\n");
             }
-
-            // why does FT not do that?!
             for (uint32_t i = 0; i < (conversion_map.width * conversion_map.rows); ++i) {
-                if (conversion_map.buffer[i])
-                    conversion_map.buffer[i] = UINT8_MAX;
+                conversion_map.buffer[i] *= UINT8_MAX;
             }
         }
 
@@ -454,10 +446,10 @@ static inline void Cache_destroy(GlyphMap* self)
         Vector_destroy_GlyphMapEntry(&self->buckets[i]);
 }
 
-__attribute__((hot, flatten)) static GlyphMapEntry* Cache_get_glyph(GfxOpenGL21* gfx,
-                                                                    GlyphMap*    self,
-                                                                    FT_Face      face,
-                                                                    char32_t     code)
+__attribute__((hot)) static GlyphMapEntry* Cache_get_glyph(GfxOpenGL21* gfx,
+                                                           GlyphMap*    self,
+                                                           FT_Face      face,
+                                                           char32_t     code)
 {
     Vector_GlyphMapEntry* block = Cache_select_bucket(self, code);
 
@@ -469,76 +461,69 @@ __attribute__((hot, flatten)) static GlyphMapEntry* Cache_get_glyph(GfxOpenGL21*
         }
     }
 
-    bool     bitmap_is_packed = false;
-    FT_Error e;
-    bool     color         = false;
-    bool     fallback_font = false;
-    int32_t  index         = FT_Get_Char_Index(face, code);
+    FT_Error       e;
+    bool           bitmap_is_packed = false;
+    bool           color            = false;
+    bool           fallback_font    = false;
+    int32_t        index            = FT_Get_Char_Index(face, code);
+    FT_Int32       load_flags  = gfx->is_main_font_rgb ? FT_LOAD_TARGET_LCD : FT_LOAD_TARGET_NORMAL;
+    FT_Render_Mode render_mode = gfx->is_main_font_rgb ? FT_RENDER_MODE_LCD : FT_RENDER_MODE_NORMAL;
 
-    if (FT_Load_Glyph(face, index,
-                      gfx->is_main_font_rgb ? FT_LOAD_TARGET_LCD : FT_LOAD_TARGET_NORMAL) ||
-        FT_Render_Glyph(face->glyph,
-                        gfx->is_main_font_rgb ? FT_RENDER_MODE_LCD : FT_RENDER_MODE_NORMAL)) {
-        WRN("Glyph error in main font %d \n", code);
-    } else if (face->glyph->glyph_index == 0 && gfx->face_fallback) {
-        // Glyph is missing im main font
-
+    if ((e = FT_Load_Glyph(face, index, load_flags)) ||
+        (e = FT_Render_Glyph(face->glyph, render_mode))) {
+        WRN("Glyph error in main font %d - %s\n", code, ft_error_to_string(e));
+    } else {
+        gfx->output_glyph = face->glyph;
+    }
+    if (gfx->output_glyph->glyph_index == 0 && gfx->face_fallback) {
         index = FT_Get_Char_Index(gfx->face_fallback, code);
-        if (FT_Load_Glyph(gfx->face_fallback, index, FT_LOAD_TARGET_LCD) ||
-            FT_Render_Glyph(gfx->face_fallback->glyph, FT_RENDER_MODE_LCD)) {
-            WRN("Glyph error in fallback font %d \n", code);
-        } else if (gfx->face_fallback->glyph->glyph_index == 0 && gfx->face_fallback2) {
-            color = true;
-            self  = gfx->cache; // put this in the 'Regular style' map
-            index = FT_Get_Char_Index(gfx->face_fallback2, code);
-
-            if ((e = FT_Load_Glyph(gfx->face_fallback2, index, FT_LOAD_COLOR))) {
-                WRN("Glyph load error2 %d %s | %d (%d)\n", e, stringify_ft_error(e), code, index);
-            } else if ((e = FT_Render_Glyph(gfx->face_fallback2->glyph, FT_RENDER_MODE_NORMAL)))
-                WRN("Glyph render error2 %d %s | %d (%d)\n", e, stringify_ft_error(e), code, index);
-            if (gfx->face_fallback2->glyph->glyph_index == 0) {
-                WRN("Missing glyph %d\n", code);
-            }
-            gfx->output_glyph = gfx->face_fallback2->glyph;
-            fallback_font     = true;
+        if ((e = FT_Load_Glyph(gfx->face_fallback, index, FT_LOAD_TARGET_LCD)) ||
+            (e = FT_Render_Glyph(gfx->face_fallback->glyph, FT_RENDER_MODE_LCD))) {
+            WRN("Glyph error in fallback font %d - %s\n", code, ft_error_to_string(e));
         } else {
             gfx->output_glyph = gfx->face_fallback->glyph;
             fallback_font     = true;
         }
-    } else
-        gfx->output_glyph = face->glyph;
+    }
+    if (gfx->output_glyph->glyph_index == 0 && gfx->face_fallback2) {
+        index = FT_Get_Char_Index(gfx->face_fallback2, code);
+        self  = gfx->cache;
+        if ((e = FT_Load_Glyph(gfx->face_fallback2, index, FT_LOAD_COLOR)) ||
+            (e = FT_Render_Glyph(gfx->face_fallback2->glyph, FT_RENDER_MODE_NORMAL))) {
+            WRN("Glyph error in fallback font2 %d - %s\n", code, ft_error_to_string(e));
+        } else {
+            gfx->output_glyph = gfx->face_fallback2->glyph;
+            fallback_font     = true;
+        }
+    }
+    if (gfx->output_glyph->glyph_index == 0) {
+        WRN("Missing glyph %d\n", code);
+    }
 
-    // In general color characters don't scale
-    // exclude box drawing characters
-    if (gfx->output_glyph->bitmap.rows > gfx->line_height_pixels &&
-        (code < 0x2500 || code > 0x257f)) {
+    /* check if this is a color emoji */
+    if (gfx->output_glyph->bitmap.pixel_mode == FT_PIXEL_MODE_BGRA) {
         color = true;
     }
 
     bitmap_is_packed = gfx->output_glyph->bitmap.pixel_mode == FT_PIXEL_MODE_MONO;
 
-    // rgb textures are packed the same as rgba
+    /* rgb textures are packed the same as rgba */
     int alignment_unpack = (gfx->is_main_font_rgb || fallback_font || color) ? 4 : 1;
 
-    // rgb texture width i 1/3 of its bitmap width
+    /* rgb texture width i 1/3 of its bitmap width */
     int actual_width = gfx->output_glyph->bitmap.width /
                        (!color && (fallback_font || gfx->is_main_font_rgb) ? 3 : 1);
 
     FT_Bitmap conversion_map;
     if (bitmap_is_packed) {
         FT_Bitmap_Init(&conversion_map);
-
         if (FT_Bitmap_Convert(gfx->ft, &gfx->output_glyph->bitmap, &conversion_map, 1)) {
             WRN("Conversion failed\n");
         }
-
-        // why does FT not do that?!
         for (uint32_t i = 0; i < (conversion_map.width * conversion_map.rows); ++i) {
-            if (conversion_map.buffer[i])
-                conversion_map.buffer[i] = UINT8_MAX;
+            conversion_map.buffer[i] *= UINT8_MAX;
         }
     }
-
 
     enum TextureFormat format =
       color ? TEX_FMT_RGB : gfx->is_main_font_rgb ? TEX_FMT_RGBA : TEX_FMT_MONO;
@@ -559,16 +544,15 @@ __attribute__((hot, flatten)) static GlyphMapEntry* Cache_get_glyph(GfxOpenGL21*
 
                  (tex.w = actual_width), (tex.h = gfx->output_glyph->bitmap.rows), 0,
 
-                 // FT always renders in BGR,
-                 // TODO: we can use RGB to flip subpixel order
                  color ? GL_BGRA : (fallback_font || gfx->is_main_font_rgb) ? GL_RGB : GL_RED,
+
                  GL_UNSIGNED_BYTE,
+
                  bitmap_is_packed ? conversion_map.buffer : gfx->output_glyph->bitmap.buffer);
 
     if (bitmap_is_packed) {
         FT_Bitmap_Done(gfx->ft, &conversion_map);
     }
-
     if (color) {
         glGenerateMipmap(GL_TEXTURE_2D);
     }
@@ -750,33 +734,31 @@ Pair_uint32_t GfxOpenGL21_pixels(Gfx* self, uint32_t c, uint32_t r)
 void GfxOpenGL21_load_font(Gfx* self)
 {
     static bool ft_lib_was_initialized = false;
-    FT_Error    ft_err                 = 0;
+    FT_Error    e                      = 0;
     int         strike_idx             = -1;
 
     if (!ft_lib_was_initialized) {
-        if ((ft_err = FT_Init_FreeType(&gfxOpenGL21(self)->ft))) {
-            ERR("Failed to initialize freetype %s", stringify_ft_error(ft_err));
+        if ((e = FT_Init_FreeType(&gfxOpenGL21(self)->ft))) {
+            ERR("Failed to initialize freetype %s", ft_error_to_string(e));
         }
     }
 
-    if ((ft_err = FT_New_Face(gfxOpenGL21(self)->ft, settings.font_file_name_regular.str, 0,
-                              &gfxOpenGL21(self)->face))) {
+    if ((e = FT_New_Face(gfxOpenGL21(self)->ft, settings.font_file_name_regular.str, 0,
+                         &gfxOpenGL21(self)->face))) {
         ERR("Font error, failed to load font file: %s. error: %s",
-            settings.font_file_name_regular.str, stringify_ft_error(ft_err));
+            settings.font_file_name_regular.str, ft_error_to_string(e));
     }
 
-    if ((ft_err =
-           FT_Set_Char_Size(gfxOpenGL21(self)->face, settings.font_size * 64,
-                            settings.font_size * 64, settings.font_dpi, settings.font_dpi))) {
-
+    FT_F26Dot6 siz = settings.font_size * 64;
+    FT_UInt    res = settings.font_dpi;
+    if ((e = FT_Set_Char_Size(gfxOpenGL21(self)->face, siz, siz, res, res))) {
         if (!gfxOpenGL21(self)->face->size->metrics.height) {
             for (strike_idx = 0; strike_idx < gfxOpenGL21(self)->face->num_fixed_sizes;
                  ++strike_idx) {
             }
-
-            if ((ft_err = FT_Select_Size(gfxOpenGL21(self)->face, strike_idx - 1))) {
+            if ((e = FT_Select_Size(gfxOpenGL21(self)->face, strike_idx - 1))) {
                 ERR("Failed to set main font bitmap strike, file %s. error: %s\n",
-                    settings.font_file_name_regular.str, stringify_ft_error(ft_err));
+                    settings.font_file_name_regular.str, ft_error_to_string(e));
             }
         }
     }
@@ -786,47 +768,43 @@ void GfxOpenGL21_load_font(Gfx* self)
     }
 
     if (settings.font_file_name_bold.str) {
-        if ((ft_err = FT_New_Face(gfxOpenGL21(self)->ft, settings.font_file_name_bold.str, 0,
-                                  &gfxOpenGL21(self)->face_bold)))
+        if ((e = FT_New_Face(gfxOpenGL21(self)->ft, settings.font_file_name_bold.str, 0,
+                             &gfxOpenGL21(self)->face_bold))) {
             ERR("Font error, failed to load font file: %s. error: %s",
-                settings.font_file_name_bold.str, stringify_ft_error(ft_err));
-
-        if (strike_idx >= 0) {
-            if ((ft_err = FT_Select_Size(gfxOpenGL21(self)->face_bold, strike_idx - 1))) {
-                WRN("Failed to set main font bitmap strike, file %s. error: %s\n",
-                    settings.font_file_name_bold.str, stringify_ft_error(ft_err));
-            }
-        } else {
-            if ((ft_err = FT_Set_Char_Size(gfxOpenGL21(self)->face_bold, settings.font_size * 64,
-                                           settings.font_size * 64, settings.font_dpi,
-                                           settings.font_dpi))) {
-                WRN("Failed to set font size, file %s. error: %s\n",
-                    settings.font_file_name_bold.str, stringify_ft_error(ft_err));
-            }
+                settings.font_file_name_bold.str, ft_error_to_string(e));
         }
 
+        if (strike_idx >= 0) {
+            if ((e = FT_Select_Size(gfxOpenGL21(self)->face_bold, strike_idx - 1))) {
+                WRN("Failed to set main font bitmap strike, file %s. error: %s\n",
+                    settings.font_file_name_bold.str, ft_error_to_string(e));
+            }
+        } else {
+            if ((e = FT_Set_Char_Size(gfxOpenGL21(self)->face_bold, siz, siz, res, res))) {
+                WRN("Failed to set font size, file %s. error: %s\n",
+                    settings.font_file_name_bold.str, ft_error_to_string(e));
+            }
+        }
         if (!FT_IS_FIXED_WIDTH(gfxOpenGL21(self)->face_bold)) {
             WRN("Bold font is not fixed width\n");
         }
     }
 
     if (settings.font_file_name_italic.str) {
-        if ((ft_err = FT_New_Face(gfxOpenGL21(self)->ft, settings.font_file_name_italic.str, 0,
-                                  &gfxOpenGL21(self)->face_italic)))
+        if ((e = FT_New_Face(gfxOpenGL21(self)->ft, settings.font_file_name_italic.str, 0,
+                             &gfxOpenGL21(self)->face_italic)))
             ERR("Font error, failed to load font file: %s. error: %s",
-                settings.font_file_name_italic.str, stringify_ft_error(ft_err));
+                settings.font_file_name_italic.str, ft_error_to_string(e));
 
         if (strike_idx >= 0) {
-            if ((ft_err = FT_Select_Size(gfxOpenGL21(self)->face_italic, strike_idx - 1))) {
+            if ((e = FT_Select_Size(gfxOpenGL21(self)->face_italic, strike_idx - 1))) {
                 WRN("Failed to set font bitmap strike, file %s. error: %s\n",
-                    settings.font_file_name_italic.str, stringify_ft_error(ft_err));
+                    settings.font_file_name_italic.str, ft_error_to_string(e));
             }
         } else {
-            if ((ft_err = FT_Set_Char_Size(gfxOpenGL21(self)->face_italic, settings.font_size * 64,
-                                           settings.font_size * 64, settings.font_dpi,
-                                           settings.font_dpi))) {
+            if ((e = FT_Set_Char_Size(gfxOpenGL21(self)->face_italic, siz, siz, res, res))) {
                 WRN("Failed to set font size, file %s. error: %s\n",
-                    settings.font_file_name_italic.str, stringify_ft_error(ft_err));
+                    settings.font_file_name_italic.str, ft_error_to_string(e));
             }
         }
 
@@ -836,25 +814,22 @@ void GfxOpenGL21_load_font(Gfx* self)
     }
 
     if (settings.font_file_name_bold_italic.str) {
-        if ((ft_err = FT_New_Face(gfxOpenGL21(self)->ft, settings.font_file_name_bold_italic.str, 0,
-                                  &gfxOpenGL21(self)->face_bold_italic)))
+        if ((e = FT_New_Face(gfxOpenGL21(self)->ft, settings.font_file_name_bold_italic.str, 0,
+                             &gfxOpenGL21(self)->face_bold_italic)))
             ERR("Font error, failed to load font file: %s. error: %s",
-                settings.font_file_name_bold_italic.str, stringify_ft_error(ft_err));
+                settings.font_file_name_bold_italic.str, ft_error_to_string(e));
 
         if (strike_idx >= 0) {
-            if ((ft_err = FT_Select_Size(gfxOpenGL21(self)->face_bold_italic, strike_idx - 1))) {
+            if ((e = FT_Select_Size(gfxOpenGL21(self)->face_bold_italic, strike_idx - 1))) {
                 WRN("Failed to set font bitmap strike, file %s. error: %s\n",
-                    settings.font_file_name_bold_italic.str, stringify_ft_error(ft_err));
+                    settings.font_file_name_bold_italic.str, ft_error_to_string(e));
             }
         } else {
-            if ((ft_err = FT_Set_Char_Size(gfxOpenGL21(self)->face_bold_italic,
-                                           settings.font_size * 64, settings.font_size * 64,
-                                           settings.font_dpi, settings.font_dpi))) {
+            if ((e = FT_Set_Char_Size(gfxOpenGL21(self)->face_bold_italic, siz, siz, res, res))) {
                 WRN("Failed to set font size, file %s. error: %s\n",
-                    settings.font_file_name_bold_italic.str, stringify_ft_error(ft_err));
+                    settings.font_file_name_bold_italic.str, ft_error_to_string(e));
             }
         }
-
         if (!FT_IS_FIXED_WIDTH(gfxOpenGL21(self)->face_bold_italic)) {
             WRN("Bold italic font is not fixed width\n");
         }
@@ -862,14 +837,16 @@ void GfxOpenGL21_load_font(Gfx* self)
 
     if (settings.font_file_name_fallback.str) {
         if (FT_New_Face(gfxOpenGL21(self)->ft, settings.font_file_name_fallback.str, 0,
-                        &gfxOpenGL21(self)->face_fallback))
+                        &gfxOpenGL21(self)->face_fallback)) {
             WRN("Font error, failed to load font file: %s", settings.font_file_name_fallback.str);
-
-        if ((ft_err =
-               FT_Set_Char_Size(gfxOpenGL21(self)->face_fallback, settings.font_size * 64,
-                                settings.font_size * 64, settings.font_dpi, settings.font_dpi))) {
+        }
+        siz = 64 * (gfxOpenGL21(self)->is_main_font_rgb
+                      ? settings.font_size
+                      : OR(settings.font_size_fallback, settings.font_size));
+        res = settings.font_dpi;
+        if ((e = FT_Set_Char_Size(gfxOpenGL21(self)->face_fallback, siz, siz, res, res))) {
             WRN("Failed to set font size, file %s. error: %s\n",
-                settings.font_file_name_fallback.str, stringify_ft_error(ft_err));
+                settings.font_file_name_fallback.str, ft_error_to_string(e));
         }
     }
 
@@ -878,20 +855,15 @@ void GfxOpenGL21_load_font(Gfx* self)
                         &gfxOpenGL21(self)->face_fallback2))
             ERR("Font error, failed to load font file: %s", settings.font_file_name_fallback2.str);
 
-        if ((ft_err = FT_Select_Size(gfxOpenGL21(self)->face_fallback2, 0))) {
+        if ((e = FT_Select_Size(gfxOpenGL21(self)->face_fallback2, 0))) {
             WRN("Failed to set font size, file %s. error: %s\n",
-                settings.font_file_name_fallback2.str, stringify_ft_error(ft_err));
+                settings.font_file_name_fallback2.str, ft_error_to_string(e));
         }
     }
 
     if (!ft_lib_was_initialized) {
-
         // we can only do this once per ft instance
-        if ((ft_err = FT_Library_SetLcdFilter(gfxOpenGL21(self)->ft, FT_LCD_FILTER_DEFAULT))) {
-        } else {
-            WRN("LCD filtering not avaliable %s\n", stringify_ft_error(ft_err));
-        }
-
+        FT_Library_SetLcdFilter(gfxOpenGL21(self)->ft, FT_LCD_FILTER_DEFAULT);
         ft_lib_was_initialized = true;
     }
 }
@@ -1957,12 +1929,12 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
         case VT_LINE_DAMAGE_RANGE: {
             size_t range_begin_idx = vt_line->damage.front;
             size_t range_end_idx   = vt_line->damage.end + 1;
-            int extra = 0, tmp;
+            int    extra           = 0, tmp;
             if ((tmp = wcwidth(vt_line->data.buf[range_end_idx].code)) > 1) {
                 extra = tmp;
             }
             if (range_end_idx && (tmp = wcwidth(vt_line->data.buf[range_end_idx].code)) > 2) {
-                extra = MAX(extra, tmp -1);
+                extra = MAX(extra, tmp - 1);
             }
             range_end_idx += extra;
             _GfxOpenGL21_rasterize_line_range(gfx, vt, vt_line, range_begin_idx, range_end_idx,

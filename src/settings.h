@@ -105,6 +105,7 @@ typedef struct
     AString font_file_name_fallback2;
 
     uint16_t       font_size;
+    uint16_t       font_size_fallback;
     uint16_t       font_dpi;
     enum LcdFilter lcd_filter;
 

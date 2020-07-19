@@ -297,11 +297,6 @@ static void find_font()
         L_DROP_IF_SAME(fallback2_file, fallback_file);
     }
 
-    if (fallback2_file && !fallback_file) {
-        fallback_file  = fallback2_file;
-        fallback2_file = NULL;
-    }
-
     free(default_file);
     FontconfigContext_destroy(&fc_context);
 
@@ -405,10 +400,11 @@ static void settings_make_default()
         .font_file_name_fallback    = AString_new_uninitialized(),
         .font_file_name_fallback2   = AString_new_uninitialized(),
 
-        .bsp_sends_del  = true,
-        .font_size      = 10,
-        .font_dpi       = 96,
-        .lcd_filter     = LCD_FILTER_UNDEFINED,
+        .bsp_sends_del      = true,
+        .font_size          = 10,
+        .font_size_fallback = 0,
+        .font_dpi           = 96,
+        .lcd_filter         = LCD_FILTER_UNDEFINED,
 
         .bg     = { .r = 0, .g = 0, .b = 0, .a = 240 },
         .bghl   = { .r = 50, .g = 50, .b = 50, .a = 240 },
@@ -474,8 +470,10 @@ static void settings_complete_defaults()
     settings._explicit_colors_set = NULL;
 }
 
-static void print_help()
+static void print_help_and_exit()
 {
+#define MAX_OPT_PADDING 24
+
     printf("Usage: %s [options...] [-e/x command args...]\n", EXE_FNAME);
     for (uint32_t i = 0; i < OPT_SENTINEL_IDX; ++i) {
         if (long_options[i].has_arg == no_argument && long_options[i].val) {
@@ -484,12 +482,13 @@ static void print_help()
             printf("     ");
         }
         if (long_options[i].has_arg == required_argument) {
-            printf(
-              " --%-s <%s>%-*s", long_options[i].name, long_options_descriptions[i][0],
-              (int)(21 - strlen(long_options[i].name) - strlen(long_options_descriptions[i][0])),
-              "");
+            printf(" --%-s <%s>%-*s", long_options[i].name, long_options_descriptions[i][0],
+                   (int)(MAX_OPT_PADDING - strlen(long_options[i].name) -
+                         strlen(long_options_descriptions[i][0])),
+                   "");
         } else {
-            printf(" --%s %*s", long_options[i].name, (int)(23 - strlen(long_options[i].name)), "");
+            printf(" --%s %*s", long_options[i].name,
+                   (int)((MAX_OPT_PADDING + 2) - strlen(long_options[i].name)), "");
         }
         puts(long_options_descriptions[i][1]);
     }
@@ -526,18 +525,39 @@ static void handle_option(const char opt, const int array_index, const char* val
                 settings.debug_gfx = true;
                 break;
             case 'h':
-                print_help();
+                print_help_and_exit();
                 break;
         }
         return;
     }
 
-
     // long options
     switch (array_index) {
 
 #define L_UNEXPECTED_EXTRA_ARG_FOR_LONG_OPT(_value)                                                \
-    WRN("Unexpected extra argument \'%s\' for option \'%s\'\n", (_value), long_options[array_index].name);
+    WRN("Unexpected extra argument \'%s\' for option \'%s\'\n", (_value),                          \
+        long_options[array_index].name);
+
+#define L_PROCESS_MULTI_ARG_PACK_BEGIN                                                             \
+    int         argument_index = 0;                                                                \
+    Vector_char buf            = Vector_new_with_capacity_char(15);                                \
+    for (const char* i = value;; ++i) {                                                            \
+        if (*i == ':' || *i == '\0') {                                                             \
+            Vector_push_char(&buf, '\0');                                                          \
+            switch (argument_index) {
+
+#define L_PROCESS_MULTI_ARG_PACK_END                                                               \
+    default:                                                                                       \
+        L_UNEXPECTED_EXTRA_ARG_FOR_LONG_OPT(buf.buf);                                              \
+        }                                                                                          \
+        Vector_clear_char(&buf);                                                                   \
+        ++argument_index;                                                                          \
+        }                                                                                          \
+        else { Vector_push_char(&buf, *i); }                                                       \
+        if (!*i)                                                                                   \
+            break;                                                                                 \
+        }                                                                                          \
+        Vector_destroy_char(&buf);
 
         case OPT_XORG_ONLY_IDX:
             settings.x11_is_default = value ? strtob(value) : true;
@@ -569,67 +589,35 @@ static void handle_option(const char opt, const int array_index, const char* val
             break;
 
         case OPT_BLINK_IDX: {
-            int         argument_index = 0;
-            Vector_char buf            = Vector_new_with_capacity_char(2);
-            for (const char* i = value;; ++i) {
-                if (*i == ':' || *i == '\0') {
-                    Vector_push_char(&buf, '\0');
-                    switch (argument_index) {
-                        case 0:
-                            settings.enable_cursor_blink = strtob(buf.buf);
-                            break;
-                        case 1:
-                            settings.cursor_blink_interval_ms = strtol(buf.buf, NULL, 10);
-                            break;
-                        case 2:
-                            settings.cursor_blink_suspend_ms = strtol(buf.buf, NULL, 10);
-                            break;
-                        case 3:
-                            settings.cursor_blink_end_s = strtol(buf.buf, NULL, 10);
-                            break;
-                        default:
-                            L_UNEXPECTED_EXTRA_ARG_FOR_LONG_OPT(buf.buf);
-                    }
-                    Vector_clear_char(&buf);
-                    ++argument_index;
-                } else {
-                    Vector_push_char(&buf, *i);
-                }
-                if (!*i)
-                    break;
-            }
-            Vector_destroy_char(&buf);
+            L_PROCESS_MULTI_ARG_PACK_BEGIN
+            case 0:
+                settings.enable_cursor_blink = strtob(buf.buf);
+                break;
+            case 1:
+                settings.cursor_blink_interval_ms = strtol(buf.buf, NULL, 10);
+                break;
+            case 2:
+                settings.cursor_blink_suspend_ms = strtol(buf.buf, NULL, 10);
+                break;
+            case 3:
+                settings.cursor_blink_end_s = strtol(buf.buf, NULL, 10);
+                break;
+                L_PROCESS_MULTI_ARG_PACK_END
         } break;
 
         case OPT_PADDING_IDX: {
-            int         argument_index = 0;
-            Vector_char buf            = Vector_new_with_capacity_char(15);
-            for (const char* i = value;; ++i) {
-                if (*i == ':' || *i == '\0') {
-                    Vector_push_char(&buf, '\0');
-                    switch (argument_index) {
-                        case 0:
-                            settings.padding_center = strtob(buf.buf);
-                            break;
-                        case 1:
-                            settings.padding = CLAMP(strtol(buf.buf, NULL, 10), 0, UINT8_MAX);
-                            break;
-                        default:
-                            L_UNEXPECTED_EXTRA_ARG_FOR_LONG_OPT(buf.buf);
-                    }
-                    Vector_clear_char(&buf);
-                    ++argument_index;
-                } else {
-                    Vector_push_char(&buf, *i);
-                }
-                if (!*i)
-                    break;
-            }
-            Vector_destroy_char(&buf);
+            L_PROCESS_MULTI_ARG_PACK_BEGIN
+            case 0:
+                settings.padding_center = strtob(buf.buf);
+                break;
+            case 1:
+                settings.padding = CLAMP(strtol(buf.buf, NULL, 10), 0, UINT8_MAX);
+                break;
+                L_PROCESS_MULTI_ARG_PACK_END
         } break;
 
         case OPT_HELP_IDX:
-            print_help();
+            print_help_and_exit();
             break;
 
         case OPT_FONT_IDX:
@@ -656,9 +644,16 @@ static void handle_option(const char opt, const int array_index, const char* val
             AString_replace_with_dynamic(&settings.font_style_italic, strdup(value));
             break;
 
-        case OPT_FONT_SIZE_IDX:
-            settings.font_size = strtoul(value, NULL, 10);
-            break;
+        case OPT_FONT_SIZE_IDX: {
+            L_PROCESS_MULTI_ARG_PACK_BEGIN
+            case 0:
+                settings.font_size = strtoul(buf.buf, NULL, 10);
+                break;
+            case 1:
+                settings.font_size_fallback = strtoul(buf.buf, NULL, 10);
+                break;
+                L_PROCESS_MULTI_ARG_PACK_END
+        } break;
 
         case OPT_DPI_IDX:
             settings.font_dpi = strtoul(value, NULL, 10);

@@ -134,10 +134,10 @@ static struct option long_options[] = {
     [OPT_FONT_STYLE_BOLD_ITALIC_IDX] = { "style-bolditalic", required_argument, 0, 0 },
 
 #define OPT_FONT_FALLBACK_IDX 37
-    [OPT_FONT_FALLBACK_IDX] = { "font-fallback", required_argument, 0, 0 },
+    [OPT_FONT_FALLBACK_IDX] = { "font-symbol", required_argument, 0, 0 },
 
 #define OPT_FONT_FALLBACK2_IDX 38
-    [OPT_FONT_FALLBACK2_IDX] = { "font-fallback2", required_argument, 0, 0 },
+    [OPT_FONT_FALLBACK2_IDX] = { "font-color", required_argument, 0, 0 },
 
 #define OPT_FONT_SIZE_IDX 39
     [OPT_FONT_SIZE_IDX] = { "font-size", required_argument, 0, 0 },
@@ -238,13 +238,14 @@ static const char* long_options_descriptions[][2] = {
     [OPT_FONT_STYLE_BOLD_IDX]        = { arg_name, "Font style to use as bold" },
     [OPT_FONT_STYLE_ITALIC_IDX]      = { arg_name, "Font style to use as italic " },
     [OPT_FONT_STYLE_BOLD_ITALIC_IDX] = { arg_name, "Font style to use as bold italic " },
-    [OPT_FONT_FALLBACK_IDX]          = { arg_name, "Fallback font family" },
-    [OPT_FONT_FALLBACK2_IDX]         = { arg_name, "Second fallback font family" },
+    [OPT_FONT_FALLBACK_IDX]          = { arg_name, "Fallback font family (TrueType)" },
+    [OPT_FONT_FALLBACK2_IDX]         = { arg_name, "Font family for color bitmap glyphs" },
 
-    [OPT_FONT_SIZE_IDX] = { arg_int, "Font size" },
+    [OPT_FONT_SIZE_IDX] = { "number:number?", "Font size - general:symbol(size for TrueType fonts "
+                                              "when using a bitmap font as primary)" },
     [OPT_DPI_IDX]       = { arg_int, "Font dpi" },
     [OPT_BLINK_IDX]     = { "bool:R?:S?:E?",
-                        "Blinking cursor enable:rate[ms]:suspend[ms]:end[s](<0 never)" },
+                        "Blinking cursor - enable:rate[ms]:suspend[ms]:end[s](<0 never)" },
 
     [OPT_SCROLL_LINES_IDX] = { arg_int, "Lines scrolled per wheel click" },
     [OPT_SCROLLBACK_IDX]   = { arg_int, "Size of scrollback buffer" },

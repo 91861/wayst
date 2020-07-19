@@ -9,7 +9,8 @@
 
 /**
  * Freetype needs to be compiled with special flags to support this */
-static const char* stringify_ft_error(FT_Error e)
+#ifdef DEBUG
+static const char* ft_error_to_string(FT_Error e)
 {
     switch (e) {
 
@@ -225,3 +226,6 @@ static const char* stringify_ft_error(FT_Error e)
             return "Bad error code";
     }
 }
+#else
+#define ft_error_to_string(_e) ""
+#endif

@@ -2,6 +2,7 @@
 
 #include <EGL/egl.h>
 
+#ifdef DEBUG
 static inline const char* egl_get_error_string(EGLint error)
 {
     switch (error) {
@@ -54,3 +55,6 @@ static inline const char* egl_get_error_string(EGLint error)
             return "NOT A VALID ERROR CODE";
     }
 }
+#else
+#define egl_get_error_string(_e) ""
+#endif
