@@ -104,7 +104,9 @@ Vector_char Vt_select_region_to_string(Vt* self)
         begin_char_idx = MIN(self->selection.begin_char_idx, self->selection.end_char_idx);
         end_char_idx   = MAX(self->selection.begin_char_idx, self->selection.end_char_idx);
 
-        return line_to_string(&self->lines.buf[begin_line].data, begin_char_idx, end_char_idx + 1,
+        return line_to_string(&self->lines.buf[begin_line].data,
+                              begin_char_idx,
+                              end_char_idx + 1,
                               "");
     } else if (self->selection.begin_line < self->selection.end_line) {
         begin_char_idx = self->selection.begin_char_idx;
@@ -130,7 +132,9 @@ Vector_char Vt_select_region_to_string(Vt* self)
           line_to_string(&self->lines.buf[begin_line].data, begin_char_idx, end_char_idx + 1, "\n");
         Vector_pop_char(&ret);
         for (size_t i = begin_line + 1; i <= end_line; ++i) {
-            tmp = line_to_string(&self->lines.buf[i].data, begin_char_idx, end_char_idx + 1,
+            tmp = line_to_string(&self->lines.buf[i].data,
+                                 begin_char_idx,
+                                 end_char_idx + 1,
                                  i == end_line ? "" : "\n");
             Vector_pushv_char(&ret, tmp.buf, tmp.size - 1);
             Vector_destroy_char(&tmp);
@@ -515,7 +519,8 @@ __attribute__((cold)) char* pty_string_prettyfy(const char* str, int32_t max)
                     case '@':
                     case 'L':
                     case 'P':
-                        Vector_pushv_char(&fmt, TERMCOLOR_BG_MAGENTA_LIGHT,
+                        Vector_pushv_char(&fmt,
+                                          TERMCOLOR_BG_MAGENTA_LIGHT,
                                           strlen(TERMCOLOR_BG_MAGENTA_LIGHT));
                         break;
 
@@ -526,7 +531,8 @@ __attribute__((cold)) char* pty_string_prettyfy(const char* str, int32_t max)
                         break;
 
                     default:
-                        Vector_pushv_char(&fmt, TERMCOLOR_BG_RED_LIGHT,
+                        Vector_pushv_char(&fmt,
+                                          TERMCOLOR_BG_RED_LIGHT,
                                           strlen(TERMCOLOR_BG_RED_LIGHT));
                 }
                 Vector_push_char(&fmt, *s);
@@ -537,10 +543,12 @@ __attribute__((cold)) char* pty_string_prettyfy(const char* str, int32_t max)
                 Vector_push_char(&fmt, *s);
                 Vector_pushv_char(&fmt, TERMCOLOR_DEFAULT, strlen(TERMCOLOR_DEFAULT));
             } else if (isdigit(*s) && seq) {
-                Vector_pushv_char(&fmt, TERMCOLOR_BG_WHITE TERMCOLOR_BLACK,
+                Vector_pushv_char(&fmt,
+                                  TERMCOLOR_BG_WHITE TERMCOLOR_BLACK,
                                   strlen(TERMCOLOR_BG_WHITE TERMCOLOR_BLACK));
                 Vector_push_char(&fmt, *s);
-                Vector_pushv_char(&fmt, TERMCOLOR_BG_GRAY_DARK TERMCOLOR_DEFAULT,
+                Vector_pushv_char(&fmt,
+                                  TERMCOLOR_BG_GRAY_DARK TERMCOLOR_DEFAULT,
                                   strlen(TERMCOLOR_BG_GRAY_DARK TERMCOLOR_DEFAULT));
             } else {
                 Vector_push_char(&fmt, *s);
@@ -570,7 +578,7 @@ static Vector_char line_to_string(Vector_VtRune* line, size_t begin, size_t end,
     res = Vector_new_with_capacity_char(end - begin);
     char utfbuf[4];
 
-    // previous character was wide, skip the following space
+    /* previous character was wide, skip the following space */
     bool prev_wide = false;
     for (uint32_t i = begin; i < end; ++i) {
         if (prev_wide && line->buf[i].code == ' ') {
@@ -806,18 +814,25 @@ void Vt_dump_info(Vt* self)
     printf("  reverse video:                    %d\n", self->modes.video_reverse);
 
     printf("\n");
-    printf("  S S | Number of lines %zu (last index: %zu)\n", self->lines.size,
+    printf("  S S | Number of lines %zu (last index: %zu)\n",
+           self->lines.size,
            Vt_bottom_line(self));
     printf("  C C | Terminal size %hu x %hu\n", self->ws.ws_col, self->ws.ws_row);
     printf("V R R | \n");
-    printf("I O . | Visible region: %zu - %zu\n", Vt_visual_top_line(self),
+    printf("I O . | Visible region: %zu - %zu\n",
+           Vt_visual_top_line(self),
            Vt_visual_bottom_line(self));
     printf("E L   | \n");
-    printf("W L V | Active line:  real: %zu (visible: %zu)\n", self->cursor.row,
+    printf("W L V | Active line:  real: %zu (visible: %zu)\n",
+           self->cursor.row,
            Vt_get_cursor_row_screen(self));
-    printf("P   I | Cursor position: %zu type: %d blink: %d hidden: %d\n", self->cursor.col,
-           self->cursor.type, self->cursor.blinking, self->cursor.hidden);
-    printf("O R E | Scroll region: %zu - %zu\n", Vt_get_scroll_region_top(self),
+    printf("P   I | Cursor position: %zu type: %d blink: %d hidden: %d\n",
+           self->cursor.col,
+           self->cursor.type,
+           self->cursor.blinking,
+           self->cursor.hidden);
+    printf("O R E | Scroll region: %zu - %zu\n",
+           Vt_get_scroll_region_top(self),
            Vt_get_scroll_region_bottom(self));
     printf("R E W | \n");
     printf("T G . +----------------------------------------------------\n");
@@ -829,12 +844,18 @@ void Vt_dump_info(Vt* self)
                i == Vt_top_line(self) ? 'v' : i == Vt_bottom_line(self) ? '^' : ' ',
                i == Vt_get_scroll_region_top(self) || i == Vt_get_scroll_region_bottom(self) ? '-'
                                                                                              : ' ',
-               i == Vt_visual_top_line(self) || i == Vt_visual_bottom_line(self) ? '*' : ' ', i,
-               i == self->cursor.row ? '*' : ' ', self->lines.buf[i].data.size,
+               i == Vt_visual_top_line(self) || i == Vt_visual_bottom_line(self) ? '*' : ' ',
+               i,
+               i == self->cursor.row ? '*' : ' ',
+               self->lines.buf[i].data.size,
                self->lines.buf[i].damage.type != VT_LINE_DAMAGE_NONE,
-               self->lines.buf[i].proxy.data[0], self->lines.buf[i].proxy.data[1],
-               self->lines.buf[i].proxy.data[2], self->lines.buf[i].proxy.data[3],
-               self->lines.buf[i].reflowable, self->lines.buf[i].rejoinable, str.buf);
+               self->lines.buf[i].proxy.data[0],
+               self->lines.buf[i].proxy.data[1],
+               self->lines.buf[i].proxy.data[2],
+               self->lines.buf[i].proxy.data[3],
+               self->lines.buf[i].reflowable,
+               self->lines.buf[i].rejoinable,
+               str.buf);
         Vector_destroy_char(&str);
     }
 }
@@ -857,7 +878,8 @@ static void Vt_reflow_expand(Vt* self, uint32_t x)
             if (i + 1 < bottom_bound && self->lines.buf[i + 1].rejoinable) {
                 chars_to_move = MIN(chars_to_move, (int32_t)self->lines.buf[i + 1].data.size);
 
-                Vector_pushv_VtRune(&self->lines.buf[i].data, self->lines.buf[i + 1].data.buf,
+                Vector_pushv_VtRune(&self->lines.buf[i].data,
+                                    self->lines.buf[i + 1].data.buf,
                                     chars_to_move);
 
                 Vector_remove_at_VtRune(&self->lines.buf[i + 1].data, 0, chars_to_move);
@@ -894,12 +916,12 @@ static void Vt_reflow_expand(Vt* self, uint32_t x)
                     --bottom_bound;
                     ++removals;
 
-                    // correct scroll region
+                    /* correct scroll region */
                     if (self->scrolling_visual && remove_index < Vt_visual_top_line(self)) {
                         Vt_visual_scroll_up(self);
                     }
 
-                    // correct selection
+                    /* correct selection */
                     if (self->selection.mode == SELECT_MODE_NORMAL) {
                         if (self->selection.begin_line >= remove_index) {
                             --self->selection.begin_line;
@@ -920,8 +942,8 @@ static void Vt_reflow_expand(Vt* self, uint32_t x)
             Vector_push_VtLine(&self->lines, VtLine_new());
     }
 
-    // do not scroll past end of screen (self->ws was not updated yet, so
-    // Vt_scroll_down does not prevent this)
+    /* do not scroll past end of screen (self->ws was not updated yet, so Vt_scroll_down does not
+     * prevent this) */
     if (Vt_visual_top_line(self) > Vt_top_line(self)) {
         Vt_visual_scroll_reset(self);
     }
@@ -958,7 +980,7 @@ static void Vt_reflow_shrink(Vt* self, uint32_t x)
             if (i + 1 < bottom_bound && self->lines.buf[i + 1].rejoinable) {
                 for (size_t ii = 0; ii < chars_to_move; ++ii) {
 
-                    // shift selection points right
+                    /* shift selection points right */
                     if (self->selection.mode == SELECT_MODE_NORMAL) {
                         if (self->selection.begin_line == i + 1) {
                             ++self->selection.begin_char_idx;
@@ -969,7 +991,8 @@ static void Vt_reflow_shrink(Vt* self, uint32_t x)
                     }
 
                     Vector_insert_VtRune(
-                      &self->lines.buf[i + 1].data, self->lines.buf[i + 1].data.buf,
+                      &self->lines.buf[i + 1].data,
+                      self->lines.buf[i + 1].data.buf,
                       *(self->lines.buf[i].data.buf + x + chars_to_move - ii - 1));
                 }
                 Vt_mark_proxy_fully_damaged(self, i + 1);
@@ -978,13 +1001,13 @@ static void Vt_reflow_shrink(Vt* self, uint32_t x)
                 size_t insert_index = i + 1;
                 Vector_insert_VtLine(&self->lines, self->lines.buf + insert_index, VtLine_new());
 
-                // correct visual scroll region
+                /* correct visual scroll region */
                 if (self->scrolling_visual && Vt_visual_top_line(self) >= insert_index &&
                     Vt_visual_bottom_line(self) < self->lines.size - 1) {
                     Vt_visual_scroll_down(self);
                 }
 
-                // correct selection region
+                /* correct selection region */
                 if (self->selection.mode == SELECT_MODE_NORMAL) {
                     if (self->selection.begin_line >= insert_index) {
                         ++self->selection.begin_line;
@@ -995,7 +1018,8 @@ static void Vt_reflow_shrink(Vt* self, uint32_t x)
                 }
                 ++self->cursor.row;
                 ++bottom_bound;
-                Vector_pushv_VtRune(&self->lines.buf[i + 1].data, self->lines.buf[i].data.buf + x,
+                Vector_pushv_VtRune(&self->lines.buf[i + 1].data,
+                                    self->lines.buf[i].data.buf + x,
                                     chars_to_move);
                 self->lines.buf[i].was_reflown    = true;
                 self->lines.buf[i + 1].rejoinable = true;
@@ -1100,7 +1124,10 @@ void Vt_resize(Vt* self, uint32_t x, uint32_t y)
     self->ws =
       (struct winsize){ .ws_col = x, .ws_row = y, .ws_xpixel = px.first, .ws_ypixel = px.second };
 
-    LOG("resized to: %d %d [%d %d]\n", self->ws.ws_col, self->ws.ws_row, self->ws.ws_xpixel,
+    LOG("resized to: %d %d [%d %d]\n",
+        self->ws.ws_col,
+        self->ws.ws_row,
+        self->ws.ws_xpixel,
         self->ws.ws_ypixel);
 
     self->pixels_per_cell_x = (double)self->ws.ws_xpixel / self->ws.ws_col;
@@ -1108,8 +1135,12 @@ void Vt_resize(Vt* self, uint32_t x, uint32_t y)
 
     if (self->master_fd > 1) {
         if (ioctl(self->master_fd, TIOCSWINSZ, &self->ws) < 0) {
-            WRN("ioctl(%d, TIOCSWINSZ, winsize { %d, %d, %d, %d }) failed:  %s\n", self->master_fd,
-                self->ws.ws_col, self->ws.ws_row, self->ws.ws_xpixel, self->ws.ws_ypixel,
+            WRN("ioctl(%d, TIOCSWINSZ, winsize { %d, %d, %d, %d }) failed:  %s\n",
+                self->master_fd,
+                self->ws.ws_col,
+                self->ws.ws_row,
+                self->ws.ws_xpixel,
+                self->ws.ws_ypixel,
                 strerror(errno));
         }
     }
@@ -1252,11 +1283,11 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
             self->modes.bracketed_paste = !on;
             break;
 
-        case 1051: // Sun function-key mode, xterm.
-        case 1052: // HP function-key mode, xterm.
-        case 1053: // SCO function-key mode, xterm.
-        case 1060: // legacy keyboard emulation, i.e, X11R6,
-        case 1061: // VT220 keyboard emulation, xterm.
+        case 1051: /* Sun function-key mode, xterm. */
+        case 1052: /* HP function-key mode, xterm. */
+        case 1053: /* SCO function-key mode, xterm. */
+        case 1060: /* legacy keyboard emulation, i.e, X11R6, */
+        case 1061: /* VT220 keyboard emulation, xterm. */
             WRN("Unimplemented keyboard option\n");
             break;
 
@@ -1271,9 +1302,7 @@ static inline void Vt_handle_CSI(Vt* self, char c)
 
     if (is_csi_sequence_terminated(self->parser.active_sequence.buf,
                                    self->parser.active_sequence.size)) {
-
         CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
-
         Vector_push_char(&self->parser.active_sequence, '\0');
         char* seq       = self->parser.active_sequence.buf;
         char  last_char = self->parser.active_sequence.buf[self->parser.active_sequence.size - 2];
@@ -1307,7 +1336,8 @@ static inline void Vt_handle_CSI(Vt* self, char c)
                         if (code && !errno) {
                             Vt_handle_dec_mode(self, code, is_enable);
                         } else {
-                            WRN("Invalid %s argument: \'%s\'\n", is_enable ? "DECSET" : "DECRST",
+                            WRN("Invalid %s argument: \'%s\'\n",
+                                is_enable ? "DECSET" : "DECRST",
                                 token->buf + 1);
                         }
                     }
@@ -1323,7 +1353,9 @@ static inline void Vt_handle_CSI(Vt* self, char c)
                     int arg = short_sequence_get_int_argument(seq);
                     /* 6 - report cursor position */
                     if (arg == 6) {
-                        Vt_output_formated(self, "\e[%zu;%zuR", Vt_get_cursor_row_screen(self) + 1,
+                        Vt_output_formated(self,
+                                           "\e[%zu;%zuR",
+                                           Vt_get_cursor_row_screen(self) + 1,
                                            self->cursor.col + 1);
                     } else {
                         WRN("Unimplemented DSR(DEC) code: %d\n", arg);
@@ -1528,7 +1560,8 @@ static inline void Vt_handle_CSI(Vt* self, char c)
                 case 'd': {
                     MULTI_ARG_IS_ERROR
                     /* origin is 1:1 */
-                    Vt_move_cursor(self, self->cursor.col,
+                    Vt_move_cursor(self,
+                                   self->cursor.col,
                                    short_sequence_get_int_argument(seq) - 1);
                 } break;
 
@@ -1615,7 +1648,9 @@ static inline void Vt_handle_CSI(Vt* self, char c)
                         Vt_output(self, "\e[0n", 4);
                     } else if (arg == 6) {
                         /* 6 - report cursor position */
-                        Vt_output_formated(self, "\e[%zu;%zuR", Vt_get_cursor_row_screen(self) + 1,
+                        Vt_output_formated(self,
+                                           "\e[%zu;%zuR",
+                                           Vt_get_cursor_row_screen(self) + 1,
                                            self->cursor.col + 1);
                     } else {
                         WRN("Unimplemented DSR code: %d\n", arg);
@@ -1803,20 +1838,26 @@ static inline void Vt_handle_CSI(Vt* self, char c)
 
                         /* Report window size in pixels */
                         case 14: {
-                            Vt_output_formated(self, "\e[4;%d;%d;t", self->ws.ws_xpixel,
+                            Vt_output_formated(self,
+                                               "\e[4;%d;%d;t",
+                                               self->ws.ws_xpixel,
                                                self->ws.ws_ypixel);
                         } break;
 
                         /* Report text area size in chars */
                         case 18: {
-                            Vt_output_formated(self, "\e[8;%d;%d;t", self->ws.ws_col,
+                            Vt_output_formated(self,
+                                               "\e[8;%d;%d;t",
+                                               self->ws.ws_col,
                                                self->ws.ws_row);
 
                         } break;
 
                         /* Report window size in chars */
                         case 19: {
-                            Vt_output_formated(self, "\e[9;%d;%d;t", self->ws.ws_col,
+                            Vt_output_formated(self,
+                                               "\e[9;%d;%d;t",
+                                               self->ws.ws_col,
                                                self->ws.ws_row);
 
                         } break;
@@ -2078,10 +2119,10 @@ static void Vt_handle_SGR_sequence(Vt* self, Vector_char seq)
             }
         } else if (!strcmp(token->buf + 1, "4")) {
 
-            // possible curly underline
+            /* possible curly underline */
             if ((args[1] = (token = Vector_iter_Vector_char(&tokens, token)))) {
 
-                // enable this only on "4:3" not "4;3"
+                /* enable this only on "4:3" not "4;3" */
                 if (!strcmp(args[1]->buf, ":3")) {
 
                     if (!settings.allow_multiple_underlines) {
@@ -2110,16 +2151,13 @@ static void Vt_handle_SGR_sequence(Vt* self, Vector_char seq)
 static void Vt_handle_APC(Vt* self, char c)
 {
     Vector_push_char(&self->parser.active_sequence, c);
-
     if (is_generic_sequence_terminated(self->parser.active_sequence.buf,
                                        self->parser.active_sequence.size)) {
         Vector_push_char(&self->parser.active_sequence, '\0');
-
         const char* seq = self->parser.active_sequence.buf;
         char*       str = pty_string_prettyfy(seq, strlen(seq));
-        WRN("Unknown application programming command: %s\n", str);
+        WRN("Unknown APC: %s\n", str);
         free(str);
-
         Vector_destroy_char(&self->parser.active_sequence);
         self->parser.active_sequence = Vector_new_char();
         self->parser.state           = PARSER_STATE_LITERAL;
@@ -2161,10 +2199,8 @@ static void Vt_handle_DCS(Vt* self, char c)
 static void Vt_handle_PM(Vt* self, char c)
 {
     Vector_push_char(&self->parser.active_sequence, c);
-
     if (is_generic_sequence_terminated(self->parser.active_sequence.buf,
                                        self->parser.active_sequence.size)) {
-
         Vector_destroy_char(&self->parser.active_sequence);
         self->parser.active_sequence = Vector_new_char();
         self->parser.state           = PARSER_STATE_LITERAL;
@@ -2195,7 +2231,8 @@ static void Vt_handle_OSC(Vt* self, char c)
                 if (tokens.size >= 2) {
                     free(self->title);
                     self->title = strdup(tokens.buf[1].buf + 1);
-                    CALL_FP(self->callbacks.on_title_changed, self->callbacks.user_data,
+                    CALL_FP(self->callbacks.on_title_changed,
+                            self->callbacks.user_data,
                             tokens.buf[1].buf + 1);
                 }
                 break;
@@ -2295,9 +2332,7 @@ static inline void Vt_push_title(Vt* self)
 
 static inline void Vt_pop_title(Vt* self)
 {
-    if (self->title)
-        free(self->title);
-
+    free(self->title);
     if (self->title_stack.size) {
         self->title = (char*)self->title_stack.buf[self->title_stack.size - 1];
         Vector_pop_size_t(&self->title_stack);
@@ -2326,13 +2361,15 @@ static inline void Vt_carriage_return(Vt* self)
  * make a new empty line at cursor position, scroll down contents below */
 static inline void Vt_insert_line(Vt* self)
 {
-    Vector_insert_VtLine(&self->lines, Vector_at_VtLine(&self->lines, self->cursor.row),
+    Vector_insert_VtLine(&self->lines,
+                         Vector_at_VtLine(&self->lines, self->cursor.row),
                          VtLine_new());
 
     Vt_empty_line_fill_bg(self, self->cursor.row);
 
     Vector_remove_at_VtLine(&self->lines,
-                            MIN(Vt_get_scroll_region_bottom(self) + 1, Vt_bottom_line(self)), 1);
+                            MIN(Vt_get_scroll_region_bottom(self) + 1, Vt_bottom_line(self)),
+                            1);
 
     Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
 }
@@ -2342,8 +2379,10 @@ static inline void Vt_insert_line(Vt* self)
 static inline void Vt_reverse_line_feed(Vt* self)
 {
     Vector_remove_at_VtLine(&self->lines,
-                            MIN(Vt_bottom_line(self), Vt_get_scroll_region_bottom(self) + 1), 1);
-    Vector_insert_VtLine(&self->lines, Vector_at_VtLine(&self->lines, self->cursor.row),
+                            MIN(Vt_bottom_line(self), Vt_get_scroll_region_bottom(self) + 1),
+                            1);
+    Vector_insert_VtLine(&self->lines,
+                         Vector_at_VtLine(&self->lines, self->cursor.row),
                          VtLine_new());
     Vt_empty_line_fill_bg(self, self->cursor.row);
     Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
@@ -2355,10 +2394,11 @@ static inline void Vt_delete_line(Vt* self)
 {
     Vector_remove_at_VtLine(&self->lines, self->cursor.row, 1);
 
-    Vector_insert_VtLine(&self->lines,
-                         Vector_at_VtLine(&self->lines, MIN(Vt_get_scroll_region_bottom(self) + 1,
-                                                            Vt_bottom_line(self))),
-                         VtLine_new());
+    Vector_insert_VtLine(
+      &self->lines,
+      Vector_at_VtLine(&self->lines,
+                       MIN(Vt_get_scroll_region_bottom(self) + 1, Vt_bottom_line(self))),
+      VtLine_new());
 
     Vt_empty_line_fill_bg(self, MIN(Vt_get_scroll_region_bottom(self) + 1, Vt_bottom_line(self)));
 
@@ -2384,10 +2424,12 @@ static inline void Vt_scroll_up(Vt* self)
 static inline void Vt_scroll_down(Vt* self)
 {
     Vector_remove_at_VtLine(&self->lines,
-                            MAX(Vt_top_line(self), Vt_get_scroll_region_bottom(self) + 1), 1);
+                            MAX(Vt_top_line(self), Vt_get_scroll_region_bottom(self) + 1),
+                            1);
 
-    Vector_insert_VtLine(
-      &self->lines, Vector_at_VtLine(&self->lines, Vt_get_scroll_region_top(self)), VtLine_new());
+    Vector_insert_VtLine(&self->lines,
+                         Vector_at_VtLine(&self->lines, Vt_get_scroll_region_top(self)),
+                         VtLine_new());
 
     Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
 }
@@ -2468,7 +2510,8 @@ static void Vt_delete_chars(Vt* self, size_t n)
                             self->lines.buf[self->cursor.row].data.size - self->ws.ws_col);
     }
 
-    Vector_remove_at_VtRune(&self->lines.buf[self->cursor.row].data, self->cursor.col,
+    Vector_remove_at_VtRune(&self->lines.buf[self->cursor.row].data,
+                            self->cursor.col,
                             MIN(self->lines.buf[self->cursor.row].data.size == self->cursor.col
                                   ? self->lines.buf[self->cursor.row].data.size - self->cursor.col
                                   : self->lines.buf[self->cursor.row].data.size,
@@ -2677,7 +2720,8 @@ static inline void Vt_insert_new_line(Vt* self)
 
     if (self->cursor.row == Vt_get_scroll_region_bottom(self) + 1) {
         Vector_remove_at_VtLine(&self->lines, Vt_get_scroll_region_top(self), 1);
-        Vector_insert_VtLine(&self->lines, Vector_at_VtLine(&self->lines, self->cursor.row),
+        Vector_insert_VtLine(&self->lines,
+                             Vector_at_VtLine(&self->lines, self->cursor.row),
                              VtLine_new());
         Vt_empty_line_fill_bg(self, self->cursor.row);
     } else {
@@ -2713,15 +2757,14 @@ __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_litera
         size_t   rd = mbrtoc32(&res, &c, 1, &self->parser.input_mbstate);
 
         if (unlikely(rd == (size_t)-1)) {
-            // encoding error
+            /* encoding error */
             WRN("%s\n", strerror(errno));
             errno = 0;
 
-            // zero-initialized mbstate_t always represents the initial
-            // conversion state
+            /* zero-initialized mbstate_t always represents the initial conversion state */
             memset(&self->parser.input_mbstate, 0, sizeof(mbstate_t));
         } else if (rd != (size_t)-2) {
-            // sequence is complete
+            /* sequence is complete */
             self->parser.in_mb_seq = false;
             if (unlikely(unicode_is_combinable(res))) {
                 WRN("Combining unicodce diacritical marks not supported\n");
@@ -2995,7 +3038,7 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
 
 static inline void Vt_shrink_scrollback(Vt* self)
 {
-    // alt buffer is active
+    /* alt buffer is active */
     if (self->alt_lines.buf)
         return;
 
@@ -3011,11 +3054,13 @@ static inline void Vt_clear_proxies(Vt* self)
 {
     if (self->scrolling_visual) {
         if (self->visual_scroll_top > self->ws.ws_row * 5) {
-            Vt_clear_proxies_in_region(self, Vt_visual_bottom_line(self) + 4 * self->ws.ws_row,
+            Vt_clear_proxies_in_region(self,
+                                       Vt_visual_bottom_line(self) + 4 * self->ws.ws_row,
                                        self->lines.size - 1);
         }
     } else if (self->lines.size > self->ws.ws_row) {
-        Vt_clear_proxies_in_region(self, 0,
+        Vt_clear_proxies_in_region(self,
+                                   0,
                                    Vt_visual_top_line(self) ? Vt_visual_top_line(self) - 1 : 0);
     }
 }
@@ -3361,10 +3406,16 @@ void Vt_handle_button(void*    _self,
                           (FLAG_IS_SET(mods, MODIFIER_CONTROL) ? 16 : 0);
             }
             if (self->modes.extended_report) {
-                Vt_output_formated(self, "\e[<%u;%lu;%lu%c", button - 1, self->last_click_x + 1,
-                                   self->last_click_y + 1, state ? 'M' : 'm');
+                Vt_output_formated(self,
+                                   "\e[<%u;%lu;%lu%c",
+                                   button - 1,
+                                   self->last_click_x + 1,
+                                   self->last_click_y + 1,
+                                   state ? 'M' : 'm');
             } else if (self->modes.mouse_btn_report) {
-                Vt_output_formated(self, "\e[M%c%c%c", 32 + button - 1 + !state * 3,
+                Vt_output_formated(self,
+                                   "\e[M%c%c%c",
+                                   32 + button - 1 + !state * 3,
                                    (char)(32 + self->last_click_x + 1),
                                    (char)(32 + self->last_click_y + 1));
             }
@@ -3385,7 +3436,10 @@ void Vt_handle_motion(void* _self, uint32_t button, int32_t x, int32_t y)
             if (click_x != self->last_click_x || click_y != self->last_click_y) {
                 self->last_click_x = click_x;
                 self->last_click_y = click_y;
-                Vt_output_formated(self, "\e[<%d;%zu;%zuM", (int)button - 1 + 32, click_x + 1,
+                Vt_output_formated(self,
+                                   "\e[<%d;%zu;%zuM",
+                                   (int)button - 1 + 32,
+                                   click_x + 1,
                                    click_y + 1);
             }
         }

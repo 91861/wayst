@@ -78,7 +78,7 @@ const char* const colors_default[8][18] = {
       "FFFFFF",
     },
     {
-      /* linux console */
+      /* linux tty */
       "000000",
       "AA0000",
       "00AA00",
@@ -140,11 +140,30 @@ const char* const colors_default[8][18] = {
       "000000",
       "FFFFFF",
     },
-    { /* yaru */
-      "2E3436", "CC0000", "4E9A06", "C4A000", "3465A4", "75507B", "06989A", "D3D7CF", "555753",
-      "EF2929", "8AE234", "FCE94F", "729FCF", "AD7FA8", "34E2E2", "EEEEEC", "300A24", "FFFFFF" },
     {
-      /* tango */ "000000",
+      /* yaru */
+      "2E3436",
+      "CC0000",
+      "4E9A06",
+      "C4A000",
+      "3465A4",
+      "75507B",
+      "06989A",
+      "D3D7CF",
+      "555753",
+      "EF2929",
+      "8AE234",
+      "FCE94F",
+      "729FCF",
+      "AD7FA8",
+      "34E2E2",
+      "EEEEEC",
+      "300A24",
+      "FFFFFF",
+    },
+    {
+      /* tango */
+      "000000",
       "CC0000",
       "4D9A05",
       "C3A000",
@@ -164,7 +183,7 @@ const char* const colors_default[8][18] = {
       "EEEEEC",
     },
     {
-      // orchis
+      /* orchis */
       "000000",
       "CC0000",
       "4D9A05",
@@ -184,9 +203,27 @@ const char* const colors_default[8][18] = {
       "303030",
       "EFEFEF",
     },
-    { // solarized
-      "073642", "DC322F", "859900", "B58900", "268BD2", "D33682", "2AA198", "EEE8D5", "002B36",
-      "CB4B16", "586E75", "657B83", "839496", "6C71C4", "93A1A1", "FDF6E3", "002B36", "839496" },
+    {
+      // solarized
+      "073642",
+      "DC322F",
+      "859900",
+      "B58900",
+      "268BD2",
+      "D33682",
+      "2AA198",
+      "EEE8D5",
+      "002B36",
+      "CB4B16",
+      "586E75",
+      "657B83",
+      "839496",
+      "6C71C4",
+      "93A1A1",
+      "FDF6E3",
+      "002B36",
+      "839496",
+    },
 };
 
 Settings settings;
@@ -261,35 +298,52 @@ static void find_font()
 
     char* main_family = OR(settings.font.str, "Monospace");
 
-    char* regular_file = FontconfigContext_get_file(
-      &fc_context, main_family, settings.font_style_regular.str, settings.font_size, &is_bitmap);
+    char* regular_file = FontconfigContext_get_file(&fc_context,
+                                                    main_family,
+                                                    settings.font_style_regular.str,
+                                                    settings.font_size,
+                                                    &is_bitmap);
     if (is_bitmap) {
         settings.lcd_filter = LCD_FILTER_NONE;
     }
 
-    char* bold_file = FontconfigContext_get_file(
-      &fc_context, main_family, OR(settings.font_style_bold.str, "Bold"), settings.font_size, NULL);
+    char* bold_file = FontconfigContext_get_file(&fc_context,
+                                                 main_family,
+                                                 OR(settings.font_style_bold.str, "Bold"),
+                                                 settings.font_size,
+                                                 NULL);
     L_DROP_IF_SAME(bold_file, regular_file);
 
-    char* italic_file = FontconfigContext_get_file(&fc_context, main_family,
+    char* italic_file = FontconfigContext_get_file(&fc_context,
+                                                   main_family,
                                                    OR(settings.font_style_italic.str, "Italic"),
-                                                   settings.font_size, NULL);
+                                                   settings.font_size,
+                                                   NULL);
     L_DROP_IF_SAME(italic_file, regular_file);
 
-    char* bold_italic_file = FontconfigContext_get_file(
-      &fc_context, main_family, OR(settings.font_style_italic.str, "Bold:Italic"),
-      settings.font_size, NULL);
+    char* bold_italic_file =
+      FontconfigContext_get_file(&fc_context,
+                                 main_family,
+                                 OR(settings.font_style_italic.str, "Bold:Italic"),
+                                 settings.font_size,
+                                 NULL);
     L_DROP_IF_SAME(bold_italic_file, regular_file);
     L_DROP_IF_SAME(bold_italic_file, bold_file);
     L_DROP_IF_SAME(bold_italic_file, italic_file);
 
-    char* fallback_file = FontconfigContext_get_file(&fc_context, settings.font_fallback.str, NULL,
-                                                     settings.font_size, NULL);
+    char* fallback_file = FontconfigContext_get_file(&fc_context,
+                                                     settings.font_fallback.str,
+                                                     NULL,
+                                                     settings.font_size,
+                                                     NULL);
     L_DROP_IF_SAME(fallback_file, regular_file);
     L_DROP_IF_SAME(fallback_file, default_file);
 
-    char* fallback2_file = FontconfigContext_get_file(&fc_context, settings.font_fallback2.str,
-                                                      NULL, settings.font_size, NULL);
+    char* fallback2_file = FontconfigContext_get_file(&fc_context,
+                                                      settings.font_fallback2.str,
+                                                      NULL,
+                                                      settings.font_size,
+                                                      NULL);
     L_DROP_IF_SAME(fallback2_file, regular_file);
     L_DROP_IF_SAME(fallback2_file, default_file);
 
@@ -482,13 +536,17 @@ static void print_help_and_exit()
             printf("     ");
         }
         if (long_options[i].has_arg == required_argument) {
-            printf(" --%-s <%s>%-*s", long_options[i].name, long_options_descriptions[i][0],
+            printf(" --%-s <%s>%-*s",
+                   long_options[i].name,
+                   long_options_descriptions[i][0],
                    (int)(MAX_OPT_PADDING - strlen(long_options[i].name) -
                          strlen(long_options_descriptions[i][0])),
                    "");
         } else {
-            printf(" --%s %*s", long_options[i].name,
-                   (int)((MAX_OPT_PADDING + 2) - strlen(long_options[i].name)), "");
+            printf(" --%s %*s",
+                   long_options[i].name,
+                   (int)((MAX_OPT_PADDING + 2) - strlen(long_options[i].name)),
+                   "");
         }
         puts(long_options_descriptions[i][1]);
     }
@@ -535,7 +593,8 @@ static void handle_option(const char opt, const int array_index, const char* val
     switch (array_index) {
 
 #define L_UNEXPECTED_EXTRA_ARG_FOR_LONG_OPT(_value)                                                \
-    WRN("Unexpected extra argument \'%s\' for option \'%s\'\n", (_value),                          \
+    WRN("Unexpected extra argument \'%s\' for option \'%s\'\n",                                    \
+        (_value),                                                                                  \
         long_options[array_index].name);
 
 #define L_PROCESS_MULTI_ARG_PACK_BEGIN                                                             \
@@ -752,22 +811,7 @@ static void handle_option(const char opt, const int array_index, const char* val
             }
         } break;
 
-        case OPT_COLOR_0_IDX:
-        case OPT_COLOR_1_IDX:
-        case OPT_COLOR_2_IDX:
-        case OPT_COLOR_3_IDX:
-        case OPT_COLOR_4_IDX:
-        case OPT_COLOR_5_IDX:
-        case OPT_COLOR_6_IDX:
-        case OPT_COLOR_7_IDX:
-        case OPT_COLOR_8_IDX:
-        case OPT_COLOR_9_IDX:
-        case OPT_COLOR_10_IDX:
-        case OPT_COLOR_11_IDX:
-        case OPT_COLOR_12_IDX:
-        case OPT_COLOR_13_IDX:
-        case OPT_COLOR_14_IDX:
-        case OPT_COLOR_15_IDX: {
+        case OPT_COLOR_0_IDX ... OPT_COLOR_15_IDX: {
             bool     failed = false;
             ColorRGB parsed = ColorRGB_from_hex(value, &failed);
 
@@ -930,7 +974,7 @@ static void handle_config_option(const char* key, const char* val)
     }
 }
 
-static void settings_file_parse(FILE* f, const int argc, char* const* argv)
+static void settings_file_parse(FILE* f)
 {
     ASSERT(f, "valid FILE*");
 
@@ -1048,7 +1092,7 @@ void settings_init(const int argc, char* const* argv)
     if (!settings.skip_config && settings.config_path.str) {
         FILE* cfg = open_config(settings.config_path.str);
         if (cfg) {
-            settings_file_parse(cfg, argc, argv);
+            settings_file_parse(cfg);
             fclose(cfg);
         }
     }

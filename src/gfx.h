@@ -44,7 +44,7 @@ struct IGfx
     Pair_uint32_t (*get_char_size)      (Gfx* self);
     void (*init_with_context_activated) (Gfx* self);
     void (*reload_font)                 (Gfx* self);
-    bool (*update_timers)               (Gfx* self, Vt* vt, Ui* ui);
+    bool (*update_timers)               (Gfx* self, Vt* vt, Ui* ui, TimePoint** out_pending);
     void (*notify_action)               (Gfx* self);
     bool (*set_focus)                   (Gfx* self, bool in_focus);
     void (*flash)                       (Gfx* self);
@@ -84,9 +84,9 @@ static void Gfx_reload_font(Gfx* self)
     self->interface->reload_font(self);
 }
 
-static bool Gfx_update_timers(Gfx* self, Vt* vt, Ui* ui)
+static bool Gfx_update_timers(Gfx* self, Vt* vt, Ui* ui, TimePoint** out_pending)
 {
-    return self->interface->update_timers(self, vt, ui);
+    return self->interface->update_timers(self, vt, ui, out_pending);
 }
 
 static void Gfx_notify_action(Gfx* self)

@@ -7,6 +7,7 @@
 #pragma once
 
 #include "settings.h"
+#include "timing.h"
 #include "util.h"
 
 #define WINDOW_IS_CLOSED         (1 << 0)
@@ -44,9 +45,10 @@ struct IWindow
     void (*set_fullscreen)(struct WindowBase* self, bool fullscreen);
     void (*resize)(struct WindowBase* self, uint32_t w, uint32_t h);
     void (*events)(struct WindowBase* self);
+    TimePoint* (*process_timers)(struct WindowBase* self);
     void (*set_title)(struct WindowBase* self, const char* title);
     void (*set_app_id)(struct WindowBase* self, const char* app_id);
-    void (*maybe_swap)(struct WindowBase* self);
+    bool (*maybe_swap)(struct WindowBase* self);
     void (*destroy)(struct WindowBase* self);
     int (*get_connection_fd)(struct WindowBase* self);
     void (*clipboard_send)(struct WindowBase* self, const char* text);
@@ -123,6 +125,11 @@ static inline void Window_events(struct WindowBase* self)
     self->interface->events(self);
 }
 
+static inline TimePoint* Window_process_timers(struct WindowBase* self)
+{
+    return self->interface->process_timers(self);
+}
+
 static inline void Window_set_title(struct WindowBase* self, const char* title)
 {
     self->interface->set_title(self, title);
@@ -133,9 +140,9 @@ static inline void Window_set_app_id(struct WindowBase* self, const char* app_id
     self->interface->set_app_id(self, app_id);
 }
 
-static inline void Window_maybe_swap(struct WindowBase* self)
+static inline bool Window_maybe_swap(struct WindowBase* self)
 {
-    self->interface->maybe_swap(self);
+    return self->interface->maybe_swap(self);
 }
 
 static inline void Window_destroy(struct WindowBase* self)

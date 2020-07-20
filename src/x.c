@@ -44,19 +44,24 @@ void               WindowX11_events(struct WindowBase* self);
 void               WindowX11_set_wm_name(struct WindowBase* self, const char* title);
 void               WindowX11_set_title(struct WindowBase* self, const char* title);
 void               WindowX11_set_swap_interval(struct WindowBase* self, int32_t ival);
-void               WindowX11_maybe_swap(struct WindowBase* self);
+bool               WindowX11_maybe_swap(struct WindowBase* self);
 void               WindowX11_destroy(struct WindowBase* self);
 int                WindowX11_get_connection_fd(struct WindowBase* self);
 void               WindowX11_clipboard_get(struct WindowBase* self);
 void               WindowX11_clipboard_send(struct WindowBase* self, const char* text);
-void     WindowX11_set_pointer_style(struct WindowBase* self, enum MousePointerStyle style);
-void*    WindowX11_get_gl_ext_proc_adress(struct WindowBase* self, const char* name);
-uint32_t WindowX11_get_keycode_from_name(struct WindowBase* self, char* name);
+void       WindowX11_set_pointer_style(struct WindowBase* self, enum MousePointerStyle style);
+void*      WindowX11_get_gl_ext_proc_adress(struct WindowBase* self, const char* name);
+uint32_t   WindowX11_get_keycode_from_name(struct WindowBase* self, char* name);
+TimePoint* WindowX11_process_timers(struct WindowBase* self)
+{
+    return NULL;
+}
 
 static struct IWindow window_interface_x11 = {
     .set_fullscreen         = WindowX11_set_fullscreen,
     .resize                 = WindowX11_resize,
     .events                 = WindowX11_events,
+    .process_timers         = WindowX11_process_timers,
     .set_title              = WindowX11_set_title,
     .set_app_id             = WindowX11_set_wm_name,
     .maybe_swap             = WindowX11_maybe_swap,
@@ -117,7 +122,11 @@ void WindowX11_clipboard_get(struct WindowBase* self)
     Window owner = XGetSelectionOwner(globalX11->display, clip);
 
     if (owner != None)
-        XConvertSelection(globalX11->display, clip, utf8, clip, windowX11(self)->window,
+        XConvertSelection(globalX11->display,
+                          clip,
+                          utf8,
+                          clip,
+                          windowX11(self)->window,
                           CurrentTime);
 }
 
@@ -127,7 +136,7 @@ static void WindowX11_setup_pointer(struct WindowBase* self)
     static char data[8] = { 0 };
     Pixmap pmp = XCreateBitmapFromData(globalX11->display, windowX11(self)->window, data, 8, 8);
     globalX11->cursor_hidden = XCreatePixmapCursor(globalX11->display, pmp, pmp, &c, &c, 0, 0);
-    globalX11->cursor_beam = XCreateFontCursor(globalX11->display, XC_xterm);
+    globalX11->cursor_beam   = XCreateFontCursor(globalX11->display, XC_xterm);
 }
 
 static void WindowX11_pointer(struct WindowBase* self, bool hide)
@@ -180,8 +189,12 @@ struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
 
     globalX11->im = XOpenIM(globalX11->display, NULL, NULL, NULL);
 
-    globalX11->ic = XCreateIC(globalX11->im, XNInputStyle, XIMPreeditNothing | XIMStatusNothing,
-                              XNClientWindow, windowX11(win)->window, NULL);
+    globalX11->ic = XCreateIC(globalX11->im,
+                              XNInputStyle,
+                              XIMPreeditNothing | XIMStatusNothing,
+                              XNClientWindow,
+                              windowX11(win)->window,
+                              NULL);
 
     if (!globalX11->ic)
         ERR("Failed to create IC\n");
@@ -211,8 +224,10 @@ struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
                                           None };
 
     int          fb_cfg_cnt;
-    GLXFBConfig* fb_cfg = glXChooseFBConfig(globalX11->display, DefaultScreen(globalX11->display),
-                                            visual_attribs, &fb_cfg_cnt);
+    GLXFBConfig* fb_cfg = glXChooseFBConfig(globalX11->display,
+                                            DefaultScreen(globalX11->display),
+                                            visual_attribs,
+                                            &fb_cfg_cnt);
 
     int fb_cfg_sel = 0;
     for (fb_cfg_sel = 0; fb_cfg_sel < fb_cfg_cnt; ++fb_cfg_sel) {
@@ -234,9 +249,11 @@ struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
         ERR("Failed to get X11 visual info");
 
     windowX11(win)->set_win_attribs = (XSetWindowAttributes){
-        .colormap = windowX11(win)->colormap = XCreateColormap(
-          globalX11->display, RootWindow(globalX11->display, globalX11->visual_info->screen),
-          globalX11->visual_info->visual, AllocNone),
+        .colormap = windowX11(win)->colormap =
+          XCreateColormap(globalX11->display,
+                          RootWindow(globalX11->display, globalX11->visual_info->screen),
+                          globalX11->visual_info->visual,
+                          AllocNone),
         .border_pixel      = 0,
         .background_pixmap = None,
         .override_redirect = True,
@@ -247,8 +264,11 @@ struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
 
     windowX11(win)->glx_context = NULL;
 
-    static int context_attribs[] = { GLX_CONTEXT_MAJOR_VERSION_ARB, 2,
-                                     GLX_CONTEXT_MINOR_VERSION_ARB, 1, None };
+    static int context_attribs[] = { GLX_CONTEXT_MAJOR_VERSION_ARB,
+                                     2,
+                                     GLX_CONTEXT_MINOR_VERSION_ARB,
+                                     1,
+                                     None };
 
     glXCreateContextAttribsARBProc glXCreateContextAttribsARB = 0;
 
@@ -264,10 +284,19 @@ struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
     if (!windowX11(win)->glx_context)
         ERR("Failed to create GLX context");
 
-    windowX11(win)->window = XCreateWindow(
-      globalX11->display, RootWindow(globalX11->display, globalX11->visual_info->screen), 0, 0,
-      win->w, win->h, 0, globalX11->visual_info->depth, InputOutput, globalX11->visual_info->visual,
-      CWBorderPixel | CWColormap | CWEventMask, &windowX11(win)->set_win_attribs);
+    windowX11(win)->window =
+      XCreateWindow(globalX11->display,
+                    RootWindow(globalX11->display, globalX11->visual_info->screen),
+                    0,
+                    0,
+                    win->w,
+                    win->h,
+                    0,
+                    globalX11->visual_info->depth,
+                    InputOutput,
+                    globalX11->visual_info->visual,
+                    CWBorderPixel | CWColormap | CWEventMask,
+                    &windowX11(win)->set_win_attribs);
 
     if (!windowX11(win)->window)
         ERR("Failed to create X11 window");
@@ -339,8 +368,11 @@ static inline void WindowX11_fullscreen_change_state(struct WindowBase* self, co
                               .format       = 32,
                               .data         = { { (long)arg, wm_fullscreen, 0 } } };
 
-    XSendEvent(globalX11->display, DefaultRootWindow(globalX11->display), False,
-               SubstructureRedirectMask | SubstructureNotifyMask, (XEvent*)&e);
+    XSendEvent(globalX11->display,
+               DefaultRootWindow(globalX11->display),
+               False,
+               SubstructureRedirectMask | SubstructureNotifyMask,
+               (XEvent*)&e);
 }
 
 void WindowX11_set_fullscreen(struct WindowBase* self, bool fullscreen)
@@ -467,8 +499,10 @@ void WindowX11_events(struct WindowBase* self)
                 if (no_consume) {
                     int32_t always_lower =
                       XkbKeycodeToKeysym(globalX11->display, e->xkey.keycode, 0, 0);
-                    self->callbacks.key_handler(self->callbacks.user_data, stat == 4 ? code : ret,
-                                                always_lower, windowX11(self)->mods);
+                    self->callbacks.key_handler(self->callbacks.user_data,
+                                                stat == 4 ? code : ret,
+                                                always_lower,
+                                                windowX11(self)->mods);
                 }
                 break;
 
@@ -492,8 +526,13 @@ void WindowX11_events(struct WindowBase* self)
 
             case ButtonRelease:
                 if (e->xbutton.button != 4 && e->xbutton.button) {
-                    self->callbacks.button_handler(self->callbacks.user_data, e->xbutton.button,
-                                                   false, e->xbutton.x, e->xbutton.y, 0, 0);
+                    self->callbacks.button_handler(self->callbacks.user_data,
+                                                   e->xbutton.button,
+                                                   false,
+                                                   e->xbutton.x,
+                                                   e->xbutton.y,
+                                                   0,
+                                                   0);
                 }
                 windowX11(self)->last_button_pressed = 0;
                 break;
@@ -501,18 +540,30 @@ void WindowX11_events(struct WindowBase* self)
             case ButtonPress:
                 if (e->xbutton.button == 4) {
                     windowX11(self)->last_button_pressed = 0;
-                    self->callbacks.button_handler(self->callbacks.user_data, 65, true,
-                                                   e->xbutton.x, e->xbutton.y, 0,
+                    self->callbacks.button_handler(self->callbacks.user_data,
+                                                   65,
+                                                   true,
+                                                   e->xbutton.x,
+                                                   e->xbutton.y,
+                                                   0,
                                                    windowX11(self)->mods);
                 } else if (e->xbutton.button == 5) {
                     windowX11(self)->last_button_pressed = 0;
-                    self->callbacks.button_handler(self->callbacks.user_data, 66, true,
-                                                   e->xbutton.x, e->xbutton.y, 0,
+                    self->callbacks.button_handler(self->callbacks.user_data,
+                                                   66,
+                                                   true,
+                                                   e->xbutton.x,
+                                                   e->xbutton.y,
+                                                   0,
                                                    windowX11(self)->mods);
                 } else {
                     windowX11(self)->last_button_pressed = e->xbutton.button;
-                    self->callbacks.button_handler(self->callbacks.user_data, e->xbutton.button,
-                                                   true, e->xbutton.x, e->xbutton.y, 0,
+                    self->callbacks.button_handler(self->callbacks.user_data,
+                                                   e->xbutton.button,
+                                                   true,
+                                                   e->xbutton.x,
+                                                   e->xbutton.y,
+                                                   0,
                                                    windowX11(self)->mods);
                 }
                 break;
@@ -524,7 +575,8 @@ void WindowX11_events(struct WindowBase* self)
                 if (windowX11(self)->last_button_pressed) {
                     self->callbacks.motion_handler(self->callbacks.user_data,
                                                    windowX11(self)->last_button_pressed,
-                                                   e->xmotion.x, e->xmotion.y);
+                                                   e->xmotion.x,
+                                                   e->xmotion.y);
                 }
                 break;
 
@@ -545,14 +597,21 @@ void WindowX11_events(struct WindowBase* self)
                     se.target    = e->xselectionrequest.target;
                     se.property  = None;
                     se.time      = e->xselectionrequest.time;
-                    XSendEvent(globalX11->display, e->xselectionrequest.requestor, True,
-                               NoEventMask, (XEvent*)&se);
+                    XSendEvent(globalX11->display,
+                               e->xselectionrequest.requestor,
+                               True,
+                               NoEventMask,
+                               (XEvent*)&se);
                 } else {
                     /* accept */
                     Atom utf8 = XInternAtom(globalX11->display, "UTF8_STRING", 0);
 
-                    XChangeProperty(globalX11->display, e->xselectionrequest.requestor,
-                                    e->xselectionrequest.property, utf8, 8, PropModeReplace,
+                    XChangeProperty(globalX11->display,
+                                    e->xselectionrequest.requestor,
+                                    e->xselectionrequest.property,
+                                    utf8,
+                                    8,
+                                    PropModeReplace,
                                     (const unsigned char*)windowX11(self)->cliptext,
                                     strlen(windowX11(self)->cliptext));
 
@@ -563,8 +622,11 @@ void WindowX11_events(struct WindowBase* self)
                     se.target    = e->xselectionrequest.target;
                     se.property  = e->xselectionrequest.property;
                     se.time      = e->xselectionrequest.time;
-                    XSendEvent(globalX11->display, e->xselectionrequest.requestor, True,
-                               NoEventMask, (XEvent*)&se);
+                    XSendEvent(globalX11->display,
+                               e->xselectionrequest.requestor,
+                               True,
+                               NoEventMask,
+                               (XEvent*)&se);
                 }
                 break;
 
@@ -576,13 +638,32 @@ void WindowX11_events(struct WindowBase* self)
                     unsigned long  dul, size;
                     unsigned char* pret = NULL;
                     incr                = XInternAtom(globalX11->display, "INCR", 0);
-                    XGetWindowProperty(globalX11->display, windowX11(self)->window, clip, 0, 0,
-                                       False, AnyPropertyType, &type, &di, &dul, &size, &pret);
+                    XGetWindowProperty(globalX11->display,
+                                       windowX11(self)->window,
+                                       clip,
+                                       0,
+                                       0,
+                                       False,
+                                       AnyPropertyType,
+                                       &type,
+                                       &di,
+                                       &dul,
+                                       &size,
+                                       &pret);
                     if (type != incr) {
                         /* if data is larger than chunk size (200-ish k), it's
                          * probably not text anyway */
-                        XGetWindowProperty(globalX11->display, windowX11(self)->window, clip, 0,
-                                           size, False, AnyPropertyType, &da, &di, &dul, &dul,
+                        XGetWindowProperty(globalX11->display,
+                                           windowX11(self)->window,
+                                           clip,
+                                           0,
+                                           size,
+                                           False,
+                                           AnyPropertyType,
+                                           &da,
+                                           &di,
+                                           &dul,
+                                           &dul,
                                            &pret);
 
                         self->callbacks.clipboard_handler(self->callbacks.user_data, (char*)pret);
@@ -622,7 +703,7 @@ void WindowX11_set_wm_name(struct WindowBase* self, const char* title)
     XSetIconName(globalX11->display, windowX11(self)->window, title);
 }
 
-void WindowX11_maybe_swap(struct WindowBase* self)
+bool WindowX11_maybe_swap(struct WindowBase* self)
 {
     if (self->paint && !FLAG_IS_SET(self->state_flags, WINDOW_IS_MINIMIZED)) {
         self->paint = false;
@@ -632,10 +713,9 @@ void WindowX11_maybe_swap(struct WindowBase* self)
         }
 
         glXSwapBuffers(globalX11->display, windowX11(self)->window);
+        return true;
     } else {
-        usleep(1000 * (FLAG_IS_SET(self->state_flags, WINDOW_IS_IN_FOCUS)
-                         ? global->target_frame_time_ms - 3
-                         : global->target_frame_time_ms));
+        return false;
     }
 }
 

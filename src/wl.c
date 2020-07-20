@@ -83,26 +83,28 @@ static struct wl_data_source_listener data_source_listener;
 static void                           cursor_set(struct wl_cursor* what, uint32_t serial);
 static void                           WindowWl_dont_swap_buffers(struct WindowBase* self);
 struct WindowBase*                    WindowWl_new(uint32_t w, uint32_t h);
-void     WindowWl_set_fullscreen(struct WindowBase* self, bool fullscreen);
-void     WindowWl_resize(struct WindowBase* self, uint32_t w, uint32_t h);
-void     WindowWl_events(struct WindowBase* self);
-void     WindowWl_set_current_context(struct WindowBase* self);
-void     WindowWl_set_swap_interval(struct WindowBase* self, int32_t ival);
-void     WindowWl_set_wm_name(struct WindowBase* self, const char* title);
-void     WindowWl_set_title(struct WindowBase* self, const char* title);
-void     WindowWl_maybe_swap(struct WindowBase* self);
-void     WindowWl_destroy(struct WindowBase* self);
-int      WindowWl_get_connection_fd(struct WindowBase* self);
-void     WindowWl_clipboard_send(struct WindowBase* self, const char* text);
-void     WindowWl_clipboard_get(struct WindowBase* self);
-void*    WindowWl_get_gl_ext_proc_adress(struct WindowBase* self, const char* name);
-uint32_t WindowWl_get_keycode_from_name(struct WindowBase* self, char* name);
-void     WindowWl_set_pointer_style(struct WindowBase* self, enum MousePointerStyle style);
+void       WindowWl_set_fullscreen(struct WindowBase* self, bool fullscreen);
+void       WindowWl_resize(struct WindowBase* self, uint32_t w, uint32_t h);
+void       WindowWl_events(struct WindowBase* self);
+TimePoint* WindowWl_process_timers(struct WindowBase* self);
+void       WindowWl_set_current_context(struct WindowBase* self);
+void       WindowWl_set_swap_interval(struct WindowBase* self, int32_t ival);
+void       WindowWl_set_wm_name(struct WindowBase* self, const char* title);
+void       WindowWl_set_title(struct WindowBase* self, const char* title);
+bool       WindowWl_maybe_swap(struct WindowBase* self);
+void       WindowWl_destroy(struct WindowBase* self);
+int        WindowWl_get_connection_fd(struct WindowBase* self);
+void       WindowWl_clipboard_send(struct WindowBase* self, const char* text);
+void       WindowWl_clipboard_get(struct WindowBase* self);
+void*      WindowWl_get_gl_ext_proc_adress(struct WindowBase* self, const char* name);
+uint32_t   WindowWl_get_keycode_from_name(struct WindowBase* self, char* name);
+void       WindowWl_set_pointer_style(struct WindowBase* self, enum MousePointerStyle style);
 
 static struct IWindow window_interface_wayland = {
     .set_fullscreen         = WindowWl_set_fullscreen,
     .resize                 = WindowWl_resize,
     .events                 = WindowWl_events,
+    .process_timers         = WindowWl_process_timers,
     .set_title              = WindowWl_set_title,
     .maybe_swap             = WindowWl_maybe_swap,
     .destroy                = WindowWl_destroy,
@@ -373,15 +375,17 @@ static void pointer_handle_motion(void*              data,
 {
     globalWl->serial       = serial;
     struct WindowBase* win = data;
-    win->pointer_x = wl_fixed_to_int(x);
-    win->pointer_y = wl_fixed_to_int(y);
+    win->pointer_x         = wl_fixed_to_int(x);
+    win->pointer_y         = wl_fixed_to_int(y);
     if (FLAG_IS_SET(win->state_flags, WINDOW_IS_POINTER_HIDDEN)) {
         cursor_set(globalWl->cursor_arrow, 0);
         FLAG_UNSET(win->state_flags, WINDOW_IS_POINTER_HIDDEN);
     }
     if (globalWl->last_button_pressed) {
-        win->callbacks.motion_handler(win->callbacks.user_data, globalWl->last_button_pressed,
-                                      win->pointer_x, win->pointer_y);
+        win->callbacks.motion_handler(win->callbacks.user_data,
+                                      globalWl->last_button_pressed,
+                                      win->pointer_x,
+                                      win->pointer_y);
     }
 }
 
@@ -412,8 +416,14 @@ static void pointer_handle_button(void*              data,
     button                        = button == 2 + 271 ? 3 : button == 3 + 271 ? 2 : button - 271;
     globalWl->last_button_pressed = state ? button : 0;
 
-    CALL_FP(win->callbacks.button_handler, win->callbacks.user_data, button, state, win->pointer_x,
-            win->pointer_y, 0, final_mods);
+    CALL_FP(win->callbacks.button_handler,
+            win->callbacks.user_data,
+            button,
+            state,
+            win->pointer_x,
+            win->pointer_y,
+            0,
+            final_mods);
 }
 
 static void pointer_handle_axis(void*              data,
@@ -426,8 +436,14 @@ static void pointer_handle_axis(void*              data,
     int32_t            v   = wl_fixed_to_int(value);
 
     if (v && !windowWl(win)->got_discrete_axis_event) {
-        CALL_FP(win->callbacks.button_handler, win->callbacks.user_data, v < 0 ? 65 : 66, 1,
-                win->pointer_x, win->pointer_y, v < 0 ? -v : v, 0);
+        CALL_FP(win->callbacks.button_handler,
+                win->callbacks.user_data,
+                v < 0 ? 65 : 66,
+                1,
+                win->pointer_x,
+                win->pointer_y,
+                v < 0 ? -v : v,
+                0);
     }
 
     windowWl(win)->got_discrete_axis_event = false;
@@ -455,8 +471,14 @@ static void pointer_handle_axis_discrete(void*              data,
     /* this is sent before a coresponding axis event, tell it to do nothing */
     windowWl(win)->got_discrete_axis_event = true;
 
-    CALL_FP(win->callbacks.button_handler, win->callbacks.user_data, discrete < 0 ? 65 : 66, 1,
-            win->pointer_x, win->pointer_y, 0, 0);
+    CALL_FP(win->callbacks.button_handler,
+            win->callbacks.user_data,
+            discrete < 0 ? 65 : 66,
+            1,
+            win->pointer_x,
+            win->pointer_y,
+            0,
+            0);
 }
 
 static struct wl_pointer_listener pointer_listener = {
@@ -506,8 +528,10 @@ static void keyboard_handle_keymap(void*               data,
     if (map_str == MAP_FAILED)
         ERR("Reading keymap info failed");
 
-    globalWl->xkb.keymap = xkb_keymap_new_from_string(
-      globalWl->xkb.ctx, map_str, XKB_KEYMAP_FORMAT_TEXT_V1, XKB_KEYMAP_COMPILE_NO_FLAGS);
+    globalWl->xkb.keymap = xkb_keymap_new_from_string(globalWl->xkb.ctx,
+                                                      map_str,
+                                                      XKB_KEYMAP_FORMAT_TEXT_V1,
+                                                      XKB_KEYMAP_COMPILE_NO_FLAGS);
 
     munmap(map_str, size);
     close(fd);
@@ -526,13 +550,17 @@ static void keyboard_handle_keymap(void*               data,
     FILE*       compose_file      = NULL;
     if (compose_file_name && *compose_file_name && (compose_file = fopen(compose_file_name, "r"))) {
         LOG("using XCOMPOSEFILE = %s\n", compose_file_name);
-        globalWl->xkb.compose_table =
-          xkb_compose_table_new_from_file(globalWl->xkb.ctx, compose_file, settings.locale.str,
-                                          XKB_COMPOSE_FORMAT_TEXT_V1, XKB_COMPOSE_COMPILE_NO_FLAGS);
+        globalWl->xkb.compose_table = xkb_compose_table_new_from_file(globalWl->xkb.ctx,
+                                                                      compose_file,
+                                                                      settings.locale.str,
+                                                                      XKB_COMPOSE_FORMAT_TEXT_V1,
+                                                                      XKB_COMPOSE_COMPILE_NO_FLAGS);
         fclose(compose_file);
     } else {
-        globalWl->xkb.compose_table = xkb_compose_table_new_from_locale(
-          globalWl->xkb.ctx, settings.locale.str, XKB_COMPOSE_COMPILE_NO_FLAGS);
+        globalWl->xkb.compose_table =
+          xkb_compose_table_new_from_locale(globalWl->xkb.ctx,
+                                            settings.locale.str,
+                                            XKB_COMPOSE_COMPILE_NO_FLAGS);
     }
 
     if (!globalWl->xkb.compose_table)
@@ -649,7 +677,12 @@ static void keyboard_handle_modifiers(void*               data,
                                       uint32_t            group)
 {
     globalWl->serial = serial;
-    xkb_state_update_mask(globalWl->xkb.state, mods_depressed, mods_latched, mods_locked, 0, 0,
+    xkb_state_update_mask(globalWl->xkb.state,
+                          mods_depressed,
+                          mods_latched,
+                          mods_locked,
+                          0,
+                          0,
                           group);
 }
 
@@ -746,18 +779,13 @@ static void xdg_toplevel_handle_configure(void*                data,
                                           struct wl_array*     states)
 {
     struct WindowBase*       win       = data;
-    bool                     is_active = false;
-    enum xdg_toplevel_state* s;
-    wl_array_for_each(s, states)
-    {
-        if (*s == XDG_TOPLEVEL_STATE_ACTIVATED) {
-            is_active = true;
-        }
-    }
-    if (is_active) {
-        windowWl(win)->draw_next_frame = true;
-    }
-
+    /* enum xdg_toplevel_state* s; */
+    /* bool                     is_active = false; */
+    /* wl_array_for_each(s, states) { */
+    /*     if (*s == XDG_TOPLEVEL_STATE_ACTIVATED) { */
+    /*         is_active = true; */
+    /*     } */
+    /* } */
     if (!width && !height) {
         wl_egl_window_resize(windowWl(win)->egl_window, win->w, win->h, 0, 0);
     } else {
@@ -845,11 +873,12 @@ static void output_handle_mode(void*             data,
     if (flags & WL_OUTPUT_MODE_CURRENT) {
         WindowWl* win           = windowWl(((struct WindowBase*)data));
         int32_t   frame_time_ms = 1000000 / refresh;
-        Vector_push_WlOutputInfo(&win->outputs, (WlOutputInfo){
-                                                  .output               = wl_output,
-                                                  .is_active            = false,
-                                                  .target_frame_time_ms = frame_time_ms,
-                                                });
+        Vector_push_WlOutputInfo(&win->outputs,
+                                 (WlOutputInfo){
+                                   .output               = wl_output,
+                                   .is_active            = false,
+                                   .target_frame_time_ms = frame_time_ms,
+                                 });
     }
 }
 
@@ -987,7 +1016,8 @@ static void data_source_handle_send(void*                  data,
          !strcmp(mime_type, "UTF8_STRING"))) {
         LOG("writing \'%s\' to fd\n", windowWl(((struct WindowBase*)data))->data_source_text);
 
-        write(fd, windowWl(((struct WindowBase*)data))->data_source_text,
+        write(fd,
+              windowWl(((struct WindowBase*)data))->data_source_text,
               strlen(windowWl(((struct WindowBase*)data))->data_source_text));
     }
     close(fd);
@@ -1102,7 +1132,10 @@ static void cursor_set(struct wl_cursor* what, uint32_t serial)
     if (what) {
         b = wl_cursor_image_get_buffer(img);
     }
-    wl_pointer_set_cursor(globalWl->pointer, serial, globalWl->cursor_surface, img->hotspot_x,
+    wl_pointer_set_cursor(globalWl->pointer,
+                          serial,
+                          globalWl->cursor_surface,
+                          img->hotspot_x,
                           img->hotspot_y);
     wl_surface_attach(globalWl->cursor_surface, what ? b : NULL, 0, 0);
     wl_surface_damage(globalWl->cursor_surface, 0, 0, img->width, img->height);
@@ -1186,10 +1219,14 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h)
 
     windowWl(win)->egl_window = wl_egl_window_create(windowWl(win)->surface, win->w, win->h);
 
-    windowWl(win)->egl_surface = eglCreatePlatformWindowSurface(
-      globalWl->egl_display, config, windowWl(win)->egl_window, srf_attribs);
+    windowWl(win)->egl_surface = eglCreatePlatformWindowSurface(globalWl->egl_display,
+                                                                config,
+                                                                windowWl(win)->egl_window,
+                                                                srf_attribs);
 
-    eglSurfaceAttrib(globalWl->egl_display, windowWl(win)->egl_surface, EGL_SWAP_BEHAVIOR,
+    eglSurfaceAttrib(globalWl->egl_display,
+                     windowWl(win)->egl_surface,
+                     EGL_SWAP_BEHAVIOR,
                      EGL_BUFFER_DESTROYED);
 
     if (globalWl->xdg_shell) {
@@ -1203,11 +1240,13 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h)
         xdg_toplevel_add_listener(windowWl(win)->xdg_toplevel, &xdg_toplevel_listener, win);
 
         if (globalWl->decoration_manager) {
-            windowWl(win)->toplevel_decoration = zxdg_decoration_manager_v1_get_toplevel_decoration(
-              globalWl->decoration_manager, windowWl(win)->xdg_toplevel);
+            windowWl(win)->toplevel_decoration =
+              zxdg_decoration_manager_v1_get_toplevel_decoration(globalWl->decoration_manager,
+                                                                 windowWl(win)->xdg_toplevel);
 
             zxdg_toplevel_decoration_v1_add_listener(windowWl(win)->toplevel_decoration,
-                                                     &zxdg_toplevel_decoration_listener, win);
+                                                     &zxdg_toplevel_decoration_listener,
+                                                     win);
 
             zxdg_toplevel_decoration_v1_set_mode(windowWl(win)->toplevel_decoration,
                                                  ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
@@ -1229,7 +1268,9 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h)
         wl_shell_surface_set_toplevel(windowWl(win)->shell_surface);
     }
 
-    eglMakeCurrent(globalWl->egl_display, windowWl(win)->egl_surface, windowWl(win)->egl_surface,
+    eglMakeCurrent(globalWl->egl_display,
+                   windowWl(win)->egl_surface,
+                   windowWl(win)->egl_surface,
                    windowWl(win)->egl_context);
 
     Window_notify_content_change(win);
@@ -1280,8 +1321,10 @@ static void WindowWl_set_no_context()
 void WindowWl_set_current_context(struct WindowBase* self)
 {
     if (self)
-        eglMakeCurrent(globalWl->egl_display, windowWl(self)->egl_surface,
-                       windowWl(self)->egl_surface, windowWl(self)->egl_context);
+        eglMakeCurrent(globalWl->egl_display,
+                       windowWl(self)->egl_surface,
+                       windowWl(self)->egl_surface,
+                       windowWl(self)->egl_context);
     else
         WindowWl_set_no_context();
 }
@@ -1316,7 +1359,7 @@ void WindowWl_resize(struct WindowBase* self, uint32_t w, uint32_t h)
     Window_notify_content_change(self);
 }
 
-static inline void WindowWl_repeat_check(struct WindowBase* self)
+TimePoint* WindowWl_process_timers(struct WindowBase* self)
 {
     WindowWl* win = windowWl(self);
     if (globalWl->keycode_to_repeat && TimePoint_passed(globalWl->repeat_point) &&
@@ -1324,8 +1367,18 @@ static inline void WindowWl_repeat_check(struct WindowBase* self)
         uint32_t ft            = win->active_output->target_frame_time_ms;
         int32_t  time_offset   = (globalWl->kbd_repeat_rate / ft) * ft + ft / 2;
         globalWl->repeat_point = TimePoint_ms_from_now(time_offset);
-        keyboard_handle_key(self, NULL, 0, 0, globalWl->keycode_to_repeat,
+        keyboard_handle_key(self,
+                            NULL,
+                            0,
+                            0,
+                            globalWl->keycode_to_repeat,
                             WL_KEYBOARD_KEY_STATE_PRESSED);
+
+        return &globalWl->repeat_point;
+    } else if (globalWl->keycode_to_repeat) {
+        return &globalWl->repeat_point;
+    } else {
+        return NULL;
     }
 }
 
@@ -1347,24 +1400,21 @@ void WindowWl_events(struct WindowBase* self)
      * before flushing and blocking.
      */
 
-    int res = wl_display_dispatch_pending(globalWl->display);
-    wl_display_flush(globalWl->display);
-
-    WindowWl_repeat_check(self);
-
-    if (res < 0) {
-        WRN("wl_display_dispatch failed\n");
+    wl_display_prepare_read(globalWl->display);
+    wl_display_read_events(globalWl->display);
+    if (wl_display_dispatch_pending(globalWl->display) < 0) {
+        ERR("wl_display_dispatch_pending() failed");
     }
+
+    wl_display_flush(globalWl->display);
 }
 
 static void WindowWl_dont_swap_buffers(struct WindowBase* self)
 {
-    wl_display_prepare_read(globalWl->display);
-    wl_display_read_events(globalWl->display);
-
-    usleep(1000 * (FLAG_IS_SET(self->state_flags, WINDOW_IS_IN_FOCUS)
-                     ? global->target_frame_time_ms - 10
-                     : global->target_frame_time_ms * 3));
+    if (wl_display_dispatch_pending(globalWl->display) < 0) {
+        ERR("wl_display_dispatch_pending() failed");
+    }
+    wl_display_flush(globalWl->display);
 }
 
 static void WindowWl_swap_buffers(struct WindowBase* self)
@@ -1381,12 +1431,14 @@ static void WindowWl_swap_buffers(struct WindowBase* self)
     wl_callback_add_listener(frame_callback, &frame_listener, self);
 }
 
-void WindowWl_maybe_swap(struct WindowBase* self)
+bool WindowWl_maybe_swap(struct WindowBase* self)
 {
     if (windowWl(self)->draw_next_frame && self->paint) {
         WindowWl_swap_buffers(self);
+        return true;
     } else {
         WindowWl_dont_swap_buffers(self);
+        return false;
     }
 }
 
@@ -1395,7 +1447,8 @@ void WindowWl_set_swap_interval(struct WindowBase* self, int32_t ival)
     ival += EGL_MIN_SWAP_INTERVAL;
 
     if (ival > EGL_MAX_SWAP_INTERVAL || ival < EGL_MIN_SWAP_INTERVAL)
-        WRN("Buffer swap interval clamped [%d, %d]\n", EGL_MIN_SWAP_INTERVAL,
+        WRN("Buffer swap interval clamped [%d, %d]\n",
+            EGL_MIN_SWAP_INTERVAL,
             EGL_MAX_SWAP_INTERVAL);
 
     eglSwapInterval(globalWl->egl_display, ival);

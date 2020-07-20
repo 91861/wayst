@@ -4,7 +4,6 @@
  * App links Vt, Monitor, Window, Gfx modules together and deals with ui
  *
  * TODO:
- * - Some way to get the next closest event timer to pass to monitor as pool() timeout
  * - Minimum scrollbar size
  * - It makes more sense for the unicode input prompt to be here
  * - Move flash animations here
@@ -63,6 +62,11 @@ typedef struct
 
     Pair_uint32_t resolution;
 
+    bool       swap_performed;
+    TimePoint* closest_pending_wakeup;
+
+    bool exit;
+
     // selection
     uint8_t   click_count;
     TimePoint next_click_limit;
@@ -116,9 +120,11 @@ void* App_load_gl_ext(const char* name)
 
 void App_init(App* self)
 {
-    self->monitor      = Monitor_fork_new_pty(settings.cols, settings.rows);
+    self->monitor = Monitor_new();
+    Monitor_fork_new_pty(&self->monitor, settings.cols, settings.rows);
+
     self->vt           = Vt_new(settings.cols, settings.rows);
-    self->vt.master_fd = self->monitor.master;
+    self->vt.master_fd = self->monitor.child_fd;
 
     /* Graphics needs to be created first and load fonts so it can determine the initial window size
      * based on the glyph size (Gfx does not need an active context before it is initialized) */
@@ -148,39 +154,54 @@ void App_init(App* self)
     Gfx_resize(self->gfx, size.first, size.second);
     Pair_uint32_t chars = Gfx_get_char_size(self->gfx);
     Vt_resize(&self->vt, chars.first, chars.second);
-    Monitor_watch_fd(&self->monitor, Window_get_connection_fd(self->win));
+    Monitor_watch_window_system_fd(&self->monitor, Window_get_connection_fd(self->win));
     self->ui.scrollbar.width = SCROLLBAR_WIDTH_PX;
     self->ui.pixel_offset_x  = 0;
     self->ui.pixel_offset_y  = 0;
+    self->swap_performed     = false;
     self->resolution         = size;
 }
 
 void App_run(App* self)
 {
-    while (!Window_is_closed(self->win) && !self->monitor.exit) {
-        Window_events(self->win);
+    while (!Window_is_closed(self->win) && !self->exit) {
+        int timeout_ms = self->swap_performed
+                           ? 0
+                           : self->closest_pending_wakeup
+                               ? TimePoint_is_ms_ahead(*self->closest_pending_wakeup)
+                               : -1;
+        Monitor_wait(&self->monitor, timeout_ms);
+        self->closest_pending_wakeup = NULL;
+        if (Monitor_are_window_system_events_pending(&self->monitor)) {
+            Window_events(self->win);
+        }
+        TimePoint* pending_window_timer = Window_process_timers(self->win);
+        if (pending_window_timer) {
+            self->closest_pending_wakeup = pending_window_timer;
+        }
+
         char*  buf;
         size_t len;
         Vt_get_output(&self->vt, &buf, &len);
         if (len) {
-            Monitor_wait(&self->monitor);
             Monitor_write(&self->monitor, buf, len);
         }
-        size_t bytes = 0;
+        ssize_t bytes = 0;
         do {
-            Monitor_wait(&self->monitor);
             bytes = Monitor_read(&self->monitor);
-            if (bytes) {
+            if (bytes > 0) {
                 Vt_interpret(&self->vt, self->monitor.input_buffer, bytes);
                 Gfx_notify_action(self->gfx);
+            } else if (bytes < 0) {
+                break;
             }
-        } while (bytes && !self->monitor.exit);
+        } while (bytes);
 
         Vt_get_output(&self->vt, &buf, &len);
         if (len) {
-            Monitor_wait(&self->monitor);
             Monitor_write(&self->monitor, buf, len);
         }
+
         App_maybe_resize(self, Window_size(self->win));
         if (self->ui.scrollbar.visible || self->vt.scrolling_visual) {
             App_do_autoscroll(self);
@@ -188,11 +209,19 @@ void App_run(App* self)
             App_update_scrollbar_dims(self);
         }
         App_update_cursor(self);
-        if (!!Gfx_update_timers(self->gfx, &self->vt, &self->ui) +
+
+        TimePoint* closest_gfx_timer;
+        if (!!Gfx_update_timers(self->gfx, &self->vt, &self->ui, &closest_gfx_timer) +
             !!Gfx_set_focus(self->gfx, FLAG_IS_SET(self->win->state_flags, WINDOW_IS_IN_FOCUS))) {
             Window_notify_content_change(self->win);
         }
-        Window_maybe_swap(self->win);
+        if ((closest_gfx_timer && !self->closest_pending_wakeup) ||
+            (closest_gfx_timer && self->closest_pending_wakeup &&
+             TimePoint_is_earlier(*closest_gfx_timer, *self->closest_pending_wakeup))) {
+            self->closest_pending_wakeup = closest_gfx_timer;
+        }
+
+        self->swap_performed = Window_maybe_swap(self->win);
     }
     Vt_destroy(&self->vt);
     Gfx_destroy(self->gfx);
@@ -312,9 +341,16 @@ static void App_clamp_cursor(App* self, Pair_uint32_t chars)
 {
     if (self->keyboard_select_mode) {
         self->ksm_cursor.col = MIN(self->ksm_cursor.col, chars.first - 1);
-        self->ksm_cursor.row = CLAMP(self->ksm_cursor.row, Vt_visual_top_line(&self->vt),
+        self->ksm_cursor.row = CLAMP(self->ksm_cursor.row,
+                                     Vt_visual_top_line(&self->vt),
                                      Vt_visual_bottom_line(&self->vt));
     }
+}
+
+static void App_exit_handler(void* self)
+{
+    App* app  = self;
+    app->exit = true;
 }
 
 /**
@@ -407,9 +443,11 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
                 Vt_select_end(&self->vt);
                 break;
             }
-            Vt_select_init_cell(
-              &self->vt, FLAG_IS_SET(mods, MODIFIER_CONTROL) ? SELECT_MODE_BOX : SELECT_MODE_NORMAL,
-              self->ksm_cursor.col, self->ksm_cursor.row);
+            Vt_select_init_cell(&self->vt,
+                                FLAG_IS_SET(mods, MODIFIER_CONTROL) ? SELECT_MODE_BOX
+                                                                    : SELECT_MODE_NORMAL,
+                                self->ksm_cursor.col,
+                                self->ksm_cursor.row);
             Vt_select_commit(&self->vt);
             break;
 
@@ -528,11 +566,15 @@ static bool App_maybe_handle_application_key(App*     self,
     } else if (KeyCommand_is_active(&settings.key_commands[KCMD_DEBUG], key, rawkey, mods)) {
         Vt_dump_info(vt);
         return true;
-    } else if (KeyCommand_is_active(&settings.key_commands[KCMD_UNICODE_ENTRY], key, rawkey,
+    } else if (KeyCommand_is_active(&settings.key_commands[KCMD_UNICODE_ENTRY],
+                                    key,
+                                    rawkey,
                                     mods)) {
         Vt_start_unicode_input(vt);
         return true;
-    } else if (KeyCommand_is_active(&settings.key_commands[KCMD_KEYBOARD_SELECT], key, rawkey,
+    } else if (KeyCommand_is_active(&settings.key_commands[KCMD_KEYBOARD_SELECT],
+                                    key,
+                                    rawkey,
                                     mods)) {
         self->ksm_cursor           = self->vt.cursor;
         self->ksm_cursor.blinking  = false;
@@ -771,9 +813,11 @@ static bool App_maybe_consume_click(App*     self,
             self->next_click_limit = TimePoint_ms_from_now(DOUBLE_CLICK_DELAY_MS);
             if (self->click_count == 0) {
                 Vt_select_end(vt);
-                Vt_select_init(
-                  vt, FLAG_IS_SET(mods, MODIFIER_CONTROL) ? SELECT_MODE_BOX : SELECT_MODE_NORMAL, x,
-                  y);
+                Vt_select_init(vt,
+                               FLAG_IS_SET(mods, MODIFIER_CONTROL) ? SELECT_MODE_BOX
+                                                                   : SELECT_MODE_NORMAL,
+                               x,
+                               y);
                 self->selection_dragging_left = true;
                 Window_set_pointer_style(self->win, MOUSE_POINTER_I_BEAM);
             } else if (self->click_count == 1) {
@@ -789,7 +833,7 @@ static bool App_maybe_consume_click(App*     self,
         }
         return true;
 
-    /* extend selection */
+        /* extend selection */
     } else if (button == MOUSE_BTN_RIGHT && state && no_middle_report && vt->selection.mode) {
         size_t clicked_line = Vt_visual_top_line(vt) + y / vt->pixels_per_cell_y;
         if (vt->selection.begin_line == vt->selection.end_line) {
@@ -824,7 +868,7 @@ static bool App_maybe_consume_click(App*     self,
         Window_set_pointer_style(self->win, MOUSE_POINTER_I_BEAM);
 
         return true;
-    /* paste from primary selection */
+        /* paste from primary selection */
     } else if (button == MOUSE_BTN_MIDDLE && state && no_middle_report) {
         if (vt->selection.mode != SELECT_MODE_NONE) {
             Vector_char text = Vt_select_region_to_string(vt);
@@ -891,6 +935,9 @@ static void App_set_callbacks(App* self)
 {
     Vt_destroy_line_proxy = App_destroy_proxy;
 
+    self->monitor.callbacks.user_data = self;
+    self->monitor.callbacks.on_exit   = App_exit_handler;
+
     self->vt.callbacks.user_data   = self;
     self->win->callbacks.user_data = self;
 
@@ -915,11 +962,6 @@ static void App_set_callbacks(App* self)
 
     settings.callbacks.user_data           = self;
     settings.callbacks.keycode_from_string = App_get_key_code;
-}
-
-__attribute__((destructor)) void destructor()
-{
-    Monitor_kill(&instance.monitor);
 }
 
 int main(int argc, char** argv)
