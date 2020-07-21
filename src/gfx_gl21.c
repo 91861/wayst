@@ -2165,6 +2165,12 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
     Framebuffer_use(NULL);
     glViewport(0, 0, gfx->win_w, gfx->win_h);
 
+    if (!has_blinking_chars && vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK]) {
+        //TODO: recycle
+        glDeleteTextures(1,(GLuint*) &vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK]);
+        vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK] = 0;
+    }
+
     if (unlikely(has_blinking_chars && !is_for_blinking)) {
         GfxOpenGL21_rasterize_line(gfx, vt, vt_line, visual_line_index, true);
     }
