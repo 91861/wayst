@@ -1669,6 +1669,14 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                             // Draw atlas characters we collected if any
                             if (gfx->vec_glyph_buffer->size || gfx->vec_glyph_buffer_italic->size ||
                                 gfx->vec_glyph_buffer_bold->size) {
+
+                                /* Set up the scissor box for this block */
+                                GLint clip_begin = (same_colors_block_begin_rune - vt_line->data.buf) * gfx->glyph_width_pixels;
+                                GLsizei clip_end = (each_rune_same_bg - vt_line->data.buf) * gfx->glyph_width_pixels;
+                                glEnable(GL_SCISSOR_TEST);
+                                glScissor(clip_begin, 0, clip_end - clip_begin, texture_height);
+
+
                                 *bound_resources = gfx->is_main_font_rgb
                                                      ? BOUND_RESOURCES_FONT
                                                      : BOUND_RESOURCES_FONT_MONO;
@@ -1772,6 +1780,7 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                             Vector_clear_GlyphBufferData(gfx->vec_glyph_buffer_bold);
 
                             // Go through each character again draw all that come from the glyphmap
+                            glDisable(GL_SCISSOR_TEST);
                             for (const VtRune* z = same_colors_block_begin_rune;
                                  z != each_rune_same_bg;
                                  ++z) {
@@ -1841,6 +1850,13 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                                       z + 1 == each_rune_same_bg;
 
                                     if (next_iteration_changes_texture) {
+
+                                        /* Set up the scissor box for this block */
+                                        GLint clip_begin = (same_colors_block_begin_rune - vt_line->data.buf) * gfx->glyph_width_pixels;
+                                        GLsizei clip_end = (each_rune_same_bg - vt_line->data.buf) * gfx->glyph_width_pixels;
+                                        glEnable(GL_SCISSOR_TEST);
+                                        glScissor(clip_begin, 0, clip_end - clip_begin, texture_height);
+
                                         // Draw noramal characters
                                         if (gfx->vec_glyph_buffer->size) {
                                             if (*bound_resources != BOUND_RESOURCES_FONT) {
@@ -2064,7 +2080,7 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
             size_t range_end_idx   = vt_line->damage.end + 1;
             int    extra           = 0, tmp;
             if ((tmp = wcwidth(vt_line->data.buf[range_end_idx].code)) > 1) {
-                extra = tmp;
+                extra = (tmp -1);
             }
             if (range_end_idx && (tmp = wcwidth(vt_line->data.buf[range_end_idx].code)) > 2) {
                 extra = MAX(extra, tmp - 1);
