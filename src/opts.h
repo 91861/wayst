@@ -12,7 +12,7 @@
 #include "util.h"
 
 static const char* const arg_path    = "path";
-static const char* const arg_int     = "number";
+static const char* const arg_int     = "int";
 static const char* const arg_color   = "#RRGGBB";
 static const char* const arg_color_a = "#RRGGBBAA";
 static const char* const arg_string  = "string";
@@ -26,7 +26,7 @@ static struct option long_options[] = {
     [OPT_CONFIG_FILE_IDX] = { "config-file", required_argument, 0, 0 },
 
 #define OPT_SKIP_CONFIG_IDX 1
-    [OPT_SKIP_CONFIG_IDX] = { "skip-config", no_argument, 0, 'C' },
+    [OPT_SKIP_CONFIG_IDX] = { "skip-config", no_argument, 0, 'c' },
 
 #define OPT_XORG_ONLY_IDX 2
     [OPT_XORG_ONLY_IDX] = { "xorg-only", no_argument, 0, 'X' },
@@ -38,7 +38,7 @@ static struct option long_options[] = {
     [OPT_TITLE_IDX] = { "title", required_argument, 0, 0 },
 
 #define OPT_DYNAMIC_TITLE_IDX 5
-    [OPT_DYNAMIC_TITLE_IDX] = { "no-dynamic-title", no_argument, 0, 'T' },
+    [OPT_DYNAMIC_TITLE_IDX] = { "no-dynamic-title", no_argument, 0, 't' },
 
 #define OPT_TITLE_FORMAT_IDX 6
     [OPT_TITLE_FORMAT_IDX] = { "title-format", required_argument, 0, 0 },
@@ -113,7 +113,7 @@ static struct option long_options[] = {
     [OPT_H_FG_COLOR_IDX] = { "h-fg-color", required_argument, 0, 0 },
 
 #define OPT_NO_FLASH_IDX 30
-    [OPT_NO_FLASH_IDX] = { "no-flash", no_argument, 0, 'F' },
+    [OPT_NO_FLASH_IDX] = { "no-flash", no_argument, 0, 'f' },
 
 #define OPT_COLORSCHEME_IDX 31
     [OPT_COLORSCHEME_IDX] = { "colorscheme", required_argument, 0, 0 },
@@ -145,55 +145,64 @@ static struct option long_options[] = {
 #define OPT_DPI_IDX 40
     [OPT_DPI_IDX] = { "dpi", required_argument, 0, 0 },
 
-#define OPT_BLINK_IDX 41
+#define OPT_GLYPH_PADDING_IDX 41
+    [OPT_GLYPH_PADDING_IDX] = { "glyph-padding", required_argument, 0, 0 },
+
+#define OPT_LCD_ORDER_IDX 42
+    [OPT_LCD_ORDER_IDX] = { "lcd-order", required_argument, 0, 0 },
+
+#define OPT_BLINK_IDX 43
     [OPT_BLINK_IDX] = { "blink", required_argument, 0, 0 },
 
-#define OPT_PADDING_IDX 42
+#define OPT_PADDING_IDX 44
     [OPT_PADDING_IDX] = { "padding", required_argument, 0, 0 },
 
-#define OPT_SCROLL_LINES_IDX 43
+#define OPT_SCROLL_LINES_IDX 45
     [OPT_SCROLL_LINES_IDX] = { "scroll-lines", required_argument, 0, 0 },
 
-#define OPT_SCROLLBACK_IDX 44
+#define OPT_SCROLLBACK_IDX 46
     [OPT_SCROLLBACK_IDX] = { "scrollback", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_COPY_IDX 45
+#define OPT_BIND_KEY_COPY_IDX 47
     [OPT_BIND_KEY_COPY_IDX] = { "bind-key-copy", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_PASTE_IDX 46
+#define OPT_BIND_KEY_PASTE_IDX 48
     [OPT_BIND_KEY_PASTE_IDX] = { "bind-key-paste", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_ENLARGE_IDX 47
+#define OPT_BIND_KEY_ENLARGE_IDX 49
     [OPT_BIND_KEY_ENLARGE_IDX] = { "bind-key-enlarge", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_SHRINK_IDX 48
+#define OPT_BIND_KEY_SHRINK_IDX 50
     [OPT_BIND_KEY_SHRINK_IDX] = { "bind-key-shrink", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_UNI_IDX 49
+#define OPT_BIND_KEY_UNI_IDX 51
     [OPT_BIND_KEY_UNI_IDX] = { "bind-key-uni", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_KSM_IDX 50
+#define OPT_BIND_KEY_KSM_IDX 52
     [OPT_BIND_KEY_KSM_IDX] = { "bind-key-ksm", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_DEBUG_IDX 51
+#define OPT_BIND_KEY_DEBUG_IDX 53
     [OPT_BIND_KEY_DEBUG_IDX] = { "bind-key-debug", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_QUIT_IDX 52
+#define OPT_BIND_KEY_QUIT_IDX 54
     [OPT_BIND_KEY_QUIT_IDX] = { "bind-key-quit", required_argument, 0, 0 },
 
-#define OPT_DEBUG_PTY_IDX 53
+#define OPT_DEBUG_PTY_IDX 55
     [OPT_DEBUG_PTY_IDX] = { "debug-pty", no_argument, 0, 'D' },
 
-#define OPT_DEBUG_GFX_IDX 54
+#define OPT_DEBUG_GFX_IDX 56
     [OPT_DEBUG_GFX_IDX] = { "debug-gfx", no_argument, 0, 'G' },
 
-#define OPT_VERSION_IDX 55
+#define OPT_DEBUG_FONT_IDX 57
+    [OPT_DEBUG_FONT_IDX] = { "debug-font", no_argument, 0, 'F' },
+
+#define OPT_VERSION_IDX 58
     [OPT_VERSION_IDX] = { "version", no_argument, 0, 'v' },
 
-#define OPT_HELP_IDX 56
+#define OPT_HELP_IDX 59
     [OPT_HELP_IDX] = { "help", no_argument, 0, 'h' },
 
-#define OPT_SENTINEL_IDX 57
+#define OPT_SENTINEL_IDX 60
     [OPT_SENTINEL_IDX] = { 0 }
 };
 
@@ -201,10 +210,9 @@ static const char* long_options_descriptions[][2] = {
     [OPT_CONFIG_FILE_IDX]   = { arg_path, "Use configuration file" },
     [OPT_SKIP_CONFIG_IDX]   = { NULL, "Ignore default configuration file" },
     [OPT_XORG_ONLY_IDX]     = { NULL, "Always use X11" },
-    [OPT_TERM_IDX]          = { arg_string, "TERM value" },
+    [OPT_TERM_IDX]          = { arg_string, "TERM value (default: xterm-256color)" },
     [OPT_TITLE_IDX]         = { arg_string, "Window title and application class name" },
-    [OPT_DYNAMIC_TITLE_IDX] = { NULL, "Do not allow programs to change the "
-                                      "window title" },
+    [OPT_DYNAMIC_TITLE_IDX] = { NULL, "Do not allow programs to change the window title" },
     [OPT_TITLE_FORMAT_IDX]  = { arg_string, "Window title format string" },
     [OPT_LOCALE_IDX]        = { arg_string, "Override locale" },
     [OPT_ROWS_IDX]          = { arg_int, "Number of rows" },
@@ -230,40 +238,51 @@ static const char* long_options_descriptions[][2] = {
     [OPT_H_BG_COLOR_IDX]    = { arg_color_a, "Highlighted text background color" },
     [OPT_H_FG_COLOR_IDX]    = { arg_color, "Highlighted text foreground color" },
     [OPT_NO_FLASH_IDX]      = { NULL, "Disable visual bell" },
-    [OPT_COLORSCHEME_IDX]   = { arg_name, "Colorscheme preset: wayst, linux, xterm, rxvt, yaru, "
-                                        "tango, orchis, solarized" },
+    [OPT_COLORSCHEME_IDX]   = { arg_name,
+                              "Colorscheme preset: wayst, linux, xterm, rxvt, yaru, tango, orchis, "
+                              "solarized" },
 
-    [OPT_FONT_IDX]                   = { arg_name, "Primary font family" },
-    [OPT_FONT_STYLE_REGULAR_IDX]     = { arg_name, "Font style to use as default" },
-    [OPT_FONT_STYLE_BOLD_IDX]        = { arg_name, "Font style to use as bold" },
-    [OPT_FONT_STYLE_ITALIC_IDX]      = { arg_name, "Font style to use as italic " },
-    [OPT_FONT_STYLE_BOLD_ITALIC_IDX] = { arg_name, "Font style to use as bold italic " },
+    [OPT_FONT_IDX]               = { arg_name, "Primary font family (default: Monospace)" },
+    [OPT_FONT_STYLE_REGULAR_IDX] = { arg_name, "Font style to use as default (default: Regular)" },
+    [OPT_FONT_STYLE_BOLD_IDX]    = { arg_name, "Font style to use as bold (default: Bold)" },
+    [OPT_FONT_STYLE_ITALIC_IDX]  = { arg_name, "Font style to use as italic (default: Italic)" },
+    [OPT_FONT_STYLE_BOLD_ITALIC_IDX] = { arg_name,
+                                         "Font style to use as bold italic (default: "
+                                         "Bold:Italic)" },
     [OPT_FONT_FALLBACK_IDX]          = { arg_name, "Fallback font family (TrueType)" },
     [OPT_FONT_FALLBACK2_IDX]         = { arg_name, "Font family for color bitmap glyphs" },
 
-    [OPT_FONT_SIZE_IDX] = { "number:number?", "Font size - general:symbol(size for TrueType fonts "
-                                              "when using a bitmap font as primary)" },
-    [OPT_DPI_IDX]       = { arg_int, "Font dpi" },
-    [OPT_BLINK_IDX]     = { "bool:R?:S?:E?",
+    [OPT_FONT_SIZE_IDX] = { "int:int?",
+                            "Font size - general:symbol(size for TrueType fonts when using a "
+                            "bitmap font as primary)" },
+
+    [OPT_DPI_IDX]           = { arg_int, "Font dpi (default: 96)" },
+    [OPT_GLYPH_PADDING_IDX] = { "int:int?", "Glyph padding - horizontal[px]:vertical[px]" },
+    [OPT_LCD_ORDER_IDX]     = { arg_name, "Force LCD subpixel order: rgb, bgr" },
+
+    [OPT_BLINK_IDX] = { "bool:int?:int?:int?",
                         "Blinking cursor - enable:rate[ms]:suspend[ms]:end[s](<0 never)" },
 
-    [OPT_SCROLL_LINES_IDX] = { arg_int, "Lines scrolled per wheel click" },
-    [OPT_SCROLLBACK_IDX]   = { arg_int, "Size of scrollback buffer" },
-    [OPT_PADDING_IDX]      = { "bool:number?", "Pad screen content: center:extra padding[px]" },
+    [OPT_SCROLL_LINES_IDX] = { arg_int, "Lines scrolled per wheel click (default: 3)" },
+    [OPT_SCROLLBACK_IDX]   = { arg_int, "Set scrollback buffer size (default: 2000)" },
+    [OPT_PADDING_IDX]      = { "bool:int?",
+                          "Pad screen content: center:extra padding[px] (default: true:0)" },
 
-    [OPT_BIND_KEY_COPY_IDX]    = { arg_key, "Copy key command" },
-    [OPT_BIND_KEY_PASTE_IDX]   = { arg_key, "Paste key command" },
-    [OPT_BIND_KEY_ENLARGE_IDX] = { arg_key, "Enlagre font key command" },
-    [OPT_BIND_KEY_SHRINK_IDX]  = { arg_key, "Shrink font key command" },
-    [OPT_BIND_KEY_UNI_IDX]     = { arg_key, "Unicode entry mode activation key command" },
-    [OPT_BIND_KEY_KSM_IDX]     = { arg_key, "Enter keyboard select mode key command" },
-    [OPT_BIND_KEY_DEBUG_IDX]   = { arg_key, "Debug info key command" },
-    [OPT_BIND_KEY_QUIT_IDX]    = { arg_key, "Quit key command" },
+    [OPT_BIND_KEY_COPY_IDX]    = { arg_key, "Copy key command (default: C+S+c)" },
+    [OPT_BIND_KEY_PASTE_IDX]   = { arg_key, "Paste key command (default: C+S+v)" },
+    [OPT_BIND_KEY_ENLARGE_IDX] = { arg_key, "Enlagre font key command (default: C+S+equal)" },
+    [OPT_BIND_KEY_SHRINK_IDX]  = { arg_key, "Shrink font key command (default: C+S+minus)" },
+    [OPT_BIND_KEY_UNI_IDX]     = { arg_key,
+                               "Unicode entry mode activation key command (default: C+S+u)" },
+    [OPT_BIND_KEY_KSM_IDX] = { arg_key, "Enter keyboard select mode key command (default: C+S+k)" },
+    [OPT_BIND_KEY_DEBUG_IDX] = { arg_key, "Debug info key command (default: C+S+d)" },
+    [OPT_BIND_KEY_QUIT_IDX]  = { arg_key, "Quit key command" },
 
-    [OPT_DEBUG_PTY_IDX] = { NULL, "Output pty communication to stderr" },
-    [OPT_DEBUG_GFX_IDX] = { NULL, "Run renderer in debug mode" },
-    [OPT_VERSION_IDX]   = { NULL, "Show version" },
-    [OPT_HELP_IDX]      = { NULL, "Show this message" },
+    [OPT_DEBUG_PTY_IDX]  = { NULL, "Output pty communication to stderr" },
+    [OPT_DEBUG_GFX_IDX]  = { NULL, "Run renderer in debug mode" },
+    [OPT_DEBUG_FONT_IDX] = { NULL, "Show font information" },
+    [OPT_VERSION_IDX]    = { NULL, "Show version" },
+    [OPT_HELP_IDX]       = { NULL, "Show this message" },
 
     [OPT_SENTINEL_IDX] = { NULL, NULL }
 };

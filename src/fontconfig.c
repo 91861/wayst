@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "fontconfig.h"
+#include "settings.h"
 #include "util.h"
 #include "vector.h"
 
@@ -44,8 +45,10 @@ char* FontconfigContext_get_file(FontconfigContext*   self,
         Vector_push_char(&pattern_string_builder, '\0');
     }
 
-    LOG("matching font pattern \'%s\'... ", pattern_string_builder.buf);
-    
+    if (unlikely(settings.debug_font)) {
+        printf("Match result for \'%s\':\n", pattern_string_builder.buf);
+    }
+
     FcPattern* pattern = FcNameParse((FcChar8*)pattern_string_builder.buf);
     FcConfigSubstitute(self->cfg, pattern, FcMatchPattern);
     FcDefaultSubstitute(pattern);
@@ -80,8 +83,10 @@ char* FontconfigContext_get_file(FontconfigContext*   self,
     }
     Vector_destroy_char(&pattern_string_builder);
 
-    LOG("font match result: \'%s\'\n", retval);
-    
+    if (unlikely(settings.debug_font)) {
+        printf("  %s\n", retval);
+    }
+
     return retval;
 }
 

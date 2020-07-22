@@ -124,6 +124,8 @@ typedef struct
 
     bool    padding_center;
     uint8_t padding;
+    int8_t padd_glyph_x;
+    int8_t padd_glyph_y;
 
     bool    allow_scrollback_clear;
     bool    scroll_on_output;
@@ -134,6 +136,7 @@ typedef struct
 
     bool debug_pty;
     bool debug_gfx;
+    bool debug_font;
 
     uint32_t scrollback;
 

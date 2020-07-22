@@ -236,22 +236,21 @@ static void settings_colorscheme_default(uint8_t idx)
         idx = 0;
         ASSERT_UNREACHABLE
     }
-
     for (uint32_t i = 0; i < 16; ++i) {
         if (!(settings._explicit_colors_set && settings._explicit_colors_set[i + 2])) {
             settings.colorscheme.color[i] = ColorRGB_from_hex(colors_default[idx][i], NULL);
         }
     }
-
-    if (colors_default[idx][16])
+    if (colors_default[idx][16]) {
         if (!(settings._explicit_colors_set && settings._explicit_colors_set[0])) {
             settings.bg = ColorRGBA_from_hex(colors_default[idx][16], NULL);
         }
-
-    if (colors_default[idx][17])
+    }
+    if (colors_default[idx][17]) {
         if (!(settings._explicit_colors_set && settings._explicit_colors_set[1])) {
             settings.fg = ColorRGB_from_hex(colors_default[idx][17], NULL);
         }
+    }
 }
 
 /**
@@ -372,15 +371,18 @@ static void find_font()
     if (fallback2_file) {
         AString_replace_with_dynamic(&settings.font_file_name_fallback2, fallback2_file);
     }
-
-    LOG("Loaded font files:\n  normal: %s\n  bold: %s\n  italic: %s\n  bold italic: %s\n  "
-        "fallback/symbol: %s\n  fallback/symbol: %s\n",
-        OR(settings.font_file_name_regular.str, "(none)"),
-        OR(settings.font_file_name_bold.str, "(none)"),
-        OR(settings.font_file_name_italic.str, "(none)"),
-        OR(settings.font_file_name_bold_italic.str, "(none)"),
-        OR(settings.font_file_name_fallback.str, "(none)"),
-        OR(settings.font_file_name_fallback2.str, "(none)"));
+    if (unlikely(settings.debug_font)) {
+        printf("Loaded font files:\n  regular:     %s\n  bold:        %s\n  italic:      %s\n  bold italic: %s\n  "
+               "symbol:      %s\n  color:       %s\n  glyph padding: %dpx-%dpx\n",
+               OR(settings.font_file_name_regular.str, "(none)"),
+               OR(settings.font_file_name_bold.str, "(none)"),
+               OR(settings.font_file_name_italic.str, "(none)"),
+               OR(settings.font_file_name_bold_italic.str, "(none)"),
+               OR(settings.font_file_name_fallback.str, "(none)"),
+               OR(settings.font_file_name_fallback2.str, "(none)"),
+               settings.padd_glyph_x,
+               settings.padd_glyph_y);
+    }
 }
 
 static void settings_make_default()
@@ -455,10 +457,10 @@ static void settings_make_default()
         .font_file_name_fallback2   = AString_new_uninitialized(),
 
         .bsp_sends_del      = true,
-        .font_size          = 10,
+        .font_size          = 9,
         .font_size_fallback = 0,
         .font_dpi           = 96,
-        .lcd_filter         = LCD_FILTER_UNDEFINED,
+        .lcd_filter         = LCD_FILTER_H_RGB,
 
         .bg     = { .r = 0, .g = 0, .b = 0, .a = 240 },
         .bghl   = { .r = 50, .g = 50, .b = 50, .a = 240 },
@@ -470,6 +472,8 @@ static void settings_make_default()
 
         .padding_center = true,
         .padding = 0,
+        .padd_glyph_x = 0,
+        .padd_glyph_y = 0,
 
         .cols = 80,
         .rows = 24,
@@ -526,7 +530,7 @@ static void settings_complete_defaults()
 
 static void print_help_and_exit()
 {
-#define MAX_OPT_PADDING 24
+#define MAX_OPT_PADDING 25
 
     printf("Usage: %s [options...] [-e/x command args...]\n", EXE_FNAME);
     for (uint32_t i = 0; i < OPT_SENTINEL_IDX; ++i) {
@@ -563,14 +567,11 @@ static void handle_option(const char opt, const int array_index, const char* val
             case 'X':
                 settings.x11_is_default = true;
                 break;
-            case 'T':
+            case 't':
                 settings.dynamic_title = false;
                 break;
-            case 'F':
-                settings.no_flash = true;
-                break;
             case 'f':
-                settings.highlight_change_fg = true;
+                settings.no_flash = true;
                 break;
             case 'v':
                 printf("version: " VERSION "\n");
@@ -581,6 +582,9 @@ static void handle_option(const char opt, const int array_index, const char* val
                 break;
             case 'G':
                 settings.debug_gfx = true;
+                break;
+            case 'F':
+                settings.debug_font = true;
                 break;
             case 'h':
                 print_help_and_exit();
@@ -618,6 +622,9 @@ static void handle_option(const char opt, const int array_index, const char* val
         }                                                                                          \
         Vector_destroy_char(&buf);
 
+#define L_WARN_BAD_VALUE                                                                           \
+    WRN("Unknown value \'%s\' for option \'%s\'\n", value, long_options[array_index].name);
+
         case OPT_XORG_ONLY_IDX:
             settings.x11_is_default = value ? strtob(value) : true;
             break;
@@ -636,6 +643,10 @@ static void handle_option(const char opt, const int array_index, const char* val
 
         case OPT_DEBUG_GFX_IDX:
             settings.debug_gfx = true;
+            break;
+
+        case OPT_DEBUG_FONT_IDX:
+            settings.debug_font = true;
             break;
 
         case OPT_SCROLLBACK_IDX:
@@ -671,6 +682,17 @@ static void handle_option(const char opt, const int array_index, const char* val
                 break;
             case 1:
                 settings.padding = CLAMP(strtol(buf.buf, NULL, 10), 0, UINT8_MAX);
+                break;
+                L_PROCESS_MULTI_ARG_PACK_END
+        } break;
+
+        case OPT_GLYPH_PADDING_IDX: {
+            L_PROCESS_MULTI_ARG_PACK_BEGIN
+            case 0:
+                settings.padd_glyph_x = CLAMP(strtol(buf.buf, NULL, 10), 0, INT8_MAX);
+                break;
+            case 1:
+                settings.padd_glyph_y = CLAMP(strtol(buf.buf, NULL, 10), 0, INT8_MAX);
                 break;
                 L_PROCESS_MULTI_ARG_PACK_END
         } break;
@@ -719,25 +741,42 @@ static void handle_option(const char opt, const int array_index, const char* val
             break;
 
         case OPT_COLORSCHEME_IDX:
-            if (!strcasecmp(value, "wayst"))
+            if (!strcasecmp(value, "wayst")) {
                 settings.colorscheme_preset = 0;
-            else if (!strcasecmp(value, "linux"))
+            } else if (!strcasecmp(value, "linux")) {
                 settings.colorscheme_preset = 1;
-            else if (!strcasecmp(value, "xterm"))
+            } else if (!strcasecmp(value, "xterm")) {
                 settings.colorscheme_preset = 2;
-            else if (!strcasecmp(value, "rxvt"))
+            } else if (!strcasecmp(value, "rxvt")) {
                 settings.colorscheme_preset = 3;
-            else if (!strcasecmp(value, "yaru"))
+            } else if (!strcasecmp(value, "yaru")) {
                 settings.colorscheme_preset = 4;
-            else if (!strcasecmp(value, "tango"))
+            } else if (!strcasecmp(value, "tango")) {
                 settings.colorscheme_preset = 5;
-            else if (!strcasecmp(value, "orchis"))
+            } else if (!strcasecmp(value, "orchis")) {
                 settings.colorscheme_preset = 6;
-            else if (!strcasecmp(value, "solarized"))
+            } else if (!strcasecmp(value, "solarized")) {
                 settings.colorscheme_preset = 7;
-            else
+            } else {
                 settings.colorscheme_preset =
                   MIN(strtoul(value, NULL, 10), sizeof(colors_default) - 1);
+            }
+            break;
+
+        case OPT_LCD_ORDER_IDX:
+            if (!strcasecmp(value, "rgb")) {
+                settings.lcd_filter = LCD_FILTER_H_RGB;
+            } else if (!strcasecmp(value, "bgr")) {
+                settings.lcd_filter = LCD_FILTER_H_BGR;
+            } else if (!strcasecmp(value, "vrgb")) {
+                settings.lcd_filter = LCD_FILTER_V_RGB;
+            } else if (!strcasecmp(value, "vbgr")) {
+                settings.lcd_filter = LCD_FILTER_V_BGR;
+            } else if (!strcasecmp(value, "none")) {
+                settings.lcd_filter = LCD_FILTER_NONE;
+            } else {
+                L_WARN_BAD_VALUE;
+            }
             break;
 
         case OPT_TITLE_IDX:
@@ -908,14 +947,12 @@ static void settings_get_opts(const int argc, char* const* argv, const bool cfg_
                  strcmp(argv[optind], "-x"));) {
 
         /* print 'invalid option' error message only once */
-        opterr = cfg_file_check;
-
+        opterr   = cfg_file_check;
         int opid = 0;
-        o        = getopt_long(argc, argv, "XCTDGFhv", long_options, &opid);
-
-        if (o == -1)
+        o        = getopt_long(argc, argv, "XctDGFfhv", long_options, &opid);
+        if (o == -1) {
             break;
-
+        }
         if (cfg_file_check) {
             if (o == 'C') {
                 settings.skip_config = true;
@@ -935,7 +972,6 @@ static void settings_get_opts(const int argc, char* const* argv, const bool cfg_
                     AString_replace_with_dynamic(&settings.shell, strdup(argv[i]));
                     settings.shell_argc = argc - i;
                     settings.shell_argv = calloc((settings.shell_argc + 1), sizeof(char*));
-
                     for (int j = 0; j < settings.shell_argc; ++j) {
                         settings.shell_argv[j] = strdup(argv[i + j]);
                     }
