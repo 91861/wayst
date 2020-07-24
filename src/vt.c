@@ -117,10 +117,16 @@ Vector_char Vt_select_region_to_string(Vt* self)
     }
 
     if (self->selection.mode == SELECT_MODE_NORMAL) {
-        ret = line_to_string(&self->lines.buf[begin_line].data, begin_char_idx, 0, "\n");
+        ret = line_to_string(&self->lines.buf[begin_line].data,
+                             begin_char_idx,
+                             0,
+                             self->lines.buf[begin_line+1].rejoinable ? "" : "\n");
         Vector_pop_char(&ret);
         for (size_t i = begin_line + 1; i < end_line; ++i) {
-            tmp = line_to_string(&self->lines.buf[i].data, 0, 0, "\n");
+            tmp = line_to_string(&self->lines.buf[i].data,
+                                 0,
+                                 0,
+                                 self->lines.buf[i+1].rejoinable ? "" : "\n");
             Vector_pushv_char(&ret, tmp.buf, tmp.size - 1);
             Vector_destroy_char(&tmp);
         }
