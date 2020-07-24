@@ -655,11 +655,9 @@ static void keyboard_handle_key(void*               data,
 
     if (state == WL_KEYBOARD_KEY_STATE_PRESSED && is_not_consumed) {
         globalWl->keycode_to_repeat = key;
-
         if (!is_repeat_event) {
             globalWl->repeat_point = TimePoint_ms_from_now(globalWl->kbd_repeat_dealy);
         }
-
         if (win->callbacks.key_handler) {
             win->callbacks.key_handler(win->callbacks.user_data, final, rawsym, final_mods);
         }
@@ -873,12 +871,17 @@ static void output_handle_mode(void*             data,
     if (flags & WL_OUTPUT_MODE_CURRENT) {
         WindowWl* win           = windowWl(((struct WindowBase*)data));
         int32_t   frame_time_ms = 1000000 / refresh;
+        bool make_active = !win->outputs.size;
+
         Vector_push_WlOutputInfo(&win->outputs,
                                  (WlOutputInfo){
                                    .output               = wl_output,
-                                   .is_active            = false,
+                                   .is_active            = make_active,
                                    .target_frame_time_ms = frame_time_ms,
                                  });
+        if (make_active) {
+            win->active_output = Vector_last_WlOutputInfo(&win->outputs);
+        }
     }
 }
 
@@ -1362,9 +1365,11 @@ void WindowWl_resize(struct WindowBase* self, uint32_t w, uint32_t h)
 TimePoint* WindowWl_process_timers(struct WindowBase* self)
 {
     WindowWl* win = windowWl(self);
-    if (globalWl->keycode_to_repeat && TimePoint_passed(globalWl->repeat_point) &&
-        win->active_output) {
-        uint32_t ft            = win->active_output->target_frame_time_ms;
+    if (globalWl->keycode_to_repeat && TimePoint_passed(globalWl->repeat_point)) {
+        uint32_t ft = 16;
+        if (win->active_output && win->active_output->target_frame_time_ms) {
+            ft = win->active_output->target_frame_time_ms;
+        }
         int32_t  time_offset   = (globalWl->kbd_repeat_rate / ft) * ft + ft / 2;
         globalWl->repeat_point = TimePoint_ms_from_now(time_offset);
         keyboard_handle_key(self,
