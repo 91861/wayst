@@ -436,6 +436,12 @@ __attribute__((hot)) static GlyphMapEntry* Cache_get_glyph(GfxOpenGL21*         
         }
     }
     FreetypeOutput*    output = Freetype_load_and_render_glyph(gfx->freetype, code, style);
+
+    if (!output) {
+        WRN("Missing glyph %d\n", code)
+        return NULL;
+    }
+    
     bool               scale  = false;
     enum TextureFormat texture_format;
     enum GlyphColor    glyph_color;

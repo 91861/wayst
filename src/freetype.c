@@ -374,14 +374,19 @@ Freetype Freetype_new()
     }
     self.primary_output_type = Vector_first_FreetypeStyledFamily(&self.primaries)->output_type;
     /* for (...) */ {
-        Vector_push_FreetypeFace(
-          &self.symbol_faces,
-          (FreetypeFace){ .loaded = false, .file_name = settings.font_file_name_fallback.str });
+        if (settings.font_file_name_fallback.str) {
+            Vector_push_FreetypeFace(
+              &self.symbol_faces,
+              (FreetypeFace){ .loaded = false, .file_name = settings.font_file_name_fallback.str });
+        }
     }
     /* for (...) */ {
-        Vector_push_FreetypeFace(
-          &self.color_faces,
-          (FreetypeFace){ .loaded = false, .file_name = settings.font_file_name_fallback2.str });
+        if (settings.font_file_name_fallback2.str) {
+            Vector_push_FreetypeFace(
+              &self.color_faces,
+              (FreetypeFace){ .loaded    = false,
+                              .file_name = settings.font_file_name_fallback2.str });
+        }
     }
     Freetype_load_fonts(&self);
     return self;
@@ -463,16 +468,21 @@ FreetypeOutput* Freetype_load_and_render_glyph(Freetype*              self,
             }
         }
     }
-    for (FreetypeFace* i = NULL; (i = Vector_iter_FreetypeFace(&self->symbol_faces, i));) {
-        output = FreetypeFace_load_and_render_glyph(self, i, codepoint);
-        if (output) {
-            return output;
+
+    if (self->symbol_faces.size) {
+        for (FreetypeFace* i = NULL; (i = Vector_iter_FreetypeFace(&self->symbol_faces, i));) {
+            output = FreetypeFace_load_and_render_glyph(self, i, codepoint);
+            if (output) {
+                return output;
+            }
         }
     }
-    for (FreetypeFace* i = NULL; (i = Vector_iter_FreetypeFace(&self->color_faces, i));) {
-        output = FreetypeFace_load_and_render_glyph(self, i, codepoint);
-        if (output) {
-            return output;
+    if (self->color_faces.size) {
+        for (FreetypeFace* i = NULL; (i = Vector_iter_FreetypeFace(&self->color_faces, i));) {
+            output = FreetypeFace_load_and_render_glyph(self, i, codepoint);
+            if (output) {
+                return output;
+            }
         }
     }
     return NULL;

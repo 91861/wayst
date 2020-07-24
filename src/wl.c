@@ -691,8 +691,8 @@ static void keyboard_handle_repeat_info(void*               data,
                                         int32_t             rate,
                                         int32_t             delay)
 {
-    globalWl->kbd_repeat_rate  = rate;
-    globalWl->kbd_repeat_dealy = delay;
+    globalWl->kbd_repeat_rate  = OR(rate, 33);
+    globalWl->kbd_repeat_dealy = OR(delay, 500);
 }
 
 static const struct wl_keyboard_listener keyboard_listener = { .keymap = keyboard_handle_keymap,
@@ -778,7 +778,7 @@ static void xdg_toplevel_handle_configure(void*                data,
                                           int32_t              height,
                                           struct wl_array*     states)
 {
-    struct WindowBase*       win       = data;
+    struct WindowBase* win = data;
     /* enum xdg_toplevel_state* s; */
     /* bool                     is_active = false; */
     /* wl_array_for_each(s, states) { */
