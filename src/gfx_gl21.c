@@ -16,13 +16,7 @@
 
 #include <GL/gl.h>
 
-#include <ft2build.h>
-#include FT_FREETYPE_H
-#include FT_GLYPH_H
-#include FT_TRUETYPE_TABLES_H
-#include FT_BITMAP_H
-#include FT_FONT_FORMATS_H
-
+#include "freetype.h"
 #include "fterrors.h"
 #include "gl.h"
 #include "shaders.h"
@@ -143,23 +137,16 @@ typedef struct
 
     uint32_t win_w, win_h;
 
-    FT_Library   ft;
-    FT_Face      face;
-    FT_Face      face_bold;
-    FT_Face      face_italic;
-    FT_Face      face_bold_italic;
-    FT_Face      face_fallback;
-    FT_Face      face_fallback2;
-    FT_GlyphSlot output_glyph;
-
     float    line_height, glyph_width;
     uint16_t line_height_pixels, glyph_width_pixels;
     size_t   max_cells_in_line;
 
     float    sx, sy;
     uint32_t gw;
-    uint8_t  pixel_offset_x;
-    uint8_t  pixel_offset_y;
+
+    /* padding offset from the top right corner */
+    uint8_t pixel_offset_x;
+    uint8_t pixel_offset_y;
 
     Framebuffer line_framebuffer;
 
@@ -222,11 +209,7 @@ typedef struct
     Timer flash_timer;
     float flash_fraction;
 
-    FT_Render_Mode render_mode;
-    FT_Render_Mode render_mode_symbol;
-    FT_Int32       load_flags;
-    FT_Int32       load_flags_symbol;
-    bool           rgb_flip;
+    Freetype* freetype;
 
 } GfxOpenGL21;
 
@@ -263,12 +246,12 @@ static struct IGfx gfx_interface_opengl21 = {
     .destroy_proxy               = GfxOpenGL21_destroy_proxy,
 };
 
-Gfx* Gfx_new_OpenGL21()
+Gfx* Gfx_new_OpenGL21(Freetype* freetype)
 {
-    Gfx* self       = calloc(1, sizeof(Gfx) + sizeof(GfxOpenGL21) - sizeof(uint8_t));
-    self->interface = &gfx_interface_opengl21;
-
-    gfxOpenGL21(self)->is_main_font_rgb = settings.lcd_filter != LCD_FILTER_NONE;
+    Gfx* self                   = calloc(1, sizeof(Gfx) + sizeof(GfxOpenGL21) - sizeof(uint8_t));
+    self->interface             = &gfx_interface_opengl21;
+    gfxOpenGL21(self)->freetype = freetype;
+    gfxOpenGL21(self)->is_main_font_rgb = !(freetype->primary_output_type == FT_OUTPUT_GRAYSCALE);
     GfxOpenGL21_load_font(self);
 
     return self;
@@ -300,24 +283,17 @@ __attribute__((always_inline, hot)) static inline int32_t Atlas_select(Atlas* se
     }
 }
 
-static Atlas Atlas_new(GfxOpenGL21* gfx, FT_Face face_)
+static Atlas Atlas_new(GfxOpenGL21* gfx, enum FreetypeFontStyle style)
 {
     Atlas self;
-
     self.w = self.h = 0;
     uint32_t wline = 0, hline = 0, limit = MIN(gfx->max_tex_res, ATLAS_SIZE_LIMIT);
-
-    uint32_t max_char_height  = 0;
-    bool     bitmap_is_packed = false;
-
+    uint32_t max_char_height = 0;
     for (int i = ATLAS_RENDERABLE_START + 1; i < ATLAS_RENDERABLE_END; i++) {
-        if (FT_Load_Char(face_, i, gfx->load_flags)) {
-            WRN("glyph load error\n");
-        }
-        gfx->output_glyph    = face_->glyph;
-        uint32_t char_width  = gfx->output_glyph->bitmap.width / (gfx->is_main_font_rgb ? 3 : 1);
-        uint32_t char_height = gfx->output_glyph->bitmap.rows;
-        max_char_height      = MAX(max_char_height, char_height);
+        FreetypeOutput* output      = Freetype_load_ascii_glyph(gfx->freetype, i, style);
+        uint32_t        char_width  = output->width;
+        uint32_t        char_height = output->height;
+        max_char_height             = MAX(max_char_height, char_height);
         if (wline + char_width < limit) {
             wline += char_width;
             hline = char_height > hline ? char_height : hline;
@@ -328,10 +304,6 @@ static Atlas Atlas_new(GfxOpenGL21* gfx, FT_Face face_)
             wline  = char_width;
         }
     }
-
-    /* monochrome bitmaps use 1 bit per pixel */
-    bitmap_is_packed = gfx->output_glyph->bitmap.pixel_mode == FT_PIXEL_MODE_MONO;
-
     if (wline > self.w) {
         self.w = wline;
     }
@@ -339,101 +311,90 @@ static Atlas Atlas_new(GfxOpenGL21* gfx, FT_Face face_)
     if (self.h > (uint32_t)gfx->max_tex_res) {
         ERR("Failed to generate font atlas, target texture to small");
     }
+
     glActiveTexture(GL_TEXTURE0);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, gfx->is_main_font_rgb ? 4 : 1);
     glGenTextures(1, &self.tex);
     glBindTexture(GL_TEXTURE_2D, self.tex);
-
-    /* faster than clamp */
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-    glTexImage2D(GL_TEXTURE_2D,
-                 0,
-                 gfx->is_main_font_rgb ? GL_RGB : GL_RED,
-                 self.w,
-                 self.h,
-                 0,
-                 gfx->is_main_font_rgb ? GL_RGBA : GL_RED,
-                 GL_UNSIGNED_BYTE,
-                 0);
-
-    hline                 = 0;
-    uint32_t offset_x_pix = 0, offset_y_pix = 0;
-
-    FT_Bitmap conversion_map;
-
-    if (bitmap_is_packed) {
-        FT_Bitmap_Init(&conversion_map);
+    GLenum internal_format;
+    GLenum format;
+    switch (gfx->freetype->primary_output_type) {
+        case FT_OUTPUT_BGR_H:
+        case FT_OUTPUT_BGR_V:
+        case FT_OUTPUT_RGB_H:
+        case FT_OUTPUT_RGB_V:
+            internal_format = GL_RGB;
+            format          = GL_RGBA;
+            break;
+        case FT_OUTPUT_GRAYSCALE:
+            internal_format = GL_RGB;
+            format          = GL_RED;
+            break;
+        default:
+            ASSERT_UNREACHABLE
     }
+    glTexImage2D(GL_TEXTURE_2D, 0, internal_format, self.w, self.h, 0, format, GL_UNSIGNED_BYTE, 0);
+    hline             = 0;
+    uint32_t offset_x = 0, offset_y = 0;
 
     for (int i = ATLAS_RENDERABLE_START + 1; i < ATLAS_RENDERABLE_END; i++) {
-        if (FT_Load_Char(face_, i, gfx->load_flags)) {
-            WRN("glyph render error\n");
-        }
-        if (FT_Render_Glyph(face_->glyph, gfx->render_mode)) {
-            WRN("glyph render error\n");
-        }
-        gfx->output_glyph = face_->glyph;
-        if (bitmap_is_packed) {
-            if (FT_Bitmap_Convert(gfx->ft, &gfx->output_glyph->bitmap, &conversion_map, 1)) {
-                WRN("FT bitmap conversion failed\n");
-            }
-            for (uint32_t i = 0; i < (conversion_map.width * conversion_map.rows); ++i) {
-                conversion_map.buffer[i] *= UINT8_MAX;
-            }
-        }
-
-        uint32_t char_width =
-          (bitmap_is_packed ? conversion_map.width : gfx->output_glyph->bitmap.width) /
-          (gfx->is_main_font_rgb ? 3 : 1);
-        uint32_t char_height =
-          bitmap_is_packed ? conversion_map.rows : gfx->output_glyph->bitmap.rows;
-
-        if (offset_x_pix + char_width > self.w) {
-            offset_y_pix += hline;
-            offset_x_pix = 0;
-            hline        = char_height;
+        FreetypeOutput* output = Freetype_load_and_render_ascii_glyph(gfx->freetype, i, style);
+        ASSERT(output, "has output");
+        uint32_t width  = output->width;
+        uint32_t height = output->height;
+        if (offset_x + width > self.w) {
+            offset_y += hline;
+            offset_x = 0;
+            hline    = height;
         } else {
-            hline = char_height > hline ? char_height : hline;
+            hline = height > hline ? height : hline;
         }
-
+        GLenum format;
+        switch (output->type) {
+            case FT_OUTPUT_BGR_H:
+            case FT_OUTPUT_BGR_V:
+                format = GL_BGR;
+                break;
+            case FT_OUTPUT_RGB_H:
+            case FT_OUTPUT_RGB_V:
+                format = GL_RGB;
+                break;
+            case FT_OUTPUT_GRAYSCALE:
+                format = GL_RED;
+                break;
+            default:
+                ASSERT_UNREACHABLE
+        }
+        glPixelStorei(GL_UNPACK_ALIGNMENT, output->alignment);
         glTexSubImage2D(GL_TEXTURE_2D,
                         0,
-                        offset_x_pix,
-                        offset_y_pix,
-                        char_width,
-                        char_height,
-                        gfx->is_main_font_rgb ? (gfx->rgb_flip ? GL_BGR : GL_RGB) : GL_RED,
+                        offset_x,
+                        offset_y,
+                        width,
+                        height,
+                        format,
                         GL_UNSIGNED_BYTE,
-                        bitmap_is_packed ? conversion_map.buffer
-                                         : gfx->output_glyph->bitmap.buffer);
+                        output->pixels);
 
         self.char_info[i - ATLAS_RENDERABLE_START] = (struct AtlasCharInfo){
-            .rows       = char_height,
-            .width      = char_width,
-            .left       = (float)gfx->output_glyph->bitmap_left,
-            .top        = (float)gfx->output_glyph->bitmap_top,
-            .tex_coords = { ((float)offset_x_pix + 0.01) / self.w,
+            .rows       = height,
+            .width      = width,
+            .left       = output->left,
+            .top        = output->top,
+            .tex_coords = { ((float)offset_x + 0.01) / self.w,
 
-                            1.0f - (((float)self.h - ((float)offset_y_pix + 0.01)) / self.h),
+                            1.0f - (((float)self.h - ((float)offset_y + 0.01)) / self.h),
 
-                            ((float)offset_x_pix + 0.01) / self.w + (float)char_width / self.w,
+                            ((float)offset_x + 0.01) / self.w + (float)width / self.w,
 
-                            1.0f - (((float)self.h - ((float)offset_y_pix + 0.01)) / self.h -
-                                    (float)char_height / self.h) }
+                            1.0f - (((float)self.h - ((float)offset_y + 0.01)) / self.h -
+                                    (float)height / self.h) }
         };
-
-        offset_x_pix += char_width;
+        offset_x += width;
     }
-
-    if (bitmap_is_packed) {
-        FT_Bitmap_Done(gfx->ft, &conversion_map);
-    }
-
     return self;
 }
 
@@ -461,124 +422,104 @@ static inline void Cache_destroy(GlyphMap* self)
     }
 }
 
-__attribute__((hot)) static GlyphMapEntry* Cache_get_glyph(GfxOpenGL21* gfx,
-                                                           GlyphMap*    self,
-                                                           FT_Face      face,
-                                                           char32_t     code)
+__attribute__((hot)) static GlyphMapEntry* Cache_get_glyph(GfxOpenGL21*           gfx,
+                                                           GlyphMap*              self,
+                                                           enum FreetypeFontStyle style,
+                                                           char32_t               code)
 {
     Vector_GlyphMapEntry* block = Cache_select_bucket(self, code);
-
-    GlyphMapEntry* found = NULL;
+    GlyphMapEntry*        found = NULL;
     while ((found = Vector_iter_GlyphMapEntry(block, found))) {
         if (found->code == code) {
             glBindTexture(GL_TEXTURE_2D, found->tex.id);
             return found;
         }
     }
-
-    FT_Error e;
-    bool     bitmap_is_packed = false;
-    bool     color            = false;
-    bool     fallback_font    = false;
-    int32_t  index            = FT_Get_Char_Index(face, code);
-
-    if ((e = FT_Load_Glyph(face, index, gfx->load_flags)) ||
-        (e = FT_Render_Glyph(face->glyph, gfx->render_mode))) {
-        WRN("Glyph error in main font %d - %s\n", code, ft_error_to_string(e));
-    } else {
-        gfx->output_glyph = face->glyph;
-    }
-    if (gfx->output_glyph->glyph_index == 0 && gfx->face_fallback) {
-        index = FT_Get_Char_Index(gfx->face_fallback, code);
-        if ((e = FT_Load_Glyph(gfx->face_fallback, index, gfx->load_flags_symbol)) ||
-            (e = FT_Render_Glyph(gfx->face_fallback->glyph, gfx->render_mode_symbol))) {
-            WRN("Glyph error in fallback font %d - %s\n", code, ft_error_to_string(e));
-        } else {
-            gfx->output_glyph = gfx->face_fallback->glyph;
-            fallback_font     = true;
-        }
-    }
-    if (gfx->output_glyph->glyph_index == 0 && gfx->face_fallback2) {
-        index = FT_Get_Char_Index(gfx->face_fallback2, code);
-        self  = gfx->cache;
-        if ((e = FT_Load_Glyph(gfx->face_fallback2, index, FT_LOAD_COLOR)) ||
-            (e = FT_Render_Glyph(gfx->face_fallback2->glyph, FT_RENDER_MODE_NORMAL))) {
-            WRN("Glyph error in fallback font2 %d - %s\n", code, ft_error_to_string(e));
-        } else {
-            gfx->output_glyph = gfx->face_fallback2->glyph;
-            fallback_font     = true;
-        }
-    }
-    if (gfx->output_glyph->glyph_index == 0) {
-        WRN("Missing glyph %d\n", code);
-    }
-
-    /* check if this is a color emoji */
-    if (gfx->output_glyph->bitmap.pixel_mode == FT_PIXEL_MODE_BGRA) {
-        color = true;
-    }
-
-    bitmap_is_packed = gfx->output_glyph->bitmap.pixel_mode == FT_PIXEL_MODE_MONO;
-
-    /* rgb textures are packed the same as rgba */
-    int alignment_unpack = (gfx->is_main_font_rgb || fallback_font || color) ? 4 : 1;
-
-    /* rgb texture width i 1/3 of its bitmap width */
-    int actual_width = gfx->output_glyph->bitmap.width /
-                       (!color && (fallback_font || gfx->is_main_font_rgb) ? 3 : 1);
-
-    FT_Bitmap conversion_map;
-    if (bitmap_is_packed) {
-        FT_Bitmap_Init(&conversion_map);
-        if (FT_Bitmap_Convert(gfx->ft, &gfx->output_glyph->bitmap, &conversion_map, 1)) {
-            WRN("Conversion failed\n");
-        }
-        for (uint32_t i = 0; i < (conversion_map.width * conversion_map.rows); ++i) {
-            conversion_map.buffer[i] *= UINT8_MAX;
-        }
+    FreetypeOutput*    output = Freetype_load_and_render_glyph(gfx->freetype, code, style);
+    bool               scale  = false;
+    enum TextureFormat texture_format;
+    enum GlyphColor    glyph_color;
+    GLenum             internal_format;
+    GLenum             load_format;
+    switch (output->type) {
+        case FT_OUTPUT_RGB_H:
+            texture_format  = TEX_FMT_RGBA;
+            glyph_color     = GLYPH_COLOR_LCD;
+            internal_format = GL_RGB;
+            load_format     = GL_RGB;
+            break;
+        case FT_OUTPUT_BGR_H:
+            texture_format  = TEX_FMT_RGBA;
+            glyph_color     = GLYPH_COLOR_LCD;
+            internal_format = GL_RGB;
+            load_format     = GL_BGR;
+            break;
+        case FT_OUTPUT_RGB_V:
+            texture_format  = TEX_FMT_RGBA;
+            glyph_color     = GLYPH_COLOR_LCD;
+            internal_format = GL_RGB;
+            load_format     = GL_RGB;
+            break;
+        case FT_OUTPUT_BGR_V:
+            texture_format  = TEX_FMT_RGBA;
+            glyph_color     = GLYPH_COLOR_LCD;
+            internal_format = GL_RGB;
+            load_format     = GL_BGR;
+            break;
+        case FT_OUTPUT_GRAYSCALE:
+            texture_format  = TEX_FMT_MONO;
+            glyph_color     = GLYPH_COLOR_MONO;
+            internal_format = GL_RED;
+            load_format     = GL_RED;
+            break;
+        case FT_OUTPUT_COLOR_BGRA:
+            texture_format  = TEX_FMT_RGB;
+            glyph_color     = GLYPH_COLOR_COLOR;
+            scale           = true;
+            internal_format = GL_RGBA;
+            load_format     = GL_BGRA;
+            break;
+        default:
+            ASSERT_UNREACHABLE
     }
 
-    enum TextureFormat format =
-      color ? TEX_FMT_RGB : gfx->is_main_font_rgb ? TEX_FMT_RGBA : TEX_FMT_MONO;
-
-    Texture tex = { .id     = 0,
-                    .format = format,
-                    .w      = actual_width,
-                    .h      = gfx->output_glyph->bitmap.rows };
+    Texture tex = {
+        .id     = 0,
+        .format = texture_format,
+        .w      = output->width,
+        .h      = output->height,
+    };
 
     glGenTextures(1, &tex.id);
     glBindTexture(GL_TEXTURE_2D, tex.id);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, alignment_unpack);
+
+    glPixelStorei(GL_UNPACK_ALIGNMENT, output->alignment);
     glTexParameteri(GL_TEXTURE_2D,
                     GL_TEXTURE_MIN_FILTER,
-                    color ? GL_LINEAR_MIPMAP_LINEAR : GL_NEAREST);
+                    scale ? GL_LINEAR_MIPMAP_LINEAR : GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexImage2D(GL_TEXTURE_2D,
                  0,
-                 color ? GL_RGBA : (fallback_font || gfx->is_main_font_rgb) ? GL_RGB : GL_RED,
-                 (tex.w = actual_width),
-                 (tex.h = gfx->output_glyph->bitmap.rows),
+                 internal_format,
+                 output->width,
+                 output->height,
                  0,
-                 color ? GL_BGRA : (fallback_font || gfx->is_main_font_rgb) ? (gfx->rgb_flip ? GL_BGR : GL_RGB) : GL_RED,
+                 load_format,
                  GL_UNSIGNED_BYTE,
-                 bitmap_is_packed ? conversion_map.buffer : gfx->output_glyph->bitmap.buffer);
+                 output->pixels);
 
-    if (bitmap_is_packed) {
-        FT_Bitmap_Done(gfx->ft, &conversion_map);
-    }
-    if (color) {
+    if (scale) {
         glGenerateMipmap(GL_TEXTURE_2D);
     }
 
-    Vector_push_GlyphMapEntry(
-      block,
-      (GlyphMapEntry){
-        .code  = code,
-        .color = color ? GLYPH_COLOR_COLOR : bitmap_is_packed ? GLYPH_COLOR_MONO : GLYPH_COLOR_LCD,
-        .left  = (float)gfx->output_glyph->bitmap_left,
-        .top   = (float)gfx->output_glyph->bitmap_top,
-        .tex   = tex,
-      });
+    Vector_push_GlyphMapEntry(block,
+                              (GlyphMapEntry){
+                                .code  = code,
+                                .color = glyph_color,
+                                .left  = output->left,
+                                .top   = output->top,
+                                .tex   = tex,
+                              });
 
     return Vector_at_GlyphMapEntry(block, block->size - 1);
 }
@@ -657,45 +598,25 @@ void GfxOpenGL21_resize(Gfx* self, uint32_t w, uint32_t h)
 {
     GfxOpenGL21* gl21 = gfxOpenGL21(self);
     GfxOpenGL21_destroy_recycled_proxies(gl21);
-
-    if (FT_Load_Char(gl21->face, '(', gl21->load_flags) ||
-        FT_Render_Glyph(gl21->face->glyph, gl21->render_mode)) {
-        WRN("Glyph error\n");
-    }
-    if (!gl21->face->size->metrics.height || !gl21->face->glyph->advance.x) {
-        ERR("Font error, reported size is 0");
-    }
-    gl21->win_w = w;
-    gl21->win_h = h;
-    gl21->sx    = 2.0f / gl21->win_w;
-    gl21->sy    = 2.0f / gl21->win_h;
-
-    uint32_t height = gl21->face->size->metrics.height + settings.padd_glyph_y * 64;
-    uint32_t hber   = gl21->face->glyph->metrics.horiBearingY / 64 / 2 / 2 + 1;
-
-    gl21->line_height_pixels = height / 64.0;
+    gl21->win_w              = w;
+    gl21->win_h              = h;
+    gl21->sx                 = 2.0f / gl21->win_w;
+    gl21->sy                 = 2.0f / gl21->win_h;
+    gl21->line_height_pixels = gl21->freetype->line_height_pixels + settings.padd_glyph_y;
+    gl21->glyph_width_pixels = gl21->freetype->glyph_width_pixels + settings.padd_glyph_x;
+    gl21->gw                 = gl21->freetype->gw;
+    FreetypeOutput* output   = Freetype_load_ascii_glyph(gl21->freetype, '(', FT_STYLE_REGULAR);
+    uint32_t        hber     = output->ft_slot->metrics.horiBearingY / 64 / 2 / 2 + 1;
+    gl21->pen_begin          = gl21->sy * (gl21->line_height_pixels / 2.0) + gl21->sy * hber;
+    gl21->pen_begin_pixels   = (float)(gl21->line_height_pixels / 1.75) + (float)hber;
+    uint32_t height          = (gl21->line_height_pixels + settings.padd_glyph_y) * 64;
     gl21->line_height        = (float)height * gl21->sy / 64.0;
-
-    gl21->pen_begin        = gl21->sy * (height / 64.0 / 2.0) + gl21->sy * hber;
-    gl21->pen_begin_pixels = (float)(height / 64.0 / 1.75) + (float)hber;
-
-    gl21->gw                 = gl21->face->glyph->advance.x + settings.padd_glyph_x * 64;
-    gl21->glyph_width_pixels = gl21->gw / 64;
-    gl21->glyph_width        = gl21->gw * gl21->sx / 64.0;
-
-    LOG("glyph box size GL: %fx%f, pixels: %dx%d\n",
-        gl21->glyph_width,
-        gl21->line_height,
-        gl21->glyph_width_pixels,
-        gl21->line_height_pixels);
-
-    gl21->max_cells_in_line = gl21->win_w / gl21->glyph_width_pixels;
+    gl21->glyph_width        = gl21->glyph_width_pixels * gl21->sx;
+    gl21->max_cells_in_line  = gl21->win_w / gl21->glyph_width_pixels;
 
     // update dynamic bg buffer
     glBindBuffer(GL_ARRAY_BUFFER, gl21->bg_vao.vbo);
-
     glVertexAttribPointer(gl21->bg_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
-
     float bg_box[] = {
         0.0f,
         0.0f,
@@ -706,12 +627,9 @@ void GfxOpenGL21_resize(Gfx* self, uint32_t w, uint32_t h)
         gl21->glyph_width,
         0.0f,
     };
-
     glBufferData(GL_ARRAY_BUFFER, sizeof bg_box, bg_box, GL_STREAM_DRAW);
-
     Pair_uint32_t cells = GfxOpenGL21_get_char_size(self);
     cells               = GfxOpenGL21_pixels(self, cells.first, cells.second);
-
     glViewport(0, 0, gl21->win_w, gl21->win_h);
 }
 
@@ -725,216 +643,13 @@ Pair_uint32_t GfxOpenGL21_get_char_size(Gfx* self)
 
 Pair_uint32_t GfxOpenGL21_pixels(Gfx* self, uint32_t c, uint32_t r)
 {
-    GfxOpenGL21* gl21 = gfxOpenGL21(self);
-    if (!gl21->gw) {
-        if (FT_Load_Char(gl21->face, '(', gl21->load_flags) ||
-            FT_Render_Glyph(gl21->face->glyph, gl21->render_mode)) {
-            WRN("Glyph load error\n");
-        }
-        gl21->gw = gl21->face->glyph->advance.x + settings.padd_glyph_x * 64;
-    }
     float x, y;
-    x = c * gl21->gw;
-    y = r * gl21->face->size->metrics.height + settings.padd_glyph_y * 64;
-    return (Pair_uint32_t){ .first  = x / 64.0 + 2 * settings.padding,
-                            .second = y / 64.0 + 2 * settings.padding };
+    x = c * (gfxOpenGL21(self)->freetype->glyph_width_pixels + settings.padd_glyph_x);
+    y = r * (gfxOpenGL21(self)->freetype->line_height_pixels + settings.padd_glyph_y);
+    return (Pair_uint32_t){ .first = x + 2 * settings.padding, .second = y + 2 * settings.padding };
 }
 
-void GfxOpenGL21_load_font(Gfx* self)
-{
-    GfxOpenGL21* gl21                   = gfxOpenGL21(self);
-    static bool  ft_lib_was_initialized = false;
-    FT_Error     e                      = 0;
-    int          strike_idx             = -1;
-
-    gl21->rgb_flip = false;
-    if (gl21->is_main_font_rgb) {
-        switch (settings.lcd_filter) {
-            case LCD_FILTER_H_BGR:
-                gl21->rgb_flip = true;
-                /* fallthrough */
-            case LCD_FILTER_H_RGB:
-                gl21->render_mode = gl21->render_mode_symbol = FT_RENDER_MODE_LCD;
-                gl21->load_flags = gl21->load_flags_symbol = FT_LOAD_TARGET_LCD;
-                break;
-            case LCD_FILTER_V_BGR:
-                gl21->rgb_flip = true;
-                /* fallthrough */
-            case LCD_FILTER_V_RGB:
-                gl21->render_mode = gl21->render_mode_symbol = FT_RENDER_MODE_LCD_V;
-                gl21->load_flags = gl21->load_flags_symbol = FT_LOAD_TARGET_LCD_V;
-                break;
-            case LCD_FILTER_NONE:
-                gl21->render_mode = gl21->render_mode_symbol = FT_RENDER_MODE_NORMAL;
-                gl21->load_flags = gl21->load_flags_symbol = FT_LOAD_TARGET_NORMAL;
-                break;
-            default:
-                ASSERT_UNREACHABLE;
-        }
-    } else {
-        gl21->render_mode = FT_RENDER_MODE_NORMAL;
-        gl21->load_flags  = FT_LOAD_TARGET_NORMAL;
-        switch (settings.lcd_filter) {
-            case LCD_FILTER_H_BGR:
-                gl21->rgb_flip = true;
-                /* fallthrough */
-            case LCD_FILTER_H_RGB:
-                gl21->render_mode_symbol = FT_RENDER_MODE_LCD;
-                gl21->load_flags_symbol  = FT_LOAD_TARGET_LCD;
-                break;
-            case LCD_FILTER_V_BGR:
-                gl21->rgb_flip = true;
-                /* fallthrough */
-            case LCD_FILTER_V_RGB:
-                gl21->render_mode_symbol = FT_RENDER_MODE_LCD_V;
-                gl21->load_flags_symbol  = FT_LOAD_TARGET_LCD_V;
-                break;
-            case LCD_FILTER_NONE:
-                gl21->render_mode_symbol = FT_RENDER_MODE_NORMAL;
-                gl21->load_flags_symbol  = FT_LOAD_TARGET_NORMAL;
-                break;
-            default:
-                ASSERT_UNREACHABLE;
-        }
-    }
-
-    if (!ft_lib_was_initialized) {
-        if ((e = FT_Init_FreeType(&gl21->ft))) {
-            ERR("Failed to initialize freetype %s", ft_error_to_string(e));
-        }
-    }
-
-    if ((e = FT_New_Face(gl21->ft, settings.font_file_name_regular.str, 0, &gl21->face))) {
-        ERR("Font error, failed to load font file: %s. error: %s",
-            settings.font_file_name_regular.str,
-            ft_error_to_string(e));
-    }
-
-    FT_F26Dot6 siz = settings.font_size * 64;
-    FT_UInt    res = settings.font_dpi;
-    if ((e = FT_Set_Char_Size(gl21->face, siz, siz, res, res))) {
-        if (!gl21->face->size->metrics.height) {
-            for (strike_idx = 0; strike_idx < gfxOpenGL21(self)->face->num_fixed_sizes;
-                 ++strike_idx) {
-            }
-            if ((e = FT_Select_Size(gl21->face, strike_idx - 1))) {
-                ERR("Failed to set main font bitmap strike, file %s. error: %s\n",
-                    settings.font_file_name_regular.str,
-                    ft_error_to_string(e));
-            }
-        }
-    }
-    if (!FT_IS_FIXED_WIDTH(gl21->face)) {
-        WRN("Main font is not fixed width\n");
-    }
-
-    if (settings.font_file_name_bold.str) {
-        if ((e = FT_New_Face(gl21->ft, settings.font_file_name_bold.str, 0, &gl21->face_bold))) {
-            ERR("Font error, failed to load font file: %s. error: %s",
-                settings.font_file_name_bold.str,
-                ft_error_to_string(e));
-        }
-
-        if (strike_idx >= 0) {
-            if ((e = FT_Select_Size(gl21->face_bold, strike_idx - 1))) {
-                WRN("Failed to set main font bitmap strike, file %s. error: %s\n",
-                    settings.font_file_name_bold.str,
-                    ft_error_to_string(e));
-            }
-        } else {
-            if ((e = FT_Set_Char_Size(gl21->face_bold, siz, siz, res, res))) {
-                WRN("Failed to set font size, file %s. error: %s\n",
-                    settings.font_file_name_bold.str,
-                    ft_error_to_string(e));
-            }
-        }
-        if (!FT_IS_FIXED_WIDTH(gl21->face_bold)) {
-            WRN("Bold font is not fixed width\n");
-        }
-    }
-
-    if (settings.font_file_name_italic.str) {
-        if ((e = FT_New_Face(gl21->ft, settings.font_file_name_italic.str, 0, &gl21->face_italic)))
-            ERR("Font error, failed to load font file: %s. error: %s",
-                settings.font_file_name_italic.str,
-                ft_error_to_string(e));
-
-        if (strike_idx >= 0) {
-            if ((e = FT_Select_Size(gl21->face_italic, strike_idx - 1))) {
-                WRN("Failed to set font bitmap strike, file %s. error: %s\n",
-                    settings.font_file_name_italic.str,
-                    ft_error_to_string(e));
-            }
-        } else {
-            if ((e = FT_Set_Char_Size(gl21->face_italic, siz, siz, res, res))) {
-                WRN("Failed to set font size, file %s. error: %s\n",
-                    settings.font_file_name_italic.str,
-                    ft_error_to_string(e));
-            }
-        }
-        if (!FT_IS_FIXED_WIDTH(gl21->face_italic)) {
-            WRN("Italic font is not fixed width\n");
-        }
-    }
-
-    if (settings.font_file_name_bold_italic.str) {
-        if ((e = FT_New_Face(gl21->ft,
-                             settings.font_file_name_bold_italic.str,
-                             0,
-                             &gl21->face_bold_italic)))
-            ERR("Font error, failed to load font file: %s. error: %s",
-                settings.font_file_name_bold_italic.str,
-                ft_error_to_string(e));
-
-        if (strike_idx >= 0) {
-            if ((e = FT_Select_Size(gl21->face_bold_italic, strike_idx - 1))) {
-                WRN("Failed to set font bitmap strike, file %s. error: %s\n",
-                    settings.font_file_name_bold_italic.str,
-                    ft_error_to_string(e));
-            }
-        } else {
-            if ((e = FT_Set_Char_Size(gl21->face_bold_italic, siz, siz, res, res))) {
-                WRN("Failed to set font size, file %s. error: %s\n",
-                    settings.font_file_name_bold_italic.str,
-                    ft_error_to_string(e));
-            }
-        }
-        if (!FT_IS_FIXED_WIDTH(gl21->face_bold_italic)) {
-            WRN("Bold italic font is not fixed width\n");
-        }
-    }
-
-    if (settings.font_file_name_fallback.str) {
-        if (FT_New_Face(gl21->ft, settings.font_file_name_fallback.str, 0, &gl21->face_fallback)) {
-            WRN("Font error, failed to load font file: %s", settings.font_file_name_fallback.str);
-        }
-        siz = 64 * (gl21->is_main_font_rgb ? settings.font_size
-                                           : OR(settings.font_size_fallback, settings.font_size));
-        res = settings.font_dpi;
-        if ((e = FT_Set_Char_Size(gl21->face_fallback, siz, siz, res, res))) {
-            WRN("Failed to set font size, file %s. error: %s\n",
-                settings.font_file_name_fallback.str,
-                ft_error_to_string(e));
-        }
-    }
-
-    if (settings.font_file_name_fallback2.str) {
-        if (FT_New_Face(gl21->ft, settings.font_file_name_fallback2.str, 0, &gl21->face_fallback2))
-            ERR("Font error, failed to load font file: %s", settings.font_file_name_fallback2.str);
-
-        if ((e = FT_Select_Size(gl21->face_fallback2, 0))) {
-            WRN("Failed to set font size, file %s. error: %s\n",
-                settings.font_file_name_fallback2.str,
-                ft_error_to_string(e));
-        }
-    }
-
-    if (!ft_lib_was_initialized) {
-        // we can only do this once per ft instance
-        FT_Library_SetLcdFilter(gfxOpenGL21(self)->ft, FT_LCD_FILTER_DEFAULT);
-        ft_lib_was_initialized = true;
-    }
-}
+void GfxOpenGL21_load_font(Gfx* self) {}
 
 void GfxOpenGL21_init_with_context_activated(Gfx* self)
 {
@@ -1017,7 +732,7 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
                 ColorRGB_get_float(settings.fg, 1),
                 ColorRGB_get_float(settings.fg, 2));
 
-    gfxOpenGL21(self)->_atlas = Atlas_new(gfxOpenGL21(self), gfxOpenGL21(self)->face);
+    gfxOpenGL21(self)->_atlas = Atlas_new(gfxOpenGL21(self), FT_STYLE_REGULAR);
     gfxOpenGL21(self)->atlas  = &gfxOpenGL21(self)->_atlas;
 
     Cache_init(&gfxOpenGL21(self)->_cache);
@@ -1041,7 +756,7 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
 
     // if font styles don't exist point their resources to deaults
     if (settings.font_file_name_bold.str) {
-        gfxOpenGL21(self)->_atlas_bold = Atlas_new(gfxOpenGL21(self), gfxOpenGL21(self)->face_bold);
+        gfxOpenGL21(self)->_atlas_bold = Atlas_new(gfxOpenGL21(self), FT_STYLE_BOLD);
         gfxOpenGL21(self)->atlas_bold  = &gfxOpenGL21(self)->_atlas_bold;
         Cache_init(&gfxOpenGL21(self)->_cache_bold);
         gfxOpenGL21(self)->cache_bold            = &gfxOpenGL21(self)->_cache_bold;
@@ -1053,9 +768,8 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
     }
 
     if (settings.font_file_name_italic.str) {
-        gfxOpenGL21(self)->_atlas_italic =
-          Atlas_new(gfxOpenGL21(self), gfxOpenGL21(self)->face_italic);
-        gfxOpenGL21(self)->atlas_italic = &gfxOpenGL21(self)->_atlas_italic;
+        gfxOpenGL21(self)->_atlas_italic = Atlas_new(gfxOpenGL21(self), FT_STYLE_ITALIC);
+        gfxOpenGL21(self)->atlas_italic  = &gfxOpenGL21(self)->_atlas_italic;
         Cache_init(&gfxOpenGL21(self)->_cache_italic);
         gfxOpenGL21(self)->cache_italic            = &gfxOpenGL21(self)->_cache_italic;
         gfxOpenGL21(self)->vec_glyph_buffer_italic = &gfxOpenGL21(self)->_vec_glyph_buffer_italic;
@@ -1066,9 +780,8 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
     }
 
     if (settings.font_file_name_bold_italic.str) {
-        gfxOpenGL21(self)->_atlas_bold_italic =
-          Atlas_new(gfxOpenGL21(self), gfxOpenGL21(self)->face_bold_italic);
-        gfxOpenGL21(self)->atlas_bold_italic = &gfxOpenGL21(self)->_atlas_bold_italic;
+        gfxOpenGL21(self)->_atlas_bold_italic = Atlas_new(gfxOpenGL21(self), FT_STYLE_BOLD_ITALIC);
+        gfxOpenGL21(self)->atlas_bold_italic  = &gfxOpenGL21(self)->_atlas_bold_italic;
         Cache_init(&gfxOpenGL21(self)->_cache_bold_italic);
         gfxOpenGL21(self)->cache_bold_italic = &gfxOpenGL21(self)->_cache_bold_italic;
         gfxOpenGL21(self)->vec_glyph_buffer_bold_italic =
@@ -1097,9 +810,9 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
 
     GfxOpenGL21_notify_action(self);
 
-    float height = gfxOpenGL21(self)->face->size->metrics.height + 64 * settings.padd_glyph_y;
-    gfxOpenGL21(self)->line_height_pixels = height / 64.0;
-
+    Freetype* ft                          = gfxOpenGL21(self)->freetype;
+    gfxOpenGL21(self)->line_height_pixels = ft->line_height_pixels + settings.padd_glyph_y;
+    gfxOpenGL21(self)->glyph_width_pixels = ft->glyph_width_pixels + settings.padd_glyph_x;
     uint32_t t_height = CLAMP(gfxOpenGL21(self)->line_height_pixels / 8.0 + 2, 4, UINT8_MAX);
 
     gfxOpenGL21(self)->squiggle_texture =
@@ -1139,39 +852,22 @@ void GfxOpenGL21_reload_font(Gfx* self)
         Cache_destroy(&gfxOpenGL21(self)->_cache_bold_italic);
     }
 
-    FT_Done_Face(gfxOpenGL21(self)->face);
-    if (settings.font_file_name_bold.str)
-        FT_Done_Face(gfxOpenGL21(self)->face_bold);
-    if (settings.font_file_name_italic.str)
-        FT_Done_Face(gfxOpenGL21(self)->face_italic);
-    if (settings.font_file_name_bold_italic.str)
-        FT_Done_Face(gfxOpenGL21(self)->face_bold_italic);
-    if (settings.font_file_name_fallback.str)
-        FT_Done_Face(gfxOpenGL21(self)->face_fallback);
-    if (settings.font_file_name_fallback2.str)
-        FT_Done_Face(gfxOpenGL21(self)->face_fallback2);
-
     GfxOpenGL21_load_font(self);
-
     GfxOpenGL21_resize(self, gfxOpenGL21(self)->win_w, gfxOpenGL21(self)->win_h);
 
-    gfxOpenGL21(self)->_atlas = Atlas_new(gfxOpenGL21(self), gfxOpenGL21(self)->face);
+    gfxOpenGL21(self)->_atlas = Atlas_new(gfxOpenGL21(self), FT_STYLE_REGULAR);
     Cache_init(&gfxOpenGL21(self)->_cache);
 
     if (settings.font_file_name_bold.str) {
-        gfxOpenGL21(self)->_atlas_bold = Atlas_new(gfxOpenGL21(self), gfxOpenGL21(self)->face_bold);
+        gfxOpenGL21(self)->_atlas_bold = Atlas_new(gfxOpenGL21(self), FT_STYLE_BOLD);
         Cache_init(&gfxOpenGL21(self)->_cache_bold);
     }
-
     if (settings.font_file_name_italic.str) {
-        gfxOpenGL21(self)->_atlas_italic =
-          Atlas_new(gfxOpenGL21(self), gfxOpenGL21(self)->face_italic);
+        gfxOpenGL21(self)->_atlas_italic = Atlas_new(gfxOpenGL21(self), FT_STYLE_ITALIC);
         Cache_init(&gfxOpenGL21(self)->_cache_italic);
     }
-
     if (settings.font_file_name_bold_italic.str) {
-        gfxOpenGL21(self)->_atlas_bold_italic =
-          Atlas_new(gfxOpenGL21(self), gfxOpenGL21(self)->face_bold_italic);
+        gfxOpenGL21(self)->_atlas_bold_italic = Atlas_new(gfxOpenGL21(self), FT_STYLE_BOLD_ITALIC);
         Cache_init(&gfxOpenGL21(self)->_cache_bold_italic);
     }
 
@@ -1802,26 +1498,26 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                                  z != each_rune_same_bg;
                                  ++z) {
                                 if (unlikely(z->code > ATLAS_RENDERABLE_END)) {
-                                    size_t    column = z - vt_line->data.buf;
-                                    GlyphMap* ca     = gfx->cache;
-                                    FT_Face   fc     = gfx->face;
+                                    size_t                 column = z - vt_line->data.buf;
+                                    GlyphMap*              ca     = gfx->cache;
+                                    enum FreetypeFontStyle style  = FT_STYLE_REGULAR;
                                     switch (z->state) {
                                         case VT_RUNE_BOLD:
-                                            ca = gfx->cache_bold;
-                                            fc = gfx->face_bold;
+                                            ca    = gfx->cache_bold;
+                                            style = FT_STYLE_BOLD;
                                             break;
                                         case VT_RUNE_ITALIC:
-                                            ca = gfx->cache_italic;
-                                            fc = gfx->face_italic;
+                                            ca    = gfx->cache_italic;
+                                            style = FT_STYLE_ITALIC;
                                             break;
                                         case VT_RUNE_BOLD_ITALIC:
-                                            ca = gfx->cache_bold_italic;
-                                            fc = gfx->face_bold_italic;
+                                            ca    = gfx->cache_bold_italic;
+                                            style = FT_STYLE_BOLD_ITALIC;
                                             break;
                                         default:;
                                     }
                                     GlyphMapEntry* g = NULL;
-                                    g                = Cache_get_glyph(gfx, ca, fc, z->code);
+                                    g                = Cache_get_glyph(gfx, ca, style, z->code);
                                     if (!g) {
                                         continue;
                                     }
@@ -2313,27 +2009,27 @@ static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const
                                       0,
                                       0);
 
-                Atlas*          source_atlas = gfx->atlas;
-                GlyphMap*       source_cache = gfx->cache;
-                FT_Face         source_face  = gfx->face;
-                enum GlyphColor color;
+                Atlas*                 source_atlas = gfx->atlas;
+                GlyphMap*              source_cache = gfx->cache;
+                enum FreetypeFontStyle style        = FT_STYLE_REGULAR;
+                enum GlyphColor        color;
                 switch (cursor_char->state) {
                     case VT_RUNE_BOLD:
                         source_atlas = gfx->atlas_bold;
                         source_cache = gfx->cache_bold;
-                        source_face  = gfx->face_bold;
+                        style        = FT_STYLE_BOLD;
                         break;
 
                     case VT_RUNE_ITALIC:
                         source_atlas = gfx->atlas_italic;
                         source_cache = gfx->cache_italic;
-                        source_face  = gfx->face_italic;
+                        style        = FT_STYLE_ITALIC;
                         break;
 
                     case VT_RUNE_BOLD_ITALIC:
                         source_atlas = gfx->atlas_bold_italic;
                         source_cache = gfx->cache_bold_italic;
-                        source_face  = gfx->face_bold_italic;
+                        style        = FT_STYLE_BOLD_ITALIC;
                         break;
 
                     default:;
@@ -2352,14 +2048,13 @@ static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const
                     memcpy(tc, g->tex_coords, sizeof tc);
                     color = gfx->is_main_font_rgb ? GLYPH_COLOR_LCD : GLYPH_COLOR_MONO;
                 } else {
-                    GlyphMapEntry* g =
-                      Cache_get_glyph(gfx, source_cache, source_face, cursor_char->code);
-                    h   = (float)g->tex.h * gfx->sy;
-                    w   = (float)g->tex.w * gfx->sx;
-                    t   = (float)g->top * gfx->sy;
-                    l   = (float)g->left * gfx->sx;
-                    gsx = -0.1 / g->tex.w;
-                    gsy = -0.05 / g->tex.h;
+                    GlyphMapEntry* g = Cache_get_glyph(gfx, source_cache, style, cursor_char->code);
+                    h                = (float)g->tex.h * gfx->sy;
+                    w                = (float)g->tex.w * gfx->sx;
+                    t                = (float)g->top * gfx->sy;
+                    l                = (float)g->left * gfx->sx;
+                    gsx              = -0.1 / g->tex.w;
+                    gsy              = -0.05 / g->tex.h;
 
                     color = g->color;
                     if (unlikely(h > gfx->line_height)) {
@@ -2683,17 +2378,14 @@ void GfxOpenGL21_destroy(Gfx* self)
     if (settings.font_file_name_bold.str) {
         Cache_destroy(&gfxOpenGL21(self)->_cache_bold);
         Atlas_destroy(&gfxOpenGL21(self)->_atlas_bold);
-        FT_Done_Face(gfxOpenGL21(self)->face_bold);
     }
     if (settings.font_file_name_italic.str) {
         Cache_destroy(&gfxOpenGL21(self)->_cache_italic);
         Atlas_destroy(&gfxOpenGL21(self)->_atlas_italic);
-        FT_Done_Face(gfxOpenGL21(self)->face_italic);
     }
     if (settings.font_file_name_bold_italic.str) {
         Cache_destroy(&gfxOpenGL21(self)->_cache_bold_italic);
         Atlas_destroy(&gfxOpenGL21(self)->_atlas_bold_italic);
-        FT_Done_Face(gfxOpenGL21(self)->face_bold_italic);
     }
 
     VBO_destroy(&gfxOpenGL21(self)->font_vao);
@@ -2721,16 +2413,4 @@ void GfxOpenGL21_destroy(Gfx* self)
 
     Vector_destroy_vertex_t(&(gfxOpenGL21(self)->vec_vertex_buffer));
     Vector_destroy_vertex_t(&(gfxOpenGL21(self)->vec_vertex_buffer2));
-
-    FT_Done_Face(gfxOpenGL21(self)->face);
-
-    if (settings.font_file_name_fallback.str) {
-        FT_Done_Face(gfxOpenGL21(self)->face_fallback);
-    }
-
-    if (settings.font_file_name_fallback2.str) {
-        FT_Done_Face(gfxOpenGL21(self)->face_fallback2);
-    }
-
-    FT_Done_FreeType(gfxOpenGL21(self)->ft);
 }

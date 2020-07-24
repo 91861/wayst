@@ -14,6 +14,8 @@
 #include <uchar.h>
 #include <time.h>
 #include <unistd.h>
+#include <string.h>
+#include <stdlib.h>
 
 #define TERMCOLOR_RESET "\e[m"
 

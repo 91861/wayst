@@ -25,6 +25,7 @@
 #include "x.h"
 #endif
 
+#include "freetype.h"
 #include "settings.h"
 #include "ui.h"
 #include "vt.h"
@@ -58,6 +59,7 @@ typedef struct
     Window_* win;
     Gfx*     gfx;
     Vt       vt;
+    Freetype freetype;
     Monitor  monitor;
 
     Pair_uint32_t resolution;
@@ -118,24 +120,15 @@ void* App_load_gl_ext(const char* name)
     return addr;
 }
 
-void App_init(App* self)
+void App_create_window(App* self, Pair_uint32_t res)
 {
-    self->monitor = Monitor_new();
-    Monitor_fork_new_pty(&self->monitor, settings.cols, settings.rows);
-
-    self->vt           = Vt_new(settings.cols, settings.rows);
-    self->vt.master_fd = self->monitor.child_fd;
-
-    /* Graphics needs to be created first and load fonts so it can determine the initial window size
-     * based on the glyph size (Gfx does not need an active context before it is initialized) */
-    self->gfx = Gfx_new_OpenGL21();
     if (!settings.x11_is_default)
 #ifndef NOWL
-        self->win = Window_new_wayland(Gfx_pixels(self->gfx, settings.cols, settings.rows));
+        self->win = Window_new_wayland(res);
 #endif
     if (!self->win) {
 #ifndef NOX
-        self->win = Window_new_x11(Gfx_pixels(self->gfx, settings.cols, settings.rows));
+        self->win = Window_new_x11(res);
 #endif
     }
     if (!self->win) {
@@ -145,6 +138,17 @@ void App_init(App* self)
 #endif
         );
     }
+}
+
+void App_init(App* self)
+{
+    self->monitor = Monitor_new();
+    Monitor_fork_new_pty(&self->monitor, settings.cols, settings.rows);
+    self->vt           = Vt_new(settings.cols, settings.rows);
+    self->vt.master_fd = self->monitor.child_fd;
+    self->freetype     = Freetype_new();
+    self->gfx          = Gfx_new_OpenGL21(&self->freetype);
+    App_create_window(self, Gfx_pixels(self->gfx, settings.cols, settings.rows));
     App_set_callbacks(self);
     settings_after_window_system_connected();
     Window_set_swap_interval(self->win, 0);
@@ -225,6 +229,7 @@ void App_run(App* self)
     }
     Vt_destroy(&self->vt);
     Gfx_destroy(self->gfx);
+    Freetype_destroy(&self->freetype);
     Window_destroy(self->win);
 }
 
@@ -270,6 +275,7 @@ void App_clipboard_handler(void* self, const char* text)
 void App_reload_font(void* self)
 {
     App* app = self;
+    Freetype_reload_fonts(&app->freetype);
     Gfx_reload_font(app->gfx);
     Gfx_draw(app->gfx, &app->vt, &app->ui);
     App_update_padding(self);

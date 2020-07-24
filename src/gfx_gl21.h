@@ -10,7 +10,8 @@
 #include "colors.h"
 #include "gl.h"
 #include "util.h"
+#include "freetype.h"
 #include "vector.h"
 
 
-Gfx* Gfx_new_OpenGL21();
+Gfx* Gfx_new_OpenGL21(Freetype* freetype);
