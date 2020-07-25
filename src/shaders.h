@@ -82,14 +82,15 @@ const char*
 font_gray_fs_src =
 "#version 120\n"
 "uniform vec3 clr;"
+"uniform vec4 bclr;"
 "uniform sampler2D tex;"
 "varying vec2 tex_coord;"
 "void main(){"
 "vec3 c=texture2D(tex,tex_coord).rgb;"
-"gl_FragData[0]=vec4(c.r*clr.r,"
-"c.r*clr.g,"
-"c.r*clr.b,"
-"c.r);"
+"gl_FragData[0]=vec4(mix(bclr.r,clr.r,c.r),"
+"mix(bclr.g,clr.g,c.r),"
+"mix(bclr.b,clr.b,c.r),"
+"bclr.a+c.r);"
 "}";
 
 

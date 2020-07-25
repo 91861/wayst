@@ -689,7 +689,7 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
       Shader_new(font_vs_src, font_fs_src, "coord", "tex", "clr", "bclr", NULL);
 
     gfxOpenGL21(self)->font_shader_gray =
-      Shader_new(font_vs_src, font_gray_fs_src, "coord", "tex", "clr", NULL);
+      Shader_new(font_vs_src, font_gray_fs_src, "coord", "tex", "clr", "bclr", NULL);
 
     gfxOpenGL21(self)->bg_shader = Shader_new(bg_vs_src, bg_fs_src, "pos", "mv", "clr", NULL);
 
@@ -831,11 +831,6 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
 
 void GfxOpenGL21_reload_font(Gfx* self)
 {
-    if (!gfxOpenGL21(self)->is_main_font_rgb) {
-        WRN("Resizing is not available for bitmap fonts\n");
-        return;
-    }
-
     Atlas_destroy(&gfxOpenGL21(self)->_atlas);
     if (gfxOpenGL21(self)->atlas != gfxOpenGL21(self)->atlas_bold) {
         Atlas_destroy(&gfxOpenGL21(self)->_atlas_bold);
@@ -1248,10 +1243,7 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
 #define L_CALC_BG_COLOR                                                                            \
     Vt_is_cell_selected(vt, idx_each_rune, visual_line_index) ? settings.bghl : each_rune->bg
 
-        if (idx_each_rune == range_end_idx ||
-            idx_each_rune == range_end_idx -1 ||
-            (range_begin_idx && idx_each_rune == range_begin_idx +1) ||
-            !ColorRGBA_eq(L_CALC_BG_COLOR, active_bg_color)) {
+        if (idx_each_rune == range_end_idx || !ColorRGBA_eq(L_CALC_BG_COLOR, active_bg_color)) {
             int32_t extra_width = 0;
 
             if (idx_each_rune > 1) {
@@ -1400,6 +1392,12 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                                                 ColorRGB_get_float(active_fg_color, 0),
                                                 ColorRGB_get_float(active_fg_color, 1),
                                                 ColorRGB_get_float(active_fg_color, 2));
+
+                                    glUniform4f(gfx->font_shader_gray.uniforms[2].location,
+                                                ColorRGBA_get_float(active_bg_color, 0),
+                                                ColorRGBA_get_float(active_bg_color, 1),
+                                                ColorRGBA_get_float(active_bg_color, 2),
+                                                ColorRGBA_get_float(active_bg_color, 3));
                                 }
                                 // normal
                                 glBindBuffer(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
@@ -1531,7 +1529,9 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                                                l + (scalex * 0.5);
                                     float y3 = -1.0f + (double)gfx->pen_begin_pixels * scaley - t +
                                                (scaley * 0.5);
+
                                     Vector_GlyphBufferData* target = &gfx->_vec_glyph_buffer;
+
                                     if (g->color == GLYPH_COLOR_COLOR) {
                                         target = &gfx->_vec_glyph_buffer_bold;
                                     } else if (g->color == GLYPH_COLOR_MONO) {
@@ -1637,6 +1637,11 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                                                         ColorRGB_get_float(active_fg_color, 0),
                                                         ColorRGB_get_float(active_fg_color, 1),
                                                         ColorRGB_get_float(active_fg_color, 2));
+                                            glUniform4f(gfx->font_shader_gray.uniforms[2].location,
+                                                        ColorRGBA_get_float(active_bg_color, 0),
+                                                        ColorRGBA_get_float(active_bg_color, 1),
+                                                        ColorRGBA_get_float(active_bg_color, 2),
+                                                        ColorRGBA_get_float(active_bg_color, 3));
                                             glBindBuffer(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
                                             glVertexAttribPointer(
                                               gfx->font_shader_gray.attribs->location,
@@ -1695,8 +1700,9 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
         } // end if bg color changed
 
         int w = wcwidth(vt_line->data.buf[idx_each_rune].code);
-        idx_each_rune += w > 1 ? w : 1;
-    }     // end for each VtRune
+        idx_each_rune =
+          CLAMP(idx_each_rune + (w > 1 ? w : 1), range_begin_idx, (vt_line->data.size + 1));
+    } // end for each VtRune
 }
 
 /**
@@ -1789,23 +1795,24 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
             size_t range_begin_idx = vt_line->damage.front;
             size_t range_end_idx   = vt_line->damage.end + 1;
             int    extra           = 0, tmp;
-            if ((tmp = wcwidth(vt_line->data.buf[range_end_idx].code)) > 1) {
+            if ((tmp = wcwidth(vt_line->data.buf[range_end_idx - 1].code)) > 1) {
                 extra = (tmp - 1);
             }
-            if (range_end_idx && (tmp = wcwidth(vt_line->data.buf[range_end_idx].code)) > 2) {
-                extra = MAX(extra, tmp - 1);
+            if (range_end_idx && (tmp = wcwidth(vt_line->data.buf[range_end_idx - 2].code)) > 2) {
+                extra = MAX(extra, tmp - 2);
             }
             range_end_idx += extra;
-            extra = 0;
-            if (range_begin_idx) {
-                extra = wcwidth(vt_line->data.buf[range_begin_idx - 1].code);
-            }
-            if (range_begin_idx > 2) {
-                extra = MAX(wcwidth(vt_line->data.buf[range_begin_idx - 2].code) - 1, extra);
-            }
-            if (range_end_idx < length) {
-                range_end_idx += wcwidth(vt_line->data.buf[range_end_idx].code);
-            }
+            range_end_idx = MIN(range_end_idx, vt_line->data.size);
+            extra         = 0;
+            /* if (range_begin_idx) { */
+            /*     extra = MAX(wcwidth(vt_line->data.buf[range_begin_idx - 1].code),1); */
+            /* } */
+            /* if (range_begin_idx > 2) { */
+            /*     extra = MAX(wcwidth(vt_line->data.buf[range_begin_idx - 2].code) - 1, extra); */
+            /* } */
+            /* if (range_end_idx < length) { */
+            /*     range_end_idx += wcwidth(vt_line->data.buf[range_end_idx].code); */
+            /* } */
             _GfxOpenGL21_rasterize_line_range(gfx,
                                               vt,
                                               vt_line,
@@ -2101,6 +2108,11 @@ static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const
                                 ColorRGB_get_float(*clr_bg, 0),
                                 ColorRGB_get_float(*clr_bg, 1),
                                 ColorRGB_get_float(*clr_bg, 2));
+                    glUniform4f(gfx->font_shader_gray.uniforms[2].location,
+                                ColorRGB_get_float(*clr, 0),
+                                ColorRGB_get_float(*clr, 1),
+                                ColorRGB_get_float(*clr, 2),
+                                1.0f);
                 } else {
                     glUseProgram(gfx->image_shader.id);
                 }

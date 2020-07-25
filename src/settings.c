@@ -302,9 +302,9 @@ static void find_font()
                                                     settings.font_style_regular.str,
                                                     settings.font_size,
                                                     &is_bitmap);
-    if (is_bitmap) {
-        settings.lcd_filter = LCD_FILTER_NONE;
-    }
+    /* if (is_bitmap) { */
+    /*     settings.lcd_filter = LCD_FILTER_NONE; */
+    /* } */
 
     char* bold_file = FontconfigContext_get_file(&fc_context,
                                                  main_family,

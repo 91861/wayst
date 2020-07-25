@@ -195,7 +195,7 @@ FreetypeOutput* FreetypeFace_load_and_render_glyph(Freetype*     freetype,
     }
     freetype->output.left = self->face->glyph->bitmap_left;
     freetype->output.top  = self->face->glyph->bitmap_top;
-    if (is_packed) {
+    if (is_packed || self->output_type == FT_OUTPUT_GRAYSCALE) {
         freetype->output.type      = FT_OUTPUT_GRAYSCALE;
         freetype->output.alignment = 1;
     } else if (self->face->glyph->bitmap.pixel_mode == FT_PIXEL_MODE_BGRA) {
@@ -361,6 +361,8 @@ Freetype Freetype_new()
         default:
             ASSERT_UNREACHABLE
     }
+    self.target_output_type = output_type;
+
     /* for (...) */ {
         Vector_push_FreetypeStyledFamily(
           &self.primaries,
@@ -370,9 +372,8 @@ Freetype Freetype_new()
                                    settings.font_file_name_bold_italic.str,
                                    0,
                                    0,
-                                   output_type));
+                                   self.target_output_type));
     }
-    self.primary_output_type = Vector_first_FreetypeStyledFamily(&self.primaries)->output_type;
     /* for (...) */ {
         if (settings.font_file_name_fallback.str) {
             Vector_push_FreetypeFace(
@@ -398,8 +399,14 @@ void Freetype_load_fonts(Freetype* self)
          (i = Vector_iter_FreetypeStyledFamily(&self->primaries, i));) {
         FreetypeStyledFamily_load(self, i, settings.font_size, settings.font_dpi);
     }
+    self->primary_output_type = Vector_first_FreetypeStyledFamily(&self->primaries)->output_type;
     for (FreetypeFace* i = NULL; (i = Vector_iter_FreetypeFace(&self->symbol_faces, i));) {
-        FreetypeFace_load(self, i, settings.font_size, settings.font_dpi, FT_OUTPUT_RGB_H, false);
+        FreetypeFace_load(self,
+                          i,
+                          settings.font_size,
+                          settings.font_dpi,
+                          self->target_output_type,
+                          false);
     }
     for (FreetypeFace* i = NULL; (i = Vector_iter_FreetypeFace(&self->color_faces, i));) {
         FreetypeFace_load(self,
@@ -468,7 +475,6 @@ FreetypeOutput* Freetype_load_and_render_glyph(Freetype*              self,
             }
         }
     }
-
     if (self->symbol_faces.size) {
         for (FreetypeFace* i = NULL; (i = Vector_iter_FreetypeFace(&self->symbol_faces, i));) {
             output = FreetypeFace_load_and_render_glyph(self, i, codepoint);

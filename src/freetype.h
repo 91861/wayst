@@ -104,6 +104,7 @@ typedef struct
     Vector_FreetypeFace            symbol_faces;
     Vector_FreetypeFace            color_faces;
     enum FreetypeOutputTextureType primary_output_type;
+    enum FreetypeOutputTextureType target_output_type;
     uint32_t                       gw;
     uint16_t                       line_height_pixels, glyph_width_pixels;
     bool                           conversion_bitmap_initialized;

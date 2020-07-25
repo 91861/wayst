@@ -4,6 +4,7 @@
 #version 120
 
 uniform vec3 clr;  // font color
+uniform vec4 bclr; // blend(background) color
 
 uniform sampler2D tex;
 
@@ -13,8 +14,8 @@ void main() {
 
     vec3 c = texture2D(tex, tex_coord).rgb;
 
-    gl_FragData[0] = vec4(c.r * clr.r,
-                          c.r * clr.g,
-                          c.r * clr.b,
-                          c.r);
+    gl_FragData[0] = vec4(mix(bclr.r, clr.r, c.r),
+                          mix(bclr.g, clr.g, c.r),
+                          mix(bclr.b, clr.b, c.r),
+                          bclr.a + c.r);
 }

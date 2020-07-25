@@ -258,7 +258,7 @@ static const char* long_options_descriptions[][2] = {
 
     [OPT_DPI_IDX]           = { arg_int, "Font dpi (default: 96)" },
     [OPT_GLYPH_PADDING_IDX] = { "int:int?", "Glyph padding - horizontal[px]:vertical[px]" },
-    [OPT_LCD_ORDER_IDX]     = { arg_name, "Force LCD subpixel order: rgb, bgr" },
+    [OPT_LCD_ORDER_IDX]     = { arg_name, "Force LCD subpixel order: none, rgb, bgr" },
 
     [OPT_BLINK_IDX] = { "bool:int?:int?:int?",
                         "Blinking cursor - enable:rate[ms]:suspend[ms]:end[s](<0 never)" },
