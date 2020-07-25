@@ -435,14 +435,14 @@ __attribute__((hot)) static GlyphMapEntry* Cache_get_glyph(GfxOpenGL21*         
             return found;
         }
     }
-    FreetypeOutput*    output = Freetype_load_and_render_glyph(gfx->freetype, code, style);
+    FreetypeOutput* output = Freetype_load_and_render_glyph(gfx->freetype, code, style);
 
     if (!output) {
         WRN("Missing glyph %d\n", code)
         return NULL;
     }
-    
-    bool               scale  = false;
+
+    bool               scale = false;
     enum TextureFormat texture_format;
     enum GlyphColor    glyph_color;
     GLenum             internal_format;
@@ -642,8 +642,12 @@ void GfxOpenGL21_resize(Gfx* self, uint32_t w, uint32_t h)
 Pair_uint32_t GfxOpenGL21_get_char_size(Gfx* self)
 {
     GfxOpenGL21* gl21 = gfxOpenGL21(self);
-    int32_t      cols = MAX((gl21->win_w - 2 * settings.padding) / gl21->glyph_width_pixels, 0);
-    int32_t      rows = MAX((gl21->win_h - 2 * settings.padding) / gl21->line_height_pixels, 0);
+    int32_t      cols = MAX((gl21->win_w - 2 * settings.padding) /
+                         (gfxOpenGL21(self)->freetype->glyph_width_pixels + settings.padd_glyph_x),
+                       0);
+    int32_t      rows = MAX((gl21->win_h - 2 * settings.padding) /
+                         (gfxOpenGL21(self)->freetype->line_height_pixels + settings.padd_glyph_y),
+                       0);
     return (Pair_uint32_t){ .first = cols, .second = rows };
 }
 
@@ -1150,7 +1154,7 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_underline_ra
                 glDrawArrays(GL_LINES, 0, gfx->vec_vertex_buffer.size);
             }
             if (gfx->vec_vertex_buffer2.size) {
-                bound_resources = BOUND_RESOURCES_NONE;
+                *bound_resources = BOUND_RESOURCES_NONE;
                 Shader_use(&gfx->image_tint_shader);
                 glBindTexture(GL_TEXTURE_2D, gfx->squiggle_texture.id);
                 glUniform3f(gfx->image_tint_shader.uniforms[1].location,
@@ -1212,8 +1216,8 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
   size_t          visual_line_index,
   bool            is_for_blinking,
   int_fast8_t*    bound_resources,
-  double          texture_width,
-  double          texture_height,
+  int32_t         texture_width,
+  int32_t         texture_height,
   bool*           has_blinking_chars,
   bool*           has_underlined_chars)
 {
@@ -1221,19 +1225,13 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
     const double scalex = 2.0f / texture_width;
     const double scaley = 2.0f / texture_height;
 
-    float buffer[] = {
-        -1.0f, -1.0f, -1.0f, 1.0f,
-        0.0f, // overwritten
-        1.0f,
-        0.0f, // overwritten
-        -1.0f,
-    };
-
+    GLint     bg_pixels_begin          = range_begin_idx * gfx->glyph_width_pixels, bg_pixels_end;
     ColorRGBA active_bg_color          = settings.bg;
     VtRune*   each_rune                = vt_line->data.buf + range_begin_idx;
     VtRune*   same_bg_block_begin_rune = each_rune;
 
-    for (size_t idx_each_rune = range_begin_idx; idx_each_rune <= range_end_idx; ++idx_each_rune) {
+    for (size_t idx_each_rune = range_begin_idx; idx_each_rune <= range_end_idx;) {
+
         each_rune = vt_line->data.buf + idx_each_rune;
         if (likely(idx_each_rune != range_end_idx)) {
             if (unlikely(each_rune->blinkng)) {
@@ -1250,37 +1248,23 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
 #define L_CALC_BG_COLOR                                                                            \
     Vt_is_cell_selected(vt, idx_each_rune, visual_line_index) ? settings.bghl : each_rune->bg
 
-        if (idx_each_rune == range_end_idx || !ColorRGBA_eq(L_CALC_BG_COLOR, active_bg_color)) {
+        if (idx_each_rune == range_end_idx ||
+            idx_each_rune == range_end_idx -1 ||
+            (range_begin_idx && idx_each_rune == range_begin_idx +1) ||
+            !ColorRGBA_eq(L_CALC_BG_COLOR, active_bg_color)) {
             int32_t extra_width = 0;
 
-            // fb was cleared with settings.bg
-            if (!ColorRGBA_eq(active_bg_color, settings.bg)) {
-                if (idx_each_rune > 1) {
-                    extra_width = wcwidth(vt_line->data.buf[idx_each_rune - 1].code) - 1;
-                }
-                buffer[4] = buffer[6] = -1.0f + (idx_each_rune + extra_width) * scalex *
-                                                  gfx->glyph_width_pixels; // set buffer end
-
-                if (*bound_resources != BOUND_RESOURCES_BG) {
-                    glBindBuffer(GL_ARRAY_BUFFER, gfx->line_bg_vao.vbo);
-                    glVertexAttribPointer(gfx->bg_shader.attribs->location,
-                                          2,
-                                          GL_FLOAT,
-                                          GL_FALSE,
-                                          0,
-                                          0);
-                    Shader_use(&gfx->bg_shader);
-                    glUniform2f(gfx->bg_shader.uniforms[0].location, 0.0f, 0.0f);
-                    *bound_resources = BOUND_RESOURCES_BG;
-                }
-                glBufferData(GL_ARRAY_BUFFER, sizeof buffer, buffer, GL_STREAM_DRAW);
-                glUniform4f(gfx->bg_shader.uniforms[1].location,
-                            ColorRGBA_get_float(active_bg_color, 0),
-                            ColorRGBA_get_float(active_bg_color, 1),
-                            ColorRGBA_get_float(active_bg_color, 2),
-                            ColorRGBA_get_float(active_bg_color, 3));
-                glDrawArrays(GL_QUADS, 0, 4);
+            if (idx_each_rune > 1) {
+                extra_width = wcwidth(vt_line->data.buf[idx_each_rune - 1].code) - 1;
             }
+            bg_pixels_end = (idx_each_rune + extra_width) * gfx->glyph_width_pixels;
+            glEnable(GL_SCISSOR_TEST);
+            glScissor(bg_pixels_begin, 0, bg_pixels_end - bg_pixels_begin, texture_height);
+            glClearColor(ColorRGBA_get_float(active_bg_color, 0),
+                         ColorRGBA_get_float(active_bg_color, 1),
+                         ColorRGBA_get_float(active_bg_color, 2),
+                         ColorRGBA_get_float(active_bg_color, 3));
+            glClear(GL_COLOR_BUFFER_BIT);
 
             { // for each block of characters with the same background color
                 ColorRGB      active_fg_color              = settings.fg;
@@ -1360,11 +1344,11 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                                     }
                                     atlas_offset =
                                       Atlas_select(source_atlas, each_rune_filtered_visible->code);
-                                    g       = &source_atlas->char_info[atlas_offset];
-                                    float h = (float)g->rows * scaley;
-                                    float w = (float)g->width * scalex;
-                                    float t = (float)g->top * scaley;
-                                    float l = (float)g->left * scalex;
+                                    g        = &source_atlas->char_info[atlas_offset];
+                                    double h = (double)g->rows * scaley;
+                                    double w = (double)g->width * scalex;
+                                    double t = (double)g->top * scaley;
+                                    double l = (double)g->left * scalex;
 
                                     /* (scalex/y * 0.5) at the end to put it in the middle of the
                                      * pixel */
@@ -1527,13 +1511,13 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                                     if (!g) {
                                         continue;
                                     }
-                                    float h   = scaley * g->tex.h;
-                                    float w   = scalex * g->tex.w;
-                                    float l   = scalex * g->left;
-                                    float t   = scaley * g->top;
-                                    float gsx = -0.1 / g->tex.w;
-                                    float gsy = -0.05 / g->tex.h;
-                                    if (unlikely(h > 2.0f)) {
+                                    double h   = scaley * g->tex.h;
+                                    double w   = scalex * g->tex.w;
+                                    double l   = scalex * g->left;
+                                    double t   = scaley * g->top;
+                                    double gsx = -0.1 / g->tex.w;
+                                    double gsy = -0.05 / g->tex.h;
+                                    if (g->color == GLYPH_COLOR_COLOR && unlikely(h > 2.0f)) {
                                         const float scale = h / 2.0f;
                                         h /= scale;
                                         w /= scale;
@@ -1543,7 +1527,7 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                                         gsy = 0;
                                     }
                                     float x3 = -1.0f +
-                                               (double)column * gfx->glyph_width_pixels * scalex +
+                                               (double)(column * gfx->glyph_width_pixels) * scalex +
                                                l + (scalex * 0.5);
                                     float y3 = -1.0f + (double)gfx->pen_begin_pixels * scaley - t +
                                                (scaley * 0.5);
@@ -1693,9 +1677,7 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                 }     // end for each char
             }         // end for each block with the same bg
 
-            // set background buffer start
-            buffer[0] = buffer[2] =
-              -1.0f + (idx_each_rune + extra_width) * scalex * gfx->glyph_width_pixels;
+            bg_pixels_begin = (idx_each_rune + extra_width) * gfx->glyph_width_pixels;
 
             int clip_begin = idx_each_rune * gfx->glyph_width_pixels;
             glEnable(GL_SCISSOR_TEST);
@@ -1711,6 +1693,9 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                 }
             }
         } // end if bg color changed
+
+        int w = wcwidth(vt_line->data.buf[idx_each_rune].code);
+        idx_each_rune += w > 1 ? w : 1;
     }     // end for each VtRune
 }
 
@@ -1733,9 +1718,9 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
 
     const size_t length               = vt_line->data.size;
     bool         has_blinking_chars   = false;
-    double       texture_width        = length * gfx->glyph_width_pixels;
-    double       actual_texture_width = texture_width;
-    double       texture_height       = gfx->line_height_pixels;
+    uint32_t     texture_width        = length * gfx->glyph_width_pixels;
+    uint32_t     actual_texture_width = texture_width;
+    uint32_t     texture_height       = gfx->line_height_pixels;
     bool         has_underlined_chars = false;
 
     // Try to reuse the texture that is already there
@@ -1774,6 +1759,7 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
 
     Framebuffer_assert_complete(&gfx->line_framebuffer);
 
+    glViewport(0, 0, texture_width, texture_height);
     glBindTexture(GL_TEXTURE_2D, 0);
     glUseProgram(0);
     glClearColor(ColorRGBA_get_float(settings.bg, 0),
@@ -1794,7 +1780,6 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
     glClear(GL_COLOR_BUFFER_BIT);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glViewport(0, 0, texture_width, texture_height);
 
     /* Keep track of gl state to avoid unnececery changes */
     int_fast8_t bound_resources = BOUND_RESOURCES_NONE;
@@ -1811,6 +1796,16 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
                 extra = MAX(extra, tmp - 1);
             }
             range_end_idx += extra;
+            extra = 0;
+            if (range_begin_idx) {
+                extra = wcwidth(vt_line->data.buf[range_begin_idx - 1].code);
+            }
+            if (range_begin_idx > 2) {
+                extra = MAX(wcwidth(vt_line->data.buf[range_begin_idx - 2].code) - 1, extra);
+            }
+            if (range_end_idx < length) {
+                range_end_idx += wcwidth(vt_line->data.buf[range_end_idx].code);
+            }
             _GfxOpenGL21_rasterize_line_range(gfx,
                                               vt,
                                               vt_line,

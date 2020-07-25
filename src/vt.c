@@ -2672,17 +2672,18 @@ __attribute__((hot)) static inline void Vt_insert_char_at_cursor(Vt* self, VtRun
         c.bg         = ColorRGBA_from_RGB(tmp);
     }
 
-    /* Vt_mark_proxy_fully_damaged(self, self->cursor.row); */
     Vt_mark_proxy_damaged_cell(self, self->cursor.row, self->cursor.col);
     self->lines.buf[self->cursor.row].data.buf[self->cursor.col] = c;
 
     ++self->cursor.col;
 
     if (unlikely(wcwidth(c.code) == 2)) {
+        VtRune tmp = c;
+        tmp.code = ' ';
         if (self->lines.buf[self->cursor.row].data.size <= self->cursor.col) {
-            Vector_push_VtRune(&self->lines.buf[self->cursor.row].data, blank_space);
+            Vector_push_VtRune(&self->lines.buf[self->cursor.row].data, tmp);
         } else {
-            self->lines.buf[self->cursor.row].data.buf[self->cursor.col] = blank_space;
+            self->lines.buf[self->cursor.row].data.buf[self->cursor.col] = tmp;
         }
 
         ++self->cursor.col;

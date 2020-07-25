@@ -128,7 +128,7 @@ typedef struct
     {
         /* Range of cells that should be repainted if type == RANGE or
          * not repainted if type == SHIFT */
-        uint8_t front, end;
+        uint32_t front, end;
 
         /* Number of cells the existing contents should be moved right */
         int8_t shift;

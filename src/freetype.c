@@ -119,7 +119,7 @@ void FreetypeFace_load(Freetype*                      freetype,
         ERR("failed to load font %s", self->file_name);
     }
     bool is_packed = self->face->glyph->bitmap.pixel_mode == FT_PIXEL_MODE_MONO;
-    if (is_packed) {
+    if (is_packed && self->output_type != FT_OUTPUT_COLOR_BGRA) {
         self->output_type = FT_OUTPUT_GRAYSCALE;
     }
     self->glyph_width_pixels = self->face->glyph->advance.x / 64;
