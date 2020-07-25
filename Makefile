@@ -77,3 +77,6 @@ cleanall:
 
 install:
 	@cp $(EXEC) $(INSTALL_DIR)/
+
+uninstall:
+	rm $(INSTALL_DIR)/$(EXEC)
