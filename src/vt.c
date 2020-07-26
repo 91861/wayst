@@ -120,13 +120,13 @@ Vector_char Vt_select_region_to_string(Vt* self)
         ret = line_to_string(&self->lines.buf[begin_line].data,
                              begin_char_idx,
                              0,
-                             self->lines.buf[begin_line+1].rejoinable ? "" : "\n");
+                             self->lines.buf[begin_line + 1].rejoinable ? "" : "\n");
         Vector_pop_char(&ret);
         for (size_t i = begin_line + 1; i < end_line; ++i) {
             tmp = line_to_string(&self->lines.buf[i].data,
                                  0,
                                  0,
-                                 self->lines.buf[i+1].rejoinable ? "" : "\n");
+                                 self->lines.buf[i + 1].rejoinable ? "" : "\n");
             Vector_pushv_char(&ret, tmp.buf, tmp.size - 1);
             Vector_destroy_char(&tmp);
         }
@@ -2679,7 +2679,7 @@ __attribute__((hot)) static inline void Vt_insert_char_at_cursor(Vt* self, VtRun
 
     if (unlikely(wcwidth(c.code) == 2)) {
         VtRune tmp = c;
-        tmp.code = ' ';
+        tmp.code   = ' ';
         if (self->lines.buf[self->cursor.row].data.size <= self->cursor.col) {
             Vector_push_VtRune(&self->lines.buf[self->cursor.row].data, tmp);
         } else {
@@ -2930,14 +2930,19 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
                     self->tabstop           = 8;
                     self->parser.state      = PARSER_STATE_LITERAL;
                     self->scroll_region_top = 0;
+                    self->charset_g0        = NULL;
+                    self->charset_g1        = NULL;
+                    self->charset_g2        = NULL;
+                    self->charset_g3        = NULL;
 
                     self->scroll_region_bottom =
                       CALL_FP(self->callbacks.on_number_of_cells_requested,
                               self->callbacks.user_data)
                         .second;
 
-                    for (size_t* i = NULL; Vector_iter_size_t(&self->title_stack, i);)
+                    for (size_t* i = NULL; Vector_iter_size_t(&self->title_stack, i);) {
                         free((char*)*i);
+                    }
                     Vector_destroy_size_t(&self->title_stack);
                     self->title_stack = Vector_new_size_t();
                     return;
