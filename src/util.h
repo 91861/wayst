@@ -300,13 +300,14 @@ static inline bool strtob(const char* restrict str)
 }
 
 
-static inline bool unicode_is_combinable(char32_t codepoint)
+static inline bool unicode_is_combining(char32_t codepoint)
 {
     switch (codepoint) {
-    case 688 ... 767 :
+    case 0xFE20 ... 0xFE2F:
     case 0x1AB0 ... 0x1AFF:
     case 0x1DC0 ... 0x1DFF:
     case 0x20D0 ... 0x20FF:
+    case 0x0300 ... 0x036F:
         return true;
     default:
         return false;

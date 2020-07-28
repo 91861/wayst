@@ -28,6 +28,11 @@
 #include "util.h"
 #include "vector.h"
 
+
+#ifndef VT_RUNE_MAX_COMBINE
+#define VT_RUNE_MAX_COMBINE 2
+#endif
+
 enum MouseButton
 {
     MOUSE_BTN_LEFT       = 1,
@@ -56,6 +61,7 @@ typedef struct Cursor
 typedef struct __attribute__((packed))
 {
     char32_t code;
+    char32_t combine[VT_RUNE_MAX_COMBINE];
 
     ColorRGB  fg;
     ColorRGB  line;
@@ -280,6 +286,8 @@ typedef struct _Vt
     uint8_t tabstop;
 
     Vector_VtLine lines, alt_lines;
+
+    VtRune* last_interted;
 
     Cursor cursor;
 

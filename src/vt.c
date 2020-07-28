@@ -15,6 +15,10 @@
 #include <termios.h>
 #include <uchar.h>
 
+#ifndef NOUTF8PROC
+#include <utf8proc.h>
+#endif
+
 #include <xkbcommon/xkbcommon.h>
 
 #include "wcwidth/wcwidth.h"
@@ -2037,6 +2041,7 @@ static void Vt_handle_SGR_code(Vt* self, char* command)
 
 static inline void Vt_alt_buffer_on(Vt* self, bool save_mouse)
 {
+    self->last_interted = NULL;
     Vt_visual_scroll_reset(self);
     Vt_select_end(self);
     self->alt_lines = self->lines;
@@ -2052,6 +2057,7 @@ static inline void Vt_alt_buffer_on(Vt* self, bool save_mouse)
 
 static inline void Vt_alt_buffer_off(Vt* self, bool save_mouse)
 {
+    self->last_interted = NULL;
     Vt_select_end(self);
     if (self->alt_lines.buf) {
         Vector_destroy_VtLine(&self->lines);
@@ -2222,12 +2228,9 @@ static void Vt_handle_OSC(Vt* self, char c)
     if (is_generic_sequence_terminated(self->parser.active_sequence.buf,
                                        self->parser.active_sequence.size)) {
         Vector_push_char(&self->parser.active_sequence, '\0');
-
         char*              seq    = self->parser.active_sequence.buf;
         Vector_Vector_char tokens = string_split_on(seq, ";:", NULL, "\a\b\n\t\v");
-
-        int arg = strtol(tokens.buf[0].buf + 1, NULL, 10);
-
+        int                arg    = strtol(tokens.buf[0].buf + 1, NULL, 10);
         switch (arg) {
             /* Change Icon Name and Window Title */
             case 0:
@@ -2284,30 +2287,12 @@ static void Vt_handle_OSC(Vt* self, char c)
                 break;
 
             /* sets dynamic colors for xterm colorOps */
-            case 10:
-            case 11:
-            case 12:
-            case 13:
-            case 14:
-            case 15:
-            case 16:
-            case 17:
-            case 18:
-            case 19:
+            case 10 ... 19:
                 WRN("Dynamic colors not implemented\n");
                 break;
 
             /* coresponding colorOps resets */
-            case 110:
-            case 111:
-            case 112:
-            case 113:
-            case 114:
-            case 115:
-            case 116:
-            case 117:
-            case 118:
-            case 119:
+            case 110 ... 119:
                 // TODO: reset things, when there are things to reset
                 break;
 
@@ -2362,6 +2347,7 @@ static inline void Vt_reset_text_attribs(Vt* self)
  * Move cursor to first column */
 static inline void Vt_carriage_return(Vt* self)
 {
+    self->last_interted = NULL;
     Vt_move_cursor_to_column(self, 0);
 }
 
@@ -2369,6 +2355,7 @@ static inline void Vt_carriage_return(Vt* self)
  * make a new empty line at cursor position, scroll down contents below */
 static inline void Vt_insert_line(Vt* self)
 {
+    self->last_interted = NULL;
     Vector_insert_VtLine(&self->lines,
                          Vector_at_VtLine(&self->lines, self->cursor.row),
                          VtLine_new());
@@ -2386,6 +2373,7 @@ static inline void Vt_insert_line(Vt* self)
  * the same as insert line, but adds before cursor line */
 static inline void Vt_reverse_line_feed(Vt* self)
 {
+    self->last_interted = NULL;
     Vector_remove_at_VtLine(&self->lines,
                             MIN(Vt_bottom_line(self), Vt_get_scroll_region_bottom(self) + 1),
                             1);
@@ -2400,6 +2388,7 @@ static inline void Vt_reverse_line_feed(Vt* self)
  * delete active line, content below scrolls up */
 static inline void Vt_delete_line(Vt* self)
 {
+    self->last_interted = NULL;
     Vector_remove_at_VtLine(&self->lines, self->cursor.row, 1);
 
     Vector_insert_VtLine(
@@ -2415,6 +2404,7 @@ static inline void Vt_delete_line(Vt* self)
 
 static inline void Vt_scroll_up(Vt* self)
 {
+    self->last_interted = NULL;
     Vector_insert_VtLine(
       &self->lines,
       Vector_at_VtLine(&self->lines,
@@ -2431,6 +2421,7 @@ static inline void Vt_scroll_up(Vt* self)
 
 static inline void Vt_scroll_down(Vt* self)
 {
+    self->last_interted = NULL;
     Vector_remove_at_VtLine(&self->lines,
                             MAX(Vt_top_line(self), Vt_get_scroll_region_bottom(self) + 1),
                             1);
@@ -2446,6 +2437,7 @@ static inline void Vt_scroll_down(Vt* self)
  * Move cursor one cell down if possible */
 static inline void Vt_cursor_down(Vt* self)
 {
+    self->last_interted = NULL;
     if (self->cursor.row < Vt_bottom_line(self))
         ++self->cursor.row;
     CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
@@ -2455,6 +2447,7 @@ static inline void Vt_cursor_down(Vt* self)
  * Move cursor one cell up if possible */
 static inline void Vt_cursor_up(Vt* self)
 {
+    self->last_interted = NULL;
     if (self->cursor.row > Vt_top_line(self))
         --self->cursor.row;
     CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
@@ -2464,6 +2457,7 @@ static inline void Vt_cursor_up(Vt* self)
  * Move cursor one cell to the left if possible */
 static inline void Vt_cursor_left(Vt* self)
 {
+    self->last_interted = NULL;
     if (self->cursor.col)
         --self->cursor.col;
     CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
@@ -2473,6 +2467,7 @@ static inline void Vt_cursor_left(Vt* self)
  * Move cursor one cell to the right if possible */
 static inline void Vt_cursor_right(Vt* self)
 {
+    self->last_interted = NULL;
     if (self->cursor.col < self->ws.ws_col)
         ++self->cursor.col;
     CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
@@ -2663,20 +2658,21 @@ __attribute__((hot)) static inline void Vt_insert_char_at_cursor(Vt* self, VtRun
         }
     }
 
-    while (self->lines.buf[self->cursor.row].data.size <= self->cursor.col)
+    while (self->lines.buf[self->cursor.row].data.size <= self->cursor.col) {
         Vector_push_VtRune(&self->lines.buf[self->cursor.row].data, blank_space);
-
+    }
     if (unlikely(self->parser.color_inverted)) {
         ColorRGB tmp = c.fg;
         c.fg         = ColorRGB_from_RGBA(c.bg);
         c.bg         = ColorRGBA_from_RGB(tmp);
     }
-
-    Vt_mark_proxy_damaged_cell(self, self->cursor.row, self->cursor.col);
-    self->lines.buf[self->cursor.row].data.buf[self->cursor.col] = c;
-
+    VtRune* insert_point = &self->lines.buf[self->cursor.row].data.buf[self->cursor.col];
+    if (likely(memcmp(insert_point, &c, sizeof(VtRune)))) {
+        Vt_mark_proxy_damaged_cell(self, self->cursor.row, self->cursor.col);
+        self->lines.buf[self->cursor.row].data.buf[self->cursor.col] = c;
+    }
+    self->last_interted = &self->lines.buf[self->cursor.row].data.buf[self->cursor.col];
     ++self->cursor.col;
-
     if (unlikely(wcwidth(c.code) == 2)) {
         VtRune tmp = c;
         tmp.code   = ' ';
@@ -2685,7 +2681,6 @@ __attribute__((hot)) static inline void Vt_insert_char_at_cursor(Vt* self, VtRun
         } else {
             self->lines.buf[self->cursor.row].data.buf[self->cursor.col] = tmp;
         }
-
         ++self->cursor.col;
     }
 }
@@ -2746,8 +2741,9 @@ static inline void Vt_insert_new_line(Vt* self)
  * Move cursor to given location (@param rows is relative to the screen!) */
 static inline void Vt_move_cursor(Vt* self, uint32_t columns, uint32_t rows)
 {
-    self->cursor.row = MIN(rows, (uint32_t)self->ws.ws_row - 1) + Vt_top_line(self);
-    self->cursor.col = MIN(columns, (uint32_t)self->ws.ws_col);
+    self->last_interted = NULL;
+    self->cursor.row    = MIN(rows, (uint32_t)self->ws.ws_row - 1) + Vt_top_line(self);
+    self->cursor.col    = MIN(columns, (uint32_t)self->ws.ws_col);
     CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
 }
 
@@ -2755,8 +2751,99 @@ static inline void Vt_move_cursor(Vt* self, uint32_t columns, uint32_t rows)
  * Move cursor to given column */
 static inline void Vt_move_cursor_to_column(Vt* self, uint32_t columns)
 {
-    self->cursor.col = MIN(columns, (uint32_t)self->ws.ws_col);
+    self->last_interted = NULL;
+    self->cursor.col    = MIN(columns, (uint32_t)self->ws.ws_col);
     CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
+}
+
+/**
+ * Add a character as a combining character for that rune */
+static inline void VtRune_push_combining(VtRune* self, char32_t codepoint)
+{
+    ASSERT(unicode_is_combining(codepoint), "must be a combining character");
+    for (uint_fast8_t i = 0; i < ARRAY_SIZE(self->combine); ++i) {
+        if (!self->combine[i]) {
+            self->combine[i] = codepoint;
+            return;
+        }
+    }
+    WRN("Combining character limit (%zu) exceeded\n", ARRAY_SIZE(self->combine));
+}
+
+/**
+ * Try to interpret a combining character as an SGR property */
+static inline bool VtRune_try_normalize_as_property(VtRune* self, char32_t codepoint)
+{
+    switch (codepoint) {
+        case 0x00001AB6: /* COMBINING WIGGLY LINE BELOW */
+            if (!self->linecolornotdefault) {
+                self->curlyunderline = true;
+                return true;
+            }
+            break;
+        case 0x00000332: /* COMBINING UNDERLINE */
+            if (!self->linecolornotdefault) {
+                self->underlined = true;
+                return true;
+            }
+            break;
+        case 0x00000333: /* COMBINING DOUBLE LOW LINE */
+            if (!self->linecolornotdefault) {
+                self->doubleunderline = true;
+                return true;
+            }
+            break;
+        case 0x00000305: /* COMBINING OVERLINE */
+            if (!self->linecolornotdefault) {
+                self->overline = true;
+                return true;
+            }
+            break;
+        case 0x00000336: /* COMBINING LONG STROKE OVERLAY */
+            if (!self->linecolornotdefault) {
+                self->strikethrough = true;
+                return true;
+            }
+            break;
+    }
+    return false;
+}
+
+/**
+ * Try to do something about combinable characters */
+static inline void Vt_handle_combinable(Vt* self, char32_t c)
+{
+    if (self->last_interted) {
+        if (VtRune_try_normalize_as_property(self->last_interted, c)) {
+            return;
+        }
+#ifndef NOUTF8PROC
+        if (self->last_interted->combine[0]) {
+#endif
+            // Already contains a combining char that failed to normalize
+            VtRune_push_combining(self->last_interted, c);
+#ifndef NOUTF8PROC
+        } else {
+            mbstate_t mbs;
+            memset(&mbs, 0, sizeof(mbs));
+            char   buff[MB_CUR_MAX * 2 + 1];
+            size_t oft = c32rtomb(buff, self->last_interted->code, &mbs);
+            buff[c32rtomb(buff + oft, c, &mbs) + oft] = 0;
+            size_t   old_len                          = strlen(buff);
+            char*    res     = (char*)utf8proc_NFC((const utf8proc_uint8_t*)buff);
+            char32_t conv[2] = { 0, 0 };
+            if (old_len == strlen(res)) {
+                VtRune_push_combining(self->last_interted, c);
+            } else if (mbrtoc32(conv, res, ARRAY_SIZE(buff) - 1, &mbs) < 1) {
+                // conversion failed
+                WRN("unicode normalization failed %s", strerror(errno));
+            } else {
+                self->last_interted->code = conv[0];
+            }
+            free(res);
+        }
+#endif
+    }
 }
 
 __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_literal(Vt* self, char c)
@@ -2775,8 +2862,8 @@ __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_litera
         } else if (rd != (size_t)-2) {
             /* sequence is complete */
             self->parser.in_mb_seq = false;
-            if (unlikely(unicode_is_combinable(res))) {
-                WRN("Combining unicodce diacritical marks not supported\n");
+            if (unlikely(unicode_is_combining(res))) {
+                Vt_handle_combinable(self, res);
                 return;
             }
             VtRune new_rune = self->parser.char_state;
@@ -2825,10 +2912,12 @@ __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_litera
                 }
                 VtRune new_char = self->parser.char_state;
                 new_char.code   = c;
-                if (unlikely((bool)self->charset_g0))
+                if (unlikely((bool)self->charset_g0)) {
                     new_char.code = self->charset_g0(c);
-                if (unlikely((bool)self->charset_g1))
+                }
+                if (unlikely((bool)self->charset_g1)) {
                     new_char.code = self->charset_g1(c);
+                }
                 Vt_insert_char_at_cursor(self, new_char);
             }
         }
@@ -2934,12 +3023,11 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
                     self->charset_g1        = NULL;
                     self->charset_g2        = NULL;
                     self->charset_g3        = NULL;
-
+                    self->last_interted     = NULL;
                     self->scroll_region_bottom =
                       CALL_FP(self->callbacks.on_number_of_cells_requested,
                               self->callbacks.user_data)
                         .second;
-
                     for (size_t* i = NULL; Vector_iter_size_t(&self->title_stack, i);) {
                         free((char*)*i);
                     }

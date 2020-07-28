@@ -29,6 +29,13 @@ else
 	LDFLAGS = -s -O2 -flto
 endif
 
+ifeq ($(shell ldconfig -p | grep libutf8proc.so > /dev/null || echo fail),fail)
+$(info libutf8proc not found, unicode normalization will be disabled)
+	CFLAGS += -DNOUTF8PROC
+else
+	LDLIBS += -lutf8proc
+endif
+
 CCWNO = -Wall -Wextra -Wno-unused-parameter -Wno-address -Wno-unused-function -Werror=implicit-function-declaration
 
 SRCS = $(wildcard $(SRC_DIR)/*.c wildcard $(SRC_DIR)/wcwidth/wcwidth.c)
@@ -79,4 +86,4 @@ install:
 	@cp $(EXEC) $(INSTALL_DIR)/
 
 uninstall:
-	rm $(INSTALL_DIR)/$(EXEC)
+	$(RM) $(INSTALL_DIR)/$(EXEC)
