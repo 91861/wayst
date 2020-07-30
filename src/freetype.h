@@ -20,6 +20,7 @@
 
 enum FreetypeFontStyle
 {
+    FT_STYLE_NONE,
     FT_STYLE_REGULAR,
     FT_STYLE_BOLD,
     FT_STYLE_ITALIC,
@@ -45,8 +46,8 @@ typedef struct
     void*                          pixels;
     enum FreetypeOutputTextureType type;
     bool                           rgb_flip;
+    enum FreetypeFontStyle         style;
 } FreetypeOutput;
-
 
 static void FreetypeOutput_print(FreetypeOutput* self)
 {
@@ -117,7 +118,7 @@ void FreetypeFace_load(Freetype*                      freetype,
                        uint32_t                       size,
                        uint32_t                       dpi,
                        enum FreetypeOutputTextureType output_type,
-                       bool warn_not_fixed);
+                       bool                           warn_not_fixed);
 
 void FreetypeFace_unload(FreetypeFace* self);
 

@@ -30,7 +30,7 @@ typedef GLXContext (
 
 typedef void (*glXSwapIntervalARBProc)(Display* dpy, GLXDrawable drawable, int interval);
 
-glXSwapIntervalARBProc glXSwapIntervalEXT = NULL;
+glXSwapIntervalARBProc __attribute__((weak)) glXSwapIntervalEXT = NULL;
 
 static WindowStatic* global;
 

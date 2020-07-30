@@ -12,47 +12,47 @@
 
 #include "util.h"
 
-extern PFNGLBUFFERSUBDATAARBPROC        glBufferSubData;
-extern PFNGLUNIFORM4FPROC               glUniform4f;
-extern PFNGLUNIFORM3FPROC               glUniform3f;
-extern PFNGLUNIFORM2FPROC               glUniform2f;
-extern PFNGLBUFFERDATAPROC              glBufferData;
-extern PFNGLDELETEPROGRAMPROC           glDeleteProgram;
-extern PFNGLUSEPROGRAMPROC              glUseProgram;
-extern PFNGLGETUNIFORMLOCATIONPROC      glGetUniformLocation;
-extern PFNGLGETATTRIBLOCATIONPROC       glGetAttribLocation;
-extern PFNGLDELETESHADERPROC            glDeleteShader;
-extern PFNGLDETACHSHADERPROC            glDetachShader;
-extern PFNGLGETPROGRAMINFOLOGPROC       glGetProgramInfoLog;
-extern PFNGLGETPROGRAMIVPROC            glGetProgramiv;
-extern PFNGLLINKPROGRAMPROC             glLinkProgram;
-extern PFNGLATTACHSHADERPROC            glAttachShader;
-extern PFNGLCOMPILESHADERPROC           glCompileShader;
-extern PFNGLSHADERSOURCEPROC            glShaderSource;
-extern PFNGLCREATESHADERPROC            glCreateShader;
-extern PFNGLCREATEPROGRAMPROC           glCreateProgram;
-extern PFNGLGETSHADERINFOLOGPROC        glGetShaderInfoLog;
-extern PFNGLGETSHADERIVPROC             glGetShaderiv;
-extern PFNGLDELETEBUFFERSPROC           glDeleteBuffers;
-extern PFNGLVERTEXATTRIBPOINTERPROC     glVertexAttribPointer;
-extern PFNGLENABLEVERTEXATTRIBARRAYPROC glEnableVertexAttribArray;
-extern PFNGLBINDBUFFERPROC              glBindBuffer;
-extern PFNGLGENBUFFERSPROC              glGenBuffers;
-extern PFNGLDELETEFRAMEBUFFERSPROC      glDeleteFramebuffers;
-extern PFNGLFRAMEBUFFERRENDERBUFFERPROC glFramebufferRenderbuffer;
-extern PFNGLRENDERBUFFERSTORAGEPROC     glRenderbufferStorage;
-extern PFNGLBINDBUFFERPROC              glBindBuffer;
-extern PFNGLGENBUFFERSPROC              glGenBuffers;
-extern PFNGLDELETEFRAMEBUFFERSPROC      glDeleteFramebuffers;
-extern PFNGLFRAMEBUFFERTEXTURE2DPROC    glFramebufferTexture2D;
-extern PFNGLBINDFRAMEBUFFERPROC         glBindFramebuffer;
-extern PFNGLBINDRENDERBUFFERPROC        glBindRenderbuffer;
-extern PFNGLGENRENDERBUFFERSPROC        glGenRenderbuffers;
-extern PFNGLGENFRAMEBUFFERSPROC         glGenFramebuffers;
-extern PFNGLGENERATEMIPMAPPROC          glGenerateMipmap;
+extern PFNGLBUFFERSUBDATAARBPROC        __attribute__((weak)) glBufferSubData;
+extern PFNGLUNIFORM4FPROC               __attribute__((weak)) glUniform4f;
+extern PFNGLUNIFORM3FPROC               __attribute__((weak)) glUniform3f;
+extern PFNGLUNIFORM2FPROC               __attribute__((weak)) glUniform2f;
+extern PFNGLBUFFERDATAPROC              __attribute__((weak)) glBufferData;
+extern PFNGLDELETEPROGRAMPROC           __attribute__((weak)) glDeleteProgram;
+extern PFNGLUSEPROGRAMPROC              __attribute__((weak)) glUseProgram;
+extern PFNGLGETUNIFORMLOCATIONPROC      __attribute__((weak)) glGetUniformLocation;
+extern PFNGLGETATTRIBLOCATIONPROC       __attribute__((weak)) glGetAttribLocation;
+extern PFNGLDELETESHADERPROC            __attribute__((weak)) glDeleteShader;
+extern PFNGLDETACHSHADERPROC            __attribute__((weak)) glDetachShader;
+extern PFNGLGETPROGRAMINFOLOGPROC       __attribute__((weak)) glGetProgramInfoLog;
+extern PFNGLGETPROGRAMIVPROC            __attribute__((weak)) glGetProgramiv;
+extern PFNGLLINKPROGRAMPROC             __attribute__((weak)) glLinkProgram;
+extern PFNGLATTACHSHADERPROC            __attribute__((weak)) glAttachShader;
+extern PFNGLCOMPILESHADERPROC           __attribute__((weak)) glCompileShader;
+extern PFNGLSHADERSOURCEPROC            __attribute__((weak)) glShaderSource;
+extern PFNGLCREATESHADERPROC            __attribute__((weak)) glCreateShader;
+extern PFNGLCREATEPROGRAMPROC           __attribute__((weak)) glCreateProgram;
+extern PFNGLGETSHADERINFOLOGPROC        __attribute__((weak)) glGetShaderInfoLog;
+extern PFNGLGETSHADERIVPROC             __attribute__((weak)) glGetShaderiv;
+extern PFNGLDELETEBUFFERSPROC           __attribute__((weak)) glDeleteBuffers;
+extern PFNGLVERTEXATTRIBPOINTERPROC     __attribute__((weak)) glVertexAttribPointer;
+extern PFNGLENABLEVERTEXATTRIBARRAYPROC __attribute__((weak)) glEnableVertexAttribArray;
+extern PFNGLBINDBUFFERPROC              __attribute__((weak)) glBindBuffer;
+extern PFNGLGENBUFFERSPROC              __attribute__((weak)) glGenBuffers;
+extern PFNGLDELETEFRAMEBUFFERSPROC      __attribute__((weak)) glDeleteFramebuffers;
+extern PFNGLFRAMEBUFFERRENDERBUFFERPROC __attribute__((weak)) glFramebufferRenderbuffer;
+extern PFNGLRENDERBUFFERSTORAGEPROC     __attribute__((weak)) glRenderbufferStorage;
+extern PFNGLBINDBUFFERPROC              __attribute__((weak)) glBindBuffer;
+extern PFNGLGENBUFFERSPROC              __attribute__((weak)) glGenBuffers;
+extern PFNGLDELETEFRAMEBUFFERSPROC      __attribute__((weak)) glDeleteFramebuffers;
+extern PFNGLFRAMEBUFFERTEXTURE2DPROC    __attribute__((weak)) glFramebufferTexture2D;
+extern PFNGLBINDFRAMEBUFFERPROC         __attribute__((weak)) glBindFramebuffer;
+extern PFNGLBINDRENDERBUFFERPROC        __attribute__((weak)) glBindRenderbuffer;
+extern PFNGLGENRENDERBUFFERSPROC        __attribute__((weak)) glGenRenderbuffers;
+extern PFNGLGENFRAMEBUFFERSPROC         __attribute__((weak)) glGenFramebuffers;
+extern PFNGLGENERATEMIPMAPPROC          __attribute__((weak)) glGenerateMipmap;
 #ifdef DEBUG
-extern PFNGLDEBUGMESSAGECALLBACKPROC   glDebugMessageCallback;
-extern PFNGLCHECKFRAMEBUFFERSTATUSPROC glCheckFramebufferStatus;
+extern PFNGLDEBUGMESSAGECALLBACKPROC    __attribute__((weak)) glDebugMessageCallback;
+extern PFNGLCHECKFRAMEBUFFERSTATUSPROC  __attribute__((weak)) glCheckFramebufferStatus;
 #endif
 
 extern void* (*gl_load_ext)(const char* procname);
@@ -100,66 +100,6 @@ typedef struct
     enum TextureFormat format;
     uint32_t           w, h;
 } Texture;
-
-/* static Texture Texture_new_with_alignment(uint8_t alignment) */
-/* { */
-/*     GLuint id = 0; */
-
-/*     glActiveTexture(GL_TEXTURE0); */
-
-/*     glGenTextures(1, &id); */
-
-/*     glBindTexture(GL_TEXTURE_2D, id); */
-/*     glPixelStorei(GL_UNPACK_ALIGNMENT, alignment); */
-
-/*     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST); */
-/*     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST); */
-
-/*     return (Texture){ id, false, 0, 0 }; */
-/* } */
-
-/* static Texture Texture_new() */
-/* { */
-/*     return Texture_new_with_alignment(4); */
-/* } */
-
-/* static inline void Texture_image_with_format(Texture*    self, */
-/*                                              GLuint      w, */
-/*                                              GLuint      h, */
-/*                                              const void* data, */
-/*                                              int         format) */
-/* { */
-/*     glBindTexture(GL_TEXTURE_2D, self->id); */
-/*     self->has_alpha = (format == GL_RGBA || format == GL_BGRA); */
-
-/*     glTexImage2D(GL_TEXTURE_2D, 0, format, (self->w = w), (self->h = h), 0,
- */
-/*                  format, GL_UNSIGNED_BYTE, data); */
-/* } */
-
-/* static inline void Texture_image(Texture*    self, */
-/*                                  bool        alpha, */
-/*                                  GLuint      w, */
-/*                                  GLuint      h, */
-/*                                  const void* data) */
-/* { */
-/*     Texture_image_with_format(self, w, h, data, alpha ? GL_RGBA : GL_RGB); */
-/* } */
-
-/* static void Texture_sub_image(Texture*    self, */
-/*                               GLuint      x, */
-/*                               GLuint      y, */
-/*                               GLuint      w, */
-/*                               GLuint      h, */
-/*                               const void* data) */
-/* { */
-
-/*     glBindTexture(GL_TEXTURE_2D, self->id); */
-
-/*     glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h, */
-/*                     self->has_alpha ? GL_RGBA : GL_RGB, GL_UNSIGNED_BYTE,
- * data); */
-/* } */
 
 static inline void Texture_destroy(Texture* self)
 {

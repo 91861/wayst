@@ -19,12 +19,12 @@
 #include "freetype.h"
 #include "fterrors.h"
 #include "gl.h"
+#include "map.h"
 #include "shaders.h"
 #include "util.h"
 #include "wcwidth/wcwidth.h"
 
-/* number of buckets in the non-ascii glyph map */
-#define NUM_BUCKETS 64
+#define NUM_BUCKETS 256
 
 #ifndef ATLAS_SIZE_LIMIT
 #define ATLAS_SIZE_LIMIT INT32_MAX
@@ -63,10 +63,21 @@ static void GlyphMapEntry_destroy(GlyphMapEntry* self);
 DEF_VECTOR(GlyphMapEntry, GlyphMapEntry_destroy)
 DEF_VECTOR(Texture, Texture_destroy)
 
+static inline size_t Rune_hash(const Rune* self)
+{
+    return self->code;
+}
+
+static inline size_t Rune_eq(const Rune* self, const Rune* other)
+{
+    return !memcmp(self, other, sizeof(Rune));
+}
+
+DEF_MAP(Rune, GlyphMapEntry, Rune_hash, Rune_eq, GlyphMapEntry_destroy)
+
 typedef struct
 {
     Vector_GlyphMapEntry buckets[NUM_BUCKETS];
-
 } GlyphMap;
 
 struct AtlasCharInfo
@@ -116,11 +127,10 @@ typedef struct
     Vector_vertex_t vec_vertex_buffer;
     Vector_vertex_t vec_vertex_buffer2;
 
-    Vector_GlyphBufferData _vec_glyph_buffer;
-    Vector_GlyphBufferData _vec_glyph_buffer_italic;
-    Vector_GlyphBufferData _vec_glyph_buffer_bold;
-    Vector_GlyphBufferData _vec_glyph_buffer_bold_italic;
-
+    Vector_GlyphBufferData  _vec_glyph_buffer;
+    Vector_GlyphBufferData  _vec_glyph_buffer_italic;
+    Vector_GlyphBufferData  _vec_glyph_buffer_bold;
+    Vector_GlyphBufferData  _vec_glyph_buffer_bold_italic;
     Vector_GlyphBufferData* vec_glyph_buffer;
     Vector_GlyphBufferData* vec_glyph_buffer_italic;
     Vector_GlyphBufferData* vec_glyph_buffer_bold;
@@ -132,83 +142,58 @@ typedef struct
     VBO flex_vbo_bold_italic;
 
     /* pen position to begin drawing font */
-    float pen_begin;
-    float pen_begin_pixels;
-
+    float    pen_begin;
+    float    pen_begin_pixels;
     uint32_t win_w, win_h;
-
     float    line_height, glyph_width;
     uint16_t line_height_pixels, glyph_width_pixels;
     size_t   max_cells_in_line;
-
     float    sx, sy;
     uint32_t gw;
 
     /* padding offset from the top right corner */
-    uint8_t pixel_offset_x;
-    uint8_t pixel_offset_y;
-
-    Framebuffer line_framebuffer;
-
-    VBO font_vao;
-    VBO bg_vao;
-    VBO line_vao;
-
-    VBO line_bg_vao;
-
-    Shader font_shader;
-    Shader font_shader_gray;
-    Shader bg_shader;
-    Shader line_shader;
-    Shader image_shader;
-    Shader image_tint_shader;
-
-    ColorRGB  color;
-    ColorRGBA bg_color;
-
-    GlyphMap _cache;
-    GlyphMap _cache_bold;
-    GlyphMap _cache_italic;
-    GlyphMap _cache_bold_italic;
-
-    GlyphMap* cache;
-    GlyphMap* cache_bold;
-    GlyphMap* cache_italic;
-    GlyphMap* cache_bold_italic;
-
-    Atlas _atlas;
-    Atlas _atlas_bold;
-    Atlas _atlas_italic;
-    Atlas _atlas_bold_italic;
-
-    Atlas* atlas;
-    Atlas* atlas_bold;
-    Atlas* atlas_italic;
-    Atlas* atlas_bold_italic;
+    uint8_t                pixel_offset_x;
+    uint8_t                pixel_offset_y;
+    Framebuffer            line_framebuffer;
+    VBO                    font_vao;
+    VBO                    bg_vao;
+    VBO                    line_vao;
+    VBO                    line_bg_vao;
+    Shader                 font_shader;
+    Shader                 font_shader_gray;
+    Shader                 bg_shader;
+    Shader                 line_shader;
+    Shader                 image_shader;
+    Shader                 image_tint_shader;
+    ColorRGB               color;
+    ColorRGBA              bg_color;
+    Map_Rune_GlyphMapEntry glyph_cache;
+    Atlas                  _atlas;
+    Atlas                  _atlas_bold;
+    Atlas                  _atlas_italic;
+    Atlas                  _atlas_bold_italic;
+    Atlas*                 atlas;
+    Atlas*                 atlas_bold;
+    Atlas*                 atlas_italic;
+    Atlas*                 atlas_bold_italic;
 
     // keep textures for reuse in order of length
-    Texture recycled_line_textures[3];
-
-    Texture squiggle_texture;
-
+    Texture   recycled_line_textures[3];
+    Texture   squiggle_texture;
     bool      has_blinking_text;
     TimePoint blink_switch;
     TimePoint blink_switch_text;
     TimePoint action;
     TimePoint inactive;
-
-    bool in_focus;
-    bool draw_blinking;
-    bool draw_blinking_text;
-    bool recent_action;
-    bool is_inactive;
-    bool is_main_font_rgb;
-
-    int scrollbar_fade;
-
-    Timer flash_timer;
-    float flash_fraction;
-
+    bool      in_focus;
+    bool      draw_blinking;
+    bool      draw_blinking_text;
+    bool      recent_action;
+    bool      is_inactive;
+    bool      is_main_font_rgb;
+    int       scrollbar_fade;
+    Timer     flash_timer;
+    float     flash_fraction;
     Freetype* freetype;
 
 } GfxOpenGL21;
@@ -403,45 +388,40 @@ static void GlyphMapEntry_destroy(GlyphMapEntry* self)
     Texture_destroy(&self->tex);
 }
 
-static void Cache_init(GlyphMap* c)
+__attribute__((hot)) static GlyphMapEntry* GfxOpenGL21_get_cached_glyph(GfxOpenGL21* gfx,
+                                                                        const Rune*  rune)
 {
-    for (size_t i = 0; i < NUM_BUCKETS; ++i) {
-        c->buckets[i] = Vector_new_GlyphMapEntry();
+    GlyphMapEntry* entry = Map_get_Rune_GlyphMapEntry(&gfx->glyph_cache, rune);
+    if (likely(entry)) {
+        glBindTexture(GL_TEXTURE_2D, entry->tex.id);
+        return entry;
     }
-}
-
-static inline Vector_GlyphMapEntry* Cache_select_bucket(GlyphMap* self, uint32_t code)
-{
-    return &self->buckets[(NUM_BUCKETS - 1) % code];
-}
-
-static inline void Cache_destroy(GlyphMap* self)
-{
-    for (int i = 0; i < NUM_BUCKETS; ++i) {
-        Vector_destroy_GlyphMapEntry(&self->buckets[i]);
+    Rune alt  = *rune;
+    alt.style = TV_RUNE_UNSTYLED;
+    entry     = Map_get_Rune_GlyphMapEntry(&gfx->glyph_cache, &alt);
+    if (likely(entry)) {
+        glBindTexture(GL_TEXTURE_2D, entry->tex.id);
+        return entry;
     }
-}
-
-__attribute__((hot)) static GlyphMapEntry* Cache_get_glyph(GfxOpenGL21*           gfx,
-                                                           GlyphMap*              self,
-                                                           enum FreetypeFontStyle style,
-                                                           char32_t               code)
-{
-    Vector_GlyphMapEntry* block = Cache_select_bucket(self, code);
-    GlyphMapEntry*        found = NULL;
-    while ((found = Vector_iter_GlyphMapEntry(block, found))) {
-        if (found->code == code) {
-            glBindTexture(GL_TEXTURE_2D, found->tex.id);
-            return found;
-        }
+    char32_t               code  = rune->code;
+    enum FreetypeFontStyle style = FT_STYLE_REGULAR;
+    switch (rune->style) {
+        case VT_RUNE_BOLD:
+            style = FT_STYLE_BOLD;
+            break;
+        case VT_RUNE_ITALIC:
+            style = FT_STYLE_ITALIC;
+            break;
+        case VT_RUNE_BOLD_ITALIC:
+            style = FT_STYLE_BOLD_ITALIC;
+            break;
+        default:;
     }
     FreetypeOutput* output = Freetype_load_and_render_glyph(gfx->freetype, code, style);
-
     if (!output) {
         WRN("Missing glyph %d\n", code)
         return NULL;
     }
-
     bool               scale = false;
     enum TextureFormat texture_format;
     enum GlyphColor    glyph_color;
@@ -488,17 +468,14 @@ __attribute__((hot)) static GlyphMapEntry* Cache_get_glyph(GfxOpenGL21*         
         default:
             ASSERT_UNREACHABLE
     }
-
     Texture tex = {
         .id     = 0,
         .format = texture_format,
         .w      = output->width,
         .h      = output->height,
     };
-
     glGenTextures(1, &tex.id);
     glBindTexture(GL_TEXTURE_2D, tex.id);
-
     glPixelStorei(GL_UNPACK_ALIGNMENT, output->alignment);
     glTexParameteri(GL_TEXTURE_2D,
                     GL_TEXTURE_MIN_FILTER,
@@ -513,21 +490,21 @@ __attribute__((hot)) static GlyphMapEntry* Cache_get_glyph(GfxOpenGL21*         
                  load_format,
                  GL_UNSIGNED_BYTE,
                  output->pixels);
-
     if (scale) {
         glGenerateMipmap(GL_TEXTURE_2D);
     }
-
-    Vector_push_GlyphMapEntry(block,
-                              (GlyphMapEntry){
-                                .code  = code,
-                                .color = glyph_color,
-                                .left  = output->left,
-                                .top   = output->top,
-                                .tex   = tex,
-                              });
-
-    return Vector_at_GlyphMapEntry(block, block->size - 1);
+    GlyphMapEntry new_entry = {
+        .code  = code,
+        .color = glyph_color,
+        .left  = output->left,
+        .top   = output->top,
+        .tex   = tex,
+    };
+    Rune key = *rune;
+    if (output->style == FT_STYLE_NONE) {
+        key.style = TV_RUNE_UNSTYLED;
+    }
+    return Map_insert_Rune_GlyphMapEntry(&gfx->glyph_cache, key, new_entry);
 }
 
 // Generate a sinewave image and store it as an OpenGL texture
@@ -745,9 +722,6 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
     gfxOpenGL21(self)->_atlas = Atlas_new(gfxOpenGL21(self), FT_STYLE_REGULAR);
     gfxOpenGL21(self)->atlas  = &gfxOpenGL21(self)->_atlas;
 
-    Cache_init(&gfxOpenGL21(self)->_cache);
-    gfxOpenGL21(self)->cache = &gfxOpenGL21(self)->_cache;
-
     gfxOpenGL21(self)->line_framebuffer = Framebuffer_new();
 
     gfxOpenGL21(self)->in_focus           = true;
@@ -766,54 +740,45 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
 
     // if font styles don't exist point their resources to deaults
     if (settings.font_file_name_bold.str) {
-        gfxOpenGL21(self)->_atlas_bold = Atlas_new(gfxOpenGL21(self), FT_STYLE_BOLD);
-        gfxOpenGL21(self)->atlas_bold  = &gfxOpenGL21(self)->_atlas_bold;
-        Cache_init(&gfxOpenGL21(self)->_cache_bold);
-        gfxOpenGL21(self)->cache_bold            = &gfxOpenGL21(self)->_cache_bold;
+        gfxOpenGL21(self)->_atlas_bold           = Atlas_new(gfxOpenGL21(self), FT_STYLE_BOLD);
+        gfxOpenGL21(self)->atlas_bold            = &gfxOpenGL21(self)->_atlas_bold;
         gfxOpenGL21(self)->vec_glyph_buffer_bold = &gfxOpenGL21(self)->_vec_glyph_buffer_bold;
     } else {
         gfxOpenGL21(self)->atlas_bold            = &gfxOpenGL21(self)->_atlas;
-        gfxOpenGL21(self)->cache_bold            = &gfxOpenGL21(self)->_cache;
         gfxOpenGL21(self)->vec_glyph_buffer_bold = &gfxOpenGL21(self)->_vec_glyph_buffer;
     }
 
     if (settings.font_file_name_italic.str) {
-        gfxOpenGL21(self)->_atlas_italic = Atlas_new(gfxOpenGL21(self), FT_STYLE_ITALIC);
-        gfxOpenGL21(self)->atlas_italic  = &gfxOpenGL21(self)->_atlas_italic;
-        Cache_init(&gfxOpenGL21(self)->_cache_italic);
-        gfxOpenGL21(self)->cache_italic            = &gfxOpenGL21(self)->_cache_italic;
+        gfxOpenGL21(self)->_atlas_italic           = Atlas_new(gfxOpenGL21(self), FT_STYLE_ITALIC);
+        gfxOpenGL21(self)->atlas_italic            = &gfxOpenGL21(self)->_atlas_italic;
         gfxOpenGL21(self)->vec_glyph_buffer_italic = &gfxOpenGL21(self)->_vec_glyph_buffer_italic;
     } else {
         gfxOpenGL21(self)->atlas_italic            = &gfxOpenGL21(self)->_atlas;
-        gfxOpenGL21(self)->cache_italic            = &gfxOpenGL21(self)->_cache;
         gfxOpenGL21(self)->vec_glyph_buffer_italic = &gfxOpenGL21(self)->_vec_glyph_buffer;
     }
 
     if (settings.font_file_name_bold_italic.str) {
         gfxOpenGL21(self)->_atlas_bold_italic = Atlas_new(gfxOpenGL21(self), FT_STYLE_BOLD_ITALIC);
         gfxOpenGL21(self)->atlas_bold_italic  = &gfxOpenGL21(self)->_atlas_bold_italic;
-        Cache_init(&gfxOpenGL21(self)->_cache_bold_italic);
-        gfxOpenGL21(self)->cache_bold_italic = &gfxOpenGL21(self)->_cache_bold_italic;
         gfxOpenGL21(self)->vec_glyph_buffer_bold_italic =
           &gfxOpenGL21(self)->_vec_glyph_buffer_bold_italic;
         gfxOpenGL21(self)->_vec_glyph_buffer_bold_italic = Vector_new_GlyphBufferData();
     } else {
         if (settings.font_file_name_italic.str) {
             gfxOpenGL21(self)->atlas_bold_italic = &gfxOpenGL21(self)->_atlas_italic;
-            gfxOpenGL21(self)->cache_bold_italic = &gfxOpenGL21(self)->_cache_italic;
             gfxOpenGL21(self)->vec_glyph_buffer_bold_italic =
               &gfxOpenGL21(self)->_vec_glyph_buffer_italic;
         } else if (settings.font_file_name_bold.str) {
             gfxOpenGL21(self)->atlas_bold_italic = &gfxOpenGL21(self)->_atlas_bold;
-            gfxOpenGL21(self)->cache_bold_italic = &gfxOpenGL21(self)->_cache_bold;
             gfxOpenGL21(self)->vec_glyph_buffer_bold_italic =
               &gfxOpenGL21(self)->_vec_glyph_buffer_bold;
         } else {
             gfxOpenGL21(self)->atlas_bold_italic            = &gfxOpenGL21(self)->_atlas;
-            gfxOpenGL21(self)->cache_bold_italic            = &gfxOpenGL21(self)->_cache;
             gfxOpenGL21(self)->vec_glyph_buffer_bold_italic = &gfxOpenGL21(self)->_vec_glyph_buffer;
         }
     }
+
+    gfxOpenGL21(self)->glyph_cache = Map_new_Rune_GlyphMapEntry(NUM_BUCKETS);
 
     gfxOpenGL21(self)->vec_vertex_buffer  = Vector_new_vertex_t();
     gfxOpenGL21(self)->vec_vertex_buffer2 = Vector_new_vertex_t();
@@ -844,36 +809,22 @@ void GfxOpenGL21_reload_font(Gfx* self)
         Atlas_destroy(&gfxOpenGL21(self)->_atlas_bold_italic);
     }
 
-    Cache_destroy(&gfxOpenGL21(self)->_cache);
-    if (gfxOpenGL21(self)->cache != gfxOpenGL21(self)->cache_bold) {
-        Cache_destroy(&gfxOpenGL21(self)->_cache_bold);
-    }
-    if (gfxOpenGL21(self)->cache != gfxOpenGL21(self)->cache_italic) {
-        Cache_destroy(&gfxOpenGL21(self)->_cache_italic);
-    }
-    if (gfxOpenGL21(self)->cache != gfxOpenGL21(self)->cache_bold_italic &&
-        gfxOpenGL21(self)->cache_bold != gfxOpenGL21(self)->cache_bold_italic &&
-        gfxOpenGL21(self)->cache_italic != gfxOpenGL21(self)->cache_bold_italic) {
-        Cache_destroy(&gfxOpenGL21(self)->_cache_bold_italic);
-    }
+    Map_destroy_Rune_GlyphMapEntry(&gfxOpenGL21(self)->glyph_cache);
+    gfxOpenGL21(self)->glyph_cache = Map_new_Rune_GlyphMapEntry(NUM_BUCKETS);
 
     GfxOpenGL21_load_font(self);
     GfxOpenGL21_resize(self, gfxOpenGL21(self)->win_w, gfxOpenGL21(self)->win_h);
 
     gfxOpenGL21(self)->_atlas = Atlas_new(gfxOpenGL21(self), FT_STYLE_REGULAR);
-    Cache_init(&gfxOpenGL21(self)->_cache);
 
     if (settings.font_file_name_bold.str) {
         gfxOpenGL21(self)->_atlas_bold = Atlas_new(gfxOpenGL21(self), FT_STYLE_BOLD);
-        Cache_init(&gfxOpenGL21(self)->_cache_bold);
     }
     if (settings.font_file_name_italic.str) {
         gfxOpenGL21(self)->_atlas_italic = Atlas_new(gfxOpenGL21(self), FT_STYLE_ITALIC);
-        Cache_init(&gfxOpenGL21(self)->_cache_italic);
     }
     if (settings.font_file_name_bold_italic.str) {
         gfxOpenGL21(self)->_atlas_bold_italic = Atlas_new(gfxOpenGL21(self), FT_STYLE_BOLD_ITALIC);
-        Cache_init(&gfxOpenGL21(self)->_cache_bold_italic);
     }
 
     // regenerate the squiggle texture
@@ -1247,7 +1198,7 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
             int32_t extra_width = 0;
 
             if (idx_each_rune > 1) {
-                extra_width = wcwidth(vt_line->data.buf[idx_each_rune - 1].code) - 1;
+                extra_width = wcwidth(vt_line->data.buf[idx_each_rune - 1].rune.code) - 1;
             }
             bg_pixels_end = (idx_each_rune + extra_width) * gfx->glyph_width_pixels;
             glEnable(GL_SCISSOR_TEST);
@@ -1306,21 +1257,22 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                                 /* Filter out stuff that should be hidden on this pass */
                                 if (unlikely((is_for_blinking && each_rune_same_colors->blinkng) ||
                                              each_rune_same_colors->hidden)) {
-                                    same_color_blank_space      = *each_rune_same_colors;
-                                    same_color_blank_space.code = ' ';
-                                    each_rune_filtered_visible  = &same_color_blank_space;
+                                    same_color_blank_space           = *each_rune_same_colors;
+                                    same_color_blank_space.rune.code = ' ';
+                                    each_rune_filtered_visible       = &same_color_blank_space;
                                 } else {
                                     each_rune_filtered_visible = each_rune_same_colors;
                                 }
-                                if (each_rune_filtered_visible->code > ATLAS_RENDERABLE_START &&
-                                    each_rune_filtered_visible->code <= ATLAS_RENDERABLE_END) {
+                                if (each_rune_filtered_visible->rune.code >
+                                      ATLAS_RENDERABLE_START &&
+                                    each_rune_filtered_visible->rune.code <= ATLAS_RENDERABLE_END) {
                                     // pull data from font atlas
                                     struct AtlasCharInfo*   g;
                                     int32_t                 atlas_offset = -1;
                                     Vector_GlyphBufferData* target       = gfx->vec_glyph_buffer;
                                     Atlas*                  source_atlas = gfx->atlas;
-                                    switch (
-                                      expect(each_rune_filtered_visible->state, VT_RUNE_NORMAL)) {
+                                    switch (expect(each_rune_filtered_visible->rune.style,
+                                                   VT_RUNE_NORMAL)) {
                                         case VT_RUNE_ITALIC:
                                             target       = gfx->vec_glyph_buffer_italic;
                                             source_atlas = gfx->atlas_italic;
@@ -1335,7 +1287,8 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                                         default:;
                                     }
                                     atlas_offset =
-                                      Atlas_select(source_atlas, each_rune_filtered_visible->code);
+                                      Atlas_select(source_atlas,
+                                                   each_rune_filtered_visible->rune.code);
                                     g        = &source_atlas->char_info[atlas_offset];
                                     double h = (double)g->rows * scaley;
                                     double w = (double)g->width * scalex;
@@ -1485,27 +1438,9 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                             for (const VtRune* z = same_colors_block_begin_rune;
                                  z != each_rune_same_bg;
                                  ++z) {
-                                if (unlikely(z->code > ATLAS_RENDERABLE_END)) {
-                                    size_t                 column = z - vt_line->data.buf;
-                                    GlyphMap*              ca     = gfx->cache;
-                                    enum FreetypeFontStyle style  = FT_STYLE_REGULAR;
-                                    switch (z->state) {
-                                        case VT_RUNE_BOLD:
-                                            ca    = gfx->cache_bold;
-                                            style = FT_STYLE_BOLD;
-                                            break;
-                                        case VT_RUNE_ITALIC:
-                                            ca    = gfx->cache_italic;
-                                            style = FT_STYLE_ITALIC;
-                                            break;
-                                        case VT_RUNE_BOLD_ITALIC:
-                                            ca    = gfx->cache_bold_italic;
-                                            style = FT_STYLE_BOLD_ITALIC;
-                                            break;
-                                        default:;
-                                    }
-                                    GlyphMapEntry* g = NULL;
-                                    g                = Cache_get_glyph(gfx, ca, style, z->code);
+                                if (unlikely(z->rune.code > ATLAS_RENDERABLE_END)) {
+                                    size_t         column = z - vt_line->data.buf;
+                                    GlyphMapEntry* g = GfxOpenGL21_get_cached_glyph(gfx, &z->rune);
                                     if (!g) {
                                         continue;
                                     }
@@ -1537,7 +1472,6 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                                     } else if (g->color == GLYPH_COLOR_MONO) {
                                         target = &gfx->_vec_glyph_buffer_italic;
                                     }
-
                                     /* Very often characters like this are used to draw tables and
                                      * borders. Render all repeating characters in one call. */
                                     Vector_push_GlyphBufferData(
@@ -1547,13 +1481,11 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                                           { x3 + w, y3, 1.0f - gsx, 0.0f - gsy },
                                           { x3 + w, y3 + h, 1.0f - gsx, 1.0f - gsy },
                                           { x3, y3 + h, 0.0f - gsx, 1.0f - gsy } } });
-
                                     bool next_iteration_changes_texture =
-                                      (z + 1 != each_rune_same_bg && z->code != (z + 1)->code) ||
+                                      (z + 1 != each_rune_same_bg &&
+                                       z->rune.code != (z + 1)->rune.code) ||
                                       z + 1 == each_rune_same_bg;
-
                                     if (next_iteration_changes_texture) {
-
                                         /* Set up the scissor box for this block */
                                         GLint clip_begin =
                                           (same_colors_block_begin_rune - vt_line->data.buf) *
@@ -1565,7 +1497,6 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                                                   0,
                                                   clip_end - clip_begin,
                                                   texture_height);
-
                                         // Draw noramal characters
                                         if (gfx->vec_glyph_buffer->size) {
                                             if (*bound_resources != BOUND_RESOURCES_FONT) {
@@ -1599,7 +1530,6 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                                                          gfx->vec_glyph_buffer->size * 4);
                                             Vector_clear_GlyphBufferData(gfx->vec_glyph_buffer);
                                         }
-
                                         // Draw color characters
                                         if (gfx->_vec_glyph_buffer_bold.size) {
                                             if (likely(*bound_resources != BOUND_RESOURCES_IMAGE)) {
@@ -1625,7 +1555,6 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                                                          gfx->_vec_glyph_buffer_bold.size * 4);
                                             gfx->_vec_glyph_buffer_bold.size = 0;
                                         }
-
                                         // draw mono characters
                                         if (gfx->_vec_glyph_buffer_italic.size) {
                                             if (likely(*bound_resources !=
@@ -1699,9 +1628,12 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
             }
         } // end if bg color changed
 
-        int w = wcwidth(vt_line->data.buf[idx_each_rune].code);
-        idx_each_rune =
-          CLAMP(idx_each_rune + (w > 1 ? w : 1), range_begin_idx, (vt_line->data.size + 1));
+        int w = likely(idx_each_rune != range_end_idx)
+                  ? wcwidth(vt_line->data.buf[idx_each_rune].rune.code)
+                  : 1;
+        idx_each_rune = CLAMP(idx_each_rune + (unlikely(w > 1) ? w : 1),
+                              range_begin_idx,
+                              (vt_line->data.size + 1));
     } // end for each VtRune
 }
 
@@ -1795,24 +1727,17 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
             size_t range_begin_idx = vt_line->damage.front;
             size_t range_end_idx   = vt_line->damage.end + 1;
             int    extra           = 0, tmp;
-            if ((tmp = wcwidth(vt_line->data.buf[range_end_idx - 1].code)) > 1) {
+            if ((tmp = wcwidth(vt_line->data.buf[range_end_idx - 1].rune.code)) > 1) {
                 extra = (tmp - 1);
             }
-            if (range_end_idx && (tmp = wcwidth(vt_line->data.buf[range_end_idx - 2].code)) > 2) {
+            if (range_end_idx &&
+                (tmp = wcwidth(vt_line->data.buf[range_end_idx - 2].rune.code)) > 2) {
                 extra = MAX(extra, tmp - 2);
             }
             range_end_idx += extra;
             range_end_idx = MIN(range_end_idx, vt_line->data.size);
             extra         = 0;
-            /* if (range_begin_idx) { */
-            /*     extra = MAX(wcwidth(vt_line->data.buf[range_begin_idx - 1].code),1); */
-            /* } */
-            /* if (range_begin_idx > 2) { */
-            /*     extra = MAX(wcwidth(vt_line->data.buf[range_begin_idx - 2].code) - 1, extra); */
-            /* } */
-            /* if (range_end_idx < length) { */
-            /*     range_end_idx += wcwidth(vt_line->data.buf[range_end_idx].code); */
-            /* } */
+
             _GfxOpenGL21_rasterize_line_range(gfx,
                                               vt,
                                               vt_line,
@@ -2008,7 +1933,7 @@ static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const
                          1.0f);
             glClear(GL_COLOR_BUFFER_BIT);
 
-            if (cursor_char && cursor_char->code > ' ') {
+            if (cursor_char && cursor_char->rune.code > ' ') {
                 glBindBuffer(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
                 glVertexAttribPointer(gfx->font_shader.attribs->location,
                                       4,
@@ -2016,37 +1941,22 @@ static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const
                                       GL_FALSE,
                                       0,
                                       0);
-
-                Atlas*                 source_atlas = gfx->atlas;
-                GlyphMap*              source_cache = gfx->cache;
-                enum FreetypeFontStyle style        = FT_STYLE_REGULAR;
-                enum GlyphColor        color;
-                switch (cursor_char->state) {
-                    case VT_RUNE_BOLD:
-                        source_atlas = gfx->atlas_bold;
-                        source_cache = gfx->cache_bold;
-                        style        = FT_STYLE_BOLD;
-                        break;
-
+                Atlas*          source_atlas = gfx->atlas;
+                switch (expect(cursor_char->rune.style, VT_RUNE_NORMAL)) {
                     case VT_RUNE_ITALIC:
                         source_atlas = gfx->atlas_italic;
-                        source_cache = gfx->cache_italic;
-                        style        = FT_STYLE_ITALIC;
                         break;
-
+                    case VT_RUNE_BOLD:
+                        source_atlas = gfx->atlas_bold;
+                        break;
                     case VT_RUNE_BOLD_ITALIC:
                         source_atlas = gfx->atlas_bold_italic;
-                        source_cache = gfx->cache_bold_italic;
-                        style        = FT_STYLE_BOLD_ITALIC;
-                        break;
-
                     default:;
                 }
-
-                float h, w, t, l, gsx = 0.0, gsy = 0.0;
-                float tc[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
-
-                int32_t atlas_offset = Atlas_select(source_atlas, cursor_char->code);
+                enum GlyphColor color;
+                float           h, w, t, l, gsx = 0.0, gsy = 0.0;
+                float           tc[4]        = { 0.0f, 0.0f, 1.0f, 1.0f };
+                int32_t         atlas_offset = Atlas_select(source_atlas, cursor_char->rune.code);
                 if (atlas_offset >= 0) {
                     struct AtlasCharInfo* g = &source_atlas->char_info[atlas_offset];
                     h                       = (float)g->rows * gfx->sy;
@@ -2056,15 +1966,14 @@ static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const
                     memcpy(tc, g->tex_coords, sizeof tc);
                     color = gfx->is_main_font_rgb ? GLYPH_COLOR_LCD : GLYPH_COLOR_MONO;
                 } else {
-                    GlyphMapEntry* g = Cache_get_glyph(gfx, source_cache, style, cursor_char->code);
+                    GlyphMapEntry* g = GfxOpenGL21_get_cached_glyph(gfx, &cursor_char->rune);
                     h                = (float)g->tex.h * gfx->sy;
                     w                = (float)g->tex.w * gfx->sx;
                     t                = (float)g->top * gfx->sy;
                     l                = (float)g->left * gfx->sx;
                     gsx              = -0.1 / g->tex.w;
                     gsy              = -0.05 / g->tex.h;
-
-                    color = g->color;
+                    color            = g->color;
                     if (unlikely(h > gfx->line_height)) {
                         const float scale = h / gfx->line_height;
                         h /= scale;
@@ -2073,12 +1982,10 @@ static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const
                         l /= scale;
                     }
                 }
-
                 float x3 =
                   -1.0f + (float)col * gfx->glyph_width_pixels * gfx->sx + l + (gfx->sx * 0.5);
                 float y3 = +1.0f - gfx->pen_begin_pixels * gfx->sy -
                            (float)row * gfx->line_height_pixels * gfx->sy + t - (gfx->sy * 0.5);
-
                 Vector_clear_GlyphBufferData(gfx->vec_glyph_buffer);
                 Vector_push_GlyphBufferData(gfx->vec_glyph_buffer,
                                             (GlyphBufferData){ {
@@ -2087,10 +1994,8 @@ static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const
                                               { x3 + w, y3 - h, tc[2] - gsx, tc[3] - gsy },
                                               { x3, y3 - h, tc[0] - gsx, tc[3] - gsy },
                                             } });
-
                 size_t newsize = gfx->vec_glyph_buffer->size * sizeof(GlyphBufferData);
                 ARRAY_BUFFER_SUB_OR_SWAP(gfx->vec_glyph_buffer->buf, gfx->flex_vbo.size, newsize);
-
                 if (color == GLYPH_COLOR_LCD) {
                     glUseProgram(gfx->font_shader.id);
                     glUniform3f(gfx->font_shader.uniforms[1].location,
@@ -2386,20 +2291,18 @@ void GfxOpenGL21_destroy(Gfx* self)
 {
     GfxOpenGL21_destroy_recycled_proxies(gfxOpenGL21(self));
 
-    Cache_destroy(gfxOpenGL21(self)->cache);
     Atlas_destroy(gfxOpenGL21(self)->atlas);
     if (settings.font_file_name_bold.str) {
-        Cache_destroy(&gfxOpenGL21(self)->_cache_bold);
         Atlas_destroy(&gfxOpenGL21(self)->_atlas_bold);
     }
     if (settings.font_file_name_italic.str) {
-        Cache_destroy(&gfxOpenGL21(self)->_cache_italic);
         Atlas_destroy(&gfxOpenGL21(self)->_atlas_italic);
     }
     if (settings.font_file_name_bold_italic.str) {
-        Cache_destroy(&gfxOpenGL21(self)->_cache_bold_italic);
         Atlas_destroy(&gfxOpenGL21(self)->_atlas_bold_italic);
     }
+
+    Map_destroy_Rune_GlyphMapEntry(&(gfxOpenGL21(self)->glyph_cache));
 
     VBO_destroy(&gfxOpenGL21(self)->font_vao);
     VBO_destroy(&gfxOpenGL21(self)->bg_vao);

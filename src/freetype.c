@@ -205,7 +205,6 @@ FreetypeOutput* FreetypeFace_load_and_render_glyph(Freetype*     freetype,
         freetype->output.type      = self->output_type;
         freetype->output.alignment = 4;
     }
-
     return &freetype->output;
 }
 
@@ -220,7 +219,6 @@ FreetypeStyledFamily FreetypeStyledFamily_new(const char* regular_file,
                                               enum FreetypeOutputTextureType output_type)
 {
     ASSERT(regular_file, "regular file not null");
-
     FreetypeStyledFamily self = { .faces                 = Vector_new_FreetypeFace(),
                                   .regular               = NULL,
                                   .bold                  = NULL,
@@ -229,34 +227,30 @@ FreetypeStyledFamily FreetypeStyledFamily_new(const char* regular_file,
                                   .codepoint_range_begin = opt_codepoint_range_begin,
                                   .codepoint_range_end   = opt_codepoint_range_end,
                                   .output_type           = output_type };
-
     Vector_push_FreetypeFace(&self.faces,
                              (FreetypeFace){ .loaded = false, .file_name = regular_file });
     self.regular = Vector_last_FreetypeFace(&self.faces);
-
     if (opt_bold_file) {
         Vector_push_FreetypeFace(&self.faces,
                                  (FreetypeFace){ .loaded = false, .file_name = opt_bold_file });
         self.bold = Vector_last_FreetypeFace(&self.faces);
     } else {
-        self.bold = self.regular;
+        self.bold = NULL;
     }
-
     if (opt_italic_file) {
         Vector_push_FreetypeFace(&self.faces,
                                  (FreetypeFace){ .loaded = false, .file_name = opt_italic_file });
         self.italic = Vector_last_FreetypeFace(&self.faces);
     } else {
-        self.italic = self.regular;
+        self.italic = NULL;
     }
-
     if (opt_bold_italic_file) {
         Vector_push_FreetypeFace(
           &self.faces,
           (FreetypeFace){ .loaded = false, .file_name = opt_bold_italic_file });
         self.bold_italic = Vector_last_FreetypeFace(&self.faces);
     } else {
-        self.bold_italic = OR(self.italic, OR(self.bold, self.regular));
+        self.bold_italic = NULL;
     }
 
     return self;
@@ -281,17 +275,52 @@ void FreetypeStyledFamily_unload(FreetypeStyledFamily* self)
 }
 
 FreetypeFace* FreetypeStyledFamily_select_face(FreetypeStyledFamily*  self,
-                                               enum FreetypeFontStyle style)
+                                               enum FreetypeFontStyle style,
+                                               enum FreetypeFontStyle* opt_out_style)
 {
+    if (opt_out_style){
+        *opt_out_style = FT_STYLE_REGULAR;
+    }
     switch (style) {
         case FT_STYLE_REGULAR:
             return self->regular;
         case FT_STYLE_BOLD:
-            return self->bold;
+            if (self->bold) {
+                if (opt_out_style){
+                    *opt_out_style = FT_STYLE_BOLD;
+                }
+                return self->bold;
+            } else {
+                return self->regular;
+            }
         case FT_STYLE_ITALIC:
-            return self->italic;
+            if (self->italic) {
+                if (opt_out_style){
+                    *opt_out_style = FT_STYLE_ITALIC;
+                }
+                return self->italic;
+            } else {
+                return self->regular;
+            }
         case FT_STYLE_BOLD_ITALIC:
-            return self->bold_italic;
+            if (self->bold_italic) {
+                if (opt_out_style){
+                    *opt_out_style = FT_STYLE_BOLD_ITALIC;
+                }
+                return self->bold_italic;
+            } else if (self->italic) {
+                if (opt_out_style){
+                    *opt_out_style = FT_STYLE_ITALIC;
+                }
+                return self->italic;
+            } else if (self->bold) {
+                if (opt_out_style){
+                    *opt_out_style = FT_STYLE_BOLD;
+                }
+                return self->bold;
+            } else {
+                return self->regular;
+            }
         default:
             ASSERT_UNREACHABLE
     }
@@ -302,8 +331,13 @@ FreetypeOutput* FreetypeStyledFamily_load_glyph(Freetype*              freetype,
                                                 char32_t               codepoint,
                                                 enum FreetypeFontStyle style)
 {
-    FreetypeFace* source_face = FreetypeStyledFamily_select_face(self, style);
-    return FreetypeFace_load_glyph(freetype, source_face, codepoint);
+    enum FreetypeFontStyle final_style;
+    FreetypeFace* source_face = FreetypeStyledFamily_select_face(self, style, &final_style);
+    FreetypeOutput* output = FreetypeFace_load_glyph(freetype, source_face, codepoint);
+    if (output) {
+        output->style = final_style;
+    }
+    return output;
 }
 
 FreetypeOutput* FreetypeStyledFamily_load_and_render_glyph(Freetype*              freetype,
@@ -311,8 +345,13 @@ FreetypeOutput* FreetypeStyledFamily_load_and_render_glyph(Freetype*            
                                                            char32_t               codepoint,
                                                            enum FreetypeFontStyle style)
 {
-    FreetypeFace* source_face = FreetypeStyledFamily_select_face(self, style);
-    return FreetypeFace_load_and_render_glyph(freetype, source_face, codepoint);
+    enum FreetypeFontStyle final_style;
+    FreetypeFace*   source_face = FreetypeStyledFamily_select_face(self, style, &final_style);
+    FreetypeOutput* output = FreetypeFace_load_and_render_glyph(freetype, source_face, codepoint);
+    if (output) {
+        output->style = final_style;
+    }
+    return output;
 }
 
 bool FreetypeStyledFamily_applies_to(FreetypeStyledFamily* self, char32_t codepoint)
@@ -479,6 +518,7 @@ FreetypeOutput* Freetype_load_and_render_glyph(Freetype*              self,
         for (FreetypeFace* i = NULL; (i = Vector_iter_FreetypeFace(&self->symbol_faces, i));) {
             output = FreetypeFace_load_and_render_glyph(self, i, codepoint);
             if (output) {
+                output->style = FT_STYLE_NONE;
                 return output;
             }
         }
@@ -487,6 +527,7 @@ FreetypeOutput* Freetype_load_and_render_glyph(Freetype*              self,
         for (FreetypeFace* i = NULL; (i = Vector_iter_FreetypeFace(&self->color_faces, i));) {
             output = FreetypeFace_load_and_render_glyph(self, i, codepoint);
             if (output) {
+                output->style = FT_STYLE_NONE;
                 return output;
             }
         }

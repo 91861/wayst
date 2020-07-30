@@ -28,7 +28,6 @@
 #include "util.h"
 #include "vector.h"
 
-
 #ifndef VT_RUNE_MAX_COMBINE
 #define VT_RUNE_MAX_COMBINE 2
 #endif
@@ -56,34 +55,37 @@ typedef struct Cursor
     size_t  col, row;
 } Cursor;
 
-/**
- * Represents a single character */
-typedef struct __attribute__((packed))
+typedef struct
 {
     char32_t code;
     char32_t combine[VT_RUNE_MAX_COMBINE];
-
-    ColorRGB  fg;
-    ColorRGB  line;
-    ColorRGBA bg;
-
-    enum __attribute__((packed)) VtRuneStyle
+    enum VtRuneStyle
     {
         VT_RUNE_NORMAL = 0,
         VT_RUNE_BOLD,
         VT_RUNE_ITALIC,
         VT_RUNE_BOLD_ITALIC,
-    } state : 3;
+        TV_RUNE_UNSTYLED,
+    } style : 3;
+} Rune;
 
-    uint8_t linecolornotdefault : 1;
-    uint8_t dim : 1;
-    uint8_t hidden : 1;
-    uint8_t blinkng : 1;
-    uint8_t underlined : 1;
-    uint8_t strikethrough : 1;
-    uint8_t doubleunderline : 1;
-    uint8_t curlyunderline : 1;
-    uint8_t overline : 1;
+/**
+ * Represents a single character */
+typedef struct
+{
+    Rune      rune;
+    ColorRGB  fg;
+    ColorRGB  line;
+    ColorRGBA bg;
+    uint8_t   linecolornotdefault : 1;
+    uint8_t   dim : 1;
+    uint8_t   hidden : 1;
+    uint8_t   blinkng : 1;
+    uint8_t   underlined : 1;
+    uint8_t   strikethrough : 1;
+    uint8_t   doubleunderline : 1;
+    uint8_t   curlyunderline : 1;
+    uint8_t   overline : 1;
 
 } VtRune;
 

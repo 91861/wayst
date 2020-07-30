@@ -319,7 +319,7 @@ static inline bool unicode_is_combining(char32_t codepoint)
 typedef struct
 {
     char* str;
-    __attribute__((packed)) enum AStringState {
+    enum AStringState {
         ASTRING_UNINITIALIZED = 0,
         ASTRING_DYNAMIC,
         ASTRING_STATIC

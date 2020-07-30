@@ -193,10 +193,10 @@ void Vt_select_init_word(Vt* self, int32_t x, int32_t y)
     size_t         cmax    = ln->size;
     size_t         begin   = click_x;
     size_t         end     = click_x;
-    while (begin - 1 < cmax && begin > 0 && !isspace(ln->buf[begin - 1].code)) {
+    while (begin - 1 < cmax && begin > 0 && !isspace(ln->buf[begin - 1].rune.code)) {
         --begin;
     }
-    while (end + 1 < cmax && end > 0 && !isspace(ln->buf[end + 1].code)) {
+    while (end + 1 < cmax && end > 0 && !isspace(ln->buf[end + 1].rune.code)) {
         ++end;
     }
     self->selection.begin_char_idx = begin;
@@ -591,19 +591,19 @@ static Vector_char line_to_string(Vector_VtRune* line, size_t begin, size_t end,
     /* previous character was wide, skip the following space */
     bool prev_wide = false;
     for (uint32_t i = begin; i < end; ++i) {
-        if (prev_wide && line->buf[i].code == ' ') {
+        if (prev_wide && line->buf[i].rune.code == ' ') {
             prev_wide = false;
             continue;
         }
-        if (line->buf[i].code > CHAR_MAX) {
+        if (line->buf[i].rune.code > CHAR_MAX) {
             static mbstate_t mbstate;
-            size_t           bytes = c32rtomb(utfbuf, line->buf[i].code, &mbstate);
+            size_t           bytes = c32rtomb(utfbuf, line->buf[i].rune.code, &mbstate);
             if (bytes > 0) {
                 Vector_pushv_char(&res, utfbuf, bytes);
             }
-            prev_wide = wcwidth(line->buf[i].code) > 1;
+            prev_wide = wcwidth(line->buf[i].rune.code) > 1;
         } else {
-            Vector_push_char(&res, line->buf[i].code);
+            Vector_push_char(&res, line->buf[i].rune.code);
             prev_wide = false;
         }
     }
@@ -702,10 +702,9 @@ Vt Vt_new(uint32_t cols, uint32_t rows)
     self.parser.in_mb_seq     = false;
 
     self.parser.char_state = blank_space = (VtRune){
-        .code          = ' ',
+        .rune          = ((Rune){ .code = ' ', .combine = { 0 }, .style = VT_RUNE_NORMAL }),
         .bg            = settings.bg,
         .fg            = settings.fg,
-        .state         = VT_RUNE_NORMAL,
         .dim           = false,
         .hidden        = false,
         .blinkng       = false,
@@ -1066,7 +1065,7 @@ static void Vt_trim_columns(Vt* self)
             s = self->lines.buf[i].data.size;
 
             for (blanks = 0; blanks < s; ++blanks) {
-                if (!(self->lines.buf[i].data.buf[s - 1 - blanks].code == ' ' &&
+                if (!(self->lines.buf[i].data.buf[s - 1 - blanks].rune.code == ' ' &&
                       ColorRGBA_eq(settings.bg, self->lines.buf[i].data.buf[s - 1 - blanks].bg))) {
                     break;
                 }
@@ -1167,7 +1166,6 @@ __attribute__((always_inline, flatten)) static inline int32_t short_sequence_get
 
 static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
 {
-
     switch (code) {
         /* Application Cursor Keys (DECCKM) */
         // FIXME: that should be some other separate mode
@@ -1927,10 +1925,10 @@ static void Vt_handle_SGR_code(Vt* self, char* command)
             break;
 
         case 1:
-            if (self->parser.char_state.state == VT_RUNE_ITALIC) {
-                self->parser.char_state.state = VT_RUNE_BOLD_ITALIC;
+            if (self->parser.char_state.rune.style == VT_RUNE_ITALIC) {
+                self->parser.char_state.rune.style = VT_RUNE_BOLD_ITALIC;
             } else {
-                self->parser.char_state.state = VT_RUNE_BOLD;
+                self->parser.char_state.rune.style = VT_RUNE_BOLD;
             }
             break;
 
@@ -1939,10 +1937,10 @@ static void Vt_handle_SGR_code(Vt* self, char* command)
             break;
 
         case 3:
-            if (self->parser.char_state.state == VT_RUNE_BOLD) {
-                self->parser.char_state.state = VT_RUNE_BOLD_ITALIC;
+            if (self->parser.char_state.rune.style == VT_RUNE_BOLD) {
+                self->parser.char_state.rune.style = VT_RUNE_BOLD_ITALIC;
             } else {
-                self->parser.char_state.state = VT_RUNE_ITALIC;
+                self->parser.char_state.rune.style = VT_RUNE_ITALIC;
             }
             break;
 
@@ -1988,7 +1986,7 @@ static void Vt_handle_SGR_code(Vt* self, char* command)
             break;
 
         case 23:
-            self->parser.char_state.state = VT_RUNE_NORMAL;
+            self->parser.char_state.rune.style = VT_RUNE_NORMAL;
             break;
 
         case 24:
@@ -2337,10 +2335,10 @@ static inline void Vt_pop_title(Vt* self)
 static inline void Vt_reset_text_attribs(Vt* self)
 {
     memset(&self->parser.char_state, 0, sizeof(self->parser.char_state));
-    self->parser.char_state.code = ' ';
-    self->parser.char_state.bg   = settings.bg;
-    self->parser.char_state.fg   = settings.fg;
-    self->parser.color_inverted  = false;
+    self->parser.char_state.rune.code = ' ';
+    self->parser.char_state.bg        = settings.bg;
+    self->parser.char_state.fg        = settings.fg;
+    self->parser.color_inverted       = false;
 }
 
 /**
@@ -2673,9 +2671,9 @@ __attribute__((hot)) static inline void Vt_insert_char_at_cursor(Vt* self, VtRun
     }
     self->last_interted = &self->lines.buf[self->cursor.row].data.buf[self->cursor.col];
     ++self->cursor.col;
-    if (unlikely(wcwidth(c.code) == 2)) {
-        VtRune tmp = c;
-        tmp.code   = ' ';
+    if (unlikely(wcwidth(c.rune.code) == 2)) {
+        VtRune tmp    = c;
+        tmp.rune.code = ' ';
         if (self->lines.buf[self->cursor.row].data.size <= self->cursor.col) {
             Vector_push_VtRune(&self->lines.buf[self->cursor.row].data, tmp);
         } else {
@@ -2761,13 +2759,13 @@ static inline void Vt_move_cursor_to_column(Vt* self, uint32_t columns)
 static inline void VtRune_push_combining(VtRune* self, char32_t codepoint)
 {
     ASSERT(unicode_is_combining(codepoint), "must be a combining character");
-    for (uint_fast8_t i = 0; i < ARRAY_SIZE(self->combine); ++i) {
-        if (!self->combine[i]) {
-            self->combine[i] = codepoint;
+    for (uint_fast8_t i = 0; i < ARRAY_SIZE(self->rune.combine); ++i) {
+        if (!self->rune.combine[i]) {
+            self->rune.combine[i] = codepoint;
             return;
         }
     }
-    WRN("Combining character limit (%zu) exceeded\n", ARRAY_SIZE(self->combine));
+    WRN("Combining character limit (%zu) exceeded\n", ARRAY_SIZE(self->rune.combine));
 }
 
 /**
@@ -2818,7 +2816,7 @@ static inline void Vt_handle_combinable(Vt* self, char32_t c)
             return;
         }
 #ifndef NOUTF8PROC
-        if (self->last_interted->combine[0]) {
+        if (self->last_interted->rune.combine[0]) {
 #endif
             // Already contains a combining char that failed to normalize
             VtRune_push_combining(self->last_interted, c);
@@ -2827,7 +2825,7 @@ static inline void Vt_handle_combinable(Vt* self, char32_t c)
             mbstate_t mbs;
             memset(&mbs, 0, sizeof(mbs));
             char   buff[MB_CUR_MAX * 2 + 1];
-            size_t oft = c32rtomb(buff, self->last_interted->code, &mbs);
+            size_t oft = c32rtomb(buff, self->last_interted->rune.code, &mbs);
             buff[c32rtomb(buff + oft, c, &mbs) + oft] = 0;
             size_t   old_len                          = strlen(buff);
             char*    res     = (char*)utf8proc_NFC((const utf8proc_uint8_t*)buff);
@@ -2838,7 +2836,7 @@ static inline void Vt_handle_combinable(Vt* self, char32_t c)
                 // conversion failed
                 WRN("unicode normalization failed %s", strerror(errno));
             } else {
-                self->last_interted->code = conv[0];
+                self->last_interted->rune.code = conv[0];
             }
             free(res);
         }
@@ -2866,8 +2864,8 @@ __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_litera
                 Vt_handle_combinable(self, res);
                 return;
             }
-            VtRune new_rune = self->parser.char_state;
-            new_rune.code   = res;
+            VtRune new_rune    = self->parser.char_state;
+            new_rune.rune.code = res;
             Vt_insert_char_at_cursor(self, new_rune);
         }
     } else {
@@ -2910,13 +2908,13 @@ __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_litera
                     self->parser.in_mb_seq = true;
                     break;
                 }
-                VtRune new_char = self->parser.char_state;
-                new_char.code   = c;
+                VtRune new_char    = self->parser.char_state;
+                new_char.rune.code = c;
                 if (unlikely((bool)self->charset_g0)) {
-                    new_char.code = self->charset_g0(c);
+                    new_char.rune.code = self->charset_g0(c);
                 }
                 if (unlikely((bool)self->charset_g1)) {
-                    new_char.code = self->charset_g1(c);
+                    new_char.rune.code = self->charset_g1(c);
                 }
                 Vt_insert_char_at_cursor(self, new_char);
             }
@@ -3582,13 +3580,15 @@ void Vt_handle_clipboard(void* self, const char* text)
 void Vt_destroy(Vt* self)
 {
     Vector_destroy_VtLine(&self->lines);
-    if (self->alt_lines.buf)
+    if (self->alt_lines.buf) {
         Vector_destroy_VtLine(&self->alt_lines);
+    }
 
     Vector_destroy_char(&self->parser.active_sequence);
 
-    for (size_t* i = NULL; Vector_iter_size_t(&self->title_stack, i);)
+    for (size_t* i = NULL; Vector_iter_size_t(&self->title_stack, i);) {
         free((char*)*i);
+    }
 
     Vector_destroy_size_t(&self->title_stack);
     free(self->work_dir);

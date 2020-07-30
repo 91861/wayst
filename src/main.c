@@ -464,9 +464,10 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
                     break;
                 }
                 char32_t code =
-                  self->vt.lines.buf[self->ksm_cursor.row].data.buf[self->ksm_cursor.col].code;
-                char32_t prev_code =
-                  self->vt.lines.buf[self->ksm_cursor.row].data.buf[self->ksm_cursor.col - 1].code;
+                  self->vt.lines.buf[self->ksm_cursor.row].data.buf[self->ksm_cursor.col].rune.code;
+                char32_t prev_code = self->vt.lines.buf[self->ksm_cursor.row]
+                                       .data.buf[self->ksm_cursor.col - 1]
+                                       .rune.code;
                 if (isblank(prev_code) && !isblank(code) && !initial) {
                     break;
                 }
@@ -485,9 +486,10 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
                     break;
                 }
                 char32_t code =
-                  self->vt.lines.buf[self->ksm_cursor.row].data.buf[self->ksm_cursor.col].code;
-                char32_t next_code =
-                  self->vt.lines.buf[self->ksm_cursor.row].data.buf[self->ksm_cursor.col + 1].code;
+                  self->vt.lines.buf[self->ksm_cursor.row].data.buf[self->ksm_cursor.col].rune.code;
+                char32_t next_code = self->vt.lines.buf[self->ksm_cursor.row]
+                                       .data.buf[self->ksm_cursor.col + 1]
+                                       .rune.code;
                 ++self->ksm_cursor.col;
                 App_notify_content_change(self);
                 if ((isblank(code) && !isblank(next_code)) && !initial)
@@ -504,12 +506,12 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
                       self->vt.lines.buf[self->ksm_cursor.row].data.size) {
                     break;
                 }
-                char32_t
-                  code =
-                    self->vt.lines.buf[self->ksm_cursor.row].data.buf[self->ksm_cursor.col].code,
-                  next_code = self->vt.lines.buf[self->ksm_cursor.row]
-                                .data.buf[self->ksm_cursor.col + 1]
-                                .code;
+                char32_t code = self->vt.lines.buf[self->ksm_cursor.row]
+                                  .data.buf[self->ksm_cursor.col]
+                                  .rune.code,
+                         next_code = self->vt.lines.buf[self->ksm_cursor.row]
+                                       .data.buf[self->ksm_cursor.col + 1]
+                                       .rune.code;
                 if ((isblank(next_code) && !isblank(code)) && !initial)
                     break;
                 ++self->ksm_cursor.col;

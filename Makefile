@@ -17,16 +17,16 @@ else
 endif
 
 ifeq ($(mode),debug)
-	CFLAGS = -O0 -g3 -ffinite-math-only -fno-rounding-math -std=c18 -fsanitize=address -fsanitize=undefined -DDEBUG -DVERSION="\"debug build\""
+	CFLAGS = -std=c18 -O0 -g3 -ffinite-math-only -fno-rounding-math -fshort-enums -fsanitize=address -fsanitize=undefined -DDEBUG
 	LDFLAGS =  -fsanitize=address -fsanitize=undefined -fsanitize=unreachable
 	LDLIBS += -lGLU
 else ifeq ($(mode),debugoptimized)
-	CFLAGS = -std=c18 -g -O2 -fno-omit-frame-pointer -mtune=generic -ffast-math -DDEBUG -DVERSION="\"debug build\""
+	CFLAGS = -std=c18 -g -O2 -fno-omit-frame-pointer -mtune=generic -ffast-math -fshort-enums -DDEBUG
 	LDFLAGS = -O2 -g
 	LDLIBS += -lGLU
 else
-	CFLAGS = -std=c18 -O2 -mtune=generic -ffast-math
-	LDFLAGS = -s -O2 -flto
+	CFLAGS = -std=c18 -O2 -flto -mtune=generic -ffast-math -fshort-enums
+	LDFLAGS = -O2 -flto
 endif
 
 ifeq ($(shell ldconfig -p | grep libutf8proc.so > /dev/null || echo fail),fail)

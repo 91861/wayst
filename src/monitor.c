@@ -75,7 +75,6 @@ void Monitor_fork_new_pty(Monitor* self, uint32_t cols, uint32_t rows)
         setenv("COLORTERM", "truecolor", 1);
         setenv("VTE_VERSION", "5602", 1);
         setenv("TERM", settings.term.str, 1);
-        settings_cleanup();
 
         if (execvp(settings.shell.str, (char**)settings.shell_argv)) {
             printf(TERMCOLOR_RED "Failed to execute command: \'%s\'.\n%s\n\narguments: ",

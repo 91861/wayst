@@ -372,7 +372,8 @@ static void find_font()
         AString_replace_with_dynamic(&settings.font_file_name_fallback2, fallback2_file);
     }
     if (unlikely(settings.debug_font)) {
-        printf("Loaded font files:\n  regular:     %s\n  bold:        %s\n  italic:      %s\n  bold italic: %s\n  "
+        printf("Loaded font files:\n  regular:     %s\n  bold:        %s\n  italic:      %s\n  "
+               "bold italic: %s\n  "
                "symbol:      %s\n  color:       %s\n  glyph padding: %dpx-%dpx\n",
                OR(settings.font_file_name_regular.str, "(none)"),
                OR(settings.font_file_name_bold.str, "(none)"),
@@ -557,6 +558,36 @@ static void print_help_and_exit()
     exit(EXIT_SUCCESS);
 }
 
+static void print_version_and_exit()
+{
+    printf("version: " VERSION
+           #ifdef DEBUG
+           "-debug"
+           #endif
+
+           "\n wayland: "
+#ifdef NOWL
+           "disabled"
+#else
+           "enabled"
+#endif
+           "\n X11: "
+#ifdef NOWL
+           "disabled"
+#else
+           "enabled"
+#endif
+           "\n utf8proc: "
+#ifdef NOUTF8PROC
+           "disabled"
+#else
+           "enabled"
+#endif
+           "\n");
+
+    exit(EXIT_SUCCESS);
+}
+
 static void handle_option(const char opt, const int array_index, const char* value)
 {
     LOG("settings[%d] (%s) = %s\n", array_index, long_options[array_index].name, value);
@@ -574,8 +605,7 @@ static void handle_option(const char opt, const int array_index, const char* val
                 settings.no_flash = true;
                 break;
             case 'v':
-                printf("version: " VERSION "\n");
-                exit(EXIT_SUCCESS);
+                print_version_and_exit();
                 break;
             case 'D':
                 settings.debug_pty = true;
@@ -654,8 +684,7 @@ static void handle_option(const char opt, const int array_index, const char* val
             break;
 
         case OPT_VERSION_IDX:
-            printf("version: " VERSION "\n");
-            exit(EXIT_SUCCESS);
+            print_version_and_exit();
             break;
 
         case OPT_BLINK_IDX: {
