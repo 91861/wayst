@@ -261,6 +261,7 @@ typedef struct _Vt
             PARSER_STATE_APC,
             PARSER_STATE_OSC,
             PARSER_STATE_PM,
+            PARSER_STATE_CHARSET,
             PARSER_STATE_CHARSET_G0,
             PARSER_STATE_CHARSET_G1,
             PARSER_STATE_CHARSET_G2,
@@ -280,10 +281,29 @@ typedef struct _Vt
     char*         work_dir;
     Vector_size_t title_stack;
 
+    /**
+     * Character set is composed of C0 (7-bit control characters), C1 (8-bit control characters), GL
+     * - graphics left (7-bit graphic characters), GR - graphics right (8-bit graphic characters).
+     *
+     * The program can use SCS sequences to designate graphic sets G0-G3. This allows mapping them
+     * to GL and GR with `locking shifts` - LS sequences or `single shifts` - SS sequences.
+     * Locking shifts stay active until modified by another LS sequence or RIS. Single shifts only
+     * affect the following character.
+     * By default G0 is designated as GL and G1 as GR.
+     *
+     * GR has no effect in UTF-8 mode. C1 is used only if S8C1T is enabled.
+     *
+     * Historically this was used to input language specific characters or symbols (without
+     * multi-byte sequences). Even though there is no need for this when using UTF-8, some modern
+     * programs will enable the `DEC Special` set to optimize drawing line/box-drawing characters.
+     */
     char32_t (*charset_g0)(char);
     char32_t (*charset_g1)(char);
-    char32_t (*charset_g2)(char);
-    char32_t (*charset_g3)(char);
+    char32_t (*charset_g2)(char); // not available on VT100
+    char32_t (*charset_g3)(char); // not available on VT100
+    char32_t (**charset_gl)(char);
+    char32_t (**charset_gr)(char);           // VT200 only
+    char32_t (**charset_single_shift)(char); // not available on VT100
 
     uint8_t tabstop;
 

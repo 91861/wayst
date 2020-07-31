@@ -2894,6 +2894,16 @@ __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_litera
                 self->parser.state = PARSER_STATE_ESCAPED;
                 break;
 
+            /* Invoke the G1 character set as GL */
+            case 14 /* SO */:
+                self->charset_gl = &self->charset_g1;
+                break;
+
+            /* Invoke the G0 character set (the default) as GL */
+            case 15 /* SI */:
+                self->charset_gl = &self->charset_g0;
+                break;
+
             case '\t': {
                 size_t cp = self->cursor.col;
 
@@ -2903,6 +2913,7 @@ __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_litera
             } break;
 
             default: {
+                // TODO: ISO 8859-1 charset (not UTF-8 mode)
                 if (c & (1 << 7)) {
                     mbrtoc32(NULL, &c, 1, &self->parser.input_mbstate);
                     self->parser.in_mb_seq = true;
@@ -2910,11 +2921,12 @@ __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_litera
                 }
                 VtRune new_char    = self->parser.char_state;
                 new_char.rune.code = c;
-                if (unlikely((bool)self->charset_g0)) {
-                    new_char.rune.code = self->charset_g0(c);
-                }
-                if (unlikely((bool)self->charset_g1)) {
-                    new_char.rune.code = self->charset_g1(c);
+
+                if (unlikely(self->charset_single_shift && *self->charset_single_shift)) {
+                    new_char.rune.code         = (*(self->charset_single_shift))(c);
+                    self->charset_single_shift = NULL;
+                } else if (unlikely(self->charset_gl && (*self->charset_gl))) {
+                    new_char.rune.code = (*(self->charset_gl))(c);
                 }
                 Vt_insert_char_at_cursor(self, new_char);
             }
@@ -2974,20 +2986,29 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
                     self->parser.state = PARSER_STATE_LITERAL;
                     return;
 
+                /* set primary charset G0 */
                 case '(':
                     self->parser.state = PARSER_STATE_CHARSET_G0;
                     return;
 
+                /* set secondary charset G1 */
                 case ')':
                     self->parser.state = PARSER_STATE_CHARSET_G1;
                     return;
 
+                /* set tertiary charset G2 */
                 case '*':
                     self->parser.state = PARSER_STATE_CHARSET_G2;
                     return;
 
+                /* set quaternary charset G3 */
                 case '+':
                     self->parser.state = PARSER_STATE_CHARSET_G3;
+                    return;
+
+                /* Select default character set(<ESC>%@) or Select UTF-8 character set(<ESC>%G) */
+                case '%':
+                    self->parser.state = PARSER_STATE_CHARSET;
                     return;
 
                 case 'g':
@@ -3014,14 +3035,15 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
                     Vt_select_end(self);
                     Vt_clear_display_and_scrollback(self);
                     Vt_move_cursor(self, 0, 0);
-                    self->tabstop           = 8;
-                    self->parser.state      = PARSER_STATE_LITERAL;
-                    self->scroll_region_top = 0;
-                    self->charset_g0        = NULL;
-                    self->charset_g1        = NULL;
-                    self->charset_g2        = NULL;
-                    self->charset_g3        = NULL;
-                    self->last_interted     = NULL;
+                    self->tabstop              = 8;
+                    self->parser.state         = PARSER_STATE_LITERAL;
+                    self->scroll_region_top    = 0;
+                    self->charset_g0           = NULL;
+                    self->charset_g1           = NULL;
+                    self->charset_g2           = NULL;
+                    self->charset_g3           = NULL;
+                    self->charset_single_shift = NULL;
+                    self->last_interted        = NULL;
                     self->scroll_region_bottom =
                       CALL_FP(self->callbacks.on_number_of_cells_requested,
                               self->callbacks.user_data)
@@ -3047,6 +3069,62 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
                     self->parser.state = PARSER_STATE_LITERAL;
                     return;
 
+                /* Invoke the G2 Character Set into GL (VT200 mode only) (LS2) */
+                case 'n':
+                    self->charset_gl   = &self->charset_g2;
+                    self->parser.state = PARSER_STATE_LITERAL;
+                    break;
+
+                /* Invoke the G3 Character Set into GL (VT200 mode only) (LS3) */
+                case 'o':
+                    self->charset_gl   = &self->charset_g3;
+                    self->parser.state = PARSER_STATE_LITERAL;
+                    break;
+
+                /*  Invoke the G3 Character Set into GR (VT200 mode only) (LS3R) */
+                case '|':
+                    self->charset_gr   = &self->charset_g3;
+                    self->parser.state = PARSER_STATE_LITERAL;
+                    break;
+
+                /* Invoke the G2 Character Set into GR (VT200 mode only) (LS2R) */
+                case '}':
+                    self->charset_gr   = &self->charset_g2;
+                    self->parser.state = PARSER_STATE_LITERAL;
+                    break;
+
+                /* Invoke the G1 Character Set into GR (VT200 mode only) (LS1R) */
+                case '~':
+                    self->charset_gr   = &self->charset_g1;
+                    self->parser.state = PARSER_STATE_LITERAL;
+                    break;
+
+                /* Single Shift Select of G2 Character Set (SS2), VT220 */
+                case 'N':
+                    self->charset_single_shift = &self->charset_g2;
+                    self->parser.state = PARSER_STATE_LITERAL;
+                    break;
+
+                /* Single Shift Select of G3 Character Set (SS3), VT220 */
+                case 'O':
+                    self->charset_single_shift = &self->charset_g3;
+                    self->parser.state = PARSER_STATE_LITERAL;
+                    break;
+
+                /* Start of string */
+                case 'X':
+                    WRN("SOS not implemented\n");
+                    self->parser.state = PARSER_STATE_LITERAL;
+                    break;
+
+                /* Start of guarded area */
+                case 'V':
+                /* End of guarded area */
+                case 'W':
+                    WRN("Guarded areas not implemented\n");
+                    self->parser.state = PARSER_STATE_LITERAL;
+                    break;
+
                 case '\e':
                     return;
 
@@ -3063,6 +3141,12 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
 
         case PARSER_STATE_CHARSET_G0:
             self->parser.state = PARSER_STATE_LITERAL;
+            if (!self->charset_gl) {
+                self->charset_gl = &self->charset_g0;
+            }
+            if (!self->charset_gr) {
+                self->charset_gr = &self->charset_g1;
+            }
             switch (c) {
                 case '0':
                     self->charset_g0 = &char_sub_gfx;
@@ -3074,12 +3158,18 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
                     self->charset_g0 = NULL;
                     return;
                 default:
-                    WRN("Unknown sequence ESC(%c\n", c);
+                    WRN("Unknown character set code %c\n", c);
                     return;
             }
             break;
 
         case PARSER_STATE_CHARSET_G1:
+            if (!self->charset_gl) {
+                self->charset_gl = &self->charset_g0;
+            }
+            if (!self->charset_gr) {
+                self->charset_gr = &self->charset_g1;
+            }
             self->parser.state = PARSER_STATE_LITERAL;
             switch (c) {
                 case '0':
@@ -3092,12 +3182,18 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
                     self->charset_g1 = NULL;
                     return;
                 default:
-                    WRN("Unknown sequence <ESC>)%c\n", c);
+                    WRN("Unknown character set code %c\n", c);
                     return;
             }
             break;
 
         case PARSER_STATE_CHARSET_G2:
+            if (!self->charset_gl) {
+                self->charset_gl = &self->charset_g0;
+            }
+            if (!self->charset_gr) {
+                self->charset_gr = &self->charset_g1;
+            }
             self->parser.state = PARSER_STATE_LITERAL;
             switch (c) {
                 case '0':
@@ -3110,9 +3206,38 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
                     self->charset_g2 = NULL;
                     return;
                 default:
-                    WRN("Unknown sequence <ESC>)%c\n", c);
+                    WRN("Unknown character set code %c\n", c);
                     return;
             }
+            break;
+
+        case PARSER_STATE_CHARSET_G3:
+            if (!self->charset_gl) {
+                self->charset_gl = &self->charset_g0;
+            }
+            if (!self->charset_gr) {
+                self->charset_gr = &self->charset_g1;
+            }
+            self->parser.state = PARSER_STATE_LITERAL;
+            switch (c) {
+                case '0':
+                    self->charset_g3 = &char_sub_gfx;
+                    return;
+                case 'A':
+                    self->charset_g3 = &char_sub_uk;
+                    return;
+                case 'B':
+                    self->charset_g3 = NULL;
+                    return;
+                default:
+                    WRN("Unknown character set code %c\n", c);
+                    return;
+            }
+            break;
+
+        case PARSER_STATE_CHARSET:
+            WRN("Unimplemented character set select command\n");
+            self->parser.state = PARSER_STATE_LITERAL;
             break;
 
         case PARSER_STATE_OSC:
