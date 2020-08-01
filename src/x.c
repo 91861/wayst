@@ -26,12 +26,22 @@
 #define GLX_SWAP_INTERVAL_EXT         0x20F1
 #define GLX_MAX_SWAP_INTERVAL_EXT     0x20F2
 
-typedef GLXContext (
-  *glXCreateContextAttribsARBProc)(Display*, GLXFBConfig, GLXContext, Bool, const int*);
+static APIENTRY PFNGLXSWAPINTERVALEXTPROC glXSwapIntervalEXT = NULL;
 
-typedef void (*glXSwapIntervalARBProc)(Display* dpy, GLXDrawable drawable, int interval);
-
-glXSwapIntervalARBProc __attribute__((weak)) glXSwapIntervalEXT = NULL;
+static int32_t convert_modifier_mask(unsigned int x_mask)
+{
+    int32_t mods = 0;
+    if (x_mask & ShiftMask) {
+        FLAG_SET(mods, MODIFIER_SHIFT);
+    }
+    if (x_mask & ControlMask) {
+        FLAG_SET(mods, MODIFIER_CONTROL);
+    }
+    if (x_mask & Mod1Mask) {
+        FLAG_SET(mods, MODIFIER_CONTROL);
+    }
+    return mods;
+}
 
 static WindowStatic* global;
 
@@ -101,7 +111,6 @@ typedef struct
     XSetWindowAttributes set_win_attribs;
     Colormap             colormap;
     uint32_t             last_button_pressed;
-    uint32_t             mods;
     const char*          cliptext;
     XClassHint*          class_hint;
 } WindowX11;
@@ -122,13 +131,14 @@ void WindowX11_clipboard_get(struct WindowBase* self)
     Atom   utf8  = XInternAtom(globalX11->display, "UTF8_STRING", 0);
     Window owner = XGetSelectionOwner(globalX11->display, clip);
 
-    if (owner != None)
+    if (owner != None) {
         XConvertSelection(globalX11->display,
                           clip,
                           utf8,
                           clip,
                           windowX11(self)->window,
                           CurrentTime);
+    }
 }
 
 static void WindowX11_setup_pointer(struct WindowBase* self)
@@ -143,15 +153,10 @@ static void WindowX11_setup_pointer(struct WindowBase* self)
 static void WindowX11_pointer(struct WindowBase* self, bool hide)
 {
     if (hide && !FLAG_IS_SET(self->state_flags, WINDOW_IS_POINTER_HIDDEN)) {
-
         XDefineCursor(globalX11->display, windowX11(self)->window, globalX11->cursor_hidden);
-
         FLAG_SET(self->state_flags, WINDOW_IS_POINTER_HIDDEN);
-
     } else if (!hide && FLAG_IS_SET(self->state_flags, WINDOW_IS_POINTER_HIDDEN)) {
-
         XUndefineCursor(globalX11->display, windowX11(self)->window);
-
         FLAG_UNSET(self->state_flags, WINDOW_IS_POINTER_HIDDEN);
     }
 }
@@ -166,7 +171,6 @@ struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
     global = calloc(1, sizeof(WindowStatic) + sizeof(GlobalX11) - sizeof(uint8_t));
 
     globalX11->display = XOpenDisplay(NULL);
-
     if (!globalX11->display) {
         free(global);
         return NULL;
@@ -180,16 +184,15 @@ struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
         return NULL;
     }
 
-    if (!XSupportsLocale())
+    if (!XSupportsLocale()) {
         ERR("Xorg does not support locales\n");
+    }
 
     struct WindowBase* win =
       calloc(1, sizeof(struct WindowBase) + sizeof(WindowX11) - sizeof(uint8_t));
 
     XSetLocaleModifiers("@im=none");
-
     globalX11->im = XOpenIM(globalX11->display, NULL, NULL, NULL);
-
     globalX11->ic = XCreateIC(globalX11->im,
                               XNInputStyle,
                               XIMPreeditNothing | XIMStatusNothing,
@@ -197,15 +200,14 @@ struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
                               windowX11(win)->window,
                               NULL);
 
-    if (!globalX11->ic)
+    if (!globalX11->ic) {
         ERR("Failed to create IC\n");
-
+    }
     XSetICFocus(globalX11->ic);
 
-    win->w         = w;
-    win->h         = h;
-    win->interface = &window_interface_x11;
-
+    win->w                            = w;
+    win->h                            = h;
+    win->interface                    = &window_interface_x11;
     static const int visual_attribs[] = { GLX_RENDER_TYPE,
                                           GLX_RGBA_BIT,
                                           GLX_DRAWABLE_TYPE,
@@ -225,29 +227,27 @@ struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
                                           None };
 
     int          fb_cfg_cnt;
-    GLXFBConfig* fb_cfg = glXChooseFBConfig(globalX11->display,
+    GLXFBConfig* fb_cfg     = glXChooseFBConfig(globalX11->display,
                                             DefaultScreen(globalX11->display),
                                             visual_attribs,
                                             &fb_cfg_cnt);
-
-    int fb_cfg_sel = 0;
+    int          fb_cfg_sel = 0;
     for (fb_cfg_sel = 0; fb_cfg_sel < fb_cfg_cnt; ++fb_cfg_sel) {
         globalX11->visual_info = glXGetVisualFromFBConfig(globalX11->display, fb_cfg[fb_cfg_sel]);
-
-        if (!globalX11->visual_info)
+        if (!globalX11->visual_info) {
             continue;
-
+        }
         XRenderPictFormat* pf =
           XRenderFindVisualFormat(globalX11->display, globalX11->visual_info->visual);
-
-        if (pf->direct.alphaMask > 0)
+        if (pf->direct.alphaMask > 0) {
             break;
-
+        }
         XFree(globalX11->visual_info);
     }
 
-    if (!globalX11->visual_info)
+    if (!globalX11->visual_info) {
         ERR("Failed to get X11 visual info");
+    }
 
     windowX11(win)->set_win_attribs = (XSetWindowAttributes){
         .colormap = windowX11(win)->colormap =
@@ -258,7 +258,7 @@ struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
         .border_pixel      = 0,
         .background_pixmap = None,
         .override_redirect = True,
-        .event_mask        = KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask |
+        .event_mask        = KeyPressMask | ButtonPressMask | ButtonReleaseMask |
                       SubstructureRedirectMask | StructureNotifyMask | PointerMotionMask |
                       ExposureMask | FocusChangeMask | KeymapStateMask | VisibilityChangeMask,
     };
@@ -270,20 +270,37 @@ struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
                                      GLX_CONTEXT_MINOR_VERSION_ARB,
                                      1,
                                      None };
+    const char* exts =
+      glXQueryExtensionsString(globalX11->display, DefaultScreen(globalX11->display));
+    LOG("GLX extensions: %s\n", exts);
 
-    glXCreateContextAttribsARBProc glXCreateContextAttribsARB = 0;
+    if (strstr(exts, "_swap_control")) {
+        glXSwapIntervalEXT = (APIENTRY PFNGLXSWAPINTERVALEXTPROC)glXGetProcAddressARB(
+          (const GLubyte*)"glXSwapIntervalEXT");
+    }
+    if (!glXSwapIntervalEXT) {
+        WRN("glXSwapIntervalEXT not found\n");
+    }
 
-    glXSwapIntervalEXT =
-      (PFNGLXSWAPINTERVALEXTPROC)glXGetProcAddressARB((const GLubyte*)"glXSwapIntervalEXT");
-
-    glXCreateContextAttribsARB = (glXCreateContextAttribsARBProc)glXGetProcAddress(
-      (const GLubyte*)"glXCreateContextAttribsARB");
-
-    windowX11(win)->glx_context =
-      glXCreateContextAttribsARB(globalX11->display, fb_cfg[fb_cfg_sel], 0, True, context_attribs);
-
-    if (!windowX11(win)->glx_context)
+    APIENTRY PFNGLXCREATECONTEXTATTRIBSARBPROC glXCreateContextAttribsARB = NULL;
+    if (strstr(exts, "GLX_ARB_create_context")) {
+        glXCreateContextAttribsARB = (PFNGLXCREATECONTEXTATTRIBSARBPROC)glXGetProcAddressARB(
+          (const GLubyte*)"glXCreateContextAttribsARB");
+    }
+    if (!glXCreateContextAttribsARB) {
+        WRN("glXCreateContextAttribsARB not found\n");
+        windowX11(win)->glx_context =
+          glXCreateNewContext(globalX11->display, fb_cfg[fb_cfg_sel], GLX_RGBA_TYPE, 0, True);
+    } else {
+        windowX11(win)->glx_context = glXCreateContextAttribsARB(globalX11->display,
+                                                                 fb_cfg[fb_cfg_sel],
+                                                                 0,
+                                                                 True,
+                                                                 context_attribs);
+    }
+    if (!windowX11(win)->glx_context) {
         ERR("Failed to create GLX context");
+    }
 
     windowX11(win)->window =
       XCreateWindow(globalX11->display,
@@ -298,48 +315,24 @@ struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
                     globalX11->visual_info->visual,
                     CWBorderPixel | CWColormap | CWEventMask,
                     &windowX11(win)->set_win_attribs);
-
-    if (!windowX11(win)->window)
+    if (!windowX11(win)->window) {
         ERR("Failed to create X11 window");
+    }
 
     XFree(fb_cfg);
     XFree(globalX11->visual_info);
 
     XMapWindow(globalX11->display, windowX11(win)->window);
-
     glXMakeCurrent(globalX11->display, windowX11(win)->window, windowX11(win)->glx_context);
-
     XSync(globalX11->display, False);
-
     globalX11->wm_delete = XInternAtom(globalX11->display, "WM_DELETE_WINDOW", True);
-
     XSetWMProtocols(globalX11->display, windowX11(win)->window, &globalX11->wm_delete, 1);
-
     XFlush(globalX11->display);
-
     WindowX11_setup_pointer(win);
-
-    /* get refresh rate from xrandr */
-    XRRScreenConfiguration* xrr_s_conf =
-      XRRGetScreenInfo(globalX11->display, RootWindow(globalX11->display, 0));
-
-    short xrr_ref_rate = xrr_s_conf ? XRRConfigCurrentRate(xrr_s_conf) : 0;
-
-    LOG("Detected frame rate: %d fps\n", xrr_ref_rate);
-    if (xrr_ref_rate > 1) {
-        global->target_frame_time_ms = 1000 / xrr_ref_rate;
-    } else {
-        global->target_frame_time_ms = 1000 / 60;
-    }
-
-    XRRFreeScreenConfigInfo(xrr_s_conf);
-
     XkbSelectEvents(globalX11->display, XkbUseCoreKbd, XkbAllEventsMask, XkbAllEventsMask);
-
     windowX11(win)->class_hint            = XAllocClassHint();
     windowX11(win)->class_hint->res_class = strdup(settings.title.str);
     XSetClassHint(globalX11->display, windowX11(win)->window, windowX11(win)->class_hint);
-
     return win;
 }
 
@@ -404,9 +397,7 @@ void WindowX11_events(struct WindowBase* self)
 {
     while (XPending(globalX11->display)) {
         XNextEvent(globalX11->display, &windowX11(self)->event);
-
         XEvent* e = &windowX11(self)->event;
-
         switch (e->type) {
             case MapNotify:
                 FLAG_UNSET(self->state_flags, WINDOW_IS_MINIMIZED);
@@ -442,7 +433,6 @@ void WindowX11_events(struct WindowBase* self)
             case ConfigureNotify:
                 self->x = e->xconfigure.x;
                 self->y = e->xconfigure.y;
-
                 if (self->w != e->xconfigure.width || self->h != e->xconfigure.height) {
                     self->w = e->xconfigure.width;
                     self->h = e->xconfigure.height;
@@ -451,8 +441,9 @@ void WindowX11_events(struct WindowBase* self)
                 break;
 
             case ClientMessage:
-                if ((Atom)e->xclient.data.l[0] == globalX11->wm_delete)
+                if ((Atom)e->xclient.data.l[0] == globalX11->wm_delete) {
                     FLAG_SET(self->state_flags, WINDOW_IS_CLOSED);
+                }
                 break;
 
             case MappingNotify:
@@ -468,7 +459,6 @@ void WindowX11_events(struct WindowBase* self)
                 uint32_t  code;
                 int       no_consume = (stat == 4);
                 mbrtoc32(&code, buf, bytes, &mb);
-
                 switch (ret) {
                     case XK_Home:
                     case XK_End:
@@ -481,105 +471,70 @@ void WindowX11_events(struct WindowBase* self)
                         no_consume = 1;
                         break;
 
-                    case XK_Control_L:
-                    case XK_Control_R:
-                        FLAG_SET(windowX11(self)->mods, MODIFIER_CONTROL);
-                        break;
-                    case XK_Shift_L:
-                    case XK_Shift_R:
-                        FLAG_SET(windowX11(self)->mods, MODIFIER_SHIFT);
-                        break;
-                    case XK_Alt_L:
-                    case XK_Alt_R:
-                        FLAG_SET(windowX11(self)->mods, MODIFIER_ALT);
-                        break;
-
                     default:
-                        if (ret >= XK_F1 && ret <= XK_F24)
+                        if (ret >= XK_F1 && ret <= XK_F24) {
                             no_consume = 1;
+                        }
                 }
 
                 if (no_consume) {
-                    int32_t always_lower =
-                      XkbKeycodeToKeysym(globalX11->display, e->xkey.keycode, 0, 0);
-                    self->callbacks.key_handler(self->callbacks.user_data,
-                                                stat == 4 ? code : ret,
-                                                always_lower,
-                                                windowX11(self)->mods);
-                }
-                break;
-
-            case KeyRelease:
-                switch (XLookupKeysym(&e->xkey, 0)) {
-                    case XK_Control_L:
-                    case XK_Control_R:
-                        FLAG_UNSET(windowX11(self)->mods, MODIFIER_CONTROL);
-                        break;
-                    case XK_Shift_L:
-                    case XK_Shift_R:
-                        FLAG_UNSET(windowX11(self)->mods, MODIFIER_SHIFT);
-                        break;
-                    case XK_Alt_L:
-                    case XK_Alt_R:
-                        FLAG_UNSET(windowX11(self)->mods, MODIFIER_ALT);
-                        break;
-                    default:;
+                    int32_t lower = XkbKeycodeToKeysym(globalX11->display, e->xkey.keycode, 0, 0);
+                    CALL_FP(self->callbacks.key_handler,
+                            self->callbacks.user_data,
+                            stat == 4 ? code : ret,
+                            lower,
+                            convert_modifier_mask(e->xkey.state));
                 }
                 break;
 
             case ButtonRelease:
-                if (e->xbutton.button != 4 && e->xbutton.button) {
-                    self->callbacks.button_handler(self->callbacks.user_data,
-                                                   e->xbutton.button,
-                                                   false,
-                                                   e->xbutton.x,
-                                                   e->xbutton.y,
-                                                   0,
-                                                   0);
+                if (e->xbutton.button != 4 && e->xbutton.button != 5 && e->xbutton.button) {
+                    CALL_FP(self->callbacks.button_handler,
+                            self->callbacks.user_data,
+                            e->xbutton.button,
+                            false,
+                            e->xbutton.x,
+                            e->xbutton.y,
+                            0,
+                            convert_modifier_mask(e->xbutton.state));
                 }
                 windowX11(self)->last_button_pressed = 0;
                 break;
 
-            case ButtonPress:
-                if (e->xbutton.button == 4) {
-                    windowX11(self)->last_button_pressed = 0;
-                    self->callbacks.button_handler(self->callbacks.user_data,
-                                                   65,
-                                                   true,
-                                                   e->xbutton.x,
-                                                   e->xbutton.y,
-                                                   0,
-                                                   windowX11(self)->mods);
-                } else if (e->xbutton.button == 5) {
-                    windowX11(self)->last_button_pressed = 0;
-                    self->callbacks.button_handler(self->callbacks.user_data,
-                                                   66,
-                                                   true,
-                                                   e->xbutton.x,
-                                                   e->xbutton.y,
-                                                   0,
-                                                   windowX11(self)->mods);
-                } else {
-                    windowX11(self)->last_button_pressed = e->xbutton.button;
-                    self->callbacks.button_handler(self->callbacks.user_data,
-                                                   e->xbutton.button,
-                                                   true,
-                                                   e->xbutton.x,
-                                                   e->xbutton.y,
-                                                   0,
-                                                   windowX11(self)->mods);
+            case ButtonPress: {
+                uint32_t btn;
+                switch (e->xbutton.button) {
+                    case 4:
+                        windowX11(self)->last_button_pressed = 0;
+                        btn                                  = 65;
+                        break;
+                    case 5:
+                        windowX11(self)->last_button_pressed = 0;
+                        btn                                  = 66;
+                        break;
+                    default:
+                        windowX11(self)->last_button_pressed = btn = e->xbutton.button;
                 }
-                break;
+                CALL_FP(self->callbacks.button_handler,
+                        self->callbacks.user_data,
+                        btn,
+                        true,
+                        e->xbutton.x,
+                        e->xbutton.y,
+                        0,
+                        convert_modifier_mask(e->xbutton.state));
+            } break;
 
             case MotionNotify:
                 if (Window_is_pointer_hidden(self)) {
                     WindowX11_set_pointer_style(self, MOUSE_POINTER_ARROW);
                 }
                 if (windowX11(self)->last_button_pressed) {
-                    self->callbacks.motion_handler(self->callbacks.user_data,
-                                                   windowX11(self)->last_button_pressed,
-                                                   e->xmotion.x,
-                                                   e->xmotion.y);
+                    CALL_FP(self->callbacks.motion_handler,
+                            self->callbacks.user_data,
+                            windowX11(self)->last_button_pressed,
+                            e->xmotion.x,
+                            e->xmotion.y);
                 }
                 break;
 
@@ -687,8 +642,6 @@ void WindowX11_set_swap_interval(struct WindowBase* self, int32_t ival)
 {
     if (glXSwapIntervalEXT) {
         glXSwapIntervalEXT(globalX11->display, windowX11(self)->window, ival);
-    } else {
-        WRN("glXSwapIntervalEXT not found\n");
     }
 }
 
