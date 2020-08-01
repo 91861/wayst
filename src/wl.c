@@ -871,7 +871,7 @@ static void output_handle_mode(void*             data,
     if (flags & WL_OUTPUT_MODE_CURRENT) {
         WindowWl* win           = windowWl(((struct WindowBase*)data));
         int32_t   frame_time_ms = 1000000 / refresh;
-        bool make_active = !win->outputs.size;
+        bool      make_active   = !win->outputs.size;
 
         Vector_push_WlOutputInfo(&win->outputs,
                                  (WlOutputInfo){
@@ -1345,10 +1345,11 @@ void WindowWl_set_fullscreen(struct WindowBase* self, bool fullscreen)
         }
         FLAG_SET(self->state_flags, WINDOW_IS_FULLSCREEN);
     } else {
-        if (globalWl->xdg_shell)
+        if (globalWl->xdg_shell) {
             xdg_toplevel_unset_fullscreen(windowWl(self)->xdg_toplevel);
-        else
+        } else {
             wl_shell_surface_set_toplevel(windowWl(self)->shell_surface);
+        }
 
         FLAG_UNSET(self->state_flags, WINDOW_IS_FULLSCREEN);
     }
@@ -1370,7 +1371,7 @@ TimePoint* WindowWl_process_timers(struct WindowBase* self)
         if (win->active_output && win->active_output->target_frame_time_ms) {
             ft = win->active_output->target_frame_time_ms;
         }
-        int32_t  time_offset   = (globalWl->kbd_repeat_rate / ft) * ft + ft / 2;
+        int32_t time_offset    = ((1000 / globalWl->kbd_repeat_rate) / ft) * ft + 0.3 * ft;
         globalWl->repeat_point = TimePoint_ms_from_now(time_offset);
         keyboard_handle_key(self,
                             NULL,

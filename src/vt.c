@@ -1,5 +1,7 @@
 /* See LICENSE for license information. */
 
+#include "settings.h"
+#include "util.h"
 #define _GNU_SOURCE
 
 #include "vt.h"
@@ -3102,13 +3104,13 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
                 /* Single Shift Select of G2 Character Set (SS2), VT220 */
                 case 'N':
                     self->charset_single_shift = &self->charset_g2;
-                    self->parser.state = PARSER_STATE_LITERAL;
+                    self->parser.state         = PARSER_STATE_LITERAL;
                     break;
 
                 /* Single Shift Select of G3 Character Set (SS3), VT220 */
                 case 'O':
                     self->charset_single_shift = &self->charset_g3;
-                    self->parser.state = PARSER_STATE_LITERAL;
+                    self->parser.state         = PARSER_STATE_LITERAL;
                     break;
 
                 /* Start of string */
@@ -3532,9 +3534,6 @@ static inline bool Vt_maybe_handle_function_key(Vt* self, uint32_t key, uint32_t
     } else if (key == XKB_KEY_Page_Down) {
         Vt_output(self, "\e[6~", 4);
         return true;
-    } else if (key == ' ' && FLAG_IS_SET(mods, MODIFIER_CONTROL)) {
-        Vt_output(self, "", 1);
-        return true;
     }
 
     return false;
@@ -3590,14 +3589,20 @@ void Vt_handle_key(void* _self, uint32_t key, uint32_t rawkey, uint32_t mods)
         if (FLAG_IS_SET(mods, MODIFIER_ALT) && !self->modes.no_alt_sends_esc) {
             Vector_push_char(&self->output, '\e');
         }
-
-        if (unlikely(key == '\b') && settings.bsp_sends_del)
+        if (unlikely(FLAG_IS_SET(mods, MODIFIER_CONTROL))) {
+            if (unlikely(key == ' ')) {
+                key = 0;
+            } else if (isalpha(key)) {
+                key = tolower(key) - 'a';
+            }
+        }
+        if (unlikely(key == '\b') && ((mods & MODIFIER_ALT) == mods || !mods) &&
+            settings.bsp_sends_del) {
             key = 127;
-
+        }
         char             tmp[32];
         static mbstate_t mbstate;
         size_t           mb_len = c32rtomb(tmp, key, &mbstate);
-
         if (mb_len) {
             Vt_output(self, tmp, mb_len);
         }

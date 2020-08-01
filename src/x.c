@@ -6,6 +6,7 @@
 
 #include "x.h"
 
+#include <X11/Xlib.h>
 #include <uchar.h>
 
 #include <GL/glx.h>
@@ -417,6 +418,7 @@ void WindowX11_events(struct WindowBase* self)
                 break;
 
             case FocusIn:
+                XSetICFocus(globalX11->ic);
                 FLAG_SET(self->state_flags, WINDOW_IS_IN_FOCUS);
                 self->callbacks.activity_notify_handler(self->callbacks.user_data);
                 Window_notify_content_change(self);
@@ -426,6 +428,7 @@ void WindowX11_events(struct WindowBase* self)
                 break;
 
             case FocusOut:
+                XUnsetICFocus(globalX11->ic);
                 if (Window_is_pointer_hidden(self)) {
                     WindowX11_set_pointer_style(self, MOUSE_POINTER_ARROW);
                 }
