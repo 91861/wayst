@@ -1,5 +1,7 @@
 #include "freetype.h"
+#include "freetype/ftimage.h"
 
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -71,7 +73,7 @@ static inline int32_t height_factor_for_output(enum FreetypeOutputTextureType ou
     }
 }
 
-static void Freetype_convert_bitmap(Freetype* self, const FT_Bitmap* source)
+static void Freetype_convert_mono_bitmap_to_grayscale(Freetype* self, const FT_Bitmap* source)
 {
     FT_Error e;
     if (unlikely(!self->conversion_bitmap_initialized)) {
@@ -81,10 +83,39 @@ static void Freetype_convert_bitmap(Freetype* self, const FT_Bitmap* source)
     if ((e = FT_Bitmap_Convert(self->ft, source, &self->converted_output_bitmap, 1))) {
         ERR("Bitmap conversion failed %s", ft_error_to_string(e));
     }
-    uint32_t pixel_count = self->converted_output_bitmap.width * self->converted_output_bitmap.rows;
-    for (uint_fast32_t i = 0; i < pixel_count; ++i) {
+    uint_fast16_t pixel_count =
+      self->converted_output_bitmap.width * self->converted_output_bitmap.rows;
+    for (uint_fast16_t i = 0; i < pixel_count; ++i) {
         self->converted_output_bitmap.buffer[i] *= UINT8_MAX;
     }
+}
+
+static void Freetype_convert_vertical_pixel_data_layout(Freetype* self, FT_Bitmap* source)
+{
+    ASSERT(source->pixel_mode == FT_PIXEL_MODE_LCD_V, "is vertical layout");
+
+    const uint_fast16_t TARGET_ROW_ALIGNMENT = 4;
+    uint_fast16_t       pixel_width          = source->width;
+    uint_fast16_t       pixel_height         = source->rows / 3;
+    uint_fast16_t       target_width         = pixel_width * 3;
+    uint_fast16_t       target_height        = pixel_height;
+    uint_fast16_t       source_row_length    = source->pitch;
+    uint_fast16_t       target_row_length    = target_width;
+    uint_fast16_t       mod                  = target_row_length % TARGET_ROW_ALIGNMENT;
+    uint_fast16_t       add                  = mod ? (TARGET_ROW_ALIGNMENT - mod) : 0;
+    target_row_length += add;
+    uint8_t* target = calloc(1, target_row_length * target_height);
+    for (uint_fast16_t x = 0; x < pixel_width; ++x) {
+        for (uint_fast16_t y = 0; y < pixel_height; ++y) {
+            for (uint_fast8_t s = 0; s < 3; ++s) {
+                uint_fast16_t src_off  = source_row_length * (y * 3 + s) + x;
+                uint_fast16_t tgt_off  = target_row_length * y + 3 * x + s;
+                target[tgt_off] = source->buffer[src_off];
+            }
+        }
+    }
+    free(self->converted_output_pixels);
+    self->converted_output_pixels = target;
 }
 
 void FreetypeFace_load(Freetype*                      freetype,
@@ -179,7 +210,7 @@ FreetypeOutput* FreetypeFace_load_and_render_glyph(Freetype*     freetype,
     }
     bool is_packed = self->face->glyph->bitmap.pixel_mode == FT_PIXEL_MODE_MONO;
     if (is_packed) {
-        Freetype_convert_bitmap(freetype, &self->face->glyph->bitmap);
+        Freetype_convert_mono_bitmap_to_grayscale(freetype, &self->face->glyph->bitmap);
         freetype->output.width =
           freetype->converted_output_bitmap.width / width_factor_for_output(self->output_type);
         freetype->output.height =
@@ -200,6 +231,11 @@ FreetypeOutput* FreetypeFace_load_and_render_glyph(Freetype*     freetype,
         freetype->output.alignment = 1;
     } else if (self->face->glyph->bitmap.pixel_mode == FT_PIXEL_MODE_BGRA) {
         freetype->output.type      = FT_OUTPUT_COLOR_BGRA;
+        freetype->output.alignment = 4;
+    } else if (self->face->glyph->bitmap.pixel_mode == FT_PIXEL_MODE_LCD_V) {
+        Freetype_convert_vertical_pixel_data_layout(freetype, &self->face->glyph->bitmap);
+        freetype->output.pixels    = freetype->converted_output_pixels;
+        freetype->output.type      = self->output_type;
         freetype->output.alignment = 4;
     } else {
         freetype->output.type      = self->output_type;
@@ -274,11 +310,11 @@ void FreetypeStyledFamily_unload(FreetypeStyledFamily* self)
     }
 }
 
-FreetypeFace* FreetypeStyledFamily_select_face(FreetypeStyledFamily*  self,
-                                               enum FreetypeFontStyle style,
+FreetypeFace* FreetypeStyledFamily_select_face(FreetypeStyledFamily*   self,
+                                               enum FreetypeFontStyle  style,
                                                enum FreetypeFontStyle* opt_out_style)
 {
-    if (opt_out_style){
+    if (opt_out_style) {
         *opt_out_style = FT_STYLE_REGULAR;
     }
     switch (style) {
@@ -286,7 +322,7 @@ FreetypeFace* FreetypeStyledFamily_select_face(FreetypeStyledFamily*  self,
             return self->regular;
         case FT_STYLE_BOLD:
             if (self->bold) {
-                if (opt_out_style){
+                if (opt_out_style) {
                     *opt_out_style = FT_STYLE_BOLD;
                 }
                 return self->bold;
@@ -295,7 +331,7 @@ FreetypeFace* FreetypeStyledFamily_select_face(FreetypeStyledFamily*  self,
             }
         case FT_STYLE_ITALIC:
             if (self->italic) {
-                if (opt_out_style){
+                if (opt_out_style) {
                     *opt_out_style = FT_STYLE_ITALIC;
                 }
                 return self->italic;
@@ -304,17 +340,17 @@ FreetypeFace* FreetypeStyledFamily_select_face(FreetypeStyledFamily*  self,
             }
         case FT_STYLE_BOLD_ITALIC:
             if (self->bold_italic) {
-                if (opt_out_style){
+                if (opt_out_style) {
                     *opt_out_style = FT_STYLE_BOLD_ITALIC;
                 }
                 return self->bold_italic;
             } else if (self->italic) {
-                if (opt_out_style){
+                if (opt_out_style) {
                     *opt_out_style = FT_STYLE_ITALIC;
                 }
                 return self->italic;
             } else if (self->bold) {
-                if (opt_out_style){
+                if (opt_out_style) {
                     *opt_out_style = FT_STYLE_BOLD;
                 }
                 return self->bold;
@@ -332,8 +368,8 @@ FreetypeOutput* FreetypeStyledFamily_load_glyph(Freetype*              freetype,
                                                 enum FreetypeFontStyle style)
 {
     enum FreetypeFontStyle final_style;
-    FreetypeFace* source_face = FreetypeStyledFamily_select_face(self, style, &final_style);
-    FreetypeOutput* output = FreetypeFace_load_glyph(freetype, source_face, codepoint);
+    FreetypeFace*   source_face = FreetypeStyledFamily_select_face(self, style, &final_style);
+    FreetypeOutput* output      = FreetypeFace_load_glyph(freetype, source_face, codepoint);
     if (output) {
         output->style = final_style;
     }
@@ -542,5 +578,6 @@ void Freetype_destroy(Freetype* self)
     Vector_destroy_FreetypeFace(&self->symbol_faces);
     Vector_destroy_FreetypeFace(&self->color_faces);
     FT_Done_FreeType(self->ft);
+    free(self->converted_output_pixels);
     self->initialized = false;
 }

@@ -110,6 +110,7 @@ typedef struct
     uint16_t                       line_height_pixels, glyph_width_pixels;
     bool                           conversion_bitmap_initialized;
     FT_Bitmap                      converted_output_bitmap;
+    void*                          converted_output_pixels;
     FreetypeOutput                 output;
 } Freetype;
 
