@@ -2041,13 +2041,15 @@ static void Vt_handle_SGR_code(Vt* self, char* command)
 
 static inline void Vt_alt_buffer_on(Vt* self, bool save_mouse)
 {
-    self->last_interted = NULL;
+    Vt_clear_all_proxies(self);
     Vt_visual_scroll_reset(self);
     Vt_select_end(self);
-    self->alt_lines = self->lines;
-    self->lines     = Vector_new_VtLine();
-    for (size_t i = 0; i < self->ws.ws_row; ++i)
+    self->last_interted = NULL;
+    self->alt_lines     = self->lines;
+    self->lines         = Vector_new_VtLine();
+    for (size_t i = 0; i < self->ws.ws_row; ++i) {
         Vector_push_VtLine(&self->lines, VtLine_new());
+    }
     if (save_mouse) {
         self->alt_cursor_pos  = self->cursor.col;
         self->alt_active_line = self->cursor.row;
@@ -2057,8 +2059,8 @@ static inline void Vt_alt_buffer_on(Vt* self, bool save_mouse)
 
 static inline void Vt_alt_buffer_off(Vt* self, bool save_mouse)
 {
-    self->last_interted = NULL;
     Vt_select_end(self);
+    self->last_interted = NULL;
     if (self->alt_lines.buf) {
         Vector_destroy_VtLine(&self->lines);
         self->lines          = self->alt_lines;
