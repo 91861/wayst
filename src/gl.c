@@ -41,6 +41,7 @@ PFNGLFRAMEBUFFERTEXTURE2DPROC    glFramebufferTexture2D;
 PFNGLBINDFRAMEBUFFERPROC         glBindFramebuffer;
 PFNGLBINDRENDERBUFFERPROC        glBindRenderbuffer;
 PFNGLGENRENDERBUFFERSPROC        glGenRenderbuffers;
+PFNGLDELETERENDERBUFFERSPROC     glDeleteRenderbuffers;
 PFNGLGENFRAMEBUFFERSPROC         glGenFramebuffers;
 PFNGLGENERATEMIPMAPPROC          glGenerateMipmap;
 #ifdef DEBUG
@@ -82,12 +83,13 @@ void gl_load_exts()
     glGenBuffers              = gl_load_ext("glGenBuffers");
     glDeleteFramebuffers      = gl_load_ext("glDeleteFramebuffers");
     glFramebufferRenderbuffer = gl_load_ext("glFramebufferRenderbuffer");
-    glRenderbufferStorage     = gl_load_ext("glRenderbufferStorage");
     glBindBuffer              = gl_load_ext("glBindBuffer");
     glGenBuffers              = gl_load_ext("glGenBuffers");
     glDeleteFramebuffers      = gl_load_ext("glDeleteFramebuffers");
     glFramebufferTexture2D    = gl_load_ext("glFramebufferTexture2D");
     glBindFramebuffer         = gl_load_ext("glBindFramebuffer");
+    glRenderbufferStorage     = gl_load_ext("glRenderbufferStorage");
+    glDeleteRenderbuffers     = gl_load_ext("glDeleteRenderbuffers");
     glBindRenderbuffer        = gl_load_ext("glBindRenderbuffer");
     glGenRenderbuffers        = gl_load_ext("glGenRenderbuffers");
     glGenFramebuffers         = gl_load_ext("glGenFramebuffers");

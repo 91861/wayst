@@ -49,6 +49,7 @@ extern PFNGLBINDFRAMEBUFFERPROC         __attribute__((weak)) glBindFramebuffer;
 extern PFNGLBINDRENDERBUFFERPROC        __attribute__((weak)) glBindRenderbuffer;
 extern PFNGLGENRENDERBUFFERSPROC        __attribute__((weak)) glGenRenderbuffers;
 extern PFNGLGENFRAMEBUFFERSPROC         __attribute__((weak)) glGenFramebuffers;
+extern PFNGLDELETERENDERBUFFERSPROC     __attribute__((weak)) glDeleteRenderbuffers;
 extern PFNGLGENERATEMIPMAPPROC          __attribute__((weak)) glGenerateMipmap;
 #ifdef DEBUG
 extern PFNGLDEBUGMESSAGECALLBACKPROC    __attribute__((weak)) glDebugMessageCallback;

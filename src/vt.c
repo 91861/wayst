@@ -2845,6 +2845,8 @@ static inline void Vt_handle_combinable(Vt* self, char32_t c)
             free(res);
         }
 #endif
+    } else {
+        WRN("Got combining character, but no previous character is recorded\n");
     }
 }
 

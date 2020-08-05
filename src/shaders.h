@@ -111,3 +111,15 @@ line_fs_src =
 "void main(){"
 "gl_FragData[0]=vec4(clr,1);"
 "}";
+
+
+const char*
+font_depth_blend_fs_src =
+"#version 120\n"
+"uniform sampler2D tex;"
+"varying vec2 tex_coord;"
+"void main(){"
+"vec3 c=texture2D(tex,tex_coord).rgb;"
+"gl_FragDepth=1.0-length(c)/length(vec3(1,1,1));"
+"gl_FragColor=vec4(c,1);"
+"}";

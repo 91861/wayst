@@ -1,9 +1,12 @@
 #include "freetype.h"
+#include "freetype/ftbitmap.h"
 #include "freetype/ftimage.h"
+#include "util.h"
 
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 
 static inline FT_Render_Mode render_mode_for_output(enum FreetypeOutputTextureType output_type)
 {
@@ -108,9 +111,9 @@ static void Freetype_convert_vertical_pixel_data_layout(Freetype* self, FT_Bitma
     for (uint_fast16_t x = 0; x < pixel_width; ++x) {
         for (uint_fast16_t y = 0; y < pixel_height; ++y) {
             for (uint_fast8_t s = 0; s < 3; ++s) {
-                uint_fast16_t src_off  = source_row_length * (y * 3 + s) + x;
-                uint_fast16_t tgt_off  = target_row_length * y + 3 * x + s;
-                target[tgt_off] = source->buffer[src_off];
+                uint_fast16_t src_off = source_row_length * (y * 3 + s) + x;
+                uint_fast16_t tgt_off = target_row_length * y + 3 * x + s;
+                target[tgt_off]       = source->buffer[src_off];
             }
         }
     }
@@ -382,7 +385,7 @@ FreetypeOutput* FreetypeStyledFamily_load_and_render_glyph(Freetype*            
                                                            enum FreetypeFontStyle style)
 {
     enum FreetypeFontStyle final_style;
-    FreetypeFace*   source_face = FreetypeStyledFamily_select_face(self, style, &final_style);
+    FreetypeFace* source_face = FreetypeStyledFamily_select_face(self, style, &final_style);
     FreetypeOutput* output = FreetypeFace_load_and_render_glyph(freetype, source_face, codepoint);
     if (output) {
         output->style = final_style;
@@ -413,7 +416,9 @@ Freetype Freetype_new()
         if ((e = FT_Init_FreeType(&self.ft))) {
             ERR("Failed to initialize freetype %s", ft_error_to_string(e));
         }
-        FT_Library_SetLcdFilter(self.ft, FT_LCD_FILTER_DEFAULT);
+        if ((e = FT_Library_SetLcdFilter(self.ft, FT_LCD_FILTER_DEFAULT))) {
+            WRN("Freetype has no clear type support %s\n", ft_error_to_string(e));
+        }
         self.initialized = true;
     }
     enum FreetypeOutputTextureType output_type;

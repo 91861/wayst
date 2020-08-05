@@ -41,8 +41,8 @@ enum FreetypeOutputTextureType
 typedef struct
 {
     FT_GlyphSlotRec*               ft_slot;
-    int32_t                        width, height, left, top;
-    uint8_t                        alignment;
+    int16_t                        width, height, left, top;
+    int8_t                         alignment;
     void*                          pixels;
     enum FreetypeOutputTextureType type;
     bool                           rgb_flip;
@@ -106,8 +106,10 @@ typedef struct
     Vector_FreetypeFace            color_faces;
     enum FreetypeOutputTextureType primary_output_type;
     enum FreetypeOutputTextureType target_output_type;
-    uint32_t                       gw;
-    uint16_t                       line_height_pixels, glyph_width_pixels;
+    int32_t                        gw;
+    int16_t                        line_height_pixels, glyph_width_pixels;
+    bool                           blend_bitmap_initialized;
+    FT_Bitmap                      blend_output_bitmap;
     bool                           conversion_bitmap_initialized;
     FT_Bitmap                      converted_output_bitmap;
     void*                          converted_output_pixels;

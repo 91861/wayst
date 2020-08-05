@@ -160,6 +160,7 @@ typedef struct
     VBO                    line_vao;
     VBO                    line_bg_vao;
     Shader                 font_shader;
+    Shader                 font_shader_blend;
     Shader                 font_shader_gray;
     Shader                 bg_shader;
     Shader                 line_shader;
@@ -419,7 +420,7 @@ __attribute__((hot)) static GlyphMapEntry* GfxOpenGL21_get_cached_glyph(GfxOpenG
     }
     FreetypeOutput* output = Freetype_load_and_render_glyph(gfx->freetype, code, style);
     if (!output) {
-        WRN("Missing glyph %d\n", code)
+        WRN("Missing glyph u+%X\n", code)
         return NULL;
     }
     bool               scale = false;
@@ -468,41 +469,193 @@ __attribute__((hot)) static GlyphMapEntry* GfxOpenGL21_get_cached_glyph(GfxOpenG
         default:
             ASSERT_UNREACHABLE
     }
-    Texture tex = {
-        .id     = 0,
-        .format = texture_format,
-        .w      = output->width,
-        .h      = output->height,
-    };
-    glGenTextures(1, &tex.id);
-    glBindTexture(GL_TEXTURE_2D, tex.id);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, output->alignment);
-    glTexParameteri(GL_TEXTURE_2D,
-                    GL_TEXTURE_MIN_FILTER,
-                    scale ? GL_LINEAR_MIPMAP_LINEAR : GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexImage2D(GL_TEXTURE_2D,
-                 0,
-                 internal_format,
-                 output->width,
-                 output->height,
-                 0,
-                 load_format,
-                 GL_UNSIGNED_BYTE,
-                 output->pixels);
-    if (scale) {
-        glGenerateMipmap(GL_TEXTURE_2D);
-    }
-    GlyphMapEntry new_entry = {
-        .code  = code,
-        .color = glyph_color,
-        .left  = output->left,
-        .top   = output->top,
-        .tex   = tex,
-    };
+
+
     Rune key = *rune;
     if (output->style == FT_STYLE_NONE) {
         key.style = TV_RUNE_UNSTYLED;
+    }
+    GlyphMapEntry new_entry;
+
+    if (unlikely(rune->combine[0])) {
+        /* Contains accent characters. Generate a texture combining them with the main `base` glyph.
+         * This has to be done here, freetype does not support this directly and blending in
+         * freetype requires RGBA as the target format and will remove lcd antialiasing.
+         */
+
+        int32_t base_left = output->left;
+        Texture tex       = {
+            .id     = 0,
+            .format = texture_format,
+            .w      = MAX(gfx->glyph_width_pixels, output->width),
+            .h      = MAX(gfx->line_height_pixels, output->height),
+        };
+        float scalex = 2.0 / tex.w;
+        float scaley = 2.0 / tex.h;
+
+        glGenTextures(1, &tex.id);
+        glBindTexture(GL_TEXTURE_2D, tex.id);
+        glTexParameteri(GL_TEXTURE_2D,
+                        GL_TEXTURE_MIN_FILTER,
+                        scale ? GL_LINEAR_MIPMAP_LINEAR : GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, output->alignment);
+        glTexImage2D(GL_TEXTURE_2D,
+                     0,
+                     internal_format,
+                     tex.w,
+                     tex.h,
+                     0,
+                     load_format,
+                     GL_UNSIGNED_BYTE,
+                     NULL);
+
+        GLint     old_fb;
+        GLint     old_shader;
+        GLboolean old_depth_test;
+        glGetBooleanv(GL_DEPTH_TEST, &old_depth_test);
+        GLint old_viewport[4];
+        glGetIntegerv(GL_VIEWPORT, old_viewport);
+        glGetIntegerv(GL_CURRENT_PROGRAM, &old_shader);
+        glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &old_fb);
+
+        GLuint tmp_rb;
+        glGenRenderbuffers(1, &tmp_rb);
+        glBindRenderbuffer(GL_RENDERBUFFER, tmp_rb);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, tex.w, tex.h);
+
+        GLuint tmp_fb;
+        glGenFramebuffers(1, &tmp_fb);
+        glBindFramebuffer(GL_FRAMEBUFFER, tmp_fb);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex.id, 0);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, tmp_rb);
+
+        glViewport(0, 0, tex.w, tex.h);
+        glEnable(GL_DEPTH_TEST);
+        glDepthMask(GL_TRUE);
+        glDepthFunc(GL_LEQUAL);
+        glDepthRange(0.0f, 1.0f);
+        glClearColor(0, 0, 0, 1);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+        GLuint tmp_vbo;
+        glGenBuffers(1, &tmp_vbo);
+        glBindBuffer(GL_ARRAY_BUFFER, tmp_vbo);
+        glUseProgram(gfx->font_shader_blend.id);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(float[4][4]), NULL, GL_STREAM_DRAW);
+        glVertexAttribPointer(gfx->font_shader_blend.attribs->location,
+                              4,
+                              GL_FLOAT,
+                              GL_FALSE,
+                              0,
+                              0);
+
+        gl_check_error();
+
+        for (uint32_t i = 0; i < VT_RUNE_MAX_COMBINE + 1; ++i) {
+            char32_t c = i ? rune->combine[i - 1] : rune->code;
+            if (!c) {
+                break;
+            }
+            if (i) {
+                output = Freetype_load_and_render_glyph(gfx->freetype, c, style);
+            }
+            if (!output) {
+                WRN("Missing combining glyph u+%X\n", c);
+                continue;
+            }
+            GLuint tmp_tex;
+            glGenTextures(1, &tmp_tex);
+            glBindTexture(GL_TEXTURE_2D, tmp_tex);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexImage2D(GL_TEXTURE_2D,
+                         0,
+                         internal_format,
+                         output->width,
+                         output->height,
+                         0,
+                         load_format,
+                         GL_UNSIGNED_BYTE,
+                         output->pixels);
+            gl_check_error();
+
+            float l = scalex * output->left;
+            float t = scaley * output->top;
+            float w = scalex * output->width;
+            float h = scaley * output->height;
+
+            float x = -1.0 + (i ? ((tex.w - output->width) / 2 * scalex) : l);
+            float y = 1.0 - t + h;
+            y       = CLAMP(y, -1.0 + h, 1.0);
+
+            float vbo_data[4][4] = {
+                { x, y, 0.0f, 1.0f },
+                { x + w, y, 1.0f, 1.0f },
+                { x + w, y - h, 1.0f, 0.0f },
+                { x, y - h, 0.0f, 0.0f },
+            };
+            glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vbo_data), vbo_data);
+            glDrawArrays(GL_QUADS, 0, 4);
+
+            glDeleteTextures(1, &tmp_tex);
+            gl_check_error();
+        }
+
+        glDepthFunc(GL_LESS);
+
+        /* restore initial state */
+        glUseProgram(old_shader);
+        glBindFramebuffer(GL_FRAMEBUFFER, old_fb);
+        glViewport(old_viewport[0], old_viewport[1], old_viewport[2], old_viewport[3]);
+        glDeleteFramebuffers(1, &tmp_fb);
+        glDeleteRenderbuffers(1, &tmp_rb);
+        glDeleteBuffers(1, &tmp_vbo);
+        if (!old_depth_test) {
+            glDisable(GL_DEPTH_TEST);
+        }
+
+        new_entry = (GlyphMapEntry){
+            .code  = code,
+            .color = glyph_color,
+            .left  = MIN(0, base_left),
+            .top   = tex.h,
+            .tex   = tex,
+        };
+        glBindTexture(GL_TEXTURE_2D, tex.id);
+    } else {
+        Texture tex = {
+            .id     = 0,
+            .format = texture_format,
+            .w      = output->width,
+            .h      = output->height,
+        };
+        glGenTextures(1, &tex.id);
+        glBindTexture(GL_TEXTURE_2D, tex.id);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, output->alignment);
+        glTexParameteri(GL_TEXTURE_2D,
+                        GL_TEXTURE_MIN_FILTER,
+                        scale ? GL_LINEAR_MIPMAP_LINEAR : GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexImage2D(GL_TEXTURE_2D,
+                     0,
+                     internal_format,
+                     output->width,
+                     output->height,
+                     0,
+                     load_format,
+                     GL_UNSIGNED_BYTE,
+                     output->pixels);
+        if (scale) {
+            glGenerateMipmap(GL_TEXTURE_2D);
+        }
+        new_entry = (GlyphMapEntry){
+            .code  = code,
+            .color = glyph_color,
+            .left  = output->left,
+            .top   = output->top,
+            .tex   = tex,
+        };
     }
     return Map_insert_Rune_GlyphMapEntry(&gfx->glyph_cache, key, new_entry);
 }
@@ -512,42 +665,35 @@ __attribute__((cold)) static Texture create_squiggle_texture(uint32_t w,
                                                              uint32_t h,
                                                              uint32_t thickness)
 {
+    const double MSAA = 4;
+    w *= MSAA;
+    h *= MSAA;
     GLuint tex;
     glEnable(GL_TEXTURE_2D);
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-    uint8_t* fragments = calloc(w * h * 4, 1);
-
-    double pixel_size                = 2.0 / h;
-    double stroke_width              = thickness * pixel_size;
-    double stroke_fade               = pixel_size * 1.5;
-    double distance_limit_full_alpha = POW2(stroke_width / 2.0);
-    double distance_limit_zero_alpha = POW2(stroke_width / 2.0 + stroke_fade);
-
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    uint8_t* fragments                 = calloc(w * h * 4, 1);
+    double   pixel_size                = 2.0 / h;
+    double   stroke_width              = thickness * pixel_size * (MSAA / 1.3);
+    double   stroke_fade               = pixel_size * MSAA * 2;
+    double   distance_limit_full_alpha = POW2(stroke_width / 1.0);
+    double   distance_limit_zero_alpha = POW2(stroke_width / 1.0 + stroke_fade);
     for (uint_fast32_t x = 0; x < w; ++x)
         for (uint_fast32_t y = 0; y < h; ++y) {
-            uint8_t* fragment = &fragments[(y * w + x) * 4];
-
 #define DISTANCE_SQR(_x, _y, _x2, _y2) (pow((_x2) - (_x), 2) + pow((_y2) - (_y), 2))
-
-            double x_frag = (double)x / (double)w * 2.0 * M_PI;
+            uint8_t* fragment = &fragments[(y * w + x) * 4];
+            double   x_frag   = (double)x / (double)w * 2.0 * M_PI;
             double y_frag = (double)y / (double)h * (2.0 + stroke_width * 2.0 + stroke_fade * 2.0) -
                             1.0 - stroke_width - stroke_fade;
-
-            double y_curve = sin(x_frag);
-
-            // d/dx -> in what dir is closest point
+            double y_curve          = sin(x_frag);
             double dx_frag          = cos(x_frag);
             double y_dist           = y_frag - y_curve;
             double closest_distance = DISTANCE_SQR(x_frag, y_frag, x_frag, y_curve);
-
-            double step = dx_frag * y_dist < 0.0 ? 0.01 : -0.01;
-
+            double step             = dx_frag * y_dist < 0.0 ? 0.001 : -0.001;
             for (double i = x_frag + step;; i += step / 2.0) {
                 double i_distance = DISTANCE_SQR(x_frag, y_frag, i, sin(i));
                 if (likely(i_distance <= closest_distance)) {
@@ -556,7 +702,6 @@ __attribute__((cold)) static Texture create_squiggle_texture(uint32_t w,
                     break;
                 }
             }
-
             fragments[3] = 0;
             if (closest_distance <= distance_limit_full_alpha) {
                 fragment[0] = fragment[1] = fragment[2] = fragment[3] = UINT8_MAX;
@@ -571,10 +716,9 @@ __attribute__((cold)) static Texture create_squiggle_texture(uint32_t w,
 
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, fragments);
-
     free(fragments);
 
-    return (Texture){ .id = tex, .format = TEX_FMT_RGBA, .w = w, .h = h };
+    return (Texture){ .id = tex, .format = TEX_FMT_RGBA, .w = w / MSAA, .h = h / MSAA };
 }
 
 void GfxOpenGL21_resize(Gfx* self, uint32_t w, uint32_t h)
@@ -667,6 +811,9 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
 
     gfxOpenGL21(self)->font_shader_gray =
       Shader_new(font_vs_src, font_gray_fs_src, "coord", "tex", "clr", "bclr", NULL);
+
+    gfxOpenGL21(self)->font_shader_blend =
+      Shader_new(font_vs_src, font_depth_blend_fs_src, "coord", "tex", NULL);
 
     gfxOpenGL21(self)->bg_shader = Shader_new(bg_vs_src, bg_fs_src, "pos", "mv", "clr", NULL);
 
@@ -791,7 +938,7 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
     uint32_t t_height = CLAMP(gfxOpenGL21(self)->line_height_pixels / 8.0 + 2, 4, UINT8_MAX);
 
     gfxOpenGL21(self)->squiggle_texture =
-      create_squiggle_texture(t_height * M_PI / 2.0, t_height, CLAMP(t_height / 3, 1, 10));
+      create_squiggle_texture(t_height * M_PI / 2.0, t_height, CLAMP((t_height / 4), 1, 20));
 }
 
 void GfxOpenGL21_reload_font(Gfx* self)
@@ -831,7 +978,7 @@ void GfxOpenGL21_reload_font(Gfx* self)
     glDeleteTextures(1, &gfxOpenGL21(self)->squiggle_texture.id);
     uint32_t t_height = CLAMP(gfxOpenGL21(self)->line_height_pixels / 8.0 + 2, 4, UINT8_MAX);
     gfxOpenGL21(self)->squiggle_texture =
-      create_squiggle_texture(t_height * M_PI / 2.0, t_height, CLAMP(t_height / 7, 1, 10));
+      create_squiggle_texture(t_height * M_PI / 2.0, t_height, CLAMP(t_height / 4, 1, 20));
 
     GfxOpenGL21_notify_action(self);
 }
@@ -1265,7 +1412,8 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                                 }
                                 if (each_rune_filtered_visible->rune.code >
                                       ATLAS_RENDERABLE_START &&
-                                    each_rune_filtered_visible->rune.code <= ATLAS_RENDERABLE_END) {
+                                    each_rune_filtered_visible->rune.code <= ATLAS_RENDERABLE_END &&
+                                    !each_rune_filtered_visible->rune.combine[0]) {
                                     // pull data from font atlas
                                     struct AtlasCharInfo*   g;
                                     int32_t                 atlas_offset = -1;
@@ -1438,7 +1586,8 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                             for (const VtRune* z = same_colors_block_begin_rune;
                                  z != each_rune_same_bg;
                                  ++z) {
-                                if (unlikely(z->rune.code > ATLAS_RENDERABLE_END)) {
+                                if (unlikely(z->rune.code > ATLAS_RENDERABLE_END ||
+                                             z->rune.combine[0])) {
                                     size_t         column = z - vt_line->data.buf;
                                     GlyphMapEntry* g = GfxOpenGL21_get_cached_glyph(gfx, &z->rune);
                                     if (!g) {
@@ -1730,7 +1879,7 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
             if ((tmp = wcwidth(vt_line->data.buf[range_end_idx - 1].rune.code)) > 1) {
                 extra = (tmp - 1);
             }
-            if (range_end_idx &&
+            if (range_end_idx > 2 &&
                 (tmp = wcwidth(vt_line->data.buf[range_end_idx - 2].rune.code)) > 2) {
                 extra = MAX(extra, tmp - 2);
             }
@@ -1941,7 +2090,7 @@ static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const
                                       GL_FALSE,
                                       0,
                                       0);
-                Atlas*          source_atlas = gfx->atlas;
+                Atlas* source_atlas = gfx->atlas;
                 switch (expect(cursor_char->rune.style, VT_RUNE_NORMAL)) {
                     case VT_RUNE_ITALIC:
                         source_atlas = gfx->atlas_italic;
@@ -2308,6 +2457,7 @@ void GfxOpenGL21_destroy(Gfx* self)
     VBO_destroy(&gfxOpenGL21(self)->bg_vao);
 
     Shader_destroy(&gfxOpenGL21(self)->font_shader);
+    Shader_destroy(&gfxOpenGL21(self)->font_shader_blend);
     Shader_destroy(&gfxOpenGL21(self)->bg_shader);
     Shader_destroy(&gfxOpenGL21(self)->line_shader);
     Shader_destroy(&gfxOpenGL21(self)->image_shader);

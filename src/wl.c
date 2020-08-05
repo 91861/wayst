@@ -1365,13 +1365,13 @@ void WindowWl_resize(struct WindowBase* self, uint32_t w, uint32_t h)
 
 TimePoint* WindowWl_process_timers(struct WindowBase* self)
 {
-    WindowWl* win = windowWl(self);
+    /* WindowWl* win = windowWl(self); */
     if (globalWl->keycode_to_repeat && TimePoint_passed(globalWl->repeat_point)) {
-        uint32_t ft = 16;
-        if (win->active_output && win->active_output->target_frame_time_ms) {
-            ft = win->active_output->target_frame_time_ms;
-        }
-        int32_t time_offset    = ((1000 / globalWl->kbd_repeat_rate) / ft) * ft + 0.3 * ft;
+        /* uint32_t ft = 16; */
+        /* if (win->active_output && win->active_output->target_frame_time_ms) { */
+        /*     ft = win->active_output->target_frame_time_ms; */
+        /* } */
+        int32_t time_offset    = (1000 / globalWl->kbd_repeat_rate);
         globalWl->repeat_point = TimePoint_ms_from_now(time_offset);
         keyboard_handle_key(self,
                             NULL,
@@ -1450,7 +1450,7 @@ bool WindowWl_maybe_swap(struct WindowBase* self)
 
 void WindowWl_set_swap_interval(struct WindowBase* self, int32_t ival)
 {
-    ival += EGL_MIN_SWAP_INTERVAL;
+    ival = EGL_MIN_SWAP_INTERVAL + ival;
 
     if (ival > EGL_MAX_SWAP_INTERVAL || ival < EGL_MIN_SWAP_INTERVAL)
         WRN("Buffer swap interval clamped [%d, %d]\n",
