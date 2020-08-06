@@ -470,7 +470,6 @@ __attribute__((hot)) static GlyphMapEntry* GfxOpenGL21_get_cached_glyph(GfxOpenG
             ASSERT_UNREACHABLE
     }
 
-
     Rune key = *rune;
     if (output->style == FT_STYLE_NONE) {
         key.style = TV_RUNE_UNSTYLED;
@@ -1853,6 +1852,7 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
                  ColorRGBA_get_float(settings.bg, 1),
                  ColorRGBA_get_float(settings.bg, 2),
                  ColorRGBA_get_float(settings.bg, 3));
+
     if (vt_line->damage.type == VT_LINE_DAMAGE_RANGE) {
         glEnable(GL_SCISSOR_TEST);
         size_t begin_px = gfx->glyph_width_pixels * vt_line->damage.front;
@@ -1875,17 +1875,13 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
         case VT_LINE_DAMAGE_RANGE: {
             size_t range_begin_idx = vt_line->damage.front;
             size_t range_end_idx   = vt_line->damage.end + 1;
-            int    extra           = 0, tmp;
-            if ((tmp = wcwidth(vt_line->data.buf[range_end_idx - 1].rune.code)) > 1) {
-                extra = (tmp - 1);
+            while (range_begin_idx && vt_line->data.buf[range_begin_idx].rune.code != ' ') {
+                --range_begin_idx;
             }
-            if (range_end_idx > 2 &&
-                (tmp = wcwidth(vt_line->data.buf[range_end_idx - 2].rune.code)) > 2) {
-                extra = MAX(extra, tmp - 2);
+            while (range_end_idx < vt_line->data.size && range_end_idx &&
+                   vt_line->data.buf[range_end_idx-1].rune.code != ' ') {
+                ++range_end_idx;
             }
-            range_end_idx += extra;
-            range_end_idx = MIN(range_end_idx, vt_line->data.size);
-            extra         = 0;
 
             _GfxOpenGL21_rasterize_line_range(gfx,
                                               vt,
@@ -1913,12 +1909,11 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
         case VT_LINE_DAMAGE_SHIFT:
             // TODO:
         case VT_LINE_DAMAGE_FULL: {
-            size_t range_begin_idx = 0, range_end_idx = length;
             _GfxOpenGL21_rasterize_line_range(gfx,
                                               vt,
                                               vt_line,
-                                              range_begin_idx,
-                                              range_end_idx,
+                                              0,      // range_begin_idx
+                                              length, // range_end_idx
                                               visual_line_index,
                                               is_for_blinking,
                                               &bound_resources,
@@ -1929,8 +1924,8 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
             if (has_underlined_chars) {
                 _GfxOpenGL21_rasterize_line_underline_range(gfx,
                                                             vt_line,
-                                                            range_begin_idx,
-                                                            range_end_idx,
+                                                            0,      // range_begin_idx
+                                                            length, // range_end_idx
                                                             &bound_resources,
                                                             texture_width,
                                                             texture_height);

@@ -590,23 +590,25 @@ static Vector_char line_to_string(Vector_VtRune* line, size_t begin, size_t end,
     res = Vector_new_with_capacity_char(end - begin);
     char utfbuf[4];
 
-    /* previous character was wide, skip the following space */
-    bool prev_wide = false;
     for (uint32_t i = begin; i < end; ++i) {
-        if (prev_wide && line->buf[i].rune.code == ' ') {
-            prev_wide = false;
+        Rune* rune = &line->buf[i].rune;
+        
+        if (rune->code == VT_RUNE_CODE_WIDE_TAIL) {
             continue;
         }
-        if (line->buf[i].rune.code > CHAR_MAX) {
+
+        if (rune->code > CHAR_MAX) {
             static mbstate_t mbstate;
-            size_t           bytes = c32rtomb(utfbuf, line->buf[i].rune.code, &mbstate);
+            size_t           bytes = c32rtomb(utfbuf, rune->code, &mbstate);
             if (bytes > 0) {
                 Vector_pushv_char(&res, utfbuf, bytes);
             }
-            prev_wide = wcwidth(line->buf[i].rune.code) > 1;
         } else {
-            Vector_push_char(&res, line->buf[i].rune.code);
-            prev_wide = false;
+            Vector_push_char(&res, rune->code);
+        }
+
+        for (int j = 0; j < VT_RUNE_MAX_COMBINE && rune->combine[j]; ++j) {
+            Vector_push_char(&res, rune->combine[j]);
         }
     }
     if (tail) {
@@ -847,7 +849,7 @@ void Vt_dump_info(Vt* self)
            Vt_get_scroll_region_bottom(self));
     printf("R E W | \n");
     printf("T G . +----------------------------------------------------\n");
-    printf("| | |  BUFFER: %s\n", (self->alt_lines.buf ? "ALTERNATIVE" : "MAIN"));
+    printf("| | |  BUFFER: %s\n", (self->alt_lines.buf ? "ALTERNATE" : "MAIN"));
     printf("V V V  \n");
     for (size_t i = 0; i < self->lines.size; ++i) {
         Vector_char str = line_to_string(&self->lines.buf[i].data, 0, 0, "");
@@ -1881,10 +1883,12 @@ static inline void Vt_handle_CSI(Vt* self, char c)
 
                         /* push title to stack */
                         case 22:
+                            WRN("Title stack not implemented\n");
                             break;
 
                         /* pop title from stack */
                         case 23:
+                            WRN("Title stack not implemented\n");
                             break;
 
                         /* Resize window to args[1] lines (DECSLPP) */
@@ -2364,9 +2368,8 @@ static inline void Vt_insert_line(Vt* self)
 
     Vt_empty_line_fill_bg(self, self->cursor.row);
 
-    Vector_remove_at_VtLine(&self->lines,
-                            MIN(Vt_get_scroll_region_bottom(self) + 1, Vt_bottom_line(self)),
-                            1);
+    size_t rem_idx = MIN(Vt_get_scroll_region_bottom(self) + 1, Vt_bottom_line(self));
+    Vector_remove_at_VtLine(&self->lines, rem_idx, 1);
 
     Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
 }
@@ -2376,12 +2379,12 @@ static inline void Vt_insert_line(Vt* self)
 static inline void Vt_reverse_line_feed(Vt* self)
 {
     self->last_interted = NULL;
-    Vector_remove_at_VtLine(&self->lines,
-                            MIN(Vt_bottom_line(self), Vt_get_scroll_region_bottom(self) + 1),
-                            1);
-    Vector_insert_VtLine(&self->lines,
-                         Vector_at_VtLine(&self->lines, self->cursor.row),
-                         VtLine_new());
+
+    size_t rem_idx = MIN(Vt_bottom_line(self), Vt_get_scroll_region_bottom(self) + 1);
+    Vector_remove_at_VtLine(&self->lines, rem_idx, 1);
+
+    VtLine* insert_point = Vector_at_VtLine(&self->lines, self->cursor.row);
+    Vector_insert_VtLine(&self->lines, insert_point, VtLine_new());
     Vt_empty_line_fill_bg(self, self->cursor.row);
     Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
 }
@@ -2393,11 +2396,9 @@ static inline void Vt_delete_line(Vt* self)
     self->last_interted = NULL;
     Vector_remove_at_VtLine(&self->lines, self->cursor.row, 1);
 
-    Vector_insert_VtLine(
-      &self->lines,
-      Vector_at_VtLine(&self->lines,
-                       MIN(Vt_get_scroll_region_bottom(self) + 1, Vt_bottom_line(self))),
-      VtLine_new());
+    size_t  insert_idx   = MIN(Vt_get_scroll_region_bottom(self) + 1, Vt_bottom_line(self));
+    VtLine* insert_point = Vector_at_VtLine(&self->lines, insert_idx);
+    Vector_insert_VtLine(&self->lines, insert_point, VtLine_new());
 
     Vt_empty_line_fill_bg(self, MIN(Vt_get_scroll_region_bottom(self) + 1, Vt_bottom_line(self)));
 
@@ -2406,12 +2407,10 @@ static inline void Vt_delete_line(Vt* self)
 
 static inline void Vt_scroll_up(Vt* self)
 {
-    self->last_interted = NULL;
-    Vector_insert_VtLine(
-      &self->lines,
-      Vector_at_VtLine(&self->lines,
-                       MIN(Vt_bottom_line(self), Vt_get_scroll_region_bottom(self) + 1) + 1),
-      VtLine_new());
+    self->last_interted  = NULL;
+    size_t  insert_idx   = MIN(Vt_bottom_line(self), Vt_get_scroll_region_bottom(self) + 1) + 1;
+    VtLine* insert_point = Vector_at_VtLine(&self->lines, insert_idx);
+    Vector_insert_VtLine(&self->lines, insert_point, VtLine_new());
 
     Vt_empty_line_fill_bg(self,
                           MIN(Vt_bottom_line(self), Vt_get_scroll_region_bottom(self) + 1) + 1);
@@ -2663,27 +2662,35 @@ __attribute__((hot)) static inline void Vt_insert_char_at_cursor(Vt* self, VtRun
     while (self->lines.buf[self->cursor.row].data.size <= self->cursor.col) {
         Vector_push_VtRune(&self->lines.buf[self->cursor.row].data, blank_space);
     }
+
     if (unlikely(self->parser.color_inverted)) {
         ColorRGB tmp = c.fg;
         c.fg         = ColorRGB_from_RGBA(c.bg);
         c.bg         = ColorRGBA_from_RGB(tmp);
     }
+
     VtRune* insert_point = &self->lines.buf[self->cursor.row].data.buf[self->cursor.col];
     if (likely(memcmp(insert_point, &c, sizeof(VtRune)))) {
         Vt_mark_proxy_damaged_cell(self, self->cursor.row, self->cursor.col);
         self->lines.buf[self->cursor.row].data.buf[self->cursor.col] = c;
     }
+
     self->last_interted = &self->lines.buf[self->cursor.row].data.buf[self->cursor.col];
     ++self->cursor.col;
-    if (unlikely(wcwidth(c.rune.code) == 2)) {
+
+    int width;
+    if (unlikely((width = wcwidth(c.rune.code)) > 1)) {
         VtRune tmp    = c;
-        tmp.rune.code = ' ';
-        if (self->lines.buf[self->cursor.row].data.size <= self->cursor.col) {
-            Vector_push_VtRune(&self->lines.buf[self->cursor.row].data, tmp);
-        } else {
-            self->lines.buf[self->cursor.row].data.buf[self->cursor.col] = tmp;
+        tmp.rune.code = VT_RUNE_CODE_WIDE_TAIL;
+
+        for (int i = 0; i < width; ++i) {
+            if (self->lines.buf[self->cursor.row].data.size <= self->cursor.col) {
+                Vector_push_VtRune(&self->lines.buf[self->cursor.row].data, tmp);
+            } else {
+                self->lines.buf[self->cursor.row].data.buf[self->cursor.col] = tmp;
+            }
+            ++self->cursor.col;
         }
-        ++self->cursor.col;
     }
 }
 
@@ -2708,7 +2715,7 @@ static inline void Vt_insert_char_at_cursor_with_shift(Vt* self, VtRune c)
 
 static inline void Vt_empty_line_fill_bg(Vt* self, size_t idx)
 {
-    ASSERT(self->lines.buf[idx].data.size == 0, "line is not empty");
+    ASSERT(self->lines.buf[idx].data.size == 0, "line is empty");
 
     Vt_mark_proxy_fully_damaged(self, idx);
     if (!ColorRGBA_eq(self->parser.char_state.bg, settings.bg)) {
@@ -2737,6 +2744,7 @@ static inline void Vt_insert_new_line(Vt* self)
         }
         ++self->cursor.row;
     }
+    Vt_mark_proxy_fully_damaged(self, self->cursor.row);
 }
 
 /**
@@ -2760,7 +2768,7 @@ static inline void Vt_move_cursor_to_column(Vt* self, uint32_t columns)
 
 /**
  * Add a character as a combining character for that rune */
-static inline void VtRune_push_combining(VtRune* self, char32_t codepoint)
+static void VtRune_push_combining(VtRune* self, char32_t codepoint)
 {
     ASSERT(unicode_is_combining(codepoint), "must be a combining character");
     for (uint_fast8_t i = 0; i < ARRAY_SIZE(self->rune.combine); ++i) {
@@ -2774,7 +2782,7 @@ static inline void VtRune_push_combining(VtRune* self, char32_t codepoint)
 
 /**
  * Try to interpret a combining character as an SGR property */
-static inline bool VtRune_try_normalize_as_property(VtRune* self, char32_t codepoint)
+static bool VtRune_try_normalize_as_property(VtRune* self, char32_t codepoint)
 {
     switch (codepoint) {
         case 0x00001AB6: /* COMBINING WIGGLY LINE BELOW */
@@ -2813,7 +2821,7 @@ static inline bool VtRune_try_normalize_as_property(VtRune* self, char32_t codep
 
 /**
  * Try to do something about combinable characters */
-static inline void Vt_handle_combinable(Vt* self, char32_t c)
+static void Vt_handle_combinable(Vt* self, char32_t c)
 {
     if (self->last_interted) {
         if (VtRune_try_normalize_as_property(self->last_interted, c)) {
@@ -3267,7 +3275,7 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
     }
 }
 
-static inline void Vt_shrink_scrollback(Vt* self)
+static void Vt_shrink_scrollback(Vt* self)
 {
     /* alt buffer is active */
     if (self->alt_lines.buf)
@@ -3319,7 +3327,7 @@ void Vt_get_visible_lines(const Vt* self, VtLine** out_begin, VtLine** out_end)
     }
 }
 
-static inline const char* normal_keypad_response(const uint32_t key)
+static const char* normal_keypad_response(const uint32_t key)
 {
     switch (key) {
         case XKB_KEY_Up:
@@ -3341,7 +3349,7 @@ static inline const char* normal_keypad_response(const uint32_t key)
     }
 }
 
-static inline const char* application_keypad_response(const uint32_t key)
+static const char* application_keypad_response(const uint32_t key)
 {
     switch (key) {
         case XKB_KEY_Up:
@@ -3377,7 +3385,7 @@ static inline const char* application_keypad_response(const uint32_t key)
 
 /**
  * Get response format string in normal keypad mode */
-static inline const char* normal_mod_keypad_response(const uint32_t key)
+static const char* normal_mod_keypad_response(const uint32_t key)
 {
     switch (key) {
         case XKB_KEY_Up:
@@ -3399,7 +3407,7 @@ static inline const char* normal_mod_keypad_response(const uint32_t key)
 
 /**
  * Get response format string in application keypad mode */
-static inline const char* application_mod_keypad_response(const uint32_t key)
+static const char* application_mod_keypad_response(const uint32_t key)
 {
     switch (key) {
         case XKB_KEY_Up:
@@ -3486,7 +3494,7 @@ static bool Vt_maybe_handle_unicode_input_key(Vt*      self,
 /**
  * Respond to key event if it is a keypad key
  * @return keypress was consumed */
-static inline bool Vt_maybe_handle_keypad_key(Vt* self, uint32_t key, uint32_t mods)
+static bool Vt_maybe_handle_keypad_key(Vt* self, uint32_t key, uint32_t mods)
 {
     const char* resp = NULL;
     if (mods) {
@@ -3511,7 +3519,7 @@ static inline bool Vt_maybe_handle_keypad_key(Vt* self, uint32_t key, uint32_t m
 /**
  * Respond to key event if it is a function key
  * @return keypress was consumed */
-static inline bool Vt_maybe_handle_function_key(Vt* self, uint32_t key, uint32_t mods)
+static bool Vt_maybe_handle_function_key(Vt* self, uint32_t key, uint32_t mods)
 {
     if (key >= XKB_KEY_F1 && key <= XKB_KEY_F35) {
         int f_num = key - XKB_KEY_F1;
@@ -3545,7 +3553,7 @@ static inline bool Vt_maybe_handle_function_key(Vt* self, uint32_t key, uint32_t
 
 /**
  *  Substitute keypad keys with normal ones */
-static inline uint32_t numpad_key_convert(uint32_t key)
+static uint32_t numpad_key_convert(uint32_t key)
 {
     switch (key) {
         case XKB_KEY_KP_Add:

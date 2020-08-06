@@ -55,6 +55,8 @@ typedef struct Cursor
     size_t  col, row;
 } Cursor;
 
+#define VT_RUNE_CODE_WIDE_TAIL 27
+
 typedef struct
 {
     char32_t code;
