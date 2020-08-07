@@ -592,7 +592,7 @@ static Vector_char line_to_string(Vector_VtRune* line, size_t begin, size_t end,
 
     for (uint32_t i = begin; i < end; ++i) {
         Rune* rune = &line->buf[i].rune;
-        
+
         if (rune->code == VT_RUNE_CODE_WIDE_TAIL) {
             continue;
         }
@@ -1704,6 +1704,19 @@ static inline void Vt_handle_CSI(Vt* self, char c)
                     MULTI_ARG_IS_ERROR
                     Vt_delete_chars(self, short_sequence_get_int_argument(seq));
                     break;
+
+                /* <ESC>[ Ps b -  Repeat the preceding graphic character Ps times (REP)
+                 * in xterm any cursor movement or SGR sequences after inserting the character
+                 * cause this to have no effect */
+                case 'b': {
+                    MULTI_ARG_IS_ERROR
+                    if (likely(self->last_interted)) {
+                        int arg = short_sequence_get_int_argument(seq);
+                        for (int i = 0; i < arg; ++i) {
+                            Vt_insert_char_at_cursor(self, *self->last_interted);
+                        }
+                    }
+                } break;
 
                 /* <ESC>[ Ps i -  Media Copy (MC) Local printing related commands */
                 case 'i':
