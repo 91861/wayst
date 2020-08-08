@@ -561,9 +561,9 @@ static void print_help_and_exit()
 static void print_version_and_exit()
 {
     printf("version: " VERSION
-           #ifdef DEBUG
+#ifdef DEBUG
            "-debug"
-           #endif
+#endif
 
            "\n wayland: "
 #ifdef NOWL
@@ -1022,7 +1022,7 @@ static void settings_get_opts(const int argc, char* const* argv, const bool cfg_
     }
 }
 
-static void handle_config_option(const char* key, const char* val)
+static void handle_config_option(const char* key, const char* val, uint32_t line)
 {
     if (key) {
         for (int i = 0;; ++i) {
@@ -1033,9 +1033,14 @@ static void handle_config_option(const char* key, const char* val)
                 if (opt->has_arg == required_argument || !val || !strcasecmp(val, "true") ||
                     !strcmp(val, "1")) {
                     handle_option(opt->val, i, val);
+                    return;
                 }
             }
         }
+        WRN("error in config on line %u: invalid option \'%s\'. \'%s -h\' to list options\n",
+            line,
+            key,
+            EXE_FNAME);
     }
 }
 
@@ -1043,10 +1048,11 @@ static void settings_file_parse(FILE* f)
 {
     ASSERT(f, "valid FILE*");
 
-    bool in_comment = false;
-    bool in_value   = false;
-    bool in_string  = false;
-    bool escaped    = false;
+    bool     in_comment = false;
+    bool     in_value   = false;
+    bool     in_string  = false;
+    bool     escaped    = false;
+    uint32_t line       = 0; // handle_config_option is called after the \n so start from 0
 
     char buf[512] = { 0 };
     int  rd;
@@ -1057,6 +1063,10 @@ static void settings_file_parse(FILE* f)
     while ((rd = fread(buf, sizeof(char), sizeof buf - 1, f))) {
 
         for (int i = 0; i < rd; ++i) {
+            if (buf[i] == '\n') {
+                ++line;
+            }
+
             if (in_comment) {
                 if (buf[i] == '\n') {
                     in_comment = false;
@@ -1069,7 +1079,7 @@ static void settings_file_parse(FILE* f)
                     in_comment = true;
                     in_value   = false;
                     Vector_push_char(&value, 0);
-                    handle_config_option(key.buf, value.buf);
+                    handle_config_option(key.buf, value.buf, line);
                     value.size = 0;
                     continue;
                 }
@@ -1084,7 +1094,7 @@ static void settings_file_parse(FILE* f)
                     in_value  = false;
                     in_string = false;
                     Vector_push_char(&value, 0);
-                    handle_config_option(key.buf, value.buf);
+                    handle_config_option(key.buf, value.buf, line);
                     value.size = 0;
                 } else {
                     if (!isblank(buf[i]) || in_string || escaped) {
@@ -1100,7 +1110,7 @@ static void settings_file_parse(FILE* f)
                 } else if (buf[i] == '\n' && !escaped) {
                     if (key.size) {
                         Vector_push_char(&key, '\0');
-                        handle_config_option(key.buf, NULL);
+                        handle_config_option(key.buf, NULL, line);
                     }
                     Vector_clear_char(&key);
                 } else {
