@@ -650,6 +650,7 @@ void WindowX11_set_title(struct WindowBase* self, const char* title)
     ASSERT(title, "string is NULL");
 
     XStoreName(globalX11->display, windowX11(self)->window, title);
+    XFlush(globalX11->display);
 }
 
 void WindowX11_set_wm_name(struct WindowBase* self, const char* title)

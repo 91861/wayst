@@ -64,6 +64,7 @@ static void          Vt_clear_display_and_scrollback(Vt* self);
 static void          Vt_erase_to_end(Vt* self);
 static void          Vt_move_cursor(Vt* self, uint32_t c, uint32_t r);
 static void          Vt_move_cursor_to_column(Vt* self, uint32_t c);
+static void          Vt_set_title(Vt* self, const char* title);
 static void          Vt_push_title(Vt* self);
 static void          Vt_pop_title(Vt* self);
 static inline void   Vt_insert_char_at_cursor(Vt* self, VtRune c);
@@ -687,7 +688,7 @@ __attribute__((hot)) static inline bool is_csi_sequence_terminated(const char*  
            seq[size - 1] == '}' || seq[size - 1] == '~' || seq[size - 1] == '|';
 }
 
-static inline bool is_generic_sequence_terminated(const char* seq, const size_t size)
+static inline bool is_string_sequence_terminated(const char* seq, const size_t size)
 {
     if (!size)
         return false;
@@ -731,7 +732,7 @@ Vt Vt_new(uint32_t cols, uint32_t rows)
     self.tabstop = 8;
 
     self.title       = NULL;
-    self.title_stack = Vector_new_size_t();
+    self.title_stack = Vector_new_DynStr();
 
     self.unicode_input.buffer = Vector_new_char();
 
@@ -1896,12 +1897,14 @@ static inline void Vt_handle_CSI(Vt* self, char c)
 
                         /* push title to stack */
                         case 22:
-                            WRN("Title stack not implemented\n");
+                            Vt_push_title(self);
+                            LOG("Title stack push\n");
                             break;
 
                         /* pop title from stack */
                         case 23:
-                            WRN("Title stack not implemented\n");
+                            Vt_pop_title(self);
+                            LOG("Title stack pop\n");
                             break;
 
                         /* Resize window to args[1] lines (DECSLPP) */
@@ -2108,8 +2111,7 @@ static void Vt_handle_SGR_sequence(Vt* self, Vector_char seq)
         if (!strcmp(token->buf + 1, "38") /* foreground */ ||
             !strcmp(token->buf + 1, "48") /* background */ ||
             !strcmp(token->buf + 1, "58") /* underline  */) {
-            /* next argument determines how the color will be set and final
-             * number of args */
+            /* next argument determines how the color will be set and final number of args */
 
             if ((args[1] = (token = Vector_iter_Vector_char(&tokens, token))) &&
                 (args[2] = (token = Vector_iter_Vector_char(&tokens, token)))) {
@@ -2184,8 +2186,8 @@ static void Vt_handle_SGR_sequence(Vt* self, Vector_char seq)
 static void Vt_handle_APC(Vt* self, char c)
 {
     Vector_push_char(&self->parser.active_sequence, c);
-    if (is_generic_sequence_terminated(self->parser.active_sequence.buf,
-                                       self->parser.active_sequence.size)) {
+    if (is_string_sequence_terminated(self->parser.active_sequence.buf,
+                                      self->parser.active_sequence.size)) {
         Vector_push_char(&self->parser.active_sequence, '\0');
         const char* seq = self->parser.active_sequence.buf;
         char*       str = pty_string_prettyfy(seq, strlen(seq));
@@ -2201,8 +2203,8 @@ static void Vt_handle_DCS(Vt* self, char c)
 {
     Vector_push_char(&self->parser.active_sequence, c);
 
-    if (is_generic_sequence_terminated(self->parser.active_sequence.buf,
-                                       self->parser.active_sequence.size)) {
+    if (is_string_sequence_terminated(self->parser.active_sequence.buf,
+                                      self->parser.active_sequence.size)) {
         Vector_push_char(&self->parser.active_sequence, '\0');
 
         const char* seq = self->parser.active_sequence.buf;
@@ -2232,8 +2234,8 @@ static void Vt_handle_DCS(Vt* self, char c)
 static void Vt_handle_PM(Vt* self, char c)
 {
     Vector_push_char(&self->parser.active_sequence, c);
-    if (is_generic_sequence_terminated(self->parser.active_sequence.buf,
-                                       self->parser.active_sequence.size)) {
+    if (is_string_sequence_terminated(self->parser.active_sequence.buf,
+                                      self->parser.active_sequence.size)) {
         Vector_destroy_char(&self->parser.active_sequence);
         self->parser.active_sequence = Vector_new_char();
         self->parser.state           = PARSER_STATE_LITERAL;
@@ -2244,12 +2246,34 @@ static void Vt_handle_OSC(Vt* self, char c)
 {
     Vector_push_char(&self->parser.active_sequence, c);
 
-    if (is_generic_sequence_terminated(self->parser.active_sequence.buf,
-                                       self->parser.active_sequence.size)) {
+    if (is_string_sequence_terminated(self->parser.active_sequence.buf,
+                                      self->parser.active_sequence.size)) {
+
+        if (*Vector_last_char(&self->parser.active_sequence) == '\\') {
+            Vector_pop_char(&self->parser.active_sequence);
+        }
+        if (*Vector_last_char(&self->parser.active_sequence) == '\e') {
+            Vector_pop_char(&self->parser.active_sequence);
+        }
+        if (*Vector_last_char(&self->parser.active_sequence) == '\a') {
+            Vector_pop_char(&self->parser.active_sequence);
+        }
         Vector_push_char(&self->parser.active_sequence, '\0');
-        char*              seq    = self->parser.active_sequence.buf;
-        Vector_Vector_char tokens = string_split_on(seq, ";:", NULL, "\a\b\n\t\v");
-        int                arg    = strtol(tokens.buf[0].buf + 1, NULL, 10);
+        char* seq  = self->parser.active_sequence.buf;
+        int   arg  = 0;
+        char* text = seq;
+
+        if (isdigit(*seq)) {
+            arg = strtol(seq, &text, 10);
+            if (text && !(*text == ';' || *text == ':')) {
+                text = seq;
+            } else if (text && *text) {
+                ++text;
+            }
+        } else {
+            WRN("no numerical argument in OSC \'%s\'\n", seq);
+        }
+
         switch (arg) {
             /* Change Icon Name and Window Title */
             case 0:
@@ -2257,14 +2281,7 @@ static void Vt_handle_OSC(Vt* self, char c)
             case 1:
             /* Change Window Title */
             case 2:
-                /* Set title */
-                if (tokens.size >= 2) {
-                    free(self->title);
-                    self->title = strdup(tokens.buf[1].buf + 1);
-                    CALL_FP(self->callbacks.on_title_changed,
-                            self->callbacks.user_data,
-                            tokens.buf[1].buf + 1);
-                }
+                Vt_set_title(self, text);
                 break;
 
             /* Set X property on top-level window (prop=val) */
@@ -2328,32 +2345,31 @@ static void Vt_handle_OSC(Vt* self, char c)
                 WRN("Unknown OSC: %s\n", self->parser.active_sequence.buf);
         }
 
-        Vector_destroy_Vector_char(&tokens);
         Vector_destroy_char(&self->parser.active_sequence);
         self->parser.active_sequence = Vector_new_char();
         self->parser.state           = PARSER_STATE_LITERAL;
     }
 }
 
-// TODO: figure out how this should work
-static inline void Vt_push_title(Vt* self)
+static void Vt_push_title(Vt* self)
 {
-    Vector_push_size_t(&self->title_stack, (size_t)self->title);
-    self->title = NULL;
+    if (self->title) {
+        Vector_push_DynStr(&self->title_stack, (DynStr){ .s = strdup(self->title) });
+    }
 }
 
-static inline void Vt_pop_title(Vt* self)
+static void Vt_pop_title(Vt* self)
 {
-    free(self->title);
     if (self->title_stack.size) {
-        self->title = (char*)self->title_stack.buf[self->title_stack.size - 1];
-        Vector_pop_size_t(&self->title_stack);
+        Vt_set_title(self, Vector_last_DynStr(&self->title_stack)->s);
+        Vector_pop_DynStr(&self->title_stack);
     } else {
+        free(self->title);
         self->title = NULL;
     }
 }
 
-static inline void Vt_reset_text_attribs(Vt* self)
+static void Vt_reset_text_attribs(Vt* self)
 {
     memset(&self->parser.char_state, 0, sizeof(self->parser.char_state));
     self->parser.char_state.rune.code = ' ';
@@ -2364,7 +2380,7 @@ static inline void Vt_reset_text_attribs(Vt* self)
 
 /**
  * Move cursor to first column */
-static inline void Vt_carriage_return(Vt* self)
+static void Vt_carriage_return(Vt* self)
 {
     self->last_interted = NULL;
     Vt_move_cursor_to_column(self, 0);
@@ -2372,7 +2388,7 @@ static inline void Vt_carriage_return(Vt* self)
 
 /**
  * make a new empty line at cursor position, scroll down contents below */
-static inline void Vt_insert_line(Vt* self)
+static void Vt_insert_line(Vt* self)
 {
     self->last_interted = NULL;
     Vector_insert_VtLine(&self->lines,
@@ -2389,7 +2405,7 @@ static inline void Vt_insert_line(Vt* self)
 
 /**
  * the same as insert line, but adds before cursor line */
-static inline void Vt_reverse_line_feed(Vt* self)
+static void Vt_reverse_line_feed(Vt* self)
 {
     self->last_interted = NULL;
 
@@ -2404,7 +2420,7 @@ static inline void Vt_reverse_line_feed(Vt* self)
 
 /**
  * delete active line, content below scrolls up */
-static inline void Vt_delete_line(Vt* self)
+static void Vt_delete_line(Vt* self)
 {
     self->last_interted = NULL;
     Vector_remove_at_VtLine(&self->lines, self->cursor.row, 1);
@@ -2418,7 +2434,7 @@ static inline void Vt_delete_line(Vt* self)
     Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
 }
 
-static inline void Vt_scroll_up(Vt* self)
+static void Vt_scroll_up(Vt* self)
 {
     self->last_interted  = NULL;
     size_t  insert_idx   = MIN(Vt_bottom_line(self), Vt_get_scroll_region_bottom(self) + 1) + 1;
@@ -2433,7 +2449,7 @@ static inline void Vt_scroll_up(Vt* self)
     Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
 }
 
-static inline void Vt_scroll_down(Vt* self)
+static void Vt_scroll_down(Vt* self)
 {
     self->last_interted = NULL;
     Vector_remove_at_VtLine(&self->lines,
@@ -2449,7 +2465,7 @@ static inline void Vt_scroll_down(Vt* self)
 
 /**
  * Move cursor one cell down if possible */
-static inline void Vt_cursor_down(Vt* self)
+static void Vt_cursor_down(Vt* self)
 {
     self->last_interted = NULL;
     if (self->cursor.row < Vt_bottom_line(self))
@@ -2459,7 +2475,7 @@ static inline void Vt_cursor_down(Vt* self)
 
 /**
  * Move cursor one cell up if possible */
-static inline void Vt_cursor_up(Vt* self)
+static void Vt_cursor_up(Vt* self)
 {
     self->last_interted = NULL;
     if (self->cursor.row > Vt_top_line(self))
@@ -3075,11 +3091,9 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
                       CALL_FP(self->callbacks.on_number_of_cells_requested,
                               self->callbacks.user_data)
                         .second;
-                    for (size_t* i = NULL; Vector_iter_size_t(&self->title_stack, i);) {
-                        free((char*)*i);
-                    }
-                    Vector_destroy_size_t(&self->title_stack);
-                    self->title_stack = Vector_new_size_t();
+                    Vector_clear_DynStr(&self->title_stack);
+                    free(self->title);
+                    self->title = NULL;
                     return;
 
                 /* Save cursor (DECSC) */
@@ -3136,6 +3150,11 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
                 case 'O':
                     self->charset_single_shift = &self->charset_g3;
                     self->parser.state         = PARSER_STATE_LITERAL;
+                    break;
+
+                /* Old title set sequence */
+                case 'k':
+                    self->parser.state = PARSER_STATE_TITLE;
                     break;
 
                 /* Start of string */
@@ -3282,6 +3301,20 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
         case PARSER_STATE_APC:
             Vt_handle_APC(self, c);
             break;
+
+        case PARSER_STATE_TITLE: {
+            Vector_push_char(&self->parser.active_sequence, c);
+            size_t len = self->parser.active_sequence.size;
+            if ((len >= 2 && self->parser.active_sequence.buf[len - 2] == '\e' &&
+                 self->parser.active_sequence.buf[len - 1] == '\\') ||
+                c == '\a') {
+                Vector_pop_n_char(&self->parser.active_sequence, 2);
+                Vector_push_char(&self->parser.active_sequence, '\0');
+                Vt_set_title(self, self->parser.active_sequence.buf);
+                self->parser.state = PARSER_STATE_LITERAL;
+                Vector_clear_char(&self->parser.active_sequence);
+            }
+        } break;
 
         default:
             ASSERT_UNREACHABLE;
@@ -3732,26 +3765,27 @@ void Vt_handle_clipboard(void* self, const char* text)
     }
 }
 
+static void Vt_set_title(Vt* self, const char* title)
+{
+    free(self->title);
+    self->title = strdup(title);
+    CALL_FP(self->callbacks.on_title_changed, self->callbacks.user_data, self->title);
+}
+
 void Vt_destroy(Vt* self)
 {
     Vector_destroy_VtLine(&self->lines);
     if (self->alt_lines.buf) {
         Vector_destroy_VtLine(&self->alt_lines);
     }
-
     Vector_destroy_char(&self->parser.active_sequence);
-
-    for (size_t* i = NULL; Vector_iter_size_t(&self->title_stack, i);) {
-        free((char*)*i);
-    }
-
-    Vector_destroy_size_t(&self->title_stack);
+    Vector_destroy_DynStr(&self->title_stack);
     free(self->work_dir);
 }
 
 void Vt_get_output(Vt* self, char** out_buf, size_t* out_bytes)
 {
-    ASSERT(out_buf && out_bytes, "");
+    ASSERT(out_buf && out_bytes, "has outputs");
 
     if (unlikely(settings.debug_pty) && self->output.size) {
         char* str = pty_string_prettyfy(self->output.buf, self->output.size);

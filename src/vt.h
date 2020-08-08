@@ -32,6 +32,16 @@
 #define VT_RUNE_MAX_COMBINE 2
 #endif
 
+
+typedef struct {char* s;} DynStr;
+
+static void DynStr_destroy(DynStr* self) {
+    free(self->s);
+    self->s = NULL;
+}
+
+DEF_VECTOR(DynStr, DynStr_destroy)
+
 enum MouseButton
 {
     MOUSE_BTN_LEFT       = 1,
@@ -268,6 +278,7 @@ typedef struct _Vt
             PARSER_STATE_CHARSET_G1,
             PARSER_STATE_CHARSET_G2,
             PARSER_STATE_CHARSET_G3,
+            PARSER_STATE_TITLE,
         } state;
 
         bool      in_mb_seq;
@@ -281,7 +292,7 @@ typedef struct _Vt
 
     char*         title;
     char*         work_dir;
-    Vector_size_t title_stack;
+    Vector_DynStr title_stack;
 
     /**
      * Character set is composed of C0 (7-bit control characters), C1 (8-bit control characters), GL
