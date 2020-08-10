@@ -38,6 +38,10 @@
 #define DIM_COLOR_BLEND_FACTOR 0.4f
 #endif
 
+#ifndef N_RECYCLED_TEXTURES
+#define N_RECYCLED_TEXTURES 5
+#endif
+
 #define PROXY_INDEX_TEXTURE       0
 #define PROXY_INDEX_TEXTURE_BLINK 1
 #define PROXY_INDEX_TEXTURE_SIZE  2
@@ -122,6 +126,20 @@ DEF_VECTOR(vertex_t, NULL);
 
 typedef struct
 {
+    GLuint  id;
+    int32_t width;
+} LineTexture;
+
+static void LineTexture_destroy(LineTexture* self)
+{
+    if (self->id) {
+        glDeleteTextures(1, &self->id);
+    }
+    self->id = 0;
+}
+
+typedef struct
+{
     GLint max_tex_res;
 
     Vector_vertex_t vec_vertex_buffer;
@@ -154,7 +172,7 @@ typedef struct
     /* padding offset from the top right corner */
     uint8_t                pixel_offset_x;
     uint8_t                pixel_offset_y;
-    Framebuffer            line_framebuffer;
+    GLuint                 line_framebuffer;
     VBO                    font_vao;
     VBO                    bg_vao;
     VBO                    line_vao;
@@ -179,7 +197,8 @@ typedef struct
     Atlas*                 atlas_bold_italic;
 
     // keep textures for reuse in order of length
-    Texture   recycled_line_textures[3];
+    LineTexture recycled_textures[5];
+
     Texture   squiggle_texture;
     bool      has_blinking_text;
     TimePoint blink_switch;
@@ -201,8 +220,9 @@ typedef struct
 
 #define gfxOpenGL21(gfx) ((GfxOpenGL21*)&gfx->extend_data)
 
-void GfxOpenGL21_load_font(Gfx* self);
-void GfxOpenGL21_destroy_recycled_proxies(GfxOpenGL21* self);
+GLuint GfxOpenGL21_pop_recycled_texture(GfxOpenGL21* self);
+void   GfxOpenGL21_load_font(Gfx* self);
+void   GfxOpenGL21_destroy_recycled_proxies(GfxOpenGL21* self);
 
 void          GfxOpenGL21_destroy(Gfx* self);
 void          GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui);
@@ -239,7 +259,6 @@ Gfx* Gfx_new_OpenGL21(Freetype* freetype)
     gfxOpenGL21(self)->freetype = freetype;
     gfxOpenGL21(self)->is_main_font_rgb = !(freetype->primary_output_type == FT_OUTPUT_GRAYSCALE);
     GfxOpenGL21_load_font(self);
-
     return self;
 }
 
@@ -868,7 +887,7 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
     gfxOpenGL21(self)->_atlas = Atlas_new(gfxOpenGL21(self), FT_STYLE_REGULAR);
     gfxOpenGL21(self)->atlas  = &gfxOpenGL21(self)->_atlas;
 
-    gfxOpenGL21(self)->line_framebuffer = Framebuffer_new();
+    glGenFramebuffers(1, &gfxOpenGL21(self)->line_framebuffer);
 
     gfxOpenGL21(self)->in_focus           = true;
     gfxOpenGL21(self)->recent_action      = true;
@@ -1808,6 +1827,7 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
     uint32_t     actual_texture_width = texture_width;
     uint32_t     texture_height       = gfx->line_height_pixels;
     bool         has_underlined_chars = false;
+    GLuint       final_texture        = 0;
 
     // Try to reuse the texture that is already there
     Texture recovered = {
@@ -1825,25 +1845,66 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
     }
 
     if (can_reuse) {
+        final_texture        = recovered.id;
         actual_texture_width = recovered.w;
-        Framebuffer_attach_as_color(&gfx->line_framebuffer,
-                                    &recovered,
-                                    recovered.w,
-                                    texture_height);
+        glBindFramebuffer(GL_FRAMEBUFFER, gfx->line_framebuffer);
+        glBindTexture(GL_TEXTURE_2D, recovered.id);
+        glFramebufferTexture2D(GL_FRAMEBUFFER,
+                               GL_COLOR_ATTACHMENT0,
+                               GL_TEXTURE_2D,
+                               recovered.id,
+                               0);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, 0);
+        glViewport(0, 0, recovered.w, recovered.h);
+        gl_check_error();
     } else {
         if (!vt_line->data.size) {
             return;
         }
         if (!is_for_blinking) {
-            GfxOpenGL21_destroy_proxy((Gfx*)gfx - offsetof(Gfx, extend_data), vt_line->proxy.data);
+            GfxOpenGL21_destroy_proxy((void*)gfx - offsetof(Gfx, extend_data), vt_line->proxy.data);
         }
-        // TODO: try to recycle
-        Framebuffer_generate_color_attachment(&gfx->line_framebuffer,
-                                              texture_width,
-                                              texture_height);
+
+        GLuint  recycle_id    = gfx->recycled_textures[0].id;
+        int32_t recycle_width = gfx->recycled_textures[0].width;
+        if (recycle_id && recycle_width >= (int32_t)texture_width) {
+            final_texture        = GfxOpenGL21_pop_recycled_texture(gfx);
+            actual_texture_width = recycle_width;
+            glBindFramebuffer(GL_FRAMEBUFFER, gfx->line_framebuffer);
+            glBindTexture(GL_TEXTURE_2D, final_texture);
+            glFramebufferTexture2D(GL_FRAMEBUFFER,
+                                   GL_COLOR_ATTACHMENT0,
+                                   GL_TEXTURE_2D,
+                                   final_texture,
+                                   0);
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, 0);
+            gl_check_error();
+        } else {
+            glBindFramebuffer(GL_FRAMEBUFFER, gfx->line_framebuffer);
+            glGenTextures(1, &final_texture);
+            glBindTexture(GL_TEXTURE_2D, final_texture);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glTexImage2D(GL_TEXTURE_2D,
+                         0,
+                         GL_RGBA,
+                         texture_width,
+                         texture_height,
+                         0,
+                         GL_RGBA,
+                         GL_UNSIGNED_BYTE,
+                         0);
+            glFramebufferTexture2D(GL_FRAMEBUFFER,
+                                   GL_COLOR_ATTACHMENT0,
+                                   GL_TEXTURE_2D,
+                                   final_texture,
+                                   0);
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, 0);
+            gl_check_error();
+        }
     }
 
-    Framebuffer_assert_complete(&gfx->line_framebuffer);
+    assert_farmebuffer_complete();
 
     glViewport(0, 0, texture_width, texture_height);
     glBindTexture(GL_TEXTURE_2D, 0);
@@ -1875,11 +1936,19 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
         case VT_LINE_DAMAGE_RANGE: {
             size_t range_begin_idx = vt_line->damage.front;
             size_t range_end_idx   = vt_line->damage.end + 1;
-            while (range_begin_idx && vt_line->data.buf[range_begin_idx].rune.code != ' ') {
+
+            while (range_begin_idx) {
+                char32_t this_char = vt_line->data.buf[range_begin_idx].rune.code;
+                char32_t prev_char = vt_line->data.buf[range_begin_idx - 1].rune.code;
+                if (this_char == ' ' && !unicode_is_private_use_area(prev_char) &&
+                    wcwidth(prev_char) < 2) {
+                    break;
+                }
                 --range_begin_idx;
             }
+
             while (range_end_idx < vt_line->data.size && range_end_idx &&
-                   vt_line->data.buf[range_end_idx-1].rune.code != ' ') {
+                   vt_line->data.buf[range_end_idx - 1].rune.code != ' ') {
                 ++range_end_idx;
             }
 
@@ -1938,11 +2007,9 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
 
     // set proxy data to generated texture
     if (unlikely(is_for_blinking)) {
-        vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK] =
-          Framebuffer_extract_color_texture(&gfx->line_framebuffer).id;
+        vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK] = final_texture;
     } else {
-        vt_line->proxy.data[PROXY_INDEX_TEXTURE] =
-          Framebuffer_extract_color_texture(&gfx->line_framebuffer).id;
+        vt_line->proxy.data[PROXY_INDEX_TEXTURE]      = final_texture;
         vt_line->proxy.data[PROXY_INDEX_TEXTURE_SIZE] = actual_texture_width;
         vt_line->damage.type                          = VT_LINE_DAMAGE_NONE;
         vt_line->damage.shift                         = 0;
@@ -1958,10 +2025,11 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
         glBegin(GL_QUADS);
-        if (can_reuse)
+        if (can_reuse) {
             glColor4f(0, 0, 0, 0);
-        else
+        } else {
             glColor4f(fabs(sin(debug_tint)), fabs(cos(debug_tint)), sin(debug_tint), 0.1);
+        }
         glVertex2f(1, 1);
         glVertex2f(-1, 1);
         glColor4f(fabs(sin(debug_tint)), fabs(cos(debug_tint)), sin(debug_tint), 0.1);
@@ -1970,11 +2038,12 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
         glEnd();
         glDisable(GL_BLEND);
         debug_tint += 0.5f;
-        if (debug_tint > M_PI)
+        if (debug_tint > M_PI) {
             debug_tint -= M_PI;
+        }
     }
 
-    Framebuffer_use(NULL);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glViewport(0, 0, gfx->win_w, gfx->win_h);
 
     if (!has_blinking_chars && vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK]) {
@@ -2409,26 +2478,73 @@ void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
 
 void GfxOpenGL21_destroy_recycled_proxies(GfxOpenGL21* self)
 {
-    for (uint_fast8_t i = 0; i < ARRAY_SIZE(self->recycled_line_textures); ++i) {
-        Texture_destroy(&self->recycled_line_textures[i]);
+    for (uint_fast8_t i = 0; i < ARRAY_SIZE(self->recycled_textures); ++i) {
+        if (self->recycled_textures[i].id) {
+            glDeleteTextures(1, &self->recycled_textures[i].id);
+        }
+        self->recycled_textures[i].id    = 0;
+        self->recycled_textures[i].width = 0;
     }
+}
+
+void GfxOpenGL21_push_recycled_texture(GfxOpenGL21* self, GLuint tex_id, int32_t width)
+{
+    uint_fast8_t insert_point;
+    for (insert_point = 0; insert_point < N_RECYCLED_TEXTURES; ++insert_point) {
+        if (width > self->recycled_textures[insert_point].width) {
+            if (likely(ARRAY_LAST(self->recycled_textures).id)) {
+                glDeleteTextures(1, &ARRAY_LAST(self->recycled_textures).id);
+            }
+            void*  src = self->recycled_textures + insert_point;
+            void*  dst = self->recycled_textures + insert_point + 1;
+            size_t n = sizeof(*self->recycled_textures) * (N_RECYCLED_TEXTURES - insert_point - 1);
+            memmove(dst, src, n);
+            self->recycled_textures[insert_point].id    = tex_id;
+            self->recycled_textures[insert_point].width = width;
+            return;
+        }
+    }
+    glDeleteTextures(1, &tex_id);
+}
+
+GLuint GfxOpenGL21_pop_recycled_texture(GfxOpenGL21* self)
+{
+    GLuint ret = self->recycled_textures[0].id;
+    memmove(self->recycled_textures,
+            self->recycled_textures + 1,
+            sizeof(*self->recycled_textures) * (N_RECYCLED_TEXTURES - 1));
+    ARRAY_LAST(self->recycled_textures).id    = 0;
+    ARRAY_LAST(self->recycled_textures).width = 0;
+
+    return ret;
 }
 
 __attribute__((hot)) void GfxOpenGL21_destroy_proxy(Gfx* self, int32_t* proxy)
 {
-    // TODO: store for reuse
-    if (likely(proxy[PROXY_INDEX_TEXTURE])) {
+    /* try to store for reuse */
+    if (unlikely(proxy[PROXY_INDEX_TEXTURE] &&
+                 ARRAY_LAST(gfxOpenGL21(self)->recycled_textures).width <
+                   proxy[PROXY_INDEX_TEXTURE_SIZE])) {
+
+        GfxOpenGL21_push_recycled_texture(gfxOpenGL21(self),
+                                          proxy[PROXY_INDEX_TEXTURE],
+                                          proxy[PROXY_INDEX_TEXTURE_SIZE]);
+
+        if (unlikely(proxy[PROXY_INDEX_TEXTURE_BLINK])) {
+            GfxOpenGL21_push_recycled_texture(gfxOpenGL21(self),
+                                              proxy[PROXY_INDEX_TEXTURE_BLINK],
+                                              proxy[PROXY_INDEX_TEXTURE_SIZE]);
+        }
+    } else if (likely(proxy[PROXY_INDEX_TEXTURE])) {
+        /* delete starting from first */
         glDeleteTextures(unlikely(proxy[PROXY_INDEX_TEXTURE_BLINK]) ? 2 : 1,
                          (GLuint*)&proxy[PROXY_INDEX_TEXTURE]);
-        proxy[PROXY_INDEX_TEXTURE]       = 0;
-        proxy[PROXY_INDEX_TEXTURE_BLINK] = 0;
-        proxy[PROXY_INDEX_TEXTURE_SIZE]  = 0;
     } else if (unlikely(proxy[PROXY_INDEX_TEXTURE_BLINK])) {
         glDeleteTextures(1, (GLuint*)&proxy[PROXY_INDEX_TEXTURE_BLINK]);
-        proxy[PROXY_INDEX_TEXTURE]       = 0;
-        proxy[PROXY_INDEX_TEXTURE_BLINK] = 0;
-        proxy[PROXY_INDEX_TEXTURE_SIZE]  = 0;
     }
+    proxy[PROXY_INDEX_TEXTURE]       = 0;
+    proxy[PROXY_INDEX_TEXTURE_BLINK] = 0;
+    proxy[PROXY_INDEX_TEXTURE_SIZE]  = 0;
 }
 
 void GfxOpenGL21_destroy(Gfx* self)
@@ -2447,6 +2563,8 @@ void GfxOpenGL21_destroy(Gfx* self)
     }
 
     Map_destroy_Rune_GlyphMapEntry(&(gfxOpenGL21(self)->glyph_cache));
+
+    glDeleteFramebuffers(1, &gfxOpenGL21(self)->line_framebuffer);
 
     VBO_destroy(&gfxOpenGL21(self)->font_vao);
     VBO_destroy(&gfxOpenGL21(self)->bg_vao);

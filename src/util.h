@@ -314,6 +314,11 @@ static inline bool unicode_is_combining(char32_t codepoint)
     }
 }
 
+static inline bool unicode_is_private_use_area(char32_t codepoint)
+{
+    return codepoint >= 0xE000 && codepoint <= 0xF8FF;
+}
+
 /**
  * string that keep track if it was malloc()-ed */
 typedef struct
