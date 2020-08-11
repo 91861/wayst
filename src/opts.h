@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <assert.h>
 #include <getopt.h>
 #include <stddef.h>
 
@@ -287,5 +288,5 @@ static const char* long_options_descriptions[][2] = {
     [OPT_SENTINEL_IDX] = { NULL, NULL }
 };
 
-STATIC_ASSERT(ARRAY_SIZE(long_options) == ARRAY_SIZE(long_options_descriptions),
-              all_options_have_descriptions);
+static_assert(ARRAY_SIZE(long_options) == ARRAY_SIZE(long_options_descriptions),
+              "all_options_have_descriptions");

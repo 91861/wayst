@@ -9,6 +9,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdalign.h>
 
 #include "ui.h"
 #include "util.h"
@@ -33,7 +34,7 @@ typedef struct
 {
     struct IGfx* interface;
 
-    __attribute__((aligned(8))) uint8_t extend_data;
+    alignas(alignof(void*)) uint8_t extend_data;
 
 } Gfx;
 

@@ -45,7 +45,7 @@ static int32_t convert_modifier_mask(unsigned int x_mask)
 
 static WindowStatic* global;
 
-#define globalX11       ((GlobalX11*)&global->subclass_data)
+#define globalX11       ((GlobalX11*)&global->extend_data)
 #define windowX11(base) ((WindowX11*)&base->extend_data)
 
 struct WindowBase* WindowX11_new(uint32_t w, uint32_t h);

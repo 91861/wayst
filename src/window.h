@@ -9,6 +9,7 @@
 #include "settings.h"
 #include "timing.h"
 #include "util.h"
+#include <stdalign.h>
 
 #define WINDOW_IS_CLOSED         (1 << 0)
 #define WINDOW_IS_FULLSCREEN     (1 << 1)
@@ -27,7 +28,7 @@ typedef struct
 {
     uint32_t target_frame_time_ms;
 
-    __attribute__((aligned(8))) uint8_t subclass_data;
+    alignas(alignof(void*)) uint8_t extend_data;
 
 } WindowStatic;
 
@@ -86,7 +87,7 @@ typedef struct WindowBase
 
     struct IWindow* interface;
 
-    __attribute__((aligned(8))) uint8_t extend_data;
+    alignas(alignof(void*)) uint8_t extend_data;
 
 } Window_;
 
@@ -174,11 +175,6 @@ static inline uint32_t Window_get_keysym_from_name(struct WindowBase* self, char
 }
 
 /* Trivial base functions */
-static inline void* Window_subclass_data_ptr(struct WindowBase* self)
-{
-    return &self->extend_data;
-}
-
 static inline int Window_get_connection_fd(struct WindowBase* self)
 {
     return self->interface->get_connection_fd(self);

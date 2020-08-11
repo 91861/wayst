@@ -147,7 +147,7 @@ void FreetypeFace_load(Freetype*                      freetype,
         }
     }
     if (warn_not_fixed && !FT_IS_FIXED_WIDTH(self->face)) {
-        WRN("face %s is not fixed width\n", self->file_name);
+        WRN("face %s is not fixed-width\n", self->file_name);
     }
     if ((e = FT_Load_Char(self->face, '(', FT_LOAD_TARGET_NORMAL))) {
         ERR("failed to load font %s", self->file_name);

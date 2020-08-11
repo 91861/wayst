@@ -4,7 +4,6 @@
  * App links Vt, Monitor, Window, Gfx modules together and deals with ui
  *
  * TODO:
- * - Minimum scrollbar size
  * - It makes more sense for the unicode input prompt to be here
  * - Move flash animations here
  */
@@ -144,21 +143,28 @@ void App_init(App* self)
 {
     self->monitor = Monitor_new();
     Monitor_fork_new_pty(&self->monitor, settings.cols, settings.rows);
+
     self->vt           = Vt_new(settings.cols, settings.rows);
     self->vt.master_fd = self->monitor.child_fd;
     self->freetype     = Freetype_new();
     self->gfx          = Gfx_new_OpenGL21(&self->freetype);
+
     App_create_window(self, Gfx_pixels(self->gfx, settings.cols, settings.rows));
     App_set_callbacks(self);
+
     settings_after_window_system_connected();
     Window_set_swap_interval(self->win, 0);
     gl_load_ext = App_load_gl_ext;
     Gfx_init_with_context_activated(self->gfx);
+
     Pair_uint32_t size = Window_size(self->win);
     Gfx_resize(self->gfx, size.first, size.second);
+
     Pair_uint32_t chars = Gfx_get_char_size(self->gfx);
     Vt_resize(&self->vt, chars.first, chars.second);
+
     Monitor_watch_window_system_fd(&self->monitor, Window_get_connection_fd(self->win));
+
     self->ui.scrollbar.width = SCROLLBAR_WIDTH_PX;
     self->ui.pixel_offset_x  = 0;
     self->ui.pixel_offset_y  = 0;

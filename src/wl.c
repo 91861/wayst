@@ -39,7 +39,7 @@
 
 static WindowStatic* global;
 
-#define globalWl       ((GlobalWl*)&global->subclass_data)
+#define globalWl       ((GlobalWl*)&global->extend_data)
 #define windowWl(base) ((WindowWl*)&base->extend_data)
 
 static inline bool keysym_is_mod(xkb_keysym_t sym)

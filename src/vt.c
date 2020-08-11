@@ -1,8 +1,9 @@
 /* See LICENSE for license information. */
 
+#define _GNU_SOURCE
+
 #include "settings.h"
 #include "util.h"
-#define _GNU_SOURCE
 
 #include "vt.h"
 
@@ -2712,7 +2713,7 @@ __attribute__((hot)) static inline void Vt_insert_char_at_cursor(Vt* self, VtRun
         VtRune tmp    = c;
         tmp.rune.code = VT_RUNE_CODE_WIDE_TAIL;
 
-        for (int i = 0; i < width; ++i) {
+        for (int i = 0; i < (width -1); ++i) {
             if (self->lines.buf[self->cursor.row].data.size <= self->cursor.col) {
                 Vector_push_VtRune(&self->lines.buf[self->cursor.row].data, tmp);
             } else {
