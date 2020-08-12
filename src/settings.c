@@ -28,15 +28,6 @@
 #define CFG_FNAME "config"
 #endif
 
-// executable name
-#ifndef EXE_FNAME
-#define EXE_FNAME "wayst"
-#endif
-
-// application name
-#ifndef APP_NAME
-#define APP_NAME "Wayst"
-#endif
 
 // default title format
 #ifndef DFT_TITLE_FMT

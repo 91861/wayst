@@ -12,6 +12,7 @@
 #include <GL/glx.h>
 #include <X11/X.h>
 #include <X11/XKBlib.h>
+#include <X11/Xatom.h>
 #include <X11/cursorfont.h>
 #include <X11/extensions/Xrandr.h>
 #include <X11/extensions/Xrender.h>
@@ -112,7 +113,6 @@ typedef struct
     Colormap             colormap;
     uint32_t             last_button_pressed;
     const char*          cliptext;
-    XClassHint*          class_hint;
 } WindowX11;
 
 void WindowX11_clipboard_send(struct WindowBase* self, const char* text)
@@ -265,7 +265,7 @@ struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
 
     windowX11(win)->glx_context = NULL;
 
-    static int context_attribs[] = { GLX_CONTEXT_MAJOR_VERSION_ARB,
+    static int  context_attribs[] = { GLX_CONTEXT_MAJOR_VERSION_ARB,
                                      2,
                                      GLX_CONTEXT_MINOR_VERSION_ARB,
                                      1,
@@ -322,17 +322,59 @@ struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
     XFree(fb_cfg);
     XFree(globalX11->visual_info);
 
+    WindowX11_set_wm_name(win, APP_NAME);
+
+    Atom win_type_normal = XInternAtom(globalX11->display, "_NET_WM_WINDOW_TYPE_NORMAL", False);
+    XChangeProperty(globalX11->display,
+                    windowX11(win)->window,
+                    XInternAtom(globalX11->display, "_NET_WM_WINDOW_TYPE", False),
+                    XA_ATOM,
+                    32,
+                    PropModeReplace,
+                    (unsigned char*)&win_type_normal,
+                    1);
+
+    XChangeProperty(globalX11->display,
+                    windowX11(win)->window,
+                    XInternAtom(globalX11->display, "WM_CLASS", False),
+                    XInternAtom(globalX11->display, "UTF8_STRING", False),
+                    8,
+                    PropModeReplace,
+                    (unsigned char*)APP_NAME,
+                    strlen(APP_NAME));
+
+    /* XChangeProperty(globalX11->display, */
+    /*                 windowX11(win)->window, */
+    /*                 XInternAtom(globalX11->display, "_NET_WM_ICON_NAME", False), */
+    /*                 XInternAtom(globalX11->display, "UTF8_STRING", False), */
+    /*                 8, */
+    /*                 PropModeReplace, */
+    /*                 (unsigned char*)"wayst", */
+    /*                 strlen("wayst")); */
+
+    /* XSetIconName(globalX11->display, windowX11(win)->window, "wayst"); */
+
+    XClassHint class_hint = { APP_NAME, APP_NAME };
+    XWMHints   wm_hints   = { .flags = InputHint, .input = 1 };
+    XSetWMProperties(globalX11->display,
+                     windowX11(win)->window,
+                     NULL,
+                     NULL,
+                     NULL,
+                     0,
+                     NULL,
+                     &wm_hints,
+                     &class_hint);
+
+    XSync(globalX11->display, False);
     XMapWindow(globalX11->display, windowX11(win)->window);
     glXMakeCurrent(globalX11->display, windowX11(win)->window, windowX11(win)->glx_context);
-    XSync(globalX11->display, False);
     globalX11->wm_delete = XInternAtom(globalX11->display, "WM_DELETE_WINDOW", True);
     XSetWMProtocols(globalX11->display, windowX11(win)->window, &globalX11->wm_delete, 1);
-    XFlush(globalX11->display);
     WindowX11_setup_pointer(win);
     XkbSelectEvents(globalX11->display, XkbUseCoreKbd, XkbAllEventsMask, XkbAllEventsMask);
-    windowX11(win)->class_hint            = XAllocClassHint();
-    windowX11(win)->class_hint->res_class = strdup(settings.title.str);
-    XSetClassHint(globalX11->display, windowX11(win)->window, windowX11(win)->class_hint);
+    XFlush(globalX11->display);
+
     return win;
 }
 
@@ -344,8 +386,8 @@ struct WindowBase* Window_new_x11(Pair_uint32_t res)
         return NULL;
 
     win->title = NULL;
+    WindowX11_set_wm_name(win, APP_NAME);
     WindowX11_set_title(win, settings.title.str);
-    WindowX11_set_wm_name(win, settings.title.str);
 
     return win;
 }
@@ -648,16 +690,23 @@ void WindowX11_set_swap_interval(struct WindowBase* self, int32_t ival)
 void WindowX11_set_title(struct WindowBase* self, const char* title)
 {
     ASSERT(title, "string is NULL");
-
     XStoreName(globalX11->display, windowX11(self)->window, title);
+    XChangeProperty(globalX11->display,
+                    windowX11(self)->window,
+                    XInternAtom(globalX11->display, "_NET_WM_NAME", False),
+                    XInternAtom(globalX11->display, "UTF8_STRING", False),
+                    8,
+                    PropModeReplace,
+                    (unsigned char*)title,
+                    strlen(title));
     XFlush(globalX11->display);
 }
 
-void WindowX11_set_wm_name(struct WindowBase* self, const char* title)
+void WindowX11_set_wm_name(struct WindowBase* self, const char* class_name)
 {
-    ASSERT(title, "string is NULL");
-
-    XSetIconName(globalX11->display, windowX11(self)->window, title);
+    ASSERT(class_name, "string is not NULL");
+    XClassHint class_hint = { (char*)class_name, (char*)class_name };
+    XSetClassHint(globalX11->display, windowX11(self)->window, &class_hint);
 }
 
 bool WindowX11_maybe_swap(struct WindowBase* self)
@@ -691,9 +740,6 @@ void WindowX11_destroy(struct WindowBase* self)
 
     XDestroyIC(globalX11->ic);
     XCloseIM(globalX11->im);
-
-    free(windowX11(self)->class_hint->res_class);
-    XFree(windowX11(self)->class_hint);
 
     XDestroyWindow(globalX11->display, windowX11(self)->window);
     XCloseDisplay(globalX11->display);

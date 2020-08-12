@@ -9,6 +9,16 @@
 #define VERSION "0.0.0"
 #endif
 
+// executable name
+#ifndef EXE_FNAME
+#define EXE_FNAME "wayst"
+#endif
+
+// application name
+#ifndef APP_NAME
+#define APP_NAME "Wayst"
+#endif
+
 // default lcd filter
 #ifndef LCD_FILT_DFT
 #define LCD_FILT_DFT LCD_FILTER_H_RGB
