@@ -250,6 +250,7 @@ DEF_PAIR(float);
 DEF_PAIR(double);
 DEF_PAIR(wchar_t);
 DEF_PAIR(size_t);
+DEF_PAIR(ssize_t);
 
 /** check string equality case insensitive */
 static inline bool strneqci(const char* restrict s1, const char* restrict s2, const size_t n)

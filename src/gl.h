@@ -56,7 +56,8 @@ extern PFNGLDEBUGMESSAGECALLBACKPROC __attribute__((weak)) glDebugMessageCallbac
 extern PFNGLCHECKFRAMEBUFFERSTATUSPROC __attribute__((weak)) glCheckFramebufferStatus;
 #endif
 
-extern void* (*gl_load_ext)(const char* procname);
+extern void* gl_ext_loader;
+extern void* (*gl_load_ext)(void* loader, const char* procname);
 
 void gl_load_exts();
 

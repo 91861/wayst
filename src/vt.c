@@ -266,7 +266,7 @@ static inline void Vt_mark_proxies_damaged_in_region(Vt* self, size_t begin, siz
 static inline void Vt_clear_proxy(Vt* self, size_t idx)
 {
     Vt_mark_proxy_fully_damaged(self, idx);
-    Vt_destroy_line_proxy(self->lines.buf[idx].proxy.data);
+    CALL_FP(self->callbacks.destroy_proxy, self->callbacks.user_data, &self->lines.buf[idx].proxy);
 }
 
 static inline void Vt_clear_proxies_in_region(Vt* self, size_t begin, size_t end)
@@ -697,17 +697,15 @@ static inline bool is_string_sequence_terminated(const char* seq, const size_t s
     return seq[size - 1] == '\a' || (size > 1 && seq[size - 2] == '\e' && seq[size - 1] == '\\');
 }
 
-Vt Vt_new(uint32_t cols, uint32_t rows)
+void Vt_init(Vt* self, uint32_t cols, uint32_t rows)
 {
-    Vt self;
-    memset(&self, 0, sizeof(Vt));
+    memset(self, 0, sizeof(Vt));
+    self->ws                   = (struct winsize){ .ws_col = cols, .ws_row = rows };
+    self->scroll_region_bottom = rows;
+    self->parser.state         = PARSER_STATE_LITERAL;
+    self->parser.in_mb_seq     = false;
 
-    self.ws                   = (struct winsize){ .ws_col = cols, .ws_row = rows };
-    self.scroll_region_bottom = rows;
-    self.parser.state         = PARSER_STATE_LITERAL;
-    self.parser.in_mb_seq     = false;
-
-    self.parser.char_state = blank_space = (VtRune){
+    self->parser.char_state = blank_space = (VtRune){
         .rune          = ((Rune){ .code = ' ', .combine = { 0 }, .style = VT_RUNE_NORMAL }),
         .bg            = settings.bg,
         .fg            = settings.fg,
@@ -718,26 +716,24 @@ Vt Vt_new(uint32_t cols, uint32_t rows)
         .strikethrough = false,
     };
 
-    self.parser.active_sequence = Vector_new_char();
-    self.output                 = Vector_new_char();
-    self.lines                  = Vector_new_VtLine();
+    self->parser.active_sequence = Vector_new_char();
+    self->output                 = Vector_new_char();
+    self->lines                  = Vector_new_VtLine(self);
 
-    for (size_t i = 0; i < self.ws.ws_row; ++i) {
-        Vector_push_VtLine(&self.lines, VtLine_new());
+    for (size_t i = 0; i < self->ws.ws_row; ++i) {
+        Vector_push_VtLine(&self->lines, VtLine_new());
     }
 
-    self.cursor.type     = CURSOR_BLOCK;
-    self.cursor.blinking = true;
-    self.cursor.col      = 0;
+    self->cursor.type     = CURSOR_BLOCK;
+    self->cursor.blinking = true;
+    self->cursor.col      = 0;
 
-    self.tabstop = 8;
+    self->tabstop = 8;
 
-    self.title       = NULL;
-    self.title_stack = Vector_new_DynStr();
+    self->title       = NULL;
+    self->title_stack = Vector_new_DynStr();
 
-    self.unicode_input.buffer = Vector_new_char();
-
-    return self;
+    self->unicode_input.buffer = Vector_new_char();
 }
 
 static inline size_t Vt_top_line_alt(const Vt* const self)
@@ -2067,7 +2063,7 @@ static inline void Vt_alt_buffer_on(Vt* self, bool save_mouse)
     Vt_select_end(self);
     self->last_interted = NULL;
     self->alt_lines     = self->lines;
-    self->lines         = Vector_new_VtLine();
+    self->lines         = Vector_new_VtLine(self);
     for (size_t i = 0; i < self->ws.ws_row; ++i) {
         Vector_push_VtLine(&self->lines, VtLine_new());
     }
@@ -2636,7 +2632,7 @@ static inline void Vt_clear_display_and_scrollback(Vt* self)
 {
     Vt_mark_proxy_fully_damaged(self, self->cursor.row);
     Vector_destroy_VtLine(&self->lines);
-    self->lines = Vector_new_VtLine();
+    self->lines = Vector_new_VtLine(self);
     for (size_t i = 0; i < self->ws.ws_row; ++i) {
         Vector_push_VtLine(&self->lines, VtLine_new());
         Vt_empty_line_fill_bg(self, self->lines.size - 1);
@@ -3781,6 +3777,9 @@ void Vt_destroy(Vt* self)
     }
     Vector_destroy_char(&self->parser.active_sequence);
     Vector_destroy_DynStr(&self->title_stack);
+    Vector_destroy_char(&self->unicode_input.buffer);
+    Vector_destroy_char(&self->output);
+    free(self->title);
     free(self->work_dir);
 }
 

@@ -131,8 +131,6 @@ typedef struct
     int32_t data[4];
 } VtLineProxy;
 
-extern void (*Vt_destroy_line_proxy)(int32_t proxy[static 4]);
-
 typedef struct
 {
     /* Characters */
@@ -182,15 +180,10 @@ typedef struct
 
 /* TODO: Make a version of Vector that can bind an additional destructor argument, so
  * Vt_destroy_line_proxy doesn't have to be a global */
-static inline void VtLine_destroy(VtLine* self)
-{
-    if (Vt_destroy_line_proxy)
-        Vt_destroy_line_proxy(self->proxy.data);
 
-    Vector_destroy_VtRune(&self->data);
-}
+static inline void VtLine_destroy(void* vt_, VtLine* self);
 
-DEF_VECTOR(VtLine, VtLine_destroy)
+DEF_VECTOR(VtLine, VtLine_destroy, void)
 
 typedef struct _Vt
 {
@@ -213,6 +206,7 @@ typedef struct _Vt
         void (*on_font_reload_requseted)(void*);
         void (*on_clipboard_sent)(void*, const char*);
 
+        void (*destroy_proxy)(void*, VtLineProxy*);
     } callbacks;
 
     size_t last_click_x;
@@ -353,9 +347,16 @@ typedef struct _Vt
 
 } Vt;
 
+static inline void VtLine_destroy(void* vt_, VtLine* self)
+{
+    Vt* vt = vt_;
+    CALL_FP(vt->callbacks.destroy_proxy, vt->callbacks.user_data, &self->proxy);
+    Vector_destroy_VtRune(&self->data);
+}
+
 /**
  * Make a new interpreter with a given size */
-Vt Vt_new(uint32_t cols, uint32_t rows);
+void Vt_init(Vt* self, uint32_t cols, uint32_t rows);
 
 /**
  * Interpret a range od bytes */

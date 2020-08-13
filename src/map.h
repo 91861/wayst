@@ -84,8 +84,6 @@
         return &Vector_last_MapEntry_##k##_##v(bucket)->value;                                     \
     }                                                                                              \
                                                                                                    \
-    /**                                                                                            \
-     * @return value was found and overwritten */                                                  \
     static v* Map_insert_##k##_##v(Map_##k##_##v* self, k key, v value)                            \
     {                                                                                              \
         return Map_insert_entry_##k##_##v(self,                                                    \

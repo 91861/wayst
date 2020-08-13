@@ -100,7 +100,6 @@ typedef struct
 
 } App;
 
-static App  instance = {};
 static void App_update_scrollbar_dims(App* self);
 static void App_update_scrollbar_vis(App* self);
 static void App_update_cursor(App* self);
@@ -110,9 +109,10 @@ static void App_clamp_cursor(App* self, Pair_uint32_t chars);
 static void App_set_callbacks(App* self);
 static void App_maybe_resize(App* self, Pair_uint32_t newres);
 
-void* App_load_gl_ext(const char* name)
+void* App_load_gl_ext(void* self, const char* name)
 {
-    void* addr = Window_get_proc_adress(instance.win, name);
+    App*  app  = self;
+    void* addr = Window_get_proc_adress(app->win, name);
     if (!addr) {
         ERR("Failed to load extension proc adress for: %s", name);
     }
@@ -141,20 +141,22 @@ void App_create_window(App* self, Pair_uint32_t res)
 
 void App_init(App* self)
 {
+    memset(self, 0, sizeof(App));
     self->monitor = Monitor_new();
     Monitor_fork_new_pty(&self->monitor, settings.cols, settings.rows);
 
-    self->vt           = Vt_new(settings.cols, settings.rows);
+    Vt_init(&self->vt, settings.cols, settings.rows);
     self->vt.master_fd = self->monitor.child_fd;
     self->freetype     = Freetype_new();
     self->gfx          = Gfx_new_OpenGL21(&self->freetype);
 
     App_create_window(self, Gfx_pixels(self->gfx, settings.cols, settings.rows));
     App_set_callbacks(self);
+    gl_ext_loader = self;
+    gl_load_ext   = App_load_gl_ext;
 
     settings_after_window_system_connected();
     Window_set_swap_interval(self->win, 0);
-    gl_load_ext = App_load_gl_ext;
     Gfx_init_with_context_activated(self->gfx);
 
     Pair_uint32_t size = Window_size(self->win);
@@ -178,8 +180,9 @@ void App_run(App* self)
         int timeout_ms = self->swap_performed
                            ? 0
                            : self->closest_pending_wakeup
-                               ? TimePoint_is_ms_ahead(*self->closest_pending_wakeup)
+                               ? TimePoint_is_ms_ahead(*(self->closest_pending_wakeup))
                                : -1;
+
         Monitor_wait(&self->monitor, timeout_ms);
         self->closest_pending_wakeup = NULL;
         if (Monitor_are_window_system_events_pending(&self->monitor)) {
@@ -233,6 +236,7 @@ void App_run(App* self)
 
         self->swap_performed = Window_maybe_swap(self->win);
     }
+
     Vt_destroy(&self->vt);
     Gfx_destroy(self->gfx);
     Freetype_destroy(&self->freetype);
@@ -292,11 +296,6 @@ void App_reload_font(void* self)
 uint32_t App_get_key_code(void* self, char* name)
 {
     return Window_get_keysym_from_name(((App*)self)->win, name);
-}
-
-void App_destroy_proxy(int32_t proxy[static 4])
-{
-    Gfx_destroy_proxy(instance.gfx, proxy);
 }
 
 void App_notify_content_change(void* self)
@@ -945,10 +944,14 @@ void App_motion_handler(void* self, uint32_t button, int32_t x, int32_t y)
     }
 }
 
+void App_destroy_proxy_handler(void* self, VtLineProxy* proxy)
+{
+    App* app = self;
+    Gfx_destroy_proxy(app->gfx, proxy->data);
+}
+
 static void App_set_callbacks(App* self)
 {
-    Vt_destroy_line_proxy = App_destroy_proxy;
-
     self->monitor.callbacks.user_data = self;
     self->monitor.callbacks.on_exit   = App_exit_handler;
 
@@ -966,6 +969,7 @@ static void App_set_callbacks(App* self)
     self->vt.callbacks.on_bell_flash                       = App_flash;
     self->vt.callbacks.on_action_performed                 = App_action;
     self->vt.callbacks.on_font_reload_requseted            = App_reload_font;
+    self->vt.callbacks.destroy_proxy                       = App_destroy_proxy_handler;
 
     self->win->callbacks.key_handler             = App_key_handler;
     self->win->callbacks.button_handler          = App_button_handler;
@@ -981,7 +985,8 @@ static void App_set_callbacks(App* self)
 int main(int argc, char** argv)
 {
     settings_init(argc, argv);
-    App_init(&instance);
-    App_run(&instance);
+    App application;
+    App_init(&application);
+    App_run(&application);
     settings_cleanup();
 }

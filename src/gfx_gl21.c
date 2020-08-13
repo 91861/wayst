@@ -1167,53 +1167,50 @@ static uint_fast32_t GfxOpenGL21_draw_line_quads(GfxOpenGL21*  gfx,
 __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_underline_range(
   GfxOpenGL21* gfx,
   VtLine*      vt_line,
-  size_t       range_begin_idx,
-  size_t       range_end_idx,
+  Pair_size_t  range,
   int_fast8_t* bound_resources,
-  double       texture_width,
-  double       texture_height)
+  Pair_int32_t texture_dims)
 {
     /* Scale from pixels to GL coordinates */
-    const double scalex = 2.0f / texture_width;
-    const double scaley = 2.0f / texture_height;
+    const double scalex = 2.0f / texture_dims.first;
+    const double scaley = 2.0f / texture_dims.second;
 
     // draw lines
     static float begin[5]   = { -1, -1, -1, -1, -1 };
     static float end[5]     = { 1, 1, 1, 1, 1 };
     static bool  drawing[5] = { 0 };
 
-    if (unlikely(range_begin_idx)) {
-        const float init_coord = unlikely(range_begin_idx)
-                                   ? -1.0f + gfx->glyph_width_pixels * scalex * range_begin_idx
-                                   : 0.0f;
+    if (unlikely(range.first)) {
+        const float init_coord =
+          unlikely(range.second) ? -1.0f + gfx->glyph_width_pixels * scalex * range.first : 0.0f;
         for (uint_fast8_t i = 0; i < ARRAY_SIZE(begin); ++i) {
             begin[i] = init_coord;
         }
     }
 
     // lines are drawn in the same color as the character, unless the line color was explicitly set
-    ColorRGB line_color = vt_line->data.buf[range_begin_idx].linecolornotdefault
-                            ? vt_line->data.buf[range_begin_idx].line
-                            : vt_line->data.buf[range_begin_idx].fg;
+    ColorRGB line_color = vt_line->data.buf[range.first].linecolornotdefault
+                            ? vt_line->data.buf[range.first].line
+                            : vt_line->data.buf[range.first].fg;
 
     glDisable(GL_SCISSOR_TEST);
 
-    for (const VtRune* each_rune = vt_line->data.buf + range_begin_idx;
-         each_rune <= vt_line->data.buf + range_end_idx;
+    for (const VtRune* each_rune = vt_line->data.buf + range.first;
+         each_rune <= vt_line->data.buf + range.second;
          ++each_rune) {
 
         /* text column where this should be drawn */
         size_t   column = each_rune - vt_line->data.buf;
         ColorRGB nc     = {};
-        if (each_rune != vt_line->data.buf + range_end_idx) {
+        if (each_rune != vt_line->data.buf + range.second) {
             nc = each_rune->linecolornotdefault ? each_rune->line : each_rune->fg;
         }
         // State has changed
-        if (!ColorRGB_eq(line_color, nc) || each_rune == vt_line->data.buf + range_end_idx ||
+        if (!ColorRGB_eq(line_color, nc) || each_rune == vt_line->data.buf + range.second ||
             each_rune->underlined != drawing[0] || each_rune->doubleunderline != drawing[1] ||
             each_rune->strikethrough != drawing[2] || each_rune->overline != drawing[3] ||
             each_rune->curlyunderline != drawing[4]) {
-            if (each_rune == vt_line->data.buf + range_end_idx) {
+            if (each_rune == vt_line->data.buf + range.second) {
                 for (int_fast8_t tmp = 0; tmp < 5; tmp++) {
                     end[tmp] = -1.0f + (float)column * scalex * (float)gfx->glyph_width_pixels;
                 }
@@ -1314,14 +1311,14 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_underline_ra
         begin[index] = -1.0f + (float)column * scalex * (float)gfx->glyph_width_pixels;            \
     }
 
-            if (each_rune != vt_line->data.buf + range_end_idx) {
+            if (each_rune != vt_line->data.buf + range.second) {
                 L_SET_BOUNDS_BEGIN(each_rune->underlined, 0);
                 L_SET_BOUNDS_BEGIN(each_rune->doubleunderline, 1);
                 L_SET_BOUNDS_BEGIN(each_rune->strikethrough, 2);
                 L_SET_BOUNDS_BEGIN(each_rune->overline, 3);
                 L_SET_BOUNDS_BEGIN(each_rune->curlyunderline, 4);
             }
-            if (each_rune != vt_line->data.buf + range_end_idx) {
+            if (each_rune != vt_line->data.buf + range.second) {
                 drawing[0] = each_rune->underlined;
                 drawing[1] = each_rune->doubleunderline;
                 drawing[2] = each_rune->strikethrough;
@@ -1347,29 +1344,27 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
   GfxOpenGL21*    gfx,
   const Vt* const vt,
   VtLine*         vt_line,
-  size_t          range_begin_idx,
-  size_t          range_end_idx,
+  Pair_size_t     range,
   size_t          visual_line_index,
   bool            is_for_blinking,
   int_fast8_t*    bound_resources,
-  int32_t         texture_width,
-  int32_t         texture_height,
+  Pair_int32_t    texture_dims,
   bool*           has_blinking_chars,
   bool*           has_underlined_chars)
 {
     /* Scale from pixels to GL coordinates */
-    const double scalex = 2.0f / texture_width;
-    const double scaley = 2.0f / texture_height;
+    const double scalex = 2.0f / texture_dims.first;
+    const double scaley = 2.0f / texture_dims.second;
 
-    GLint     bg_pixels_begin          = range_begin_idx * gfx->glyph_width_pixels, bg_pixels_end;
+    GLint     bg_pixels_begin          = range.first * gfx->glyph_width_pixels, bg_pixels_end;
     ColorRGBA active_bg_color          = settings.bg;
-    VtRune*   each_rune                = vt_line->data.buf + range_begin_idx;
+    VtRune*   each_rune                = vt_line->data.buf + range.first;
     VtRune*   same_bg_block_begin_rune = each_rune;
 
-    for (size_t idx_each_rune = range_begin_idx; idx_each_rune <= range_end_idx;) {
+    for (size_t idx_each_rune = range.first; idx_each_rune <= range.second;) {
 
         each_rune = vt_line->data.buf + idx_each_rune;
-        if (likely(idx_each_rune != range_end_idx)) {
+        if (likely(idx_each_rune != range.second)) {
             if (unlikely(each_rune->blinkng)) {
                 *has_blinking_chars = true;
             }
@@ -1384,7 +1379,7 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
 #define L_CALC_BG_COLOR                                                                            \
     Vt_is_cell_selected(vt, idx_each_rune, visual_line_index) ? settings.bghl : each_rune->bg
 
-        if (idx_each_rune == range_end_idx || !ColorRGBA_eq(L_CALC_BG_COLOR, active_bg_color)) {
+        if (idx_each_rune == range.second || !ColorRGBA_eq(L_CALC_BG_COLOR, active_bg_color)) {
             int32_t extra_width = 0;
 
             if (idx_each_rune > 1) {
@@ -1394,7 +1389,7 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
             bg_pixels_end = (idx_each_rune + extra_width) * gfx->glyph_width_pixels;
 
             glEnable(GL_SCISSOR_TEST);
-            glScissor(bg_pixels_begin, 0, bg_pixels_end - bg_pixels_begin, texture_height);
+            glScissor(bg_pixels_begin, 0, bg_pixels_end - bg_pixels_begin, texture_dims.second);
 
             glClearColor(ColorRGBA_get_float(active_bg_color, 0),
                          ColorRGBA_get_float(active_bg_color, 1),
@@ -1519,7 +1514,10 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                                 GLsizei clip_end =
                                   (each_rune_same_bg - vt_line->data.buf) * gfx->glyph_width_pixels;
                                 // glEnable(GL_SCISSOR_TEST);
-                                glScissor(clip_begin, 0, clip_end - clip_begin, texture_height);
+                                glScissor(clip_begin,
+                                          0,
+                                          clip_end - clip_begin,
+                                          texture_dims.second);
 
                                 *bound_resources = gfx->is_main_font_rgb
                                                      ? BOUND_RESOURCES_FONT
@@ -1698,7 +1696,7 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                                         glScissor(clip_begin,
                                                   0,
                                                   clip_end - clip_begin,
-                                                  texture_height);
+                                                  texture_dims.second);
 
                                         // Draw noramal characters
                                         if (gfx->vec_glyph_buffer->size) {
@@ -1820,9 +1818,9 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
 
             int clip_begin = idx_each_rune * gfx->glyph_width_pixels;
             glEnable(GL_SCISSOR_TEST);
-            glScissor(clip_begin, 0, texture_width, texture_height);
+            glScissor(clip_begin, 0, texture_dims.first, texture_dims.second);
 
-            if (idx_each_rune != range_end_idx) {
+            if (idx_each_rune != range.second) {
                 same_bg_block_begin_rune = each_rune;
                 // update active bg color;
                 if (unlikely(Vt_is_cell_selected(vt, idx_each_rune, visual_line_index))) {
@@ -1833,12 +1831,11 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
             }
         } // end if bg color changed
 
-        int w = likely(idx_each_rune != range_end_idx)
+        int w = likely(idx_each_rune != range.second)
                   ? wcwidth(vt_line->data.buf[idx_each_rune].rune.code)
                   : 1;
-        idx_each_rune = CLAMP(idx_each_rune + (unlikely(w > 1) ? w : 1),
-                              range_begin_idx,
-                              (vt_line->data.size + 1));
+        idx_each_rune =
+          CLAMP(idx_each_rune + (unlikely(w > 1) ? w : 1), range.first, (vt_line->data.size + 1));
     } // end for each VtRune
 }
 
@@ -1993,23 +1990,20 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
             _GfxOpenGL21_rasterize_line_range(gfx,
                                               vt,
                                               vt_line,
-                                              range_begin_idx,
-                                              range_end_idx,
+                                              (Pair_size_t){ range_begin_idx, range_end_idx },
                                               visual_line_index,
                                               is_for_blinking,
                                               &bound_resources,
-                                              texture_width,
-                                              texture_height,
+                                              (Pair_int32_t){ texture_width, texture_height },
                                               &has_blinking_chars,
                                               &has_underlined_chars);
             if (has_underlined_chars) {
-                _GfxOpenGL21_rasterize_line_underline_range(gfx,
-                                                            vt_line,
-                                                            range_begin_idx,
-                                                            range_end_idx,
-                                                            &bound_resources,
-                                                            texture_width,
-                                                            texture_height);
+                _GfxOpenGL21_rasterize_line_underline_range(
+                  gfx,
+                  vt_line,
+                  (Pair_size_t){ range_begin_idx, range_end_idx },
+                  &bound_resources,
+                  (Pair_int32_t){ texture_width, texture_height });
             }
         } break;
 
@@ -2019,23 +2013,20 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
             _GfxOpenGL21_rasterize_line_range(gfx,
                                               vt,
                                               vt_line,
-                                              0,      // range_begin_idx
-                                              length, // range_end_idx
+                                              (Pair_size_t){ 0, length },
                                               visual_line_index,
                                               is_for_blinking,
                                               &bound_resources,
-                                              texture_width,
-                                              texture_height,
+                                              (Pair_int32_t){ texture_width, texture_height },
                                               &has_blinking_chars,
                                               &has_underlined_chars);
             if (has_underlined_chars) {
-                _GfxOpenGL21_rasterize_line_underline_range(gfx,
-                                                            vt_line,
-                                                            0,      // range_begin_idx
-                                                            length, // range_end_idx
-                                                            &bound_resources,
-                                                            texture_width,
-                                                            texture_height);
+                _GfxOpenGL21_rasterize_line_underline_range(
+                  gfx,
+                  vt_line,
+                  (Pair_size_t){ 0, length },
+                  &bound_resources,
+                  (Pair_int32_t){ texture_width, texture_height });
             }
         } break;
 
