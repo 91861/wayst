@@ -28,8 +28,6 @@
 
 VtRune blank_space;
 
-void (*Vt_destroy_line_proxy)(int32_t proxy[static 4]) = NULL;
-
 static inline size_t Vt_top_line(const Vt* const self);
 void                 Vt_visual_scroll_to(Vt* self, size_t line);
 void                 Vt_visual_scroll_up(Vt* self);
@@ -1054,7 +1052,10 @@ static void Vt_trim_columns(Vt* self)
     for (size_t i = 0; i < self->lines.size; ++i) {
         if (self->lines.buf[i].data.size > (size_t)self->ws.ws_col) {
             Vt_mark_proxy_fully_damaged(self, i);
-            Vt_destroy_line_proxy(self->lines.buf[i].proxy.data);
+
+            CALL_FP(self->callbacks.destroy_proxy,
+                    self->callbacks.user_data,
+                    &self->lines.buf[i].proxy);
 
             size_t blanks = 0;
 
@@ -2709,7 +2710,7 @@ __attribute__((hot)) static inline void Vt_insert_char_at_cursor(Vt* self, VtRun
         VtRune tmp    = c;
         tmp.rune.code = VT_RUNE_CODE_WIDE_TAIL;
 
-        for (int i = 0; i < (width -1); ++i) {
+        for (int i = 0; i < (width - 1); ++i) {
             if (self->lines.buf[self->cursor.row].data.size <= self->cursor.col) {
                 Vector_push_VtRune(&self->lines.buf[self->cursor.row].data, tmp);
             } else {
