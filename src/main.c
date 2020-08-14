@@ -109,7 +109,7 @@ static void App_clamp_cursor(App* self, Pair_uint32_t chars);
 static void App_set_callbacks(App* self);
 static void App_maybe_resize(App* self, Pair_uint32_t newres);
 
-void* App_load_gl_ext(void* self, const char* name)
+void* App_load_extension_proc_address(void* self, const char* name)
 {
     App*  app  = self;
     void* addr = Window_get_proc_adress(app->win, name);
@@ -152,8 +152,6 @@ void App_init(App* self)
 
     App_create_window(self, Gfx_pixels(self->gfx, settings.cols, settings.rows));
     App_set_callbacks(self);
-    gl_ext_loader = self;
-    gl_load_ext   = App_load_gl_ext;
 
     settings_after_window_system_connected();
     Window_set_swap_interval(self->win, 0);
@@ -952,12 +950,10 @@ void App_destroy_proxy_handler(void* self, VtLineProxy* proxy)
 
 static void App_set_callbacks(App* self)
 {
-    self->monitor.callbacks.user_data = self;
     self->monitor.callbacks.on_exit   = App_exit_handler;
+    self->monitor.callbacks.user_data = self;
 
-    self->vt.callbacks.user_data   = self;
-    self->win->callbacks.user_data = self;
-
+    self->vt.callbacks.user_data                           = self;
     self->vt.callbacks.on_repaint_required                 = App_notify_content_change;
     self->vt.callbacks.on_clipboard_sent                   = App_clipboard_send;
     self->vt.callbacks.on_clipboard_requested              = App_clipboard_get;
@@ -971,12 +967,16 @@ static void App_set_callbacks(App* self)
     self->vt.callbacks.on_font_reload_requseted            = App_reload_font;
     self->vt.callbacks.destroy_proxy                       = App_destroy_proxy_handler;
 
+    self->win->callbacks.user_data               = self;
     self->win->callbacks.key_handler             = App_key_handler;
     self->win->callbacks.button_handler          = App_button_handler;
     self->win->callbacks.motion_handler          = App_motion_handler;
     self->win->callbacks.clipboard_handler       = App_clipboard_handler;
     self->win->callbacks.activity_notify_handler = App_action;
     self->win->callbacks.on_redraw_requested     = App_redraw;
+
+    self->gfx->callbacks.user_data                   = self;
+    self->gfx->callbacks.load_extension_proc_address = App_load_extension_proc_address;
 
     settings.callbacks.user_data           = self;
     settings.callbacks.keycode_from_string = App_get_key_code;

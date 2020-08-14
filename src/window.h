@@ -66,7 +66,7 @@ typedef struct WindowBase
     int32_t  pointer_x, pointer_y;
     uint16_t state_flags;
     bool     paint;
-    struct window_external_data
+    struct WindowCallbacks
     {
         void* user_data;
         void (*key_handler)(void* user_data, uint32_t code, uint32_t rawcode, uint32_t mods);

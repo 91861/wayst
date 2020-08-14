@@ -4,64 +4,14 @@
 
 #define _GNU_SOURCE
 
+#include "gl_exts/glext.h"
 #include <GL/gl.h>
 #include <assert.h>
 #include <stdarg.h>
 
-#include "gl_exts/glext.h"
-
 #include "util.h"
 
-extern PFNGLBUFFERSUBDATAARBPROC __attribute__((weak)) glBufferSubData;
-extern PFNGLUNIFORM4FPROC __attribute__((weak)) glUniform4f;
-extern PFNGLUNIFORM3FPROC __attribute__((weak)) glUniform3f;
-extern PFNGLUNIFORM2FPROC __attribute__((weak)) glUniform2f;
-extern PFNGLBUFFERDATAPROC __attribute__((weak)) glBufferData;
-extern PFNGLDELETEPROGRAMPROC __attribute__((weak)) glDeleteProgram;
-extern PFNGLUSEPROGRAMPROC __attribute__((weak)) glUseProgram;
-extern PFNGLGETUNIFORMLOCATIONPROC __attribute__((weak)) glGetUniformLocation;
-extern PFNGLGETATTRIBLOCATIONPROC __attribute__((weak)) glGetAttribLocation;
-extern PFNGLDELETESHADERPROC __attribute__((weak)) glDeleteShader;
-extern PFNGLDETACHSHADERPROC __attribute__((weak)) glDetachShader;
-extern PFNGLGETPROGRAMINFOLOGPROC __attribute__((weak)) glGetProgramInfoLog;
-extern PFNGLGETPROGRAMIVPROC __attribute__((weak)) glGetProgramiv;
-extern PFNGLLINKPROGRAMPROC __attribute__((weak)) glLinkProgram;
-extern PFNGLATTACHSHADERPROC __attribute__((weak)) glAttachShader;
-extern PFNGLCOMPILESHADERPROC __attribute__((weak)) glCompileShader;
-extern PFNGLSHADERSOURCEPROC __attribute__((weak)) glShaderSource;
-extern PFNGLCREATESHADERPROC __attribute__((weak)) glCreateShader;
-extern PFNGLCREATEPROGRAMPROC __attribute__((weak)) glCreateProgram;
-extern PFNGLGETSHADERINFOLOGPROC __attribute__((weak)) glGetShaderInfoLog;
-extern PFNGLGETSHADERIVPROC __attribute__((weak)) glGetShaderiv;
-extern PFNGLDELETEBUFFERSPROC __attribute__((weak)) glDeleteBuffers;
-extern PFNGLVERTEXATTRIBPOINTERPROC __attribute__((weak)) glVertexAttribPointer;
-extern PFNGLENABLEVERTEXATTRIBARRAYPROC __attribute__((weak)) glEnableVertexAttribArray;
-extern PFNGLBINDBUFFERPROC __attribute__((weak)) glBindBuffer;
-extern PFNGLGENBUFFERSPROC __attribute__((weak)) glGenBuffers;
-extern PFNGLDELETEFRAMEBUFFERSPROC __attribute__((weak)) glDeleteFramebuffers;
-extern PFNGLFRAMEBUFFERRENDERBUFFERPROC __attribute__((weak)) glFramebufferRenderbuffer;
-extern PFNGLRENDERBUFFERSTORAGEPROC __attribute__((weak)) glRenderbufferStorage;
-extern PFNGLBINDBUFFERPROC __attribute__((weak)) glBindBuffer;
-extern PFNGLGENBUFFERSPROC __attribute__((weak)) glGenBuffers;
-extern PFNGLDELETEFRAMEBUFFERSPROC __attribute__((weak)) glDeleteFramebuffers;
-extern PFNGLFRAMEBUFFERTEXTURE2DPROC __attribute__((weak)) glFramebufferTexture2D;
-extern PFNGLBINDFRAMEBUFFERPROC __attribute__((weak)) glBindFramebuffer;
-extern PFNGLBINDRENDERBUFFERPROC __attribute__((weak)) glBindRenderbuffer;
-extern PFNGLGENRENDERBUFFERSPROC __attribute__((weak)) glGenRenderbuffers;
-extern PFNGLGENFRAMEBUFFERSPROC __attribute__((weak)) glGenFramebuffers;
-extern PFNGLDELETERENDERBUFFERSPROC __attribute__((weak)) glDeleteRenderbuffers;
-extern PFNGLGENERATEMIPMAPPROC __attribute__((weak)) glGenerateMipmap;
-#ifdef DEBUG
-extern PFNGLDEBUGMESSAGECALLBACKPROC __attribute__((weak)) glDebugMessageCallback;
-extern PFNGLCHECKFRAMEBUFFERSTATUSPROC __attribute__((weak)) glCheckFramebufferStatus;
-#endif
-
-extern void* gl_ext_loader;
-extern void* (*gl_load_ext)(void* loader, const char* procname);
-
-void gl_load_exts();
-
-__attribute__((always_inline)) static inline void gl_check_error();
+static void gl_check_error();
 
 typedef struct
 {
@@ -90,7 +40,7 @@ typedef struct
     size_t size;
 } VBO;
 
-enum __attribute__((packed)) TextureFormat
+enum TextureFormat
 {
     TEX_FMT_RGBA,
     TEX_FMT_RGB,
@@ -104,7 +54,7 @@ typedef struct
     uint32_t           w, h;
 } Texture;
 
-static inline void Texture_destroy(Texture* self)
+static void Texture_destroy(Texture* self)
 {
     glDeleteTextures(1, &self->id);
     self->id = 0;
@@ -137,7 +87,6 @@ static inline void assert_farmebuffer_complete()
 #define assert_farmebuffer_complete() ;
 #endif
 
-/* VBO */
 static VBO VBO_new(const uint32_t vertices, uint32_t nattribs, const Attribute* attr)
 {
     GLuint id = 0;
@@ -153,7 +102,7 @@ static VBO VBO_new(const uint32_t vertices, uint32_t nattribs, const Attribute* 
     return (VBO){ .vbo = id, .size = 0 };
 }
 
-__attribute__((always_inline)) static inline void VBO_destroy(VBO* self)
+static void VBO_destroy(VBO* self)
 {
     glDeleteBuffers(1, &self->vbo);
 }
@@ -237,7 +186,7 @@ __attribute__((sentinel, cold)) static Shader Shader_new(const char* vs_src,
     return ret;
 }
 
-__attribute__((always_inline)) static inline void Shader_use(Shader* s)
+static void Shader_use(Shader* s)
 {
     if (s) {
         ASSERT(s->id, "use of uninitialized shader");
@@ -246,7 +195,7 @@ __attribute__((always_inline)) static inline void Shader_use(Shader* s)
         glUseProgram(0);
 }
 
-__attribute__((always_inline)) static inline void Shader_destroy(Shader* s)
+static void Shader_destroy(Shader* s)
 {
     ASSERT(s->id, "deleted uninitialized/deleted shader program");
     glDeleteProgram(s->id);
@@ -254,7 +203,7 @@ __attribute__((always_inline)) static inline void Shader_destroy(Shader* s)
 }
 
 #ifdef DEBUG
-__attribute__((cold)) static const char* gl_severity_to_str(GLenum severity)
+static const char* gl_severity_to_str(GLenum severity)
 {
     switch (severity) {
         case GL_DEBUG_SEVERITY_NOTIFICATION:
@@ -270,7 +219,7 @@ __attribute__((cold)) static const char* gl_severity_to_str(GLenum severity)
     }
 }
 
-__attribute__((cold)) static const char* gl_source_to_str(GLenum source)
+static const char* gl_source_to_str(GLenum source)
 {
     switch (source) {
         case GL_DEBUG_SOURCE_API:
@@ -290,7 +239,7 @@ __attribute__((cold)) static const char* gl_source_to_str(GLenum source)
     }
 }
 
-__attribute__((cold)) static const char* gl_type_to_str(GLenum type)
+static const char* gl_type_to_str(GLenum type)
 {
     switch (type) {
         case GL_DEBUG_TYPE_ERROR:
@@ -316,13 +265,13 @@ __attribute__((cold)) static const char* gl_type_to_str(GLenum type)
     }
 }
 
-__attribute__((cold)) static void on_gl_error(GLenum        source,
-                                              GLenum        type,
-                                              GLuint        id,
-                                              GLenum        severity,
-                                              GLsizei       length,
-                                              const GLchar* message,
-                                              const void*   user_param)
+static void on_gl_error(GLenum        source,
+                        GLenum        type,
+                        GLuint        id,
+                        GLenum        severity,
+                        GLsizei       length,
+                        const GLchar* message,
+                        const void*   user_param)
 {
     if (severity == GL_DEBUG_SEVERITY_HIGH) {
         ERR("OpenGL error\n"
@@ -364,7 +313,7 @@ __attribute__((cold)) static void on_gl_error(GLenum        source,
 }
 #endif
 
-__attribute__((always_inline)) static inline void gl_check_error()
+static void gl_check_error()
 {
 #ifdef DEBUG
     GLenum e = glGetError();

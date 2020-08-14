@@ -14,11 +14,10 @@
 #include <time.h>
 #include <unistd.h>
 
-#include <GL/gl.h>
-
 #include "freetype.h"
 #include "fterrors.h"
-#include "gl.h"
+#include <GL/gl.h>
+
 #include "map.h"
 #include "shaders.h"
 #include "util.h"
@@ -45,6 +44,109 @@
 #define PROXY_INDEX_TEXTURE       0
 #define PROXY_INDEX_TEXTURE_BLINK 1
 #define PROXY_INDEX_TEXTURE_SIZE  2
+
+#include "gl_exts/glext.h"
+
+static PFNGLBUFFERSUBDATAARBPROC        glBufferSubData;
+static PFNGLUNIFORM4FPROC               glUniform4f;
+static PFNGLUNIFORM3FPROC               glUniform3f;
+static PFNGLUNIFORM2FPROC               glUniform2f;
+static PFNGLBUFFERDATAPROC              glBufferData;
+static PFNGLDELETEPROGRAMPROC           glDeleteProgram;
+static PFNGLUSEPROGRAMPROC              glUseProgram;
+static PFNGLGETUNIFORMLOCATIONPROC      glGetUniformLocation;
+static PFNGLGETATTRIBLOCATIONPROC       glGetAttribLocation;
+static PFNGLDELETESHADERPROC            glDeleteShader;
+static PFNGLDETACHSHADERPROC            glDetachShader;
+static PFNGLGETPROGRAMINFOLOGPROC       glGetProgramInfoLog;
+static PFNGLGETPROGRAMIVPROC            glGetProgramiv;
+static PFNGLLINKPROGRAMPROC             glLinkProgram;
+static PFNGLATTACHSHADERPROC            glAttachShader;
+static PFNGLCOMPILESHADERPROC           glCompileShader;
+static PFNGLSHADERSOURCEPROC            glShaderSource;
+static PFNGLCREATESHADERPROC            glCreateShader;
+static PFNGLCREATEPROGRAMPROC           glCreateProgram;
+static PFNGLGETSHADERINFOLOGPROC        glGetShaderInfoLog;
+static PFNGLGETSHADERIVPROC             glGetShaderiv;
+static PFNGLDELETEBUFFERSPROC           glDeleteBuffers;
+static PFNGLVERTEXATTRIBPOINTERPROC     glVertexAttribPointer;
+static PFNGLENABLEVERTEXATTRIBARRAYPROC glEnableVertexAttribArray;
+static PFNGLBINDBUFFERPROC              glBindBuffer;
+static PFNGLGENBUFFERSPROC              glGenBuffers;
+static PFNGLDELETEFRAMEBUFFERSPROC      glDeleteFramebuffers;
+static PFNGLFRAMEBUFFERRENDERBUFFERPROC glFramebufferRenderbuffer;
+static PFNGLRENDERBUFFERSTORAGEPROC     glRenderbufferStorage;
+static PFNGLBINDBUFFERPROC              glBindBuffer;
+static PFNGLGENBUFFERSPROC              glGenBuffers;
+static PFNGLDELETEFRAMEBUFFERSPROC      glDeleteFramebuffers;
+static PFNGLFRAMEBUFFERTEXTURE2DPROC    glFramebufferTexture2D;
+static PFNGLBINDFRAMEBUFFERPROC         glBindFramebuffer;
+static PFNGLBINDRENDERBUFFERPROC        glBindRenderbuffer;
+static PFNGLGENRENDERBUFFERSPROC        glGenRenderbuffers;
+static PFNGLDELETERENDERBUFFERSPROC     glDeleteRenderbuffers;
+static PFNGLGENFRAMEBUFFERSPROC         glGenFramebuffers;
+static PFNGLGENERATEMIPMAPPROC          glGenerateMipmap;
+#ifdef DEBUG
+static PFNGLDEBUGMESSAGECALLBACKPROC   glDebugMessageCallback;
+static PFNGLCHECKFRAMEBUFFERSTATUSPROC glCheckFramebufferStatus;
+#endif
+
+static void maybe_load_gl_exts(void* loader,
+                               void* (*loader_func)(void* loader, const char* proc_name))
+{
+    static bool loaded = false;
+    if (loaded) {
+        return;
+    }
+
+    glBufferSubData           = loader_func(loader, "glBufferSubData");
+    glUniform4f               = loader_func(loader, "glUniform4f");
+    glUniform3f               = loader_func(loader, "glUniform3f");
+    glUniform2f               = loader_func(loader, "glUniform2f");
+    glBufferData              = loader_func(loader, "glBufferData");
+    glDeleteProgram           = loader_func(loader, "glDeleteProgram");
+    glUseProgram              = loader_func(loader, "glUseProgram");
+    glGetUniformLocation      = loader_func(loader, "glGetUniformLocation");
+    glGetAttribLocation       = loader_func(loader, "glGetAttribLocation");
+    glDeleteShader            = loader_func(loader, "glDeleteShader");
+    glDetachShader            = loader_func(loader, "glDetachShader");
+    glGetProgramInfoLog       = loader_func(loader, "glGetProgramInfoLog");
+    glGetProgramiv            = loader_func(loader, "glGetProgramiv");
+    glLinkProgram             = loader_func(loader, "glLinkProgram");
+    glAttachShader            = loader_func(loader, "glAttachShader");
+    glCompileShader           = loader_func(loader, "glCompileShader");
+    glShaderSource            = loader_func(loader, "glShaderSource");
+    glCreateShader            = loader_func(loader, "glCreateShader");
+    glCreateProgram           = loader_func(loader, "glCreateProgram");
+    glGetShaderInfoLog        = loader_func(loader, "glGetShaderInfoLog");
+    glGetShaderiv             = loader_func(loader, "glGetShaderiv");
+    glDeleteBuffers           = loader_func(loader, "glDeleteBuffers");
+    glVertexAttribPointer     = loader_func(loader, "glVertexAttribPointer");
+    glEnableVertexAttribArray = loader_func(loader, "glEnableVertexAttribArray");
+    glBindBuffer              = loader_func(loader, "glBindBuffer");
+    glGenBuffers              = loader_func(loader, "glGenBuffers");
+    glDeleteFramebuffers      = loader_func(loader, "glDeleteFramebuffers");
+    glFramebufferRenderbuffer = loader_func(loader, "glFramebufferRenderbuffer");
+    glBindBuffer              = loader_func(loader, "glBindBuffer");
+    glGenBuffers              = loader_func(loader, "glGenBuffers");
+    glDeleteFramebuffers      = loader_func(loader, "glDeleteFramebuffers");
+    glFramebufferTexture2D    = loader_func(loader, "glFramebufferTexture2D");
+    glBindFramebuffer         = loader_func(loader, "glBindFramebuffer");
+    glRenderbufferStorage     = loader_func(loader, "glRenderbufferStorage");
+    glDeleteRenderbuffers     = loader_func(loader, "glDeleteRenderbuffers");
+    glBindRenderbuffer        = loader_func(loader, "glBindRenderbuffer");
+    glGenRenderbuffers        = loader_func(loader, "glGenRenderbuffers");
+    glGenFramebuffers         = loader_func(loader, "glGenFramebuffers");
+    glGenerateMipmap          = loader_func(loader, "glGenerateMipmap");
+#ifdef DEBUG
+    glDebugMessageCallback   = loader_func(loader, "glDebugMessageCallback");
+    glCheckFramebufferStatus = loader_func(loader, "glCheckFramebufferStatus");
+#endif
+
+    loaded = true;
+}
+
+#include "gl.h"
 
 enum GlyphColor
 {
@@ -829,7 +931,10 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
 {
     GfxOpenGL21* gl21 = gfxOpenGL21(self);
 
-    gl_load_exts();
+    ASSERT(self->callbacks.user_data, "callback user data defined");
+    ASSERT(self->callbacks.load_extension_proc_address, "callback func defined");
+
+    maybe_load_gl_exts(self->callbacks.user_data, self->callbacks.load_extension_proc_address);
 
 #ifdef DEBUG
     glEnable(GL_DEBUG_OUTPUT);

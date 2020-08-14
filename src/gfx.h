@@ -34,6 +34,13 @@ typedef struct
 {
     struct IGfx* interface;
 
+    
+    struct GfxCallbacks
+    {
+        void* user_data;
+        void* (*load_extension_proc_address)(void* user_data, const char* name);
+    } callbacks;
+
     alignas(alignof(void*)) uint8_t extend_data;
 
 } Gfx;
