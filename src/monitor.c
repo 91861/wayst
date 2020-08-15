@@ -33,8 +33,13 @@ void sighandler(int sig)
         }
         for (size_t i = 0; i < instances.size; ++i) {
             MonitorInfo* info = Vector_at_MonitorInfo(&instances, i);
+            if (!info) {
+                break;
+            }
             if (info->child_pid == p) {
-                info->instance->callbacks.on_exit(info->instance->callbacks.user_data);
+                if (info->instance->callbacks.on_exit && info->instance->callbacks.user_data) {
+                    info->instance->callbacks.on_exit(info->instance->callbacks.user_data);
+                }
                 Vector_remove_at_MonitorInfo(&instances, i, 1);
                 break;
             }
@@ -49,7 +54,7 @@ Monitor Monitor_new()
         instances_initialized = true;
         instances             = Vector_new_MonitorInfo();
     }
-    Monitor self;
+    Monitor self       = { 0 };
     self.extra_fd      = 0;
     self.child_is_dead = true;
 
@@ -58,6 +63,9 @@ Monitor Monitor_new()
 
 void Monitor_fork_new_pty(Monitor* self, uint32_t cols, uint32_t rows)
 {
+    ASSERT(self->callbacks.on_exit && self->callbacks.user_data,
+           "exit callbacks set before forking");
+
     struct sigaction sigact;
     memset(&sigact, 0, sizeof(sigact));
     sigact.sa_handler = sighandler;

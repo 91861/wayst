@@ -106,6 +106,7 @@ static void App_update_cursor(App* self);
 void        App_do_autoscroll(App* self);
 void        App_notify_content_change(void* self);
 static void App_clamp_cursor(App* self, Pair_uint32_t chars);
+static void App_set_monitor_callbacks(App* self);
 static void App_set_callbacks(App* self);
 static void App_maybe_resize(App* self, Pair_uint32_t newres);
 
@@ -143,6 +144,9 @@ void App_init(App* self)
 {
     memset(self, 0, sizeof(App));
     self->monitor = Monitor_new();
+
+    App_set_monitor_callbacks(self);
+    
     Monitor_fork_new_pty(&self->monitor, settings.cols, settings.rows);
 
     Vt_init(&self->vt, settings.cols, settings.rows);
@@ -174,7 +178,7 @@ void App_init(App* self)
 
 void App_run(App* self)
 {
-    while (!Window_is_closed(self->win) && !self->exit) {
+    while (!(self->exit || Window_is_closed(self->win))) {
         int timeout_ms = self->swap_performed
                            ? 0
                            : self->closest_pending_wakeup
@@ -186,6 +190,7 @@ void App_run(App* self)
         if (Monitor_are_window_system_events_pending(&self->monitor)) {
             Window_events(self->win);
         }
+
         TimePoint* pending_window_timer = Window_process_timers(self->win);
         if (pending_window_timer) {
             self->closest_pending_wakeup = pending_window_timer;
@@ -235,6 +240,7 @@ void App_run(App* self)
         self->swap_performed = Window_maybe_swap(self->win);
     }
 
+    Monitor_kill(&self->monitor);
     Vt_destroy(&self->vt);
     Gfx_destroy(self->gfx);
     Freetype_destroy(&self->freetype);
@@ -948,11 +954,14 @@ void App_destroy_proxy_handler(void* self, VtLineProxy* proxy)
     Gfx_destroy_proxy(app->gfx, proxy->data);
 }
 
-static void App_set_callbacks(App* self)
+static void App_set_monitor_callbacks(App* self)
 {
     self->monitor.callbacks.on_exit   = App_exit_handler;
     self->monitor.callbacks.user_data = self;
+}
 
+static void App_set_callbacks(App* self)
+{
     self->vt.callbacks.user_data                           = self;
     self->vt.callbacks.on_repaint_required                 = App_notify_content_change;
     self->vt.callbacks.on_clipboard_sent                   = App_clipboard_send;
