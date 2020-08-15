@@ -2,6 +2,15 @@
 
 
 const char*
+solid_fill_vs_src =
+"#version 120\n"
+"attribute vec2 pos;"
+"void main(){"
+"gl_Position=vec4(pos,0,1);"
+"}";
+
+
+const char*
 font_vs_src =
 "#version 120\n"
 "attribute vec4 coord;"
@@ -9,16 +18,6 @@ font_vs_src =
 "void main(){"
 "tex_coord=coord.zw;"
 "gl_Position=vec4(coord.xy,0,1);"
-"}";
-
-
-const char*
-bg_vs_src =
-"#version 120\n"
-"attribute vec2 pos;"
-"uniform vec2 mv;"
-"void main(){"
-"gl_Position=vec4(pos+mv,0,1);"
 "}";
 
 
@@ -43,6 +42,15 @@ line_vs_src =
 
 
 const char*
+solid_fill_fs_src =
+"#version 120\n"
+"uniform vec4 clr;"
+"void main(){"
+"gl_FragColor=clr;"
+"}";
+
+
+const char*
 font_fs_src =
 "#version 120\n"
 "uniform vec3 clr;"
@@ -55,15 +63,6 @@ font_fs_src =
 "mix(bclr.g,clr.g,c.g),"
 "mix(bclr.b,clr.b,c.b),"
 "bclr.a+(c.r+c.g+c.b)/3.0);"
-"}";
-
-
-const char*
-bg_fs_src =
-"#version 120\n"
-"uniform vec4 clr;"
-"void main(){"
-"gl_FragData[0]=clr;"
 "}";
 
 

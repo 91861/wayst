@@ -269,6 +269,8 @@ struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
                                      2,
                                      GLX_CONTEXT_MINOR_VERSION_ARB,
                                      1,
+                                     GLX_CONTEXT_PROFILE_MASK_ARB,
+                                     GLX_CONTEXT_CORE_PROFILE_BIT_ARB,
                                      None };
     const char* exts =
       glXQueryExtensionsString(globalX11->display, DefaultScreen(globalX11->display));

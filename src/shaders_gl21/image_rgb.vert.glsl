@@ -1,12 +1,13 @@
 /* See LICENSE for license information. */
 
-
 #version 120
 
-uniform sampler2D tex;
+attribute vec4 coord;
 
 varying vec2 tex_coord;
 
 void main() {
-    gl_FragData[0] = texture2D(tex, tex_coord);
+    tex_coord = coord.zw;
+
+    gl_Position = vec4(coord.xy, 0, 1);
 }

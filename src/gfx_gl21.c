@@ -19,7 +19,7 @@
 #include <GL/gl.h>
 
 #include "map.h"
-#include "shaders.h"
+#include "shaders_gl21.h"
 #include "util.h"
 #include "wcwidth/wcwidth.h"
 
@@ -261,6 +261,8 @@ typedef struct
     VBO flex_vbo_bold;
     VBO flex_vbo_bold_italic;
 
+    GLuint full_framebuffer_quad_vbo;
+
     /* pen position to begin drawing font */
     float    pen_begin;
     float    pen_begin_pixels;
@@ -277,15 +279,13 @@ typedef struct
 
     GLuint line_framebuffer;
 
-    VBO font_vao;
-    VBO bg_vao;
-    VBO line_vao;
-    VBO line_bg_vao;
+    VBO font_vbo;
+    VBO line_vbo;
 
+    Shader solid_fill_shader;
     Shader font_shader;
     Shader font_shader_blend;
     Shader font_shader_gray;
-    Shader bg_shader;
     Shader line_shader;
     Shader image_shader;
     Shader image_tint_shader;
@@ -738,12 +738,14 @@ __attribute__((hot)) static GlyphMapEntry* GfxOpenGL21_get_cached_glyph(GfxOpenG
         glUseProgram(old_shader);
         glBindFramebuffer(GL_FRAMEBUFFER, old_fb);
         glViewport(old_viewport[0], old_viewport[1], old_viewport[2], old_viewport[3]);
-        glDeleteFramebuffers(1, &tmp_fb);
-        glDeleteRenderbuffers(1, &tmp_rb);
-        glDeleteBuffers(1, &tmp_vbo);
         if (!old_depth_test) {
             glDisable(GL_DEPTH_TEST);
         }
+
+        /* delete temps */
+        glDeleteFramebuffers(1, &tmp_fb);
+        glDeleteRenderbuffers(1, &tmp_rb);
+        glDeleteBuffers(1, &tmp_vbo);
 
         new_entry = (GlyphMapEntry){
             .code  = code,
@@ -800,7 +802,6 @@ __attribute__((cold)) static Texture create_squiggle_texture(uint32_t w,
     h *= MSAA;
 
     GLuint tex;
-    glEnable(GL_TEXTURE_2D);
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
 
@@ -880,23 +881,6 @@ void GfxOpenGL21_resize(Gfx* self, uint32_t w, uint32_t h)
     gl21->glyph_width        = gl21->glyph_width_pixels * gl21->sx;
     gl21->max_cells_in_line  = gl21->win_w / gl21->glyph_width_pixels;
 
-    // update dynamic bg buffer
-    glBindBuffer(GL_ARRAY_BUFFER, gl21->bg_vao.vbo);
-    glVertexAttribPointer(gl21->bg_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
-
-    float bg_box[] = {
-        0.0f,
-        0.0f,
-        0.0f,
-        gl21->line_height,
-        gl21->glyph_width,
-        gl21->line_height,
-        gl21->glyph_width,
-        0.0f,
-    };
-
-    glBufferData(GL_ARRAY_BUFFER, sizeof bg_box, bg_box, GL_STREAM_DRAW);
-
     Pair_uint32_t cells = GfxOpenGL21_get_char_size(self);
     cells               = GfxOpenGL21_pixels(self, cells.first, cells.second);
 
@@ -942,7 +926,13 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
     glDebugMessageCallback(on_gl_error, NULL);
 #endif
 
-    glEnable(GL_TEXTURE_2D);
+    if (unlikely(settings.debug_gfx)) {
+        fprintf(stderr, "GL_VENDOR = %s\n", glGetString(GL_VENDOR));
+        fprintf(stderr, "GL_RENDERER = %s\n", glGetString(GL_RENDERER));
+        fprintf(stderr, "GL_VERSION = %s\n", glGetString(GL_VERSION));
+        fprintf(stderr, "GL_SHADING_LANGUAGE_VERSION = %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
+    }
+
     glDisable(GL_DEPTH_TEST);
     glDepthMask(GL_FALSE);
 
@@ -956,6 +946,8 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
                  ColorRGBA_get_float(settings.bg, 2),
                  ColorRGBA_get_float(settings.bg, 3));
 
+    gl21->solid_fill_shader = Shader_new(solid_fill_vs_src, solid_fill_fs_src, "pos", "clr", NULL);
+
     gl21->font_shader = Shader_new(font_vs_src, font_fs_src, "coord", "tex", "clr", "bclr", NULL);
 
     gl21->font_shader_gray =
@@ -963,8 +955,6 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
 
     gl21->font_shader_blend =
       Shader_new(font_vs_src, font_depth_blend_fs_src, "coord", "tex", NULL);
-
-    gl21->bg_shader = Shader_new(bg_vs_src, bg_fs_src, "pos", "mv", "clr", NULL);
 
     gl21->line_shader = Shader_new(line_vs_src, line_fs_src, "pos", "clr", NULL);
 
@@ -974,35 +964,30 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
     gl21->image_tint_shader =
       Shader_new(image_rgb_vs_src, image_tint_rgb_fs_src, "coord", "tex", "tint", NULL);
 
-    gl21->bg_vao = VBO_new(2, 1, gl21->bg_shader.attribs);
-
-    gl21->line_bg_vao = VBO_new(2, 1, gl21->bg_shader.attribs);
-    glBindBuffer(GL_ARRAY_BUFFER, gl21->line_bg_vao.vbo);
+    gl21->font_vbo = VBO_new(4, 1, gl21->font_shader.attribs);
     glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 4 * 4, NULL, GL_STREAM_DRAW);
 
-    gl21->font_vao = VBO_new(4, 1, gl21->font_shader.attribs);
-    glBindBuffer(GL_ARRAY_BUFFER, gl21->font_vao.vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 4 * 4, NULL, GL_STREAM_DRAW);
-
-    gl21->line_vao = VBO_new(2, 1, gl21->line_shader.attribs);
-    glBindBuffer(GL_ARRAY_BUFFER, gfxOpenGL21(self)->line_vao.vbo);
+    gl21->line_vbo = VBO_new(2, 1, gl21->line_shader.attribs);
     glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 8, NULL, GL_STREAM_DRAW);
 
     gl21->flex_vbo = VBO_new(4, 1, gl21->font_shader.attribs);
-    glBindBuffer(GL_ARRAY_BUFFER, gl21->flex_vbo.vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 4 * 4, NULL, GL_STREAM_DRAW);
 
     gl21->flex_vbo_italic = VBO_new(4, 1, gl21->font_shader.attribs);
-    glBindBuffer(GL_ARRAY_BUFFER, gl21->flex_vbo_italic.vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 4 * 4, NULL, GL_STREAM_DRAW);
 
     gl21->flex_vbo_bold = VBO_new(4, 1, gl21->font_shader.attribs);
-    glBindBuffer(GL_ARRAY_BUFFER, gl21->flex_vbo_bold.vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 4 * 4, NULL, GL_STREAM_DRAW);
 
     gl21->flex_vbo_bold_italic = VBO_new(4, 1, gl21->font_shader.attribs);
-    glBindBuffer(GL_ARRAY_BUFFER, gl21->flex_vbo_bold_italic.vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 4 * 4, NULL, GL_STREAM_DRAW);
+
+    glGenBuffers(1, &gl21->full_framebuffer_quad_vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, gl21->full_framebuffer_quad_vbo);
+    float vertex_data[] = {
+        1.0f, 1.0f, -1.0f, 1.0f, -1.0f, -1.0f, 1.0f, -1.0f,
+    };
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_data), vertex_data, GL_STATIC_DRAW);
 
     glGetIntegerv(GL_MAX_TEXTURE_SIZE, &gl21->max_tex_res);
 
@@ -1998,11 +1983,11 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
         glViewport(0, 0, recovered.w, recovered.h);
         gl_check_error();
     } else {
-        if (!vt_line->data.size) {
-            return;
-        }
         if (!is_for_blinking) {
             GfxOpenGL21_destroy_proxy((void*)gfx - offsetof(Gfx, extend_data), vt_line->proxy.data);
+        }
+        if (!vt_line->data.size) {
+            return;
         }
 
         GLuint  recycle_id    = gfx->recycled_textures[0].id;
@@ -2155,21 +2140,25 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
     if (unlikely(settings.debug_gfx)) {
         glDisable(GL_SCISSOR_TEST);
         glBindTexture(GL_TEXTURE_2D, 0);
-        glUseProgram(0);
+        Shader_use(&gfx->solid_fill_shader);
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glBegin(GL_QUADS);
-        if (can_reuse) {
-            glColor4f(0, 0, 0, 0);
-        } else {
-            glColor4f(fabs(sin(debug_tint)), fabs(cos(debug_tint)), sin(debug_tint), 0.1);
-        }
-        glVertex2f(1, 1);
-        glVertex2f(-1, 1);
+
         glColor4f(fabs(sin(debug_tint)), fabs(cos(debug_tint)), sin(debug_tint), 0.1);
-        glVertex2f(-1, -1);
-        glVertex2f(1, -1);
-        glEnd();
+        glUniform4f(gfx->solid_fill_shader.uniforms[0].location,
+                    fabs(sin(debug_tint)),
+                    fabs(cos(debug_tint)),
+                    sin(debug_tint),
+                    0.1);
+        glBindBuffer(GL_ARRAY_BUFFER, gfx->full_framebuffer_quad_vbo);
+        glVertexAttribPointer(gfx->solid_fill_shader.attribs->location,
+                              2,
+                              GL_FLOAT,
+                              GL_FALSE,
+                              0,
+                              0);
+        glDrawArrays(GL_QUADS, 0, 4);
+
         glDisable(GL_BLEND);
         debug_tint += 0.5f;
         if (debug_tint > M_PI) {
@@ -2489,8 +2478,12 @@ static void GfxOpenGL21_draw_unicode_input(GfxOpenGL21* gfx, const Vt* vt)
 
 static void GfxOpenGL21_draw_scrollbar(GfxOpenGL21* self, const Scrollbar* scrollbar)
 {
-    // TODO: use VBOs
-    Shader_use(NULL);
+    Shader_use(&self->solid_fill_shader);
+    glUniform4f(self->solid_fill_shader.uniforms[0].location,
+                1.0f,
+                1.0f,
+                1.0f,
+                scrollbar->dragging ? 0.8f : scrollbar->opacity * 0.5f);
     glViewport(0, 0, self->win_w, self->win_h);
     glBindTexture(GL_TEXTURE_2D, 0);
 
@@ -2498,13 +2491,14 @@ static void GfxOpenGL21_draw_scrollbar(GfxOpenGL21* self, const Scrollbar* scrol
     float begin  = scrollbar->top;
     float width  = self->sx * scrollbar->width;
 
-    glBegin(GL_QUADS);
-    glColor4f(1, 1, 1, scrollbar->dragging ? 0.8f : scrollbar->opacity * 0.5f);
-    glVertex2f(1.0f - width, 1.0f - begin);
-    glVertex2f(1.0f, 1.0f - begin);
-    glVertex2f(1.0f, 1.0f - length - begin);
-    glVertex2f(1.0f - width, 1.0f - length - begin);
-    glEnd();
+    float vertex_data[] = {
+        1.0f - width, 1.0f - begin,          1.0f,         1.0f - begin,
+        1.0f,         1.0f - length - begin, 1.0f - width, 1.0f - length - begin,
+    };
+    glBindBuffer(GL_ARRAY_BUFFER, self->flex_vbo.vbo);
+    ARRAY_BUFFER_SUB_OR_SWAP(vertex_data, self->flex_vbo.size, (sizeof vertex_data));
+    glVertexAttribPointer(self->solid_fill_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
+    glDrawArrays(GL_QUADS, 0, 4);
 }
 
 static void GfxOpenGL21_draw_overlays(GfxOpenGL21* self, const Vt* vt, const Ui* ui)
@@ -2521,17 +2515,17 @@ static void GfxOpenGL21_draw_overlays(GfxOpenGL21* self, const Vt* vt, const Ui*
 
 static void GfxOpenGL21_draw_flash(GfxOpenGL21* self, float fraction)
 {
-    // TODO: use VBOs
     glViewport(0, 0, self->win_w, self->win_h);
-    Shader_use(NULL);
     glBindTexture(GL_TEXTURE_2D, 0);
-    glBegin(GL_QUADS);
-    glColor4f(1, 1, 1, sinf((1.0 - fraction) * M_1_PI) / 4.0);
-    glVertex2f(1, 1);
-    glVertex2f(-1, 1);
-    glVertex2f(-1, -1);
-    glVertex2f(1, -1);
-    glEnd();
+    Shader_use(&self->solid_fill_shader);
+    glUniform4f(self->solid_fill_shader.uniforms[0].location,
+                1.0f,
+                1.0f,
+                1.0f,
+                sinf((1.0 - fraction) * M_1_PI) / 4.0);
+    glBindBuffer(GL_ARRAY_BUFFER, self->full_framebuffer_quad_vbo);
+    glVertexAttribPointer(self->solid_fill_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
+    glDrawArrays(GL_QUADS, 0, 4);
 }
 
 void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
@@ -2567,7 +2561,7 @@ void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
                   chars.first * gfx->glyph_width_pixels,
                   chars.second * gfx->line_height_pixels);
     }
-    glLoadIdentity();
+
     Vector_clear_GlyphBufferData(gfxOpenGL21(self)->vec_glyph_buffer);
     gfxOpenGL21(self)->has_blinking_text = false;
     for (VtLine* i = begin; i < end; ++i) {
@@ -2576,13 +2570,9 @@ void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
     glViewport(gfx->pixel_offset_x, -gfx->pixel_offset_y, gfx->win_w, gfx->win_h);
     if (gfxOpenGL21(self)->vec_glyph_buffer->size) {
         glBindBuffer(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
+
         size_t newsize = gfx->vec_glyph_buffer->size * sizeof(GlyphBufferData);
-        if (newsize > gfx->flex_vbo.size) {
-            gfx->flex_vbo.size = newsize;
-            glBufferData(GL_ARRAY_BUFFER, newsize, gfx->vec_glyph_buffer->buf, GL_STREAM_DRAW);
-        } else {
-            glBufferSubData(GL_ARRAY_BUFFER, 0, newsize, gfx->vec_glyph_buffer->buf);
-        }
+        ARRAY_BUFFER_SUB_OR_SWAP(gfx->vec_glyph_buffer->buf, gfx->flex_vbo.size, newsize);
         Shader_use(&gfx->image_shader);
         glVertexAttribPointer(gfx->image_shader.attribs->location, 4, GL_FLOAT, GL_FALSE, 0, 0);
         uint_fast32_t quad_index = 0;
@@ -2597,18 +2587,21 @@ void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
     if (gfx->flash_fraction != 1.0) {
         GfxOpenGL21_draw_flash(gfx, gfx->flash_fraction);
     }
+
     static bool repaint_indicator_visible = true;
     if (unlikely(settings.debug_gfx)) {
         if (repaint_indicator_visible) {
-            Shader_use(NULL);
+            Shader_use(&gfx->solid_fill_shader);
             glBindTexture(GL_TEXTURE_2D, 0);
-            glBegin(GL_TRIANGLES);
-            glColor4f(1, 1, 1, 0.7);
-            glVertex2f(-1.0, 1);
-            glColor4f(1, 1, 1, 0.0);
-            glVertex2f(-1.0 + gfx->sx * 50, 1);
-            glVertex2f(-1.0, 1.0 - gfx->sy * 50);
-            glEnd();
+            float vertex_data[] = {
+                -1.0f, 1.0f,
+                -1.0f + gfx->sx * 50.0f, 1.0f,
+                -1.0f, 1.0f - gfx->sy * 50.0f
+            };
+            glBindBuffer(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
+            ARRAY_BUFFER_SUB_OR_SWAP(vertex_data, gfx->flex_vbo.size, (sizeof vertex_data));
+            glVertexAttribPointer(gfx->solid_fill_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
+            glDrawArrays(GL_TRIANGLES, 0, 3);
         }
         repaint_indicator_visible = !repaint_indicator_visible;
     }
@@ -2687,6 +2680,11 @@ __attribute__((hot)) void GfxOpenGL21_destroy_proxy(Gfx* self, int32_t* proxy)
 
 void GfxOpenGL21_destroy(Gfx* self)
 {
+    glUseProgram(0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+
     GfxOpenGL21_destroy_recycled_proxies(gfxOpenGL21(self));
 
     Atlas_destroy(gfxOpenGL21(self)->atlas);
@@ -2702,28 +2700,34 @@ void GfxOpenGL21_destroy(Gfx* self)
 
     Map_destroy_Rune_GlyphMapEntry(&(gfxOpenGL21(self)->glyph_cache));
 
+    glDeleteTextures(1, &gfxOpenGL21(self)->squiggle_texture.id);
+
     glDeleteFramebuffers(1, &gfxOpenGL21(self)->line_framebuffer);
 
-    VBO_destroy(&gfxOpenGL21(self)->font_vao);
-    VBO_destroy(&gfxOpenGL21(self)->bg_vao);
+    VBO_destroy(&gfxOpenGL21(self)->font_vbo);
+    VBO_destroy(&gfxOpenGL21(self)->line_vbo);
 
+    VBO_destroy(&gfxOpenGL21(self)->flex_vbo);
+    VBO_destroy(&gfxOpenGL21(self)->flex_vbo_italic);
+    VBO_destroy(&gfxOpenGL21(self)->flex_vbo_bold);
+    VBO_destroy(&gfxOpenGL21(self)->flex_vbo_bold_italic);
+    glDeleteBuffers(1, &gfxOpenGL21(self)->full_framebuffer_quad_vbo);
+
+    Shader_destroy(&gfxOpenGL21(self)->solid_fill_shader);
     Shader_destroy(&gfxOpenGL21(self)->font_shader);
+    Shader_destroy(&gfxOpenGL21(self)->font_shader_gray);
     Shader_destroy(&gfxOpenGL21(self)->font_shader_blend);
-    Shader_destroy(&gfxOpenGL21(self)->bg_shader);
     Shader_destroy(&gfxOpenGL21(self)->line_shader);
     Shader_destroy(&gfxOpenGL21(self)->image_shader);
     Shader_destroy(&gfxOpenGL21(self)->image_tint_shader);
 
     Vector_destroy_GlyphBufferData(&gfxOpenGL21(self)->_vec_glyph_buffer);
-
     if (gfxOpenGL21(self)->vec_glyph_buffer_bold) {
         Vector_destroy_GlyphBufferData(&gfxOpenGL21(self)->_vec_glyph_buffer_bold);
     }
-
     if (gfxOpenGL21(self)->vec_glyph_buffer_italic) {
         Vector_destroy_GlyphBufferData(&gfxOpenGL21(self)->_vec_glyph_buffer_italic);
     }
-
     if (gfxOpenGL21(self)->vec_glyph_buffer_bold_italic) {
         Vector_destroy_GlyphBufferData(&gfxOpenGL21(self)->_vec_glyph_buffer_bold_italic);
     }

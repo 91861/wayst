@@ -1202,21 +1202,39 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h)
     EGLint    num_config;
 
     EGLint major, minor;
-    if (eglInitialize(globalWl->egl_display, &major, &minor) != EGL_TRUE)
+    if (eglInitialize(globalWl->egl_display, &major, &minor) != EGL_TRUE) {
         ERR("EGL init error\n");
+    }
 
     LOG("EGL Initialized %d.%d\n", major, minor);
 
-    if (eglBindAPI(EGL_OPENGL_API) != EGL_TRUE)
+    if (eglBindAPI(EGL_OPENGL_API) != EGL_TRUE) {
         ERR("EGL API binding error\n");
+    }
+
 
     eglChooseConfig(globalWl->egl_display, cfg_attribs, &config, 1, &num_config);
 
-    windowWl(win)->egl_context =
-      eglCreateContext(globalWl->egl_display, config, EGL_NO_CONTEXT, NULL);
+    EGLint context_attribs[] = {
+        EGL_CONTEXT_OPENGL_PROFILE_MASK,
+        EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
+        EGL_CONTEXT_MAJOR_VERSION, 2,
+        EGL_CONTEXT_MINOR_VERSION, 1,
+        EGL_CONTEXT_OPENGL_ROBUST_ACCESS,
+        EGL_FALSE,
+        #ifdef DEBUG
+        EGL_CONTEXT_OPENGL_DEBUG,
+        EGL_TRUE,
+        #endif
+        EGL_NONE,
+    };
 
-    if (!windowWl(win)->egl_context)
+    windowWl(win)->egl_context =
+        eglCreateContext(globalWl->egl_display, config, EGL_NO_CONTEXT, context_attribs);
+
+    if (!windowWl(win)->egl_context) {
         ERR("failed to create EGL context");
+    }
 
     windowWl(win)->surface = wl_compositor_create_surface(globalWl->compositor);
 

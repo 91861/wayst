@@ -1,6 +1,5 @@
 /* See LICENSE for license information. */
 
-
 #version 120
 
 uniform vec3 clr;  // font color
