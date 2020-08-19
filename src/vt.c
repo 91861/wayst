@@ -761,7 +761,7 @@ static inline size_t Vt_get_scroll_region_top(Vt* self)
 
 static inline size_t Vt_get_scroll_region_bottom(Vt* self)
 {
-    return Vt_top_line(self) + self->scroll_region_bottom - 1;
+    return Vt_top_line(self) + self->scroll_region_bottom;
 }
 
 static inline bool Vt_scroll_region_not_default(Vt* self)
@@ -1158,7 +1158,7 @@ void Vt_resize(Vt* self, uint32_t x, uint32_t y)
     }
 
     self->scroll_region_top    = 0;
-    self->scroll_region_bottom = self->ws.ws_row;
+    self->scroll_region_bottom = self->ws.ws_row -1;
 }
 
 __attribute__((always_inline, flatten)) static inline int32_t short_sequence_get_int_argument(
@@ -1200,7 +1200,7 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
 
             /* hide/show cursor (DECTCEM) */
         case 25:
-            self->cursor.hidden = on;
+            self->cursor.hidden = !on;
             break;
 
             /* Very visible cursor (CVVIS) */
@@ -1209,7 +1209,7 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
 
         /* X11 xterm mouse protocol. */
         case 1000:
-            self->modes.mouse_btn_report = !on;
+            self->modes.mouse_btn_report = on;
             break;
 
         /* Hilite mouse tracking, xterm */
@@ -1219,7 +1219,7 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
 
         /* xterm cell motion mouse tracking */
         case 1002:
-            self->modes.mouse_motion_on_btn_report = !on;
+            self->modes.mouse_motion_on_btn_report = on;
             break;
 
         /* xterm all motion tracking */
@@ -1228,7 +1228,7 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
             break;
 
         case 1004:
-            self->modes.window_focus_events_report = !on;
+            self->modes.window_focus_events_report = on;
             break;
 
         /* utf8 Mouse Mode */
@@ -1238,7 +1238,7 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
 
         /* SGR mouse mode */
         case 1006:
-            self->modes.extended_report = !on;
+            self->modes.extended_report = on;
             break;
 
         /* urxvt mouse mode */
@@ -1263,7 +1263,7 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
             break;
 
         case 1039:
-            self->modes.no_alt_sends_esc = !on;
+            self->modes.no_alt_sends_esc = on;
             break;
 
         /* bell sets urgent WM hint */
@@ -1284,14 +1284,14 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
          * clearing it first. */
         case 1049:
             if (on) {
-                Vt_alt_buffer_off(self, code == 1049);
-            } else {
                 Vt_alt_buffer_on(self, code == 1049);
+            } else {
+                Vt_alt_buffer_off(self, code == 1049);
             }
             break;
 
         case 2004:
-            self->modes.bracketed_paste = !on;
+            self->modes.bracketed_paste = on;
             break;
 
         case 1051: /* Sun function-key mode, xterm. */
@@ -1338,7 +1338,7 @@ static inline void Vt_handle_CSI(Vt* self, char c)
                 case 'h':
                 /* <ESC>[? Pm l - DEC Private Mode Reset (DECRST) */
                 case 'l': {
-                    bool               is_enable = last_char == 'l';
+                    bool               is_enable = last_char == 'h';
                     Vector_Vector_char tokens    = string_split_on(seq + 1, ";:", NULL, NULL);
                     for (Vector_char* token = NULL;
                          (token = Vector_iter_Vector_char(&tokens, token));) {
@@ -1592,7 +1592,7 @@ static inline void Vt_handle_CSI(Vt* self, char c)
                         top    = 0;
                         bottom = CALL_FP(self->callbacks.on_number_of_cells_requested,
                                          self->callbacks.user_data)
-                                   .second;
+                                   .second -1;
                     }
 
                     self->scroll_region_top    = top;
@@ -2059,6 +2059,9 @@ static void Vt_handle_SGR_code(Vt* self, char* command)
 
 static inline void Vt_alt_buffer_on(Vt* self, bool save_mouse)
 {
+    if (self->alt_lines.buf) {
+        return;
+    }
     Vt_clear_all_proxies(self);
     Vt_visual_scroll_reset(self);
     Vt_select_end(self);
@@ -2089,7 +2092,7 @@ static inline void Vt_alt_buffer_off(Vt* self, bool save_mouse)
             self->cursor.row = self->alt_active_line;
         }
         self->scroll_region_top    = 0;
-        self->scroll_region_bottom = self->ws.ws_row;
+        self->scroll_region_bottom = self->ws.ws_row -1;
         Vt_visual_scroll_reset(self);
     }
 }
@@ -2395,7 +2398,7 @@ static void Vt_insert_line(Vt* self)
 
     Vt_empty_line_fill_bg(self, self->cursor.row);
 
-    size_t rem_idx = MIN(Vt_get_scroll_region_bottom(self) + 1, Vt_bottom_line(self));
+    size_t rem_idx = MIN(Vt_get_scroll_region_bottom(self), Vt_bottom_line(self));
     Vector_remove_at_VtLine(&self->lines, rem_idx, 1);
 
     Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
@@ -2406,12 +2409,12 @@ static void Vt_insert_line(Vt* self)
 static void Vt_reverse_line_feed(Vt* self)
 {
     self->last_interted = NULL;
-
-    size_t rem_idx = MIN(Vt_bottom_line(self), Vt_get_scroll_region_bottom(self) + 1);
+    size_t rem_idx = MIN(Vt_bottom_line(self), Vt_get_scroll_region_bottom(self));
     Vector_remove_at_VtLine(&self->lines, rem_idx, 1);
 
     VtLine* insert_point = Vector_at_VtLine(&self->lines, self->cursor.row);
     Vector_insert_VtLine(&self->lines, insert_point, VtLine_new());
+
     Vt_empty_line_fill_bg(self, self->cursor.row);
     Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
 }
@@ -2423,11 +2426,11 @@ static void Vt_delete_line(Vt* self)
     self->last_interted = NULL;
     Vector_remove_at_VtLine(&self->lines, self->cursor.row, 1);
 
-    size_t  insert_idx   = MIN(Vt_get_scroll_region_bottom(self) + 1, Vt_bottom_line(self));
+    size_t  insert_idx   = MIN(Vt_get_scroll_region_bottom(self), Vt_bottom_line(self));
     VtLine* insert_point = Vector_at_VtLine(&self->lines, insert_idx);
     Vector_insert_VtLine(&self->lines, insert_point, VtLine_new());
 
-    Vt_empty_line_fill_bg(self, MIN(Vt_get_scroll_region_bottom(self) + 1, Vt_bottom_line(self)));
+    Vt_empty_line_fill_bg(self, MIN(Vt_get_scroll_region_bottom(self), Vt_bottom_line(self)));
 
     Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
 }
@@ -2435,15 +2438,14 @@ static void Vt_delete_line(Vt* self)
 static void Vt_scroll_up(Vt* self)
 {
     self->last_interted  = NULL;
-    size_t  insert_idx   = MIN(Vt_bottom_line(self), Vt_get_scroll_region_bottom(self) + 1) + 1;
+    size_t  insert_idx   = MIN(Vt_bottom_line(self), Vt_get_scroll_region_bottom(self)) + 1;
     VtLine* insert_point = Vector_at_VtLine(&self->lines, insert_idx);
     Vector_insert_VtLine(&self->lines, insert_point, VtLine_new());
 
-    Vt_empty_line_fill_bg(self,
-                          MIN(Vt_bottom_line(self), Vt_get_scroll_region_bottom(self) + 1) + 1);
+    size_t new_line_idx = MIN(Vt_bottom_line(self), Vt_get_scroll_region_bottom(self));
+    Vt_empty_line_fill_bg(self, new_line_idx);
 
     Vector_remove_at_VtLine(&self->lines, Vt_get_scroll_region_top(self) - 1, 1);
-
     Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
 }
 
@@ -2451,7 +2453,7 @@ static void Vt_scroll_down(Vt* self)
 {
     self->last_interted = NULL;
     Vector_remove_at_VtLine(&self->lines,
-                            MAX(Vt_top_line(self), Vt_get_scroll_region_bottom(self) + 1),
+                            MAX(Vt_top_line(self), Vt_get_scroll_region_bottom(self)),
                             1);
 
     Vector_insert_VtLine(&self->lines,
@@ -2758,7 +2760,7 @@ static inline void Vt_insert_new_line(Vt* self)
 {
     Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
 
-    if (self->cursor.row == Vt_get_scroll_region_bottom(self) + 1) {
+    if (self->cursor.row == Vt_get_scroll_region_bottom(self)) {
         Vector_remove_at_VtLine(&self->lines, Vt_get_scroll_region_top(self), 1);
         Vector_insert_VtLine(&self->lines,
                              Vector_at_VtLine(&self->lines, self->cursor.row),
@@ -3088,7 +3090,7 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
                     self->scroll_region_bottom =
                       CALL_FP(self->callbacks.on_number_of_cells_requested,
                               self->callbacks.user_data)
-                        .second;
+                        .second -1;
                     Vector_clear_DynStr(&self->title_stack);
                     free(self->title);
                     self->title = NULL;
@@ -3566,18 +3568,22 @@ static bool Vt_maybe_handle_keypad_key(Vt* self, uint32_t key, uint32_t mods)
 static bool Vt_maybe_handle_function_key(Vt* self, uint32_t key, uint32_t mods)
 {
     if (key >= XKB_KEY_F1 && key <= XKB_KEY_F35) {
-        int f_num = key - XKB_KEY_F1;
+        int f_num = (key + 1) - XKB_KEY_F1;
         if (mods) {
-            if (f_num < 4) {
-                Vt_output_formated(self, "\e[[1;%u%c", mods + 1, f_num + 'P');
+            if (f_num < 5) {
+                Vt_output_formated(self, "\e[[1;%u%c", mods + 1, f_num + 'O');
+            } else if (f_num == 5) {
+                Vt_output_formated(self, "\e[%d;%u~", f_num + 10, mods + 1);
             } else {
-                Vt_output_formated(self, "\e[%d;%u~", f_num + 12, mods + 1);
+                Vt_output_formated(self, "\e[%d;%u~", f_num + 11, mods + 1);
             }
         } else {
-            if (f_num < 4) {
-                Vt_output_formated(self, "\eO%c", f_num + 'P');
+            if (f_num < 5) {
+                Vt_output_formated(self, "\eO%c", f_num + 'O');
+            } else if (f_num == 5) {
+                Vt_output_formated(self, "\e[%d~", f_num + 10);
             } else {
-                Vt_output_formated(self, "\e[%d~", f_num + 12);
+                Vt_output_formated(self, "\e[%d~", f_num + 11);
             }
         }
         return true;

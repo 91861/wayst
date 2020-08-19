@@ -178,6 +178,18 @@ typedef struct
     bool was_reflown : 1;
 } VtLine;
 
+static void VtLine_copy(VtLine* dest, VtLine* source)
+{
+    memcpy(dest, source, sizeof(VtLine));
+    dest->was_reflown = false;
+    dest->reflowable = false;
+    dest->rejoinable = false;
+    dest->damage.type = VT_LINE_DAMAGE_FULL;
+    memset(&dest->proxy, 0, sizeof(VtLineProxy));
+    dest->data = Vector_new_with_capacity_VtRune(source->data.size);
+    Vector_pushv_VtRune(&dest->data, source->data.buf, source->data.size);
+}
+
 /* TODO: Make a version of Vector that can bind an additional destructor argument, so
  * Vt_destroy_line_proxy doesn't have to be a global */
 
