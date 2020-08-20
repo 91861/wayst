@@ -177,33 +177,36 @@ static struct option long_options[] = {
     [OPT_BIND_KEY_SHRINK_IDX] = { "bind-key-shrink", required_argument, 0, 0 },
 
 #define OPT_BIND_KEY_UNI_IDX 51
-    [OPT_BIND_KEY_UNI_IDX] = { "bind-key-uni", required_argument, 0, 0 },
+    [OPT_BIND_KEY_UNI_IDX] = { "bind-key-unicode", required_argument, 0, 0 },
 
 #define OPT_BIND_KEY_KSM_IDX 52
-    [OPT_BIND_KEY_KSM_IDX] = { "bind-key-ksm", required_argument, 0, 0 },
+    [OPT_BIND_KEY_KSM_IDX] = { "bind-key-kbd-select", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_DEBUG_IDX 53
+#define OPT_BIND_KEY_DUP_IDX 53
+    [OPT_BIND_KEY_DUP_IDX] = { "bind-key-duplicate", required_argument, 0, 0 },
+
+#define OPT_BIND_KEY_DEBUG_IDX 54
     [OPT_BIND_KEY_DEBUG_IDX] = { "bind-key-debug", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_QUIT_IDX 54
+#define OPT_BIND_KEY_QUIT_IDX 55
     [OPT_BIND_KEY_QUIT_IDX] = { "bind-key-quit", required_argument, 0, 0 },
 
-#define OPT_DEBUG_PTY_IDX 55
+#define OPT_DEBUG_PTY_IDX 56
     [OPT_DEBUG_PTY_IDX] = { "debug-pty", no_argument, 0, 'D' },
 
-#define OPT_DEBUG_GFX_IDX 56
+#define OPT_DEBUG_GFX_IDX 57
     [OPT_DEBUG_GFX_IDX] = { "debug-gfx", no_argument, 0, 'G' },
 
-#define OPT_DEBUG_FONT_IDX 57
+#define OPT_DEBUG_FONT_IDX 58
     [OPT_DEBUG_FONT_IDX] = { "debug-font", no_argument, 0, 'F' },
 
-#define OPT_VERSION_IDX 58
+#define OPT_VERSION_IDX 59
     [OPT_VERSION_IDX] = { "version", no_argument, 0, 'v' },
 
-#define OPT_HELP_IDX 59
+#define OPT_HELP_IDX 60
     [OPT_HELP_IDX] = { "help", no_argument, 0, 'h' },
 
-#define OPT_SENTINEL_IDX 60
+#define OPT_SENTINEL_IDX 61
     [OPT_SENTINEL_IDX] = { 0 }
 };
 
@@ -216,8 +219,8 @@ static const char* long_options_descriptions[][2] = {
     [OPT_DYNAMIC_TITLE_IDX] = { NULL, "Do not allow programs to change the window title" },
     [OPT_TITLE_FORMAT_IDX]  = { arg_string, "Window title format string" },
     [OPT_LOCALE_IDX]        = { arg_string, "Override locale" },
-    [OPT_ROWS_IDX]          = { arg_int, "Number of rows" },
-    [OPT_COLUMNS_IDX]       = { arg_int, "Number of columns" },
+    [OPT_ROWS_IDX]          = { arg_int, "Number of rows (default: 24)" },
+    [OPT_COLUMNS_IDX]       = { arg_int, "Number of columns (default: 80)" },
     [OPT_BG_COLOR_IDX]      = { arg_color_a, "Background color" },
     [OPT_FG_COLOR_IDX]      = { arg_color, "Foreground color" },
     [OPT_COLOR_0_IDX]       = { arg_color, "Palette color black" },
@@ -243,20 +246,17 @@ static const char* long_options_descriptions[][2] = {
                               "Colorscheme preset: wayst, linux, xterm, rxvt, yaru, tango, orchis, "
                               "solarized" },
 
-    [OPT_FONT_IDX]               = { arg_name, "Primary font family (default: Monospace)" },
+    [OPT_FONT_IDX]               = { "[name,...]", "Primary font families (default: Monospace)" },
     [OPT_FONT_STYLE_REGULAR_IDX] = { arg_name, "Font style to use as default (default: Regular)" },
     [OPT_FONT_STYLE_BOLD_IDX]    = { arg_name, "Font style to use as bold (default: Bold)" },
     [OPT_FONT_STYLE_ITALIC_IDX]  = { arg_name, "Font style to use as italic (default: Italic)" },
     [OPT_FONT_STYLE_BOLD_ITALIC_IDX] = { arg_name,
                                          "Font style to use as bold italic (default: "
                                          "Bold:Italic)" },
-    [OPT_FONT_FALLBACK_IDX]          = { arg_name, "Fallback font family (TrueType)" },
-    [OPT_FONT_FALLBACK2_IDX]         = { arg_name, "Font family for color bitmap glyphs" },
+    [OPT_FONT_FALLBACK_IDX]          = { "[name,...]", "Symbol font families" },
+    [OPT_FONT_FALLBACK2_IDX]         = { "[name,...]", "Color bitmap font families" },
 
-    [OPT_FONT_SIZE_IDX] = { "int:int?",
-                            "Font size - general:symbol(size for TrueType fonts when using a "
-                            "bitmap font as primary)" },
-
+    [OPT_FONT_SIZE_IDX]     = { arg_int, "Font size" },
     [OPT_DPI_IDX]           = { arg_int, "Font dpi (default: 96)" },
     [OPT_GLYPH_PADDING_IDX] = { "int:int?", "Glyph padding - horizontal[px]:vertical[px]" },
     [OPT_LCD_ORDER_IDX]     = { arg_name, "Force LCD subpixel order: none, rgb, bgr, vrgb, vbgr" },
@@ -276,7 +276,10 @@ static const char* long_options_descriptions[][2] = {
     [OPT_BIND_KEY_UNI_IDX]     = { arg_key,
                                "Unicode entry mode activation key command (default: C+S+u)" },
     [OPT_BIND_KEY_KSM_IDX] = { arg_key, "Enter keyboard select mode key command (default: C+S+k)" },
-    [OPT_BIND_KEY_DEBUG_IDX] = { arg_key, "Debug info key command (default: C+S+d)" },
+    [OPT_BIND_KEY_DUP_IDX] = { arg_key,
+                               "Duplicate key command (start new instance in work directory set by "
+                               "OSC 7) (default: C+S+d)" },
+    [OPT_BIND_KEY_DEBUG_IDX] = { arg_key, "Debug info key command (default: C+S+slash)" },
     [OPT_BIND_KEY_QUIT_IDX]  = { arg_key, "Quit key command" },
 
     [OPT_DEBUG_PTY_IDX]  = { NULL, "Output pty communication to stderr" },

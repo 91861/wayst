@@ -3,10 +3,10 @@
 #include "freetype/ftimage.h"
 #include "util.h"
 
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdarg.h>
 
 static inline FT_Render_Mode render_mode_for_output(enum FreetypeOutputTextureType output_type)
 {
@@ -385,7 +385,7 @@ FreetypeOutput* FreetypeStyledFamily_load_and_render_glyph(Freetype*            
                                                            enum FreetypeFontStyle style)
 {
     enum FreetypeFontStyle final_style;
-    FreetypeFace* source_face = FreetypeStyledFamily_select_face(self, style, &final_style);
+    FreetypeFace*   source_face = FreetypeStyledFamily_select_face(self, style, &final_style);
     FreetypeOutput* output = FreetypeFace_load_and_render_glyph(freetype, source_face, codepoint);
     if (output) {
         output->style = final_style;
@@ -443,32 +443,35 @@ Freetype Freetype_new()
     }
     self.target_output_type = output_type;
 
-    /* for (...) */ {
-        Vector_push_FreetypeStyledFamily(
-          &self.primaries,
-          FreetypeStyledFamily_new(settings.font_file_name_regular.str,
-                                   settings.font_file_name_bold.str,
-                                   settings.font_file_name_italic.str,
-                                   settings.font_file_name_bold_italic.str,
-                                   0,
-                                   0,
-                                   self.target_output_type));
-    }
-    /* for (...) */ {
-        if (settings.font_file_name_fallback.str) {
-            Vector_push_FreetypeFace(
-              &self.symbol_faces,
-              (FreetypeFace){ .loaded = false, .file_name = settings.font_file_name_fallback.str });
+    for (StyledFontInfo* i = NULL; (i = Vector_iter_StyledFontInfo(&settings.styled_fonts, i));) {
+        if (i->regular_file_name) {
+            Vector_push_FreetypeStyledFamily(&self.primaries,
+                                            FreetypeStyledFamily_new(i->regular_file_name,
+                                                                    i->bold_file_name,
+                                                                    i->italic_file_name,
+                                                                    i->bold_italic_file_name,
+                                                                    0,
+                                                                    0,
+                                                                    self.target_output_type));
         }
     }
-    /* for (...) */ {
-        if (settings.font_file_name_fallback2.str) {
-            Vector_push_FreetypeFace(
-              &self.color_faces,
-              (FreetypeFace){ .loaded    = false,
-                              .file_name = settings.font_file_name_fallback2.str });
+
+    for (UnstyledFontInfo* i = NULL;
+         (i = Vector_iter_UnstyledFontInfo(&settings.symbol_fonts, i));) {
+        if (i->file_name) {
+            Vector_push_FreetypeFace(&self.symbol_faces,
+                                     (FreetypeFace){ .loaded = false, .file_name = i->file_name });
         }
     }
+
+    for (UnstyledFontInfo* i = NULL;
+         (i = Vector_iter_UnstyledFontInfo(&settings.color_fonts, i));) {
+        if (i->file_name) {
+            Vector_push_FreetypeFace(&self.color_faces,
+                                     (FreetypeFace){ .loaded = false, .file_name = i->file_name });
+        }
+    }
+
     Freetype_load_fonts(&self);
     return self;
 }

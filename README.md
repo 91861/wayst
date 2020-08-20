@@ -40,6 +40,7 @@ make install
 * freetype >= 2.10
 * fontconfig
 * xkbcommon [wayland]
+* utf8proc [optional]
 
 To build without X11 or Wayland support set ```window_protocol=wayland``` or ```window_protocol=x11``` respectively. With both backends enabled wayst will default to wayland. You can force X11 mode with the ```xorg-only``` option.
 
@@ -66,25 +67,44 @@ Example:
 # '#' starts a line comment
 # Strings with spaces need double quotes (use \" for " and \\ for \).
 
-font="source code pro"
-style-regular="Regular"
-style-bold="Semibold"
-font-fallback="noto sans mono nerd font"
-font-fallback2="noto color emoji"
-font-size=10
-dpi=96
+style-bold = "Semibold"
 
-colorscheme="wayst"
-fg-color="#c7eeff"
-bg-color="#000000ee"
+# Set a list of primary fonts (All available styles will be loaded)
+font = [
+  "Noto Sans Mono",
+  "Noto Sans Symbols",
+  "Terminus"
+]
 
-term="xterm-256color"
-no-flash=true
+# Or use a single font
+# font = "IBM Plex Mono"
 
-title="Terminal"
-title-format="%2$s - %1$s" #  <set by program> - Terminal
-#title-format="%s [%s]"    #  Terminal [<set by program>]
-#title-format="%2$s"       #  <set by program>
+# Set a list of 'symbol' fonts (Only the 'Regular' style will be loaded)
+font-symbol = [
+  "Sauce Code Pro Nerd Font", 
+  "FontAwesome",
+  "Powerline Symbols"
+]
+
+font-color = "Noto Color Emoji"
+
+font-size = 10
+dpi = 96
+
+# Load one of the default colorschemes
+colorscheme = "wayst"
+
+# Overwrite parts of the colorscheme
+fg-color = "#c7eeff"
+bg-color = "#000000ee"
+
+term = "xterm-256color"
+no-flash = true
+
+title = "Terminal"
+title-format = "%2$s - %1$s"  #  <set by program> - Terminal
+# title-format = "%s [%s]"    #  Terminal [<set by program>]
+# title-format = "%2$s"       #  <set by program>
 
 
 # xorg keysym names are case sensitive!
@@ -102,9 +122,10 @@ Keys|Action|
 ```Ctrl```+```Shift```+```v```     | Paste from clipboard
 ```Ctrl```+```Shift```+```=```     | Increase font size
 ```Ctrl```+```Shift```+```-```     | Decrease font size
-```Ctrl```+```Shift```+```u```     | Unicode entry
+```Ctrl```+```Shift```+```u```     | Enter unicode character by hex code
 ```Ctrl```+```Shift```+```k```     | Enter vi-like keyboard select mode
-```Ctrl```+```Shift```+```d```     | Output debug information to stdout
+```Ctrl```+```Shift```+```d```     | Start new instance in active work directory (set by OSC 7)
+```Ctrl```+```Shift```+```/```     | Output debug information to stdout
 ```LMB```                          | Select text
 ```RMB```                          | Change selected region
 ```Shift```+```LMB```              | Select text in mouse reporting mode

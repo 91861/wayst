@@ -1020,7 +1020,7 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
     gl21->_vec_glyph_buffer_bold   = Vector_new_GlyphBufferData();
 
     // if font styles don't exist point their resources to deaults
-    if (settings.font_file_name_bold.str) {
+    if (settings.has_bold_fonts) {
         gl21->_atlas_bold           = Atlas_new(gl21, FT_STYLE_BOLD);
         gl21->atlas_bold            = &gl21->_atlas_bold;
         gl21->vec_glyph_buffer_bold = &gl21->_vec_glyph_buffer_bold;
@@ -1029,7 +1029,7 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
         gl21->vec_glyph_buffer_bold = &gl21->_vec_glyph_buffer;
     }
 
-    if (settings.font_file_name_italic.str) {
+    if (settings.has_italic_fonts) {
         gl21->_atlas_italic           = Atlas_new(gl21, FT_STYLE_ITALIC);
         gl21->atlas_italic            = &gl21->_atlas_italic;
         gl21->vec_glyph_buffer_italic = &gl21->_vec_glyph_buffer_italic;
@@ -1038,16 +1038,16 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
         gl21->vec_glyph_buffer_italic = &gl21->_vec_glyph_buffer;
     }
 
-    if (settings.font_file_name_bold_italic.str) {
+    if (settings.has_bold_italic_fonts) {
         gl21->_atlas_bold_italic            = Atlas_new(gfxOpenGL21(self), FT_STYLE_BOLD_ITALIC);
         gl21->atlas_bold_italic             = &gl21->_atlas_bold_italic;
         gl21->vec_glyph_buffer_bold_italic  = &gl21->_vec_glyph_buffer_bold_italic;
         gl21->_vec_glyph_buffer_bold_italic = Vector_new_GlyphBufferData();
     } else {
-        if (settings.font_file_name_italic.str) {
+        if (settings.has_italic_fonts) {
             gl21->atlas_bold_italic            = &gfxOpenGL21(self)->_atlas_italic;
             gl21->vec_glyph_buffer_bold_italic = &gl21->_vec_glyph_buffer_italic;
-        } else if (settings.font_file_name_bold.str) {
+        } else if (settings.has_bold_fonts) {
             gl21->atlas_bold_italic            = &gl21->_atlas_bold;
             gl21->vec_glyph_buffer_bold_italic = &gl21->_vec_glyph_buffer_bold;
         } else {
@@ -1096,13 +1096,13 @@ void GfxOpenGL21_reload_font(Gfx* self)
 
     gfxOpenGL21(self)->_atlas = Atlas_new(gl21, FT_STYLE_REGULAR);
 
-    if (settings.font_file_name_bold.str) {
+    if (settings.has_bold_fonts) {
         gl21->_atlas_bold = Atlas_new(gl21, FT_STYLE_BOLD);
     }
-    if (settings.font_file_name_italic.str) {
+    if (settings.has_italic_fonts) {
         gl21->_atlas_italic = Atlas_new(gl21, FT_STYLE_ITALIC);
     }
-    if (settings.font_file_name_bold_italic.str) {
+    if (settings.has_bold_italic_fonts) {
         gl21->_atlas_bold_italic = Atlas_new(gl21, FT_STYLE_BOLD_ITALIC);
     }
 
@@ -1520,7 +1520,7 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                             Vector_clear_GlyphBufferData(gfx->vec_glyph_buffer_italic);
                             Vector_clear_GlyphBufferData(gfx->vec_glyph_buffer_bold);
 
-                            if (settings.font_file_name_bold_italic.str) {
+                            if (settings.has_bold_italic_fonts) {
                                 Vector_clear_GlyphBufferData(gfx->vec_glyph_buffer_bold_italic);
                             }
                             /* Dummy value with we can point to to filter out a character */
@@ -1603,7 +1603,8 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                                   gfx->glyph_width_pixels;
                                 GLsizei clip_end =
                                   (each_rune_same_bg - vt_line->data.buf) * gfx->glyph_width_pixels;
-                                // glEnable(GL_SCISSOR_TEST);
+
+                                glEnable(GL_SCISSOR_TEST);
                                 glScissor(clip_begin,
                                           0,
                                           clip_end - clip_begin,
@@ -2688,13 +2689,13 @@ void GfxOpenGL21_destroy(Gfx* self)
     GfxOpenGL21_destroy_recycled_proxies(gfxOpenGL21(self));
 
     Atlas_destroy(gfxOpenGL21(self)->atlas);
-    if (settings.font_file_name_bold.str) {
+    if (settings.has_bold_fonts) {
         Atlas_destroy(&gfxOpenGL21(self)->_atlas_bold);
     }
-    if (settings.font_file_name_italic.str) {
+    if (settings.has_italic_fonts) {
         Atlas_destroy(&gfxOpenGL21(self)->_atlas_italic);
     }
-    if (settings.font_file_name_bold_italic.str) {
+    if (settings.has_bold_italic_fonts) {
         Atlas_destroy(&gfxOpenGL21(self)->_atlas_bold_italic);
     }
 

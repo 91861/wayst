@@ -117,6 +117,7 @@ static ColorRGB ColorRGB_from_hex(const char* str, bool* failed)
 fail:
     if (failed)
         *failed = true;
+
     return (ColorRGB){ 0, 0, 0 };
 }
 

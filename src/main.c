@@ -146,7 +146,7 @@ void App_init(App* self)
     self->monitor = Monitor_new();
 
     App_set_monitor_callbacks(self);
-    
+
     Monitor_fork_new_pty(&self->monitor, settings.cols, settings.rows);
 
     Vt_init(&self->vt, settings.cols, settings.rows);
@@ -598,7 +598,17 @@ static bool App_maybe_handle_application_key(App*     self,
         self->ui.cursor            = &self->ksm_cursor;
         self->keyboard_select_mode = true;
         return true;
+    } else if (KeyCommand_is_active(&settings.key_commands[KCMD_DUPLICATE], key, rawkey, mods)) {
+        /* use the full path to the running file (it may have been started with a relative path) */
+        char* this_file  = get_running_binary_path();
+        char* old_argv_0 = settings.argv[0];
+        settings.argv[0] = this_file;
+        spawn_process(self->vt.work_dir, settings.argv[0], settings.argv, true, false);
+        settings.argv[0] = old_argv_0;
+        free(this_file);
+        return true;
     }
+
     return false;
 }
 
@@ -634,6 +644,7 @@ static void App_update_scrollbar_dims(App* self)
     self->ui.scrollbar.length = length + extra_length;
     self->ui.scrollbar.top    = (2.0 - length - extra_length) * fraction_scrolled;
     int64_t ms                = TimePoint_is_ms_ahead(self->scrollbar_hide_time);
+
     if (ms > 0 && ms < SCROLLBAR_FADE_TIME_MS && !self->vt.scrolling_visual) {
         self->ui.scrollbar.opacity = ((float)ms / SCROLLBAR_FADE_TIME_MS);
         App_notify_content_change(self);
@@ -999,3 +1010,4 @@ int main(int argc, char** argv)
     App_run(&application);
     settings_cleanup();
 }
+

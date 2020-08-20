@@ -466,7 +466,7 @@ __attribute__((cold)) static const char* control_char_get_pretty_string(const ch
     if ((uint32_t)c < ARRAY_SIZE(strings)) {
         return strings[(int)c];
     } else if (c == 127) {
-        return TERMCOLOR_MAGENTA_LIGHT "␡" TERMCOLOR_DEFAULT;
+        return TERMCOLOR_BG_BLACK TERMCOLOR_MAGENTA_LIGHT "␡" TERMCOLOR_DEFAULT;
     } else {
         return NULL;
     }
@@ -2307,8 +2307,11 @@ static void Vt_handle_OSC(Vt* self, char c)
                 char* uri = seq + 2; // 7;
                 if (streq_wildcard(uri, "file:*") && strlen(uri) >= 8) {
                     uri += 7; // skip 'file://'
-                    while (*uri && *uri != '/')
-                        ++uri; // skip hostname
+
+                    /* skip hostname */
+                    while (*uri && *uri != '/') {
+                        ++uri;
+                    }
                     self->work_dir = strdup(uri);
                     LOG("Program changed work dir to \'%s\'\n", self->work_dir);
                 } else {

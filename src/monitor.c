@@ -27,25 +27,28 @@ void sighandler(int sig)
 {
     pid_t p;
     int   status;
-    while ((p = waitpid(-1, &status, WNOHANG)) != -1) {
-        if (status) {
-            WRN("Child process %d exited with status %d\n", p, status);
-        }
+    while ((p = waitpid(-1, &status, WNOHANG)) > 1) {
         for (size_t i = 0; i < instances.size; ++i) {
             MonitorInfo* info = Vector_at_MonitorInfo(&instances, i);
             if (!info) {
                 break;
             }
             if (info->child_pid == p) {
+                if (status) {
+                    WRN("Child process %d exited with status %d\n", p, status);
+                }
+
                 if (info->instance->callbacks.on_exit && info->instance->callbacks.user_data) {
                     info->instance->callbacks.on_exit(info->instance->callbacks.user_data);
                 }
+
                 Vector_remove_at_MonitorInfo(&instances, i, 1);
                 break;
             }
         }
     }
 }
+
 
 Monitor Monitor_new()
 {
@@ -117,7 +120,9 @@ bool Monitor_wait(Monitor* self, int timeout)
     self->pollfds[EXTRA_FD_IDX].events = POLLIN;
 
     if (poll(self->pollfds, 2, timeout) < 0) {
-        ERR("poll failed %s", strerror(errno));
+        if (errno != EINTR && errno != EAGAIN) {
+            ERR("poll failed %s", strerror(errno));
+        }
     }
 
     self->read_info_up_to_date = true;
@@ -135,7 +140,9 @@ ssize_t Monitor_read(Monitor* self)
         self->pollfds[CHILD_FD_IDX].fd     = self->child_fd;
         self->pollfds[CHILD_FD_IDX].events = POLLIN;
         if (poll(self->pollfds, 1, 0) < 0) {
-            ERR("poll failed %s", strerror(errno));
+            if (errno != EINTR && errno != EAGAIN) {
+                ERR("poll failed %s", strerror(errno));
+            }
         }
         self->read_info_up_to_date = true;
     }

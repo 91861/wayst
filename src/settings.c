@@ -28,7 +28,6 @@
 #define CFG_FNAME "config"
 #endif
 
-
 // default title format
 #ifndef DFT_TITLE_FMT
 #define DFT_TITLE_FMT "%2$s - %1$s"
@@ -43,6 +42,9 @@
 #define PT_AS_INCH 0.0138889
 
 DEF_VECTOR(char, NULL);
+DEF_VECTOR(Vector_char, Vector_destroy_char);
+
+static Vector_Vector_char expand_list_value(const char* const list);
 
 ColorRGB color_palette_256[257];
 
@@ -195,7 +197,7 @@ const char* const colors_default[8][18] = {
       "EFEFEF",
     },
     {
-      // solarized
+      /* solarized */
       "073642",
       "DC322F",
       "859900",
@@ -286,95 +288,101 @@ static void find_font()
     char* default_file =
       FontconfigContext_get_file(&fc_context, NULL, NULL, settings.font_size, NULL);
 
-    char* main_family = OR(settings.font.str, "Monospace");
+    if (!settings.styled_fonts.size) {
+        Vector_push_StyledFontInfo(&settings.styled_fonts, (StyledFontInfo){ 0 });
+        Vector_last_StyledFontInfo(&settings.styled_fonts)->family_name = strdup("Monospace");
+    }
 
-    char* regular_file = FontconfigContext_get_file(&fc_context,
-                                                    main_family,
-                                                    settings.font_style_regular.str,
-                                                    settings.font_size,
-                                                    &is_bitmap);
-    /* if (is_bitmap) { */
-    /*     settings.lcd_filter = LCD_FILTER_NONE; */
-    /* } */
-
-    char* bold_file = FontconfigContext_get_file(&fc_context,
-                                                 main_family,
-                                                 OR(settings.font_style_bold.str, "Bold"),
-                                                 settings.font_size,
-                                                 NULL);
-    L_DROP_IF_SAME(bold_file, regular_file);
-
-    char* italic_file = FontconfigContext_get_file(&fc_context,
-                                                   main_family,
-                                                   OR(settings.font_style_italic.str, "Italic"),
-                                                   settings.font_size,
-                                                   NULL);
-    L_DROP_IF_SAME(italic_file, regular_file);
-
-    char* bold_italic_file =
-      FontconfigContext_get_file(&fc_context,
-                                 main_family,
-                                 OR(settings.font_style_italic.str, "Bold:Italic"),
-                                 settings.font_size,
-                                 NULL);
-    L_DROP_IF_SAME(bold_italic_file, regular_file);
-    L_DROP_IF_SAME(bold_italic_file, bold_file);
-    L_DROP_IF_SAME(bold_italic_file, italic_file);
-
-    char* fallback_file = FontconfigContext_get_file(&fc_context,
-                                                     settings.font_fallback.str,
-                                                     NULL,
+    for (StyledFontInfo* i = NULL; (i=Vector_iter_StyledFontInfo(&settings.styled_fonts, i));) {
+        char* main_family  = i->family_name;
+        char* regular_file = FontconfigContext_get_file(&fc_context,
+                                                        main_family,
+                                                        settings.font_style_regular.str,
+                                                        settings.font_size,
+                                                        &is_bitmap);
+        L_DROP_IF_SAME(regular_file, default_file);
+        char* bold_file    = FontconfigContext_get_file(&fc_context,
+                                                     main_family,
+                                                     OR(settings.font_style_bold.str, "Bold"),
                                                      settings.font_size,
                                                      NULL);
-    L_DROP_IF_SAME(fallback_file, regular_file);
-    L_DROP_IF_SAME(fallback_file, default_file);
+        L_DROP_IF_SAME(bold_file, regular_file);
+        L_DROP_IF_SAME(bold_file, default_file);
+        char* italic_file = FontconfigContext_get_file(&fc_context,
+                                                       main_family,
+                                                       OR(settings.font_style_italic.str, "Italic"),
+                                                       settings.font_size,
+                                                       NULL);
+        L_DROP_IF_SAME(italic_file, regular_file);
+        L_DROP_IF_SAME(italic_file, default_file);
+        char* bold_italic_file =
+          FontconfigContext_get_file(&fc_context,
+                                     main_family,
+                                     OR(settings.font_style_italic.str, "Bold:Italic"),
+                                     settings.font_size,
+                                     NULL);
+        L_DROP_IF_SAME(bold_italic_file, regular_file);
+        L_DROP_IF_SAME(bold_italic_file, bold_file);
+        L_DROP_IF_SAME(bold_italic_file, italic_file);
+        L_DROP_IF_SAME(bold_italic_file, default_file);
 
-    char* fallback2_file = FontconfigContext_get_file(&fc_context,
-                                                      settings.font_fallback2.str,
-                                                      NULL,
-                                                      settings.font_size,
-                                                      NULL);
-    L_DROP_IF_SAME(fallback2_file, regular_file);
-    L_DROP_IF_SAME(fallback2_file, default_file);
+        i->regular_file_name = regular_file;
+        if ((i->bold_file_name = bold_file)) {
+            settings.has_bold_fonts = true;
+        }
+        if ((i->italic_file_name = italic_file)) {
+            settings.has_italic_fonts = true;
+        }
+        if ((i->bold_italic_file_name = bold_italic_file)) {
+            settings.has_bold_italic_fonts = true;
+        }
 
-    if (fallback_file) {
-        L_DROP_IF_SAME(fallback2_file, fallback_file);
+        if (!regular_file) {
+            WRN("Could not find font \'%s\'\n", i->family_name);
+        }
+
+        if (unlikely(settings.debug_font)) {
+            printf("Loaded styled font:\n  regular:     %s\n  bold:        %s\n  italic:      %s\n "
+                   " bold italic: %s\n",
+                   OR(regular_file, "(none)"),
+                   OR(bold_file, "(none)"),
+                   OR(italic_file, "(none)"),
+                   OR(bold_italic_file, "(none)"));
+        }
+    }
+
+    for (UnstyledFontInfo* i = NULL;
+         (i = Vector_iter_UnstyledFontInfo(&settings.symbol_fonts, i));) {
+        char* file =
+          FontconfigContext_get_file(&fc_context, i->family_name, NULL, settings.font_size, NULL);
+        L_DROP_IF_SAME(file, default_file);
+        if ((i->file_name = file)) {
+            settings.has_symbol_fonts = true;
+        } else {
+            WRN("Could not find font \'%s\'\n", i->family_name);
+        }
+        if (unlikely(settings.debug_font)) {
+            printf("Loaded unstyled (symbol) font:\n  file:     %s\n", OR(file, "(none)"));
+        }
+    }
+
+    for (UnstyledFontInfo* i = NULL;
+         (i = Vector_iter_UnstyledFontInfo(&settings.color_fonts, i));) {
+        char* file =
+          FontconfigContext_get_file(&fc_context, i->family_name, NULL, settings.font_size, NULL);
+        L_DROP_IF_SAME(file, default_file);
+        if ((i->file_name = file)) {
+            settings.has_color_fonts = true;
+        } else {
+            WRN("Could not find font \'%s\'\n", i->family_name);
+        }
+        if (unlikely(settings.debug_font)) {
+            printf("Loaded unstyled (color) font:\n  file:     %s\n", OR(file, "(none)"));
+        }
     }
 
     free(default_file);
     FontconfigContext_destroy(&fc_context);
-
-    if (regular_file) {
-        AString_replace_with_dynamic(&settings.font_file_name_regular, regular_file);
-    }
-    if (bold_file) {
-        AString_replace_with_dynamic(&settings.font_file_name_bold, bold_file);
-    }
-    if (italic_file) {
-        AString_replace_with_dynamic(&settings.font_file_name_italic, italic_file);
-    }
-    if (bold_italic_file) {
-        AString_replace_with_dynamic(&settings.font_file_name_bold_italic, bold_italic_file);
-    }
-    if (fallback_file) {
-        AString_replace_with_dynamic(&settings.font_file_name_fallback, fallback_file);
-    }
-    if (fallback2_file) {
-        AString_replace_with_dynamic(&settings.font_file_name_fallback2, fallback2_file);
-    }
-    if (unlikely(settings.debug_font)) {
-        printf("Loaded font files:\n  regular:     %s\n  bold:        %s\n  italic:      %s\n  "
-               "bold italic: %s\n  "
-               "symbol:      %s\n  color:       %s\n  glyph padding: %dpx-%dpx\n",
-               OR(settings.font_file_name_regular.str, "(none)"),
-               OR(settings.font_file_name_bold.str, "(none)"),
-               OR(settings.font_file_name_italic.str, "(none)"),
-               OR(settings.font_file_name_bold_italic.str, "(none)"),
-               OR(settings.font_file_name_fallback.str, "(none)"),
-               OR(settings.font_file_name_fallback2.str, "(none)"),
-               settings.padd_glyph_x,
-               settings.padd_glyph_y);
-    }
 }
 
 static void settings_make_default()
@@ -416,8 +424,13 @@ static void settings_make_default()
                 .is_name = false,
                 .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
             },
-            [KCMD_DEBUG] = (KeyCommand) {
+            [KCMD_DUPLICATE] = (KeyCommand) {
                 .key.code = 100, // d
+                .is_name = false,
+                .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
+            },
+            [KCMD_DEBUG] = (KeyCommand) {
+                .key.code = 47, // ?
                 .is_name = false,
                 .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
             },
@@ -429,9 +442,11 @@ static void settings_make_default()
 
         .shell          = AString_new_uninitialized(), 
         .title_format   = AString_new_static(DFT_TITLE_FMT),
-        .font           = AString_new_uninitialized(),
-        .font_fallback  = AString_new_uninitialized(),
-        .font_fallback2 = AString_new_uninitialized(),
+
+        .styled_fonts = Vector_new_with_capacity_StyledFontInfo(1),
+        .symbol_fonts = Vector_new_with_capacity_UnstyledFontInfo(1),
+        .color_fonts  = Vector_new_with_capacity_UnstyledFontInfo(1),
+
         .term           = AString_new_static(DFT_TERM),
         .locale         = AString_new_uninitialized(),
         .title          = AString_new_static(APP_NAME),
@@ -440,13 +455,6 @@ static void settings_make_default()
         .font_style_bold        = AString_new_uninitialized(),
         .font_style_italic      = AString_new_uninitialized(),
         .font_style_bold_italic = AString_new_uninitialized(),
-
-        .font_file_name_regular     = AString_new_uninitialized(),
-        .font_file_name_bold        = AString_new_uninitialized(),
-        .font_file_name_italic      = AString_new_uninitialized(),
-        .font_file_name_bold_italic = AString_new_uninitialized(),
-        .font_file_name_fallback    = AString_new_uninitialized(),
-        .font_file_name_fallback2   = AString_new_uninitialized(),
 
         .bsp_sends_del      = true,
         .font_size          = 9,
@@ -646,6 +654,12 @@ static void handle_option(const char opt, const int array_index, const char* val
 #define L_WARN_BAD_VALUE                                                                           \
     WRN("Unknown value \'%s\' for option \'%s\'\n", value, long_options[array_index].name);
 
+#define L_WARN_BAD_COLOR                                                                           \
+    WRN("Failed to parse \'%s\' as color for option \'%s\'%s.\n",                                  \
+        value,                                                                                     \
+        long_options[array_index].name,                                                            \
+        strlen(value) ? "" : ", hint: correct config syntax is =\"#rrggbb\" or =rrggbb");
+
         case OPT_XORG_ONLY_IDX:
             settings.x11_is_default = value ? strtob(value) : true;
             break;
@@ -721,29 +735,50 @@ static void handle_option(const char opt, const int array_index, const char* val
             print_help_and_exit();
             break;
 
-        case OPT_FONT_IDX:
-            AString_replace_with_dynamic(&settings.font, strdup(value));
-            break;
+        case OPT_FONT_IDX: {
+            Vector_Vector_char values = expand_list_value(value);
+            for (Vector_char* i = NULL; (i = Vector_iter_Vector_char(&values, i));) {
+                Vector_push_StyledFontInfo(&settings.styled_fonts, (StyledFontInfo){ 0 });
+                Vector_last_StyledFontInfo(&settings.styled_fonts)->family_name = strdup(i->buf);
+            }
+            Vector_destroy_Vector_char(&values);
+        } break;
 
-        case OPT_FONT_FALLBACK_IDX:
-            AString_replace_with_dynamic(&settings.font_fallback, strdup(value));
-            break;
+        case OPT_FONT_FALLBACK_IDX: {
+            Vector_Vector_char values = expand_list_value(value);
+            for (Vector_char* i = NULL; (i = Vector_iter_Vector_char(&values, i));) {
+                Vector_push_UnstyledFontInfo(&settings.symbol_fonts, (UnstyledFontInfo){ 0 });
+                Vector_last_UnstyledFontInfo(&settings.symbol_fonts)->family_name = strdup(i->buf);
+            }
+            Vector_destroy_Vector_char(&values);
+        } break;
 
-        case OPT_FONT_FALLBACK2_IDX:
-            AString_replace_with_dynamic(&settings.font_fallback2, strdup(value));
-            break;
+        case OPT_FONT_FALLBACK2_IDX: {
+            Vector_Vector_char values = expand_list_value(value);
+            for (Vector_char* i = NULL; (i = Vector_iter_Vector_char(&values, i));) {
+                Vector_push_UnstyledFontInfo(&settings.color_fonts, (UnstyledFontInfo){ 0 });
+                Vector_last_UnstyledFontInfo(&settings.color_fonts)->family_name = strdup(i->buf);
+            }
+            Vector_destroy_Vector_char(&values);
+        } break;
 
-        case OPT_FONT_STYLE_REGULAR_IDX:
+        case OPT_FONT_STYLE_REGULAR_IDX: {
+            Vector_Vector_char values = expand_list_value(value);
             AString_replace_with_dynamic(&settings.font_style_regular, strdup(value));
-            break;
+            Vector_destroy_Vector_char(&values);
+        } break;
 
-        case OPT_FONT_STYLE_BOLD_IDX:
+        case OPT_FONT_STYLE_BOLD_IDX: {
+            Vector_Vector_char values = expand_list_value(value);
             AString_replace_with_dynamic(&settings.font_style_bold, strdup(value));
-            break;
+            Vector_destroy_Vector_char(&values);
+        } break;
 
-        case OPT_FONT_STYLE_ITALIC_IDX:
+        case OPT_FONT_STYLE_ITALIC_IDX: {
+            Vector_Vector_char values = expand_list_value(value);
             AString_replace_with_dynamic(&settings.font_style_italic, strdup(value));
-            break;
+            Vector_destroy_Vector_char(&values);
+        } break;
 
         case OPT_FONT_SIZE_IDX: {
             L_PROCESS_MULTI_ARG_PACK_BEGIN
@@ -799,9 +834,11 @@ static void handle_option(const char opt, const int array_index, const char* val
             }
             break;
 
-        case OPT_TITLE_IDX:
+        case OPT_TITLE_IDX: {
+            Vector_Vector_char values = expand_list_value(value);
             AString_replace_with_dynamic(&settings.title, strdup(value));
-            break;
+            Vector_destroy_Vector_char(&values);
+        } break;
 
         case OPT_COLUMNS_IDX:
             settings.cols = strtol(value, NULL, 10);
@@ -811,62 +848,68 @@ static void handle_option(const char opt, const int array_index, const char* val
             settings.rows = strtol(value, NULL, 10);
             break;
 
-        case OPT_TERM_IDX:
+        case OPT_TERM_IDX: {
+            Vector_Vector_char values = expand_list_value(value);
             AString_replace_with_dynamic(&settings.term, strdup(value));
-            break;
+            Vector_destroy_Vector_char(&values);
+        } break;
 
-        case OPT_LOCALE_IDX:
+        case OPT_LOCALE_IDX: {
+            Vector_Vector_char values = expand_list_value(value);
             AString_replace_with_dynamic(&settings.locale, strdup(value));
-            break;
+            Vector_destroy_Vector_char(&values);
+        } break;
 
         case OPT_SCROLL_LINES_IDX:
             settings.scroll_discrete_lines = MIN(strtod(value, NULL), UINT8_MAX);
             break;
 
-        case OPT_TITLE_FORMAT_IDX:
+        case OPT_TITLE_FORMAT_IDX: {
+            Vector_Vector_char values = expand_list_value(value);
             AString_replace_with_dynamic(&settings.title_format, strdup(value));
-            break;
+            Vector_destroy_Vector_char(&values);
+        } break;
 
         case OPT_BG_COLOR_IDX: {
             bool      failed = false;
-            ColorRGBA parsed = ColorRGBA_from_hex(value, NULL);
+            ColorRGBA parsed = ColorRGBA_from_hex(value, &failed);
             if (!failed) {
                 settings.bg                      = parsed;
                 settings._explicit_colors_set[0] = true;
             } else {
-                WRN("Failed to parse \'%s\' as RGBA color\n", value);
+                L_WARN_BAD_COLOR
             }
         } break;
 
         case OPT_FG_COLOR_IDX: {
             bool     failed = false;
-            ColorRGB parsed = ColorRGB_from_hex(value, NULL);
+            ColorRGB parsed = ColorRGB_from_hex(value, &failed);
             if (!failed) {
                 settings.fg                      = parsed;
                 settings._explicit_colors_set[1] = true;
             } else {
-                WRN("Failed to parse \'%s\' as RGB color\n", value);
+                L_WARN_BAD_COLOR
             }
         } break;
 
         case OPT_H_BG_COLOR_IDX: {
             bool      failed = false;
-            ColorRGBA parsed = ColorRGBA_from_hex(value, NULL);
+            ColorRGBA parsed = ColorRGBA_from_hex(value, &failed);
             if (!failed) {
                 settings.bghl = parsed;
             } else {
-                WRN("Failed to parse \'%s\' as RGBA color\n", value);
+                L_WARN_BAD_COLOR
             }
         } break;
 
         case OPT_H_FG_COLOR_IDX: {
             bool     failed = false;
-            ColorRGB parsed = ColorRGB_from_hex(value, NULL);
+            ColorRGB parsed = ColorRGB_from_hex(value, &failed);
             if (!failed) {
                 settings.highlight_change_fg = true;
                 settings.fghl                = parsed;
             } else {
-                WRN("Failed to parse \'%s\' as RGB color\n", value);
+                L_WARN_BAD_COLOR
             }
         } break;
 
@@ -876,10 +919,10 @@ static void handle_option(const char opt, const int array_index, const char* val
 
             if (!failed) {
                 settings.colorscheme.color[array_index - OPT_COLOR_0_IDX] = parsed;
-                ASSERT(settings._explicit_colors_set, "not malloced");
+                ASSERT(settings._explicit_colors_set, "should already be malloced");
                 settings._explicit_colors_set[array_index - OPT_COLOR_0_IDX + 2] = true;
             } else {
-                WRN("Failed to parse \'%s\' as RGB color\n", value);
+                L_WARN_BAD_COLOR
             }
         } break;
 
@@ -1028,92 +1071,192 @@ static void handle_config_option(const char* key, const char* val, uint32_t line
                 }
             }
         }
-        WRN("error in config on line %u: invalid option \'%s\'. \'%s -h\' to list options\n",
+        WRN("Error in config on line %u: invalid option \'%s\'. \'%s -h\' to list options\n",
             line,
             key,
             EXE_FNAME);
     }
 }
 
+/**
+ * Takes a settings value that may or may not be a list and expands it to a vector of strings.
+ * Interprets list and array escape codes, so any arbitrary string values should be run through
+ * this even if they are not lists.
+ */
+static Vector_Vector_char expand_list_value(const char* const list)
+{
+    Vector_Vector_char values = Vector_new_with_capacity_Vector_char(1);
+    Vector_push_Vector_char(&values, Vector_new_with_capacity_char(10));
+
+    if (!list) {
+        Vector_push_char(Vector_last_Vector_char(&values), '\0');
+        return values;
+    }
+
+    bool in_string    = false;
+    bool in_list     = false;
+    bool escaped      = false;
+    bool has_brackets = false;
+
+    const char* arr = list;
+    for (char c = *arr; c; c = *(++arr)) {
+        if (!escaped && !in_string && c == '[') {
+            has_brackets = true;
+            in_list     = true;
+            escaped      = false;
+            continue;
+        }
+        if (!escaped && !in_string && in_list && c == ']') {
+            in_list = false;
+            escaped  = false;
+            continue;
+        }
+        if (!escaped && c == '\"') {
+            in_string = !in_string;
+            continue;
+        }
+        if (!escaped && c == '\\') {
+            escaped = true;
+            continue;
+        }
+        if (!in_string && !escaped && c == ',') {
+            Vector_push_char(Vector_last_Vector_char(&values), '\0');
+            Vector_push_Vector_char(&values, Vector_new_with_capacity_char(10));
+            escaped = false;
+            continue;
+        }
+        escaped = false;
+        Vector_push_char(Vector_last_Vector_char(&values), c);
+    }
+    Vector_push_char(Vector_last_Vector_char(&values), '\0');
+
+    if (in_list) {
+        WRN("List not terminated in \'%s\'\n", list);
+    } else if (values.size == 1 && has_brackets) {
+        WRN("\'%s\' is a single element list. Did you mean \'\\[%s\\]\'?\n",
+            list,
+            values.buf[0].buf);
+    }
+    if (in_string) {
+        WRN("String not terminated in \'%s\'\n", list);
+    }
+
+    return values;
+}
+
+/**
+ * read the open configuration file and call handle_config_option() with values formatted like
+ * command line arguments (this way we can use handle_option() for dealing both config file and
+ * args)
+ */
 static void settings_file_parse(FILE* f)
 {
     ASSERT(f, "valid FILE*");
 
-    bool     in_comment = false;
-    bool     in_value   = false;
-    bool     in_string  = false;
-    bool     escaped    = false;
-    uint32_t line       = 0; // handle_config_option is called after the \n so start from 0
-
-    char buf[512] = { 0 };
+    char buf[1024 * 8] = { 0 };
     int  rd;
 
-    Vector_char key   = Vector_new_with_capacity_char(30);
+    Vector_char key   = Vector_new_with_capacity_char(10);
     Vector_char value = Vector_new_with_capacity_char(30);
 
-    while ((rd = fread(buf, sizeof(char), sizeof buf - 1, f))) {
+    bool in_list = false, in_comment = false, in_value = false, in_string = false, escaped = false;
 
+    uint32_t key_line = 0, line = 1;
+
+    while ((rd = fread(buf, sizeof(char), sizeof buf - 1, f))) {
         for (int i = 0; i < rd; ++i) {
-            if (buf[i] == '\n') {
+            char c = buf[i];
+
+            if (c == '\n') {
                 ++line;
+            } else if (c == '#' && !escaped && !in_string) {
+                in_comment = true;
+                continue;
             }
 
             if (in_comment) {
-                if (buf[i] == '\n') {
+                if (c == '\n') {
                     in_comment = false;
-                    in_string  = false;
                 }
                 continue;
-            } else if (in_value) {
+            }
 
-                if (!in_string && buf[i] == '#') {
-                    in_comment = true;
-                    in_value   = false;
-                    Vector_push_char(&value, 0);
-                    handle_config_option(key.buf, value.buf, line);
-                    value.size = 0;
-                    continue;
-                }
-
-                if (buf[i] == '\\' && !escaped) {
+            else if (in_value) {
+                if (c == '\\' && !escaped) {
                     escaped = true;
+                    if (in_list) {
+                        Vector_push_char(&value, c);
+                    }
                     continue;
-                }
-                if (buf[i] == '\"' && !escaped) {
+                } else if (c == '\"' && !escaped) {
                     in_string = !in_string;
-                } else if (buf[i] == '\n' && !escaped) {
+                    if (in_list) {
+                        Vector_push_char(&value, c);
+                    }
+                    continue;
+                } else if (c == '[' && !in_string && !escaped) {
+                    if (in_list) {
+                        WRN("Error in config on lines %u-%u: Defines nested list. Did you mean "
+                            "\'\\[\' ?\n",
+                            key_line,
+                            line);
+                    }
+                    in_list = true;
+                } else if (c == ']' && !in_string && !escaped) {
+                    if (!in_list) {
+                        WRN("Error in config on line %u: Expected \'[\' before \']\'\n", line);
+                    }
+                    in_list = false;
+                }
+
+                if (c == '\n' && !in_list) {
+                    Vector_push_char(&value, '\0');
+                    handle_config_option(key.buf, value.buf, key_line);
+                    Vector_clear_char(&key);
+                    Vector_clear_char(&value);
                     in_value  = false;
                     in_string = false;
-                    Vector_push_char(&value, 0);
-                    handle_config_option(key.buf, value.buf, line);
-                    value.size = 0;
-                } else {
-                    if (!isblank(buf[i]) || in_string || escaped) {
-                        Vector_push_char(&value, (buf[i] == 'n' && escaped) ? '\n' : buf[i]);
+                    in_list  = false;
+                    continue;
+                } else if (escaped && !in_list) {
+                    if (c == 'n') {
+                        Vector_push_char(&value, '\n');
                     }
+                } else if (!iscntrl(c) && (in_string || !isblank(c))) {
+                    switch (c) {
+                        case ']':
+                        case '[':
+                            if (in_string) {
+                                Vector_push_char(&value, '\\');
+                            }
+                    }
+                    Vector_push_char(&value, c);
                 }
+                escaped = false;
+            }
 
+            /* in key */
+            else if (c == '=') {
+                Vector_push_char(&key, '\0');
+                key_line = line;
+                in_value = true;
+            } else if (c == '\n' && key.size) {
+                Vector_push_char(&key, '\0');
+                handle_config_option(key.buf, NULL, key_line);
+                Vector_clear_char(&key);
             } else {
-                if (buf[i] == '=' && !escaped) {
-                    Vector_push_char(&key, 0);
-                    key.size = 0;
-                    in_value = true;
-                } else if (buf[i] == '\n' && !escaped) {
-                    if (key.size) {
-                        Vector_push_char(&key, '\0');
-                        handle_config_option(key.buf, NULL, line);
-                    }
-                    Vector_clear_char(&key);
-                } else {
-                    if (buf[i] == '#' && !escaped) {
-                        in_comment = true;
-                    } else if (!isblank(buf[i])) {
-                        Vector_push_char(&key, buf[i]);
-                    }
+                if (!iscntrl(c) && !isblank(c)) {
+                    Vector_push_char(&key, c);
                 }
             }
-            escaped = false;
         }
+    }
+
+    if (in_string) {
+        WRN("Error in config on line %u: String not terminated\n", line);
+    }
+    if (in_list) {
+        WRN("Error in config on line %u: List not terminated\n", line);
     }
 
     Vector_destroy_char(&key);
@@ -1150,9 +1293,11 @@ static FILE* open_config(const char* path)
     return NULL;
 }
 
-void settings_init(const int argc, char* const* argv)
+void settings_init(int argc, char** argv)
 {
     settings_make_default();
+    settings.argc = argc;
+    settings.argv = argv;
     settings_get_opts(argc, argv, true);
     find_config_path();
     if (!settings.skip_config && settings.config_path.str) {
@@ -1169,22 +1314,17 @@ void settings_init(const int argc, char* const* argv)
 
 void settings_cleanup()
 {
+    Vector_destroy_StyledFontInfo(&settings.styled_fonts);
+    Vector_destroy_UnstyledFontInfo(&settings.symbol_fonts);
+    Vector_destroy_UnstyledFontInfo(&settings.color_fonts);
+
     AString_destroy(&settings.config_path);
     AString_destroy(&settings.title_format);
-    AString_destroy(&settings.font);
-    AString_destroy(&settings.font_fallback);
-    AString_destroy(&settings.font_fallback2);
     AString_destroy(&settings.term);
     AString_destroy(&settings.locale);
     AString_destroy(&settings.title);
-    AString_destroy(&settings.font_file_name_regular);
     AString_destroy(&settings.font_style_regular);
     AString_destroy(&settings.font_style_bold);
     AString_destroy(&settings.font_style_italic);
     AString_destroy(&settings.font_style_bold_italic);
-    AString_destroy(&settings.font_file_name_bold);
-    AString_destroy(&settings.font_file_name_italic);
-    AString_destroy(&settings.font_file_name_bold_italic);
-    AString_destroy(&settings.font_file_name_fallback);
-    AString_destroy(&settings.font_file_name_fallback2);
 }

@@ -4,6 +4,7 @@
 
 #include "colors.h"
 #include "util.h"
+#include "vector.h"
 
 #ifndef VERSION
 #define VERSION "0.0.0"
@@ -27,6 +28,46 @@
 #define MODIFIER_SHIFT   (1 << 0)
 #define MODIFIER_ALT     (1 << 1)
 #define MODIFIER_CONTROL (1 << 2)
+
+typedef struct
+{
+    char* family_name;
+    char* file_name;
+} UnstyledFontInfo;
+
+static void UnstyledFontInfo_destroy(UnstyledFontInfo* self)
+{
+    free(self->family_name);
+    self->family_name = NULL;
+    free(self->file_name);
+    self->file_name = NULL;
+}
+
+typedef struct
+{
+    char* family_name;
+    char* regular_file_name;
+    char* bold_file_name;
+    char* italic_file_name;
+    char* bold_italic_file_name;
+} StyledFontInfo;
+
+static void StyledFontInfo_destroy(StyledFontInfo* self)
+{
+    free(self->family_name);
+    self->family_name = NULL;
+    free(self->regular_file_name);
+    self->regular_file_name = NULL;
+    free(self->bold_file_name);
+    self->bold_file_name = NULL;
+    free(self->italic_file_name);
+    self->italic_file_name = NULL;
+    free(self->bold_italic_file_name);
+    self->bold_italic_file_name = NULL;
+}
+
+DEF_VECTOR(StyledFontInfo, StyledFontInfo_destroy);
+DEF_VECTOR(UnstyledFontInfo, UnstyledFontInfo_destroy);
 
 typedef struct
 {
@@ -56,6 +97,7 @@ enum KeyCommands
     KCMD_FONT_SHRINK,
     KCMD_UNICODE_ENTRY,
     KCMD_KEYBOARD_SELECT,
+    KCMD_DUPLICATE,
     KCMD_DEBUG,
     KCMD_QUIT,
 
@@ -80,6 +122,9 @@ typedef struct
         uint32_t (*keycode_from_string)(void* self, char* string);
     } callbacks;
 
+    int    argc;
+    char** argv;
+
     KeyCommand key_commands[NUM_KEY_COMMANDS];
 
     bool skip_config;
@@ -95,24 +140,15 @@ typedef struct
     AString config_path;
     AString shell;
     AString title_format;
-    AString font;
-    AString font_fallback;
-    AString font_fallback2;
-    AString term;
-    AString locale;
-    AString title;
 
-    AString font_style_regular;
-    AString font_style_bold;
-    AString font_style_italic;
-    AString font_style_bold_italic;
+    AString font_style_regular, font_style_bold, font_style_italic, font_style_bold_italic;
 
-    AString font_file_name_regular;
-    AString font_file_name_bold;
-    AString font_file_name_italic;
-    AString font_file_name_bold_italic;
-    AString font_file_name_fallback;
-    AString font_file_name_fallback2;
+    Vector_StyledFontInfo   styled_fonts;
+    Vector_UnstyledFontInfo symbol_fonts, color_fonts;
+
+    bool has_bold_fonts, has_italic_fonts, has_bold_italic_fonts, has_symbol_fonts, has_color_fonts;
+
+    AString term, locale, title;
 
     uint16_t       font_size;
     uint16_t       font_size_fallback;
@@ -134,8 +170,8 @@ typedef struct
 
     bool    padding_center;
     uint8_t padding;
-    int8_t padd_glyph_x;
-    int8_t padd_glyph_y;
+    int8_t  padd_glyph_x;
+    int8_t  padd_glyph_y;
 
     bool    allow_scrollback_clear;
     bool    scroll_on_output;
@@ -144,9 +180,7 @@ typedef struct
 
     bool allow_multiple_underlines;
 
-    bool debug_pty;
-    bool debug_gfx;
-    bool debug_font;
+    bool debug_pty, debug_gfx, debug_font;
 
     uint32_t scrollback;
 
@@ -159,17 +193,19 @@ typedef struct
 extern ColorRGB color_palette_256[257];
 extern Settings settings;
 
-void settings_init(const int argc, char* const* argv);
+void settings_init(int argc, char** argv);
 
 static inline void KeyCommand_name_to_code(KeyCommand* cmd);
+
 static inline void settings_after_window_system_connected()
 {
     for (int_fast8_t i = 0; i < NUM_KEY_COMMANDS; ++i) {
         KeyCommand_name_to_code(&settings.key_commands[i]);
     }
 
-    if (settings.lcd_filter == LCD_FILTER_UNDEFINED)
+    if (settings.lcd_filter == LCD_FILTER_UNDEFINED) {
         settings.lcd_filter = LCD_FILT_DFT;
+    }
 }
 
 void settings_cleanup();

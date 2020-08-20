@@ -5,17 +5,19 @@
 #define _GNU_SOURCE
 
 #include <ctype.h>
+#include <errno.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <uchar.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <time.h>
+#include <uchar.h>
 #include <unistd.h>
-#include <string.h>
-#include <stdlib.h>
 
 #define TERMCOLOR_RESET "\e[m"
 
@@ -84,7 +86,10 @@
     {                                                                                              \
         fputs("[\e[31merror\e[m] ", stderr);                                                       \
         fprintf(stderr, __VA_ARGS__);                                                              \
-        fprintf(stderr, "\nIn file: \"%s\" function: \"%s\" line: %d\n", __FILE__, __func__,       \
+        fprintf(stderr,                                                                            \
+                "\nIn file: \"%s\" function: \"%s\" line: %d\n",                                   \
+                __FILE__,                                                                          \
+                __func__,                                                                          \
                 __LINE__);                                                                         \
         exit(EXIT_FAILURE);                                                                        \
     }
@@ -96,7 +101,9 @@
     }
 #define ASSERT_UNREACHABLE                                                                         \
     {                                                                                              \
-        ERR("got to section declared unreachable. file: %s func: %s line: %d", __FILE__, __func__, \
+        ERR("got to section declared unreachable. file: %s func: %s line: %d",                     \
+            __FILE__,                                                                              \
+            __func__,                                                                              \
             __LINE__);                                                                             \
         __builtin_unreachable();                                                                   \
     }
@@ -108,7 +115,11 @@ static inline void* _call_fp_helper(const char* const msg,
                                     const char* const func,
                                     const int         line)
 {
-    fprintf(stderr, "\e[31m%s In File: \"%s\" function: \"%s\" line: %d \e[m\n", msg, fname, func,
+    fprintf(stderr,
+            "\e[31m%s In File: \"%s\" function: \"%s\" line: %d \e[m\n",
+            msg,
+            fname,
+            func,
             line);
     exit(EXIT_FAILURE);
 }
@@ -252,6 +263,7 @@ DEF_PAIR(wchar_t);
 DEF_PAIR(size_t);
 DEF_PAIR(ssize_t);
 
+
 /** check string equality case insensitive */
 static inline bool strneqci(const char* restrict s1, const char* restrict s2, const size_t n)
 {
@@ -300,18 +312,17 @@ static inline bool strtob(const char* restrict str)
     return strneqci("true", str, 4) || strneqci("1", str, 1);
 }
 
-
 static inline bool unicode_is_combining(char32_t codepoint)
 {
     switch (codepoint) {
-    case 0xFE20 ... 0xFE2F:
-    case 0x1AB0 ... 0x1AFF:
-    case 0x1DC0 ... 0x1DFF:
-    case 0x20D0 ... 0x20FF:
-    case 0x0300 ... 0x036F:
-        return true;
-    default:
-        return false;
+        case 0xFE20 ... 0xFE2F:
+        case 0x1AB0 ... 0x1AFF:
+        case 0x1DC0 ... 0x1DFF:
+        case 0x20D0 ... 0x20FF:
+        case 0x0300 ... 0x036F:
+            return true;
+        default:
+            return false;
     }
 }
 
@@ -321,11 +332,82 @@ static inline bool unicode_is_private_use_area(char32_t codepoint)
 }
 
 /**
+ * Get full path to this binary file. Caller should free() */
+static char* get_running_binary_path()
+{
+    return realpath("/proc/self/exe", 0);
+}
+
+static int spawn_process(const char* opt_work_directory,
+                         const char* command,
+                         char*       opt_argv[],
+                         bool        detach,
+                         bool        open_pipe_to_stdin)
+{
+    int pipefd[2] = { 0 };
+    if (open_pipe_to_stdin) {
+        pipe(pipefd);
+    }
+
+    pid_t pid = fork();
+
+    if (pid == 0) {
+        if (open_pipe_to_stdin) {
+            dup2(pipefd[0], STDIN_FILENO);
+            close(pipefd[0]);
+            close(pipefd[1]);
+        }
+        if (opt_work_directory) {
+            chdir(opt_work_directory);
+        }
+        if (!opt_argv) {
+            opt_argv    = calloc(2, sizeof(char*));
+            opt_argv[0] = strdup(command);
+        }
+        if (detach && setsid() < 0) {
+            exit(EXIT_FAILURE);
+        }
+
+        signal(SIGCHLD, SIG_DFL);
+
+        if (detach) {
+            pid = fork();
+            if (pid > 0) {
+                exit(EXIT_SUCCESS);
+            } else if (pid < 0) {
+                exit(EXIT_FAILURE);
+            }
+            chdir(opt_work_directory);
+        }
+
+        umask(0);
+
+        if (execvp(command, (char**)opt_argv)) {
+            WRN("failed to execute \'%s\' %s\n", command, strerror(errno));
+            exit(EXIT_FAILURE);
+        }
+    } else if (pid < 0) {
+        WRN("failed to fork\n");
+
+        if (open_pipe_to_stdin) {
+            close(pipefd[1]);
+        }
+    }
+
+    if (open_pipe_to_stdin) {
+        close(pipefd[0]);
+    }
+
+    return pipefd[1];
+}
+
+/**
  * string that keep track if it was malloc()-ed */
 typedef struct
 {
     char* str;
-    enum AStringState {
+    enum AStringState
+    {
         ASTRING_UNINITIALIZED = 0,
         ASTRING_DYNAMIC,
         ASTRING_STATIC
@@ -333,7 +415,6 @@ typedef struct
 } AString;
 
 #define AString_UNINIT (AString)
-
 
 static AString AString_new_uninitialized()
 {
