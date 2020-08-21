@@ -297,7 +297,7 @@ static inline void Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(
         size_t selection_lo = MIN(self->selection.begin_line, self->selection.end_line);
         size_t selection_hi = MAX(self->selection.begin_line, self->selection.end_line);
         size_t start        = MAX(selection_lo, self->scroll_region_top);
-        size_t end = MIN(MIN(selection_hi, self->scroll_region_bottom), self->lines.size - 1);
+        size_t end = MIN(MIN(selection_hi, self->scroll_region_bottom - 1), self->lines.size - 1);
         Vt_mark_proxies_damaged_in_region(self, start ? (start - 1) : 0, end + 1);
     }
 }
@@ -698,8 +698,9 @@ static inline bool is_string_sequence_terminated(const char* seq, const size_t s
 void Vt_init(Vt* self, uint32_t cols, uint32_t rows)
 {
     memset(self, 0, sizeof(Vt));
-    self->ws                   = (struct winsize){ .ws_col = cols, .ws_row = rows };
-    self->scroll_region_bottom = rows;
+    self->ws = (struct winsize){ .ws_col = cols, .ws_row = rows };
+
+    self->scroll_region_bottom = rows - 1;
     self->parser.state         = PARSER_STATE_LITERAL;
     self->parser.in_mb_seq     = false;
 
@@ -1158,7 +1159,7 @@ void Vt_resize(Vt* self, uint32_t x, uint32_t y)
     }
 
     self->scroll_region_top    = 0;
-    self->scroll_region_bottom = self->ws.ws_row -1;
+    self->scroll_region_bottom = self->ws.ws_row - 1;
 }
 
 __attribute__((always_inline, flatten)) static inline int32_t short_sequence_get_int_argument(
@@ -1592,7 +1593,8 @@ static inline void Vt_handle_CSI(Vt* self, char c)
                         top    = 0;
                         bottom = CALL_FP(self->callbacks.on_number_of_cells_requested,
                                          self->callbacks.user_data)
-                                   .second -1;
+                                   .second -
+                                 1;
                     }
 
                     self->scroll_region_top    = top;
@@ -2092,7 +2094,7 @@ static inline void Vt_alt_buffer_off(Vt* self, bool save_mouse)
             self->cursor.row = self->alt_active_line;
         }
         self->scroll_region_top    = 0;
-        self->scroll_region_bottom = self->ws.ws_row -1;
+        self->scroll_region_bottom = self->ws.ws_row - 1;
         Vt_visual_scroll_reset(self);
     }
 }
@@ -2412,14 +2414,16 @@ static void Vt_insert_line(Vt* self)
 static void Vt_reverse_line_feed(Vt* self)
 {
     self->last_interted = NULL;
-    size_t rem_idx = MIN(Vt_bottom_line(self), Vt_get_scroll_region_bottom(self));
-    Vector_remove_at_VtLine(&self->lines, rem_idx, 1);
-
-    VtLine* insert_point = Vector_at_VtLine(&self->lines, self->cursor.row);
-    Vector_insert_VtLine(&self->lines, insert_point, VtLine_new());
-
-    Vt_empty_line_fill_bg(self, self->cursor.row);
-    Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
+    if (self->cursor.row == Vt_get_scroll_region_top(self)) {
+        Vector_remove_at_VtLine(&self->lines, Vt_get_scroll_region_bottom(self), 1);
+        Vector_insert_VtLine(&self->lines,
+                             Vector_at_VtLine(&self->lines, self->cursor.row),
+                             VtLine_new());
+        Vt_empty_line_fill_bg(self, self->cursor.row);
+    } else {
+        Vt_cursor_up(self);
+    }
+    Vt_mark_proxy_fully_damaged(self, self->cursor.row);
 }
 
 /**
@@ -2427,10 +2431,12 @@ static void Vt_reverse_line_feed(Vt* self)
 static void Vt_delete_line(Vt* self)
 {
     self->last_interted = NULL;
+
     Vector_remove_at_VtLine(&self->lines, self->cursor.row, 1);
 
     size_t  insert_idx   = MIN(Vt_get_scroll_region_bottom(self), Vt_bottom_line(self));
     VtLine* insert_point = Vector_at_VtLine(&self->lines, insert_idx);
+
     Vector_insert_VtLine(&self->lines, insert_point, VtLine_new());
 
     Vt_empty_line_fill_bg(self, MIN(Vt_get_scroll_region_bottom(self), Vt_bottom_line(self)));
@@ -2455,14 +2461,12 @@ static void Vt_scroll_up(Vt* self)
 static void Vt_scroll_down(Vt* self)
 {
     self->last_interted = NULL;
-    Vector_remove_at_VtLine(&self->lines,
-                            MAX(Vt_top_line(self), Vt_get_scroll_region_bottom(self)),
-                            1);
-
     Vector_insert_VtLine(&self->lines,
                          Vector_at_VtLine(&self->lines, Vt_get_scroll_region_top(self)),
                          VtLine_new());
-
+    Vector_remove_at_VtLine(&self->lines,
+                            MAX(Vt_top_line(self), Vt_get_scroll_region_bottom(self)),
+                            1);
     Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
 }
 
@@ -2761,9 +2765,8 @@ static inline void Vt_empty_line_fill_bg(Vt* self, size_t idx)
  * Move one line down or insert a new one, scrolls if region is set */
 static inline void Vt_insert_new_line(Vt* self)
 {
-    Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
-
-    if (self->cursor.row == Vt_get_scroll_region_bottom(self)) {
+    if (self->cursor.row == Vt_get_scroll_region_bottom(self) &&
+        Vt_scroll_region_not_default(self)) {
         Vector_remove_at_VtLine(&self->lines, Vt_get_scroll_region_top(self), 1);
         Vector_insert_VtLine(&self->lines,
                              Vector_at_VtLine(&self->lines, self->cursor.row),
@@ -2774,7 +2777,7 @@ static inline void Vt_insert_new_line(Vt* self)
             Vector_push_VtLine(&self->lines, VtLine_new());
             Vt_empty_line_fill_bg(self, self->lines.size - 1);
         }
-        ++self->cursor.row;
+        Vt_cursor_down(self);
     }
     Vt_mark_proxy_fully_damaged(self, self->cursor.row);
 }
@@ -3093,7 +3096,8 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
                     self->scroll_region_bottom =
                       CALL_FP(self->callbacks.on_number_of_cells_requested,
                               self->callbacks.user_data)
-                        .second -1;
+                        .second -
+                      1;
                     Vector_clear_DynStr(&self->title_stack);
                     free(self->title);
                     self->title = NULL;
