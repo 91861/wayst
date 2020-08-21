@@ -293,7 +293,7 @@ static void find_font()
         Vector_last_StyledFontInfo(&settings.styled_fonts)->family_name = strdup("Monospace");
     }
 
-    for (StyledFontInfo* i = NULL; (i=Vector_iter_StyledFontInfo(&settings.styled_fonts, i));) {
+    for (StyledFontInfo* i = NULL; (i = Vector_iter_StyledFontInfo(&settings.styled_fonts, i));) {
         char* main_family  = i->family_name;
         char* regular_file = FontconfigContext_get_file(&fc_context,
                                                         main_family,
@@ -301,7 +301,7 @@ static void find_font()
                                                         settings.font_size,
                                                         &is_bitmap);
         L_DROP_IF_SAME(regular_file, default_file);
-        char* bold_file    = FontconfigContext_get_file(&fc_context,
+        char* bold_file = FontconfigContext_get_file(&fc_context,
                                                      main_family,
                                                      OR(settings.font_style_bold.str, "Bold"),
                                                      settings.font_size,
@@ -447,9 +447,10 @@ static void settings_make_default()
         .symbol_fonts = Vector_new_with_capacity_UnstyledFontInfo(1),
         .color_fonts  = Vector_new_with_capacity_UnstyledFontInfo(1),
 
-        .term           = AString_new_static(DFT_TERM),
-        .locale         = AString_new_uninitialized(),
-        .title          = AString_new_static(APP_NAME),
+        .term        = AString_new_static(DFT_TERM),
+        .locale      = AString_new_uninitialized(),
+        .title       = AString_new_static(APP_NAME),
+        .user_app_id = NULL,
 
         .font_style_regular     = AString_new_uninitialized(),
         .font_style_bold        = AString_new_uninitialized(),
@@ -630,10 +631,10 @@ static void handle_option(const char opt, const int array_index, const char* val
         (_value),                                                                                  \
         long_options[array_index].name);
 
-#define L_PROCESS_MULTI_ARG_PACK_BEGIN                                                             \
+#define L_PROCESS_MULTI_ARG_PACK_BEGIN(_string)                                                    \
     int         argument_index = 0;                                                                \
     Vector_char buf            = Vector_new_with_capacity_char(15);                                \
-    for (const char* i = value;; ++i) {                                                            \
+    for (const char* i = (_string);; ++i) {                                                        \
         if (*i == ':' || *i == '\0') {                                                             \
             Vector_push_char(&buf, '\0');                                                          \
             switch (argument_index) {
@@ -693,7 +694,7 @@ static void handle_option(const char opt, const int array_index, const char* val
             break;
 
         case OPT_BLINK_IDX: {
-            L_PROCESS_MULTI_ARG_PACK_BEGIN
+            L_PROCESS_MULTI_ARG_PACK_BEGIN(value)
             case 0:
                 settings.enable_cursor_blink = strtob(buf.buf);
                 break;
@@ -710,7 +711,7 @@ static void handle_option(const char opt, const int array_index, const char* val
         } break;
 
         case OPT_PADDING_IDX: {
-            L_PROCESS_MULTI_ARG_PACK_BEGIN
+            L_PROCESS_MULTI_ARG_PACK_BEGIN(value)
             case 0:
                 settings.padding_center = strtob(buf.buf);
                 break;
@@ -721,7 +722,7 @@ static void handle_option(const char opt, const int array_index, const char* val
         } break;
 
         case OPT_GLYPH_PADDING_IDX: {
-            L_PROCESS_MULTI_ARG_PACK_BEGIN
+            L_PROCESS_MULTI_ARG_PACK_BEGIN(value)
             case 0:
                 settings.padd_glyph_x = CLAMP(strtol(buf.buf, NULL, 10), 0, INT8_MAX);
                 break;
@@ -781,7 +782,7 @@ static void handle_option(const char opt, const int array_index, const char* val
         } break;
 
         case OPT_FONT_SIZE_IDX: {
-            L_PROCESS_MULTI_ARG_PACK_BEGIN
+            L_PROCESS_MULTI_ARG_PACK_BEGIN(value)
             case 0:
                 settings.font_size = strtoul(buf.buf, NULL, 10);
                 break;
@@ -837,6 +838,17 @@ static void handle_option(const char opt, const int array_index, const char* val
         case OPT_TITLE_IDX: {
             Vector_Vector_char values = expand_list_value(value);
             AString_replace_with_dynamic(&settings.title, strdup(value));
+            Vector_destroy_Vector_char(&values);
+        } break;
+
+        case OPT_APP_ID_IDX: {
+            Vector_Vector_char values = expand_list_value(value);
+            free(settings.user_app_id);
+            settings.user_app_id = strdup(values.buf[0].buf);
+            if (values.size > 1) {
+                free(settings.user_app_id_2);
+                settings.user_app_id_2 = strdup(values.buf[1].buf);
+            }
             Vector_destroy_Vector_char(&values);
         } break;
 
@@ -1094,7 +1106,7 @@ static Vector_Vector_char expand_list_value(const char* const list)
     }
 
     bool in_string    = false;
-    bool in_list     = false;
+    bool in_list      = false;
     bool escaped      = false;
     bool has_brackets = false;
 
@@ -1102,13 +1114,13 @@ static Vector_Vector_char expand_list_value(const char* const list)
     for (char c = *arr; c; c = *(++arr)) {
         if (!escaped && !in_string && c == '[') {
             has_brackets = true;
-            in_list     = true;
+            in_list      = true;
             escaped      = false;
             continue;
         }
         if (!escaped && !in_string && in_list && c == ']') {
             in_list = false;
-            escaped  = false;
+            escaped = false;
             continue;
         }
         if (!escaped && c == '\"') {
@@ -1126,7 +1138,9 @@ static Vector_Vector_char expand_list_value(const char* const list)
             continue;
         }
         escaped = false;
-        Vector_push_char(Vector_last_Vector_char(&values), c);
+        if (in_string || !isblank(c)) {
+            Vector_push_char(Vector_last_Vector_char(&values), c);
+        }
     }
     Vector_push_char(Vector_last_Vector_char(&values), '\0');
 
@@ -1216,7 +1230,7 @@ static void settings_file_parse(FILE* f)
                     Vector_clear_char(&value);
                     in_value  = false;
                     in_string = false;
-                    in_list  = false;
+                    in_list   = false;
                     continue;
                 } else if (escaped && !in_list) {
                     if (c == 'n') {
@@ -1327,4 +1341,7 @@ void settings_cleanup()
     AString_destroy(&settings.font_style_bold);
     AString_destroy(&settings.font_style_italic);
     AString_destroy(&settings.font_style_bold_italic);
+
+    free(settings.user_app_id);
+    free(settings.user_app_id_2);
 }

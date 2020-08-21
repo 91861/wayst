@@ -150,6 +150,9 @@ typedef struct
 
     AString term, locale, title;
 
+    char* user_app_id;
+    char* user_app_id_2;
+
     uint16_t       font_size;
     uint16_t       font_size_fallback;
     uint16_t       font_dpi;
@@ -202,7 +205,6 @@ static inline void settings_after_window_system_connected()
     for (int_fast8_t i = 0; i < NUM_KEY_COMMANDS; ++i) {
         KeyCommand_name_to_code(&settings.key_commands[i]);
     }
-
     if (settings.lcd_filter == LCD_FILTER_UNDEFINED) {
         settings.lcd_filter = LCD_FILT_DFT;
     }
@@ -212,17 +214,15 @@ void settings_cleanup();
 
 static inline void KeyCommand_name_to_code(KeyCommand* cmd)
 {
-    ASSERT(settings.callbacks.keycode_from_string, "callback is NULL");
-
     if (cmd->is_name) {
-        uint32_t code =
-          settings.callbacks.keycode_from_string(settings.callbacks.user_data, cmd->key.name);
+        uint32_t code = CALL_FP(settings.callbacks.keycode_from_string,
+                                settings.callbacks.user_data,
+                                cmd->key.name);
         if (!code) {
             WRN("Invalid key name \'%s\'\n", cmd->key.name);
         } else {
             LOG("Converting key name \'%s\' to keysym %u\n", cmd->key.name, code);
         }
-
         free(cmd->key.name);
         cmd->key.code = code;
         cmd->is_name  = false;

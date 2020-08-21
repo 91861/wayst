@@ -1327,7 +1327,7 @@ struct WindowBase* Window_new_wayland(Pair_uint32_t res)
     win->title = NULL;
     WindowWl_set_title(win, settings.title.str);
 
-    WindowWl_set_wm_name(win, APP_NAME);
+    WindowWl_set_wm_name(win, OR(settings.user_app_id, APP_NAME));
 
     WindowWl_swap_buffers(win);
     WindowWl_events(win);

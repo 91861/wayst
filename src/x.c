@@ -53,14 +53,14 @@ struct WindowBase* WindowX11_new(uint32_t w, uint32_t h);
 void               WindowX11_set_fullscreen(struct WindowBase* self, bool fullscreen);
 void               WindowX11_resize(struct WindowBase* self, uint32_t w, uint32_t h);
 void               WindowX11_events(struct WindowBase* self);
-void               WindowX11_set_wm_name(struct WindowBase* self, const char* title);
-void               WindowX11_set_title(struct WindowBase* self, const char* title);
-void               WindowX11_set_swap_interval(struct WindowBase* self, int32_t ival);
-bool               WindowX11_maybe_swap(struct WindowBase* self);
-void               WindowX11_destroy(struct WindowBase* self);
-int                WindowX11_get_connection_fd(struct WindowBase* self);
-void               WindowX11_clipboard_get(struct WindowBase* self);
-void               WindowX11_clipboard_send(struct WindowBase* self, const char* text);
+void       WindowX11_set_wm_name(struct WindowBase* self, const char* title, const char* name);
+void       WindowX11_set_title(struct WindowBase* self, const char* title);
+void       WindowX11_set_swap_interval(struct WindowBase* self, int32_t ival);
+bool       WindowX11_maybe_swap(struct WindowBase* self);
+void       WindowX11_destroy(struct WindowBase* self);
+int        WindowX11_get_connection_fd(struct WindowBase* self);
+void       WindowX11_clipboard_get(struct WindowBase* self);
+void       WindowX11_clipboard_send(struct WindowBase* self, const char* text);
 void       WindowX11_set_pointer_style(struct WindowBase* self, enum MousePointerStyle style);
 void*      WindowX11_get_gl_ext_proc_adress(struct WindowBase* self, const char* name);
 uint32_t   WindowX11_get_keycode_from_name(struct WindowBase* self, char* name);
@@ -75,7 +75,6 @@ static struct IWindow window_interface_x11 = {
     .events                 = WindowX11_events,
     .process_timers         = WindowX11_process_timers,
     .set_title              = WindowX11_set_title,
-    .set_app_id             = WindowX11_set_wm_name,
     .maybe_swap             = WindowX11_maybe_swap,
     .destroy                = WindowX11_destroy,
     .get_connection_fd      = WindowX11_get_connection_fd,
@@ -324,8 +323,6 @@ struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
     XFree(fb_cfg);
     XFree(globalX11->visual_info);
 
-    WindowX11_set_wm_name(win, APP_NAME);
-
     Atom win_type_normal = XInternAtom(globalX11->display, "_NET_WM_WINDOW_TYPE_NORMAL", False);
     XChangeProperty(globalX11->display,
                     windowX11(win)->window,
@@ -336,14 +333,15 @@ struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
                     (unsigned char*)&win_type_normal,
                     1);
 
-    XChangeProperty(globalX11->display,
-                    windowX11(win)->window,
-                    XInternAtom(globalX11->display, "WM_CLASS", False),
-                    XInternAtom(globalX11->display, "UTF8_STRING", False),
-                    8,
-                    PropModeReplace,
-                    (unsigned char*)APP_NAME,
-                    strlen(APP_NAME));
+    /* char* wm_class = OR(settings.user_app_id, APP_NAME); */
+    /* XChangeProperty(globalX11->display, */
+    /*                 windowX11(win)->window, */
+    /*                 XInternAtom(globalX11->display, "WM_CLASS", False), */
+    /*                 XInternAtom(globalX11->display, "UTF8_STRING", False), */
+    /*                 8, */
+    /*                 PropModeReplace, */
+    /*                 (unsigned char*)wm_class, */
+    /*                 strlen(wm_class)); */
 
     /* XChangeProperty(globalX11->display, */
     /*                 windowX11(win)->window, */
@@ -356,7 +354,7 @@ struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
 
     /* XSetIconName(globalX11->display, windowX11(win)->window, "wayst"); */
 
-    XClassHint class_hint = { APP_NAME, APP_NAME };
+    XClassHint class_hint = { APP_NAME, "CLASS" };
     XWMHints   wm_hints   = { .flags = InputHint, .input = 1 };
     XSetWMProperties(globalX11->display,
                      windowX11(win)->window,
@@ -388,7 +386,9 @@ struct WindowBase* Window_new_x11(Pair_uint32_t res)
         return NULL;
 
     win->title = NULL;
-    WindowX11_set_wm_name(win, APP_NAME);
+    WindowX11_set_wm_name(win,
+                          OR(settings.user_app_id, APP_NAME),
+                          OR(settings.user_app_id_2, NULL));
     WindowX11_set_title(win, settings.title.str);
 
     return win;
@@ -704,10 +704,10 @@ void WindowX11_set_title(struct WindowBase* self, const char* title)
     XFlush(globalX11->display);
 }
 
-void WindowX11_set_wm_name(struct WindowBase* self, const char* class_name)
+void WindowX11_set_wm_name(struct WindowBase* self, const char* class_name, const char* opt_name)
 {
-    ASSERT(class_name, "string is not NULL");
-    XClassHint class_hint = { (char*)class_name, (char*)class_name };
+    ASSERT(class_name, "class name is not NULL");
+    XClassHint class_hint = { (char*)class_name, (char*)OR(opt_name, class_name) };
     XSetClassHint(globalX11->display, windowX11(self)->window, &class_hint);
 }
 
