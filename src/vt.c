@@ -38,7 +38,7 @@ static inline size_t Vt_get_scroll_region_bottom(Vt* self);
 static inline bool   Vt_scroll_region_not_default(Vt* self);
 static void          Vt_alt_buffer_on(Vt* self, bool save_mouse);
 static void          Vt_alt_buffer_off(Vt* self, bool save_mouse);
-static void          Vt_handle_SGR_sequence(Vt* self, Vector_char seq);
+static void          Vt_handle_multi_argument_SGR(Vt* self, Vector_char seq);
 static void          Vt_reset_text_attribs(Vt* self);
 static void          Vt_carriage_return(Vt* self);
 static void          Vt_clear_right(Vt* self);
@@ -66,7 +66,7 @@ static void          Vt_move_cursor_to_column(Vt* self, uint32_t c);
 static void          Vt_set_title(Vt* self, const char* title);
 static void          Vt_push_title(Vt* self);
 static void          Vt_pop_title(Vt* self);
-static inline void   Vt_insert_char_at_cursor(Vt* self, VtRune c);
+static inline void   Vt_insert_char_at_cursor(Vt* self, VtRune c, bool apply_color_modifications);
 static inline void   Vt_insert_char_at_cursor_with_shift(Vt* self, VtRune c);
 static Vector_char line_to_string(Vector_VtRune* line, size_t begin, size_t end, const char* tail);
 static inline void Vt_mark_proxy_fully_damaged(Vt* self, size_t idx);
@@ -803,25 +803,51 @@ void Vt_visual_scroll_reset(Vt* self)
     self->scrolling_visual = false;
 }
 
-void Vt_dump_info(Vt* self)
+__attribute__((cold)) void Vt_dump_info(Vt* self)
 {
     static int dump_index = 0;
     printf("\n====================[ STATE DUMP %2d ]====================\n", dump_index++);
-
+    printf("Active character attributes:\n");
+    printf("  foreground color:   " COLOR_RGB_FMT "\n", COLOR_RGB_AP(self->parser.char_state.fg));
+    printf("  background color:   " COLOR_RGBA_FMT "\n", COLOR_RGBA_AP(self->parser.char_state.bg));
+    printf("  line color uses fg: " BOOL_FMT "\n",
+           BOOL_AP(!self->parser.char_state.linecolornotdefault));
+    printf("  line color:         " COLOR_RGB_FMT "\n", COLOR_RGB_AP(self->parser.char_state.line));
+    printf("  dim:                " BOOL_FMT "\n", BOOL_AP(self->parser.char_state.dim));
+    printf("  hidden:             " BOOL_FMT "\n", BOOL_AP(self->parser.char_state.hidden));
+    printf("  blinking:           " BOOL_FMT "\n", BOOL_AP(self->parser.char_state.blinkng));
+    printf("  underlined:         " BOOL_FMT "\n", BOOL_AP(self->parser.char_state.underlined));
+    printf("  strikethrough:      " BOOL_FMT "\n", BOOL_AP(self->parser.char_state.strikethrough));
+    printf("  double underline:   " BOOL_FMT "\n",
+           BOOL_AP(self->parser.char_state.doubleunderline));
+    printf("  curly underline:    " BOOL_FMT "\n", BOOL_AP(self->parser.char_state.curlyunderline));
+    printf("  overline:           " BOOL_FMT "\n", BOOL_AP(self->parser.char_state.overline));
+    printf("  inverted:           " BOOL_FMT "\n", BOOL_AP(self->parser.color_inverted));
     printf("Modes:\n");
-    printf("  application keypad:               %d\n", self->modes.application_keypad);
-    printf("  auto repeat:                      %d\n", self->modes.auto_repeat);
-    printf("  bracketed paste:                  %d\n", self->modes.bracketed_paste);
-    printf("  send DEL on delete:               %d\n", self->modes.del_sends_del);
-    printf("  don't send esc on alt:            %d\n", self->modes.no_alt_sends_esc);
-    printf("  extended reporting:               %d\n", self->modes.extended_report);
-    printf("  window focus events reporting:    %d\n", self->modes.window_focus_events_report);
-    printf("  mouse button reporting:           %d\n", self->modes.mouse_btn_report);
-    printf("  motion on mouse button reporting: %d\n", self->modes.mouse_motion_on_btn_report);
-    printf("  mouse motion reporting:           %d\n", self->modes.mouse_motion_report);
-    printf("  x10 compat mouse reporting:       %d\n", self->modes.x10_mouse_compat);
-    printf("  no auto wrap:                     %d\n", self->modes.no_auto_wrap);
-    printf("  reverse video:                    %d\n", self->modes.video_reverse);
+    printf("  application keypad:               " BOOL_FMT "\n",
+           BOOL_AP(self->modes.application_keypad));
+    printf("  auto repeat:                      " BOOL_FMT "\n", BOOL_AP(self->modes.auto_repeat));
+    printf("  bracketed paste:                  " BOOL_FMT "\n",
+           BOOL_AP(self->modes.bracketed_paste));
+    printf("  send DEL on delete:               " BOOL_FMT "\n",
+           BOOL_AP(self->modes.del_sends_del));
+    printf("  don't send esc on alt:            " BOOL_FMT "\n",
+           BOOL_AP(self->modes.no_alt_sends_esc));
+    printf("  extended reporting:               " BOOL_FMT "\n",
+           BOOL_AP(self->modes.extended_report));
+    printf("  window focus events reporting:    " BOOL_FMT "\n",
+           BOOL_AP(self->modes.window_focus_events_report));
+    printf("  mouse button reporting:           " BOOL_FMT "\n",
+           BOOL_AP(self->modes.mouse_btn_report));
+    printf("  motion on mouse button reporting: " BOOL_FMT "\n",
+           BOOL_AP(self->modes.mouse_motion_on_btn_report));
+    printf("  mouse motion reporting:           " BOOL_FMT "\n",
+           BOOL_AP(self->modes.mouse_motion_report));
+    printf("  x10 compat mouse reporting:       " BOOL_FMT "\n",
+           BOOL_AP(self->modes.x10_mouse_compat));
+    printf("  no auto wrap:                     " BOOL_FMT "\n", BOOL_AP(self->modes.no_auto_wrap));
+    printf("  reverse video:                    " BOOL_FMT "\n",
+           BOOL_AP(self->modes.video_reverse));
 
     printf("\n");
     printf("  S S | Number of lines %zu (last index: %zu)\n",
@@ -850,22 +876,24 @@ void Vt_dump_info(Vt* self)
     printf("V V V  \n");
     for (size_t i = 0; i < self->lines.size; ++i) {
         Vector_char str = line_to_string(&self->lines.buf[i].data, 0, 0, "");
-        printf("%c %c %c %4zu%c sz:%4zu dmg:%d proxy{%3d,%3d,%3d,%3d} reflow{%d,%d} data: %.30s\n",
-               i == Vt_top_line(self) ? 'v' : i == Vt_bottom_line(self) ? '^' : ' ',
-               i == Vt_get_scroll_region_top(self) || i == Vt_get_scroll_region_bottom(self) ? '-'
-                                                                                             : ' ',
-               i == Vt_visual_top_line(self) || i == Vt_visual_bottom_line(self) ? '*' : ' ',
-               i,
-               i == self->cursor.row ? '*' : ' ',
-               self->lines.buf[i].data.size,
-               self->lines.buf[i].damage.type != VT_LINE_DAMAGE_NONE,
-               self->lines.buf[i].proxy.data[0],
-               self->lines.buf[i].proxy.data[1],
-               self->lines.buf[i].proxy.data[2],
-               self->lines.buf[i].proxy.data[3],
-               self->lines.buf[i].reflowable,
-               self->lines.buf[i].rejoinable,
-               str.buf);
+        printf(
+          "%c %c %c %4zu%c s:%3zu dmg:%d proxy{%3d,%3d,%3d,%3d} reflow{%d,%d,%d} data{%.50s%s}\n",
+          i == Vt_top_line(self) ? 'v' : i == Vt_bottom_line(self) ? '^' : ' ',
+          i == Vt_get_scroll_region_top(self) || i == Vt_get_scroll_region_bottom(self) ? '-' : ' ',
+          i == Vt_visual_top_line(self) || i == Vt_visual_bottom_line(self) ? '*' : ' ',
+          i,
+          i == self->cursor.row ? '<' : ' ',
+          self->lines.buf[i].data.size,
+          self->lines.buf[i].damage.type != VT_LINE_DAMAGE_NONE,
+          self->lines.buf[i].proxy.data[0],
+          self->lines.buf[i].proxy.data[1],
+          self->lines.buf[i].proxy.data[2],
+          self->lines.buf[i].proxy.data[3],
+          self->lines.buf[i].reflowable,
+          self->lines.buf[i].rejoinable,
+          self->lines.buf[i].was_reflown,
+          str.buf,
+          (str.size > 50 ? "…" : ""));
         Vector_destroy_char(&str);
     }
 }
@@ -1442,7 +1470,7 @@ static inline void Vt_handle_CSI(Vt* self, char c)
                 case 'm': {
                     Vector_pop_n_char(&self->parser.active_sequence, 2); // 'm', '\0'
                     Vector_push_char(&self->parser.active_sequence, '\0');
-                    Vt_handle_SGR_sequence(self, self->parser.active_sequence);
+                    Vt_handle_multi_argument_SGR(self, self->parser.active_sequence);
                 } break;
 
                 /* <ESC>[ Ps K - clear(erase) line right of cursor (EL)
@@ -1714,7 +1742,7 @@ static inline void Vt_handle_CSI(Vt* self, char c)
                     if (likely(self->last_interted)) {
                         int arg = short_sequence_get_int_argument(seq);
                         for (int i = 0; i < arg; ++i) {
-                            Vt_insert_char_at_cursor(self, *self->last_interted);
+                            Vt_insert_char_at_cursor(self, *self->last_interted, false);
                         }
                     }
                 } break;
@@ -1928,137 +1956,6 @@ static inline void Vt_handle_CSI(Vt* self, char c)
     }
 }
 
-static void Vt_handle_SGR_code(Vt* self, char* command)
-{
-    int cmd = *command ? strtol(command, NULL, 10) : 0;
-
-#define MAYBE_DISABLE_ALL_UNDERLINES                                                               \
-    if (!settings.allow_multiple_underlines) {                                                     \
-        self->parser.char_state.underlined      = false;                                           \
-        self->parser.char_state.doubleunderline = false;                                           \
-        self->parser.char_state.curlyunderline  = false;                                           \
-    }
-
-    switch (cmd) {
-
-        /* Set property */
-        case 0:
-            Vt_reset_text_attribs(self);
-            break;
-
-        case 1:
-            if (self->parser.char_state.rune.style == VT_RUNE_ITALIC) {
-                self->parser.char_state.rune.style = VT_RUNE_BOLD_ITALIC;
-            } else {
-                self->parser.char_state.rune.style = VT_RUNE_BOLD;
-            }
-            break;
-
-        case 2:
-            self->parser.char_state.dim = true;
-            break;
-
-        case 3:
-            if (self->parser.char_state.rune.style == VT_RUNE_BOLD) {
-                self->parser.char_state.rune.style = VT_RUNE_BOLD_ITALIC;
-            } else {
-                self->parser.char_state.rune.style = VT_RUNE_ITALIC;
-            }
-            break;
-
-        case 4:
-            MAYBE_DISABLE_ALL_UNDERLINES
-            self->parser.char_state.underlined = true;
-            break;
-
-            /* slow blink */
-        case 5:
-            self->parser.char_state.blinkng = true;
-            break;
-
-            /* fast blink */
-        case 6:
-            self->parser.char_state.blinkng = true;
-            break;
-
-        case 7:
-            self->parser.color_inverted = true;
-            break;
-
-        case 8:
-            self->parser.char_state.hidden = true;
-            break;
-
-        case 9:
-            self->parser.char_state.strikethrough = true;
-            break;
-
-        case 53:
-            self->parser.char_state.overline = true;
-            break;
-
-        case 21:
-            MAYBE_DISABLE_ALL_UNDERLINES
-            self->parser.char_state.doubleunderline = true;
-            break;
-
-        /* Unset property */
-        case 22:
-            self->parser.char_state.dim = false;
-            break;
-
-        case 23:
-            self->parser.char_state.rune.style = VT_RUNE_NORMAL;
-            break;
-
-        case 24:
-            self->parser.char_state.underlined = false;
-            break;
-
-        case 25:
-            self->parser.char_state.blinkng = false;
-            break;
-
-        case 27:
-            self->parser.color_inverted = false;
-            break;
-
-        case 28:
-            self->parser.char_state.hidden = false;
-            break;
-
-        case 29:
-            self->parser.char_state.strikethrough = false;
-            break;
-
-        case 19:
-            self->parser.char_state.strikethrough = false;
-            break;
-
-        case 39:
-            self->parser.char_state.fg = settings.fg;
-            break;
-
-        case 49:
-            self->parser.char_state.bg = settings.bg;
-            break;
-
-        default:
-            if (30 <= cmd && cmd <= 37) {
-                self->parser.char_state.fg = settings.colorscheme.color[cmd - 30];
-            } else if (40 <= cmd && cmd <= 47) {
-                self->parser.char_state.bg =
-                  ColorRGBA_from_RGB(settings.colorscheme.color[cmd - 40]);
-            } else if (90 <= cmd && cmd <= 97) {
-                self->parser.char_state.fg = settings.colorscheme.color[cmd - 82];
-            } else if (100 <= cmd && cmd <= 107) {
-                self->parser.char_state.bg =
-                  ColorRGBA_from_RGB(settings.colorscheme.color[cmd - 92]);
-            } else
-                WRN("Unknown SGR code: %d\n", cmd);
-    }
-}
-
 static inline void Vt_alt_buffer_on(Vt* self, bool save_mouse)
 {
     if (self->alt_lines.buf) {
@@ -2100,11 +1997,215 @@ static inline void Vt_alt_buffer_off(Vt* self, bool save_mouse)
 }
 
 /**
+ * Interpret a single argument SGR command */
+static void Vt_handle_single_argument_SGR(Vt* self, char* command)
+{
+    int cmd = *command ? strtol(command, NULL, 10) : 0;
+
+#define MAYBE_DISABLE_ALL_UNDERLINES                                                               \
+    if (!settings.allow_multiple_underlines) {                                                     \
+        self->parser.char_state.underlined      = false;                                           \
+        self->parser.char_state.doubleunderline = false;                                           \
+        self->parser.char_state.curlyunderline  = false;                                           \
+    }
+
+    switch (cmd) {
+        /**'Enable' character attribs */
+
+        /* Normal (default) */
+        case 0:
+            Vt_reset_text_attribs(self);
+            break;
+
+        /* Bold, VT100 */
+        case 1:
+            if (self->parser.char_state.rune.style == VT_RUNE_ITALIC) {
+                self->parser.char_state.rune.style = VT_RUNE_BOLD_ITALIC;
+            } else {
+                self->parser.char_state.rune.style = VT_RUNE_BOLD;
+            }
+            break;
+
+        /* Faint/dim/decreased intensity, ECMA-48 2nd */
+        case 2:
+            self->parser.char_state.dim = true;
+            break;
+
+        /* Italicized, ECMA-48 2nd */
+        case 3:
+            if (self->parser.char_state.rune.style == VT_RUNE_BOLD) {
+                self->parser.char_state.rune.style = VT_RUNE_BOLD_ITALIC;
+            } else {
+                self->parser.char_state.rune.style = VT_RUNE_ITALIC;
+            }
+            break;
+
+        /* Underlined */
+        case 4:
+            MAYBE_DISABLE_ALL_UNDERLINES
+            self->parser.char_state.underlined = true;
+            break;
+
+        /* Slow (less than 150 per minute) blink */
+        case 5:
+        /* Fast blink (MS-DOS) (most terminals that implement this use the same speed) */
+        case 6:
+            self->parser.char_state.blinkng = true;
+            break;
+
+        /* Inverse
+         *
+         * There is no clear definition of what this should actually do, but reversing all colors,
+         * after bg and fg were determined, seems to be the widely accepted behavior. So swaping
+         * parser->char_state::{bg, fg} right here will not work because all color change sequences
+         * should be inverted if this is set. We can get away with not storing this for each VtRune
+         * by changing the colors when a character is inserted.
+         */
+        case 7:
+            self->parser.color_inverted = true;
+            break;
+
+        /* Invisible, i.e., hidden, ECMA-48 2nd, VT300 */
+        case 8:
+            self->parser.char_state.hidden = true;
+            break;
+
+        /* Crossed-out characters, ECMA-48 3rd */
+        case 9:
+            self->parser.char_state.strikethrough = true;
+            break;
+
+        /* Fraktur (not widely supported) */
+        /* case 20: */
+        /*     break; */
+
+        /* Doubly-underlined, ECMA-48 3rd */
+        case 21:
+            MAYBE_DISABLE_ALL_UNDERLINES
+            self->parser.char_state.doubleunderline = true;
+            break;
+
+        /* Framed (not widely supported) */
+        /* case 51: */
+        /*     break; */
+
+        /* Encircled (not widely supported) */
+        /* case 52: */
+        /*     break; */
+
+        /* Overlined (widely supported extension) */
+        case 53:
+            self->parser.char_state.overline = true;
+            break;
+
+            /* Superscript (non-standard extension) */
+            /* case 73: */
+            /*     break; */
+
+            /* Subscript (non-standard extension) */
+            /* case 74: */
+            /*     break; */
+
+            /* Ideogram */
+            /* case 60 ... 64: */
+            /*     break; */
+
+            /** 'Disable' character attribs */
+
+        /* Normal (neither bold nor faint), ECMA-48 3rd
+         *
+         * It works this way because 'Bold' used to be 'bright'/'high intensity', the oposite of
+         * 'faint'. SGR 22 was supposed to reset the color intensity to default. At some point
+         * terminals started representing 'bright' characters as bold instead of changing the color.
+         */
+        case 22:
+            if (self->parser.char_state.rune.style == VT_RUNE_BOLD_ITALIC) {
+                self->parser.char_state.rune.style = VT_RUNE_ITALIC;
+            } else if (self->parser.char_state.rune.style == VT_RUNE_BOLD) {
+                self->parser.char_state.rune.style = VT_RUNE_NORMAL;
+            }
+
+            self->parser.char_state.dim = false;
+            break;
+
+        /* Not italicized, ECMA-48 3rd */
+        case 23:
+            if (self->parser.char_state.rune.style == VT_RUNE_BOLD_ITALIC) {
+                self->parser.char_state.rune.style = VT_RUNE_BOLD;
+            } else if (self->parser.char_state.rune.style == VT_RUNE_ITALIC) {
+                self->parser.char_state.rune.style = VT_RUNE_NORMAL;
+            }
+            break;
+
+        /*  Not underlined, ECMA-48 3rd */
+        case 24:
+            self->parser.char_state.underlined = false;
+            break;
+
+        /* Steady (not blinking), ECMA-48 3rd */
+        case 25:
+            self->parser.char_state.blinkng = false;
+            break;
+
+        /* Positive (not inverse), ECMA-48 3rd */
+        case 27:
+            self->parser.color_inverted = false;
+            break;
+
+        /* Visible (not hidden), ECMA-48 3rd, VT300 */
+        case 28:
+            self->parser.char_state.hidden = false;
+            break;
+
+        /* Not crossed-out, ECMA-48 3rd */
+        case 29:
+            self->parser.char_state.strikethrough = false;
+            break;
+
+        /* Set foreground color to default, ECMA-48 3rd */
+        case 39:
+            self->parser.char_state.fg = settings.fg;
+            break;
+
+        /* Set background color to default, ECMA-48 3rd */
+        case 49:
+            self->parser.char_state.bg = settings.bg;
+            break;
+
+        /* Set underline color to default (widely supported extension) */
+        case 59:
+            self->parser.char_state.linecolornotdefault = false;
+            break;
+
+            /* Disable all ideogram attributes */
+            /* case 65: */
+            /*     break; */
+
+        default:
+            if (30 <= cmd && cmd <= 37) {
+                self->parser.char_state.fg = settings.colorscheme.color[cmd - 30];
+            } else if (40 <= cmd && cmd <= 47) {
+                self->parser.char_state.bg =
+                  ColorRGBA_from_RGB(settings.colorscheme.color[cmd - 40]);
+            } else if (90 <= cmd && cmd <= 97) {
+                self->parser.char_state.fg = settings.colorscheme.color[cmd - 82];
+            } else if (100 <= cmd && cmd <= 107) {
+                self->parser.char_state.bg =
+                  ColorRGBA_from_RGB(settings.colorscheme.color[cmd - 92]);
+            } else {
+                WRN("Unknown SGR code: %d\n", cmd);
+            }
+    }
+}
+
+/**
+ * Interpret an SGR sequence
+ *
  * SGR codes are separated by one ';' or ':', some values require a set number of following
  * 'arguments'. 'Commands' may be combined into a single sequence. A ';' without any text should be
  * interpreted as a 0 (CSI ; 3 m == CSI 0 ; 3 m), but ':' should not
  * (CSI 58:2::130:110:255 m == CSI 58:2:130:110:255 m)" */
-static void Vt_handle_SGR_sequence(Vt* self, Vector_char seq)
+static void Vt_handle_multi_argument_SGR(Vt* self, Vector_char seq)
 {
     Vector_Vector_char tokens = string_split_on(seq.buf, ";", ":", NULL);
     for (Vector_char* token = NULL; (token = Vector_iter_Vector_char(&tokens, token));) {
@@ -2170,16 +2271,16 @@ static void Vt_handle_SGR_sequence(Vt* self, Vector_char seq)
 
                     self->parser.char_state.curlyunderline = true;
                 } else {
-                    Vt_handle_SGR_code(self, args[0]->buf + 1);
+                    Vt_handle_single_argument_SGR(self, args[0]->buf + 1);
                     token = Vector_iter_back_Vector_char(&tokens, token);
                 }
             } else {
-                Vt_handle_SGR_code(self, args[0]->buf + 1);
+                Vt_handle_single_argument_SGR(self, args[0]->buf + 1);
                 break; // end of sequence
             }
 
         } else {
-            Vt_handle_SGR_code(self, token->buf + 1);
+            Vt_handle_single_argument_SGR(self, token->buf + 1);
         }
     } // end for
 
@@ -2225,7 +2326,7 @@ static void Vt_handle_DCS(Vt* self, char c)
 
         char* str =
           pty_string_prettyfy(self->parser.active_sequence.buf, self->parser.active_sequence.size);
-        WRN("Unknown device control string: %s\n", str);
+        WRN("Unknown DCS: %s\n", str);
         free(str);
 
         Vector_destroy_char(&self->parser.active_sequence);
@@ -2681,7 +2782,9 @@ static inline void Vt_clear_right(Vt* self)
 
 /**
  * Insert character literal at cursor position, deal with reaching column limit */
-__attribute__((hot)) static inline void Vt_insert_char_at_cursor(Vt* self, VtRune c)
+__attribute__((hot)) static inline void Vt_insert_char_at_cursor(Vt*    self,
+                                                                 VtRune c,
+                                                                 bool   apply_color_modifications)
 {
     CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
 
@@ -2699,7 +2802,7 @@ __attribute__((hot)) static inline void Vt_insert_char_at_cursor(Vt* self, VtRun
         Vector_push_VtRune(&self->lines.buf[self->cursor.row].data, blank_space);
     }
 
-    if (unlikely(self->parser.color_inverted)) {
+    if (apply_color_modifications && unlikely(self->parser.color_inverted)) {
         ColorRGB tmp = c.fg;
         c.fg         = ColorRGB_from_RGBA(c.bg);
         c.bg         = ColorRGBA_from_RGB(tmp);
@@ -2816,40 +2919,28 @@ static void VtRune_push_combining(VtRune* self, char32_t codepoint)
 }
 
 /**
- * Try to interpret a combining character as an SGR property */
+ * Try to interpret a combining character as an SGR property
+ * @return was succesfull  */
 static bool VtRune_try_normalize_as_property(VtRune* self, char32_t codepoint)
 {
-    switch (codepoint) {
-        case 0x00001AB6: /* COMBINING WIGGLY LINE BELOW */
-            if (!self->linecolornotdefault) {
+    if (!self->linecolornotdefault) {
+        switch (codepoint) {
+            case 0x00001AB6: /* COMBINING WIGGLY LINE BELOW */
                 self->curlyunderline = true;
                 return true;
-            }
-            break;
-        case 0x00000332: /* COMBINING UNDERLINE */
-            if (!self->linecolornotdefault) {
+            case 0x00000332: /* COMBINING UNDERLINE */
                 self->underlined = true;
                 return true;
-            }
-            break;
-        case 0x00000333: /* COMBINING DOUBLE LOW LINE */
-            if (!self->linecolornotdefault) {
+            case 0x00000333: /* COMBINING DOUBLE LOW LINE */
                 self->doubleunderline = true;
                 return true;
-            }
-            break;
-        case 0x00000305: /* COMBINING OVERLINE */
-            if (!self->linecolornotdefault) {
+            case 0x00000305: /* COMBINING OVERLINE */
                 self->overline = true;
                 return true;
-            }
-            break;
-        case 0x00000336: /* COMBINING LONG STROKE OVERLAY */
-            if (!self->linecolornotdefault) {
+            case 0x00000336: /* COMBINING LONG STROKE OVERLAY */
                 self->strikethrough = true;
                 return true;
-            }
-            break;
+        }
     }
     return false;
 }
@@ -2865,7 +2956,7 @@ static void Vt_handle_combinable(Vt* self, char32_t c)
 #ifndef NOUTF8PROC
         if (self->last_interted->rune.combine[0]) {
 #endif
-            // Already contains a combining char that failed to normalize
+            /* Already contains a combining char that failed to normalize */
             VtRune_push_combining(self->last_interted, c);
 #ifndef NOUTF8PROC
         } else {
@@ -2880,8 +2971,8 @@ static void Vt_handle_combinable(Vt* self, char32_t c)
             if (old_len == strlen(res)) {
                 VtRune_push_combining(self->last_interted, c);
             } else if (mbrtoc32(conv, res, ARRAY_SIZE(buff) - 1, &mbs) < 1) {
-                // conversion failed
-                WRN("unicode normalization failed %s", strerror(errno));
+                /* conversion failed */
+                WRN("Unicode normalization failed %s", strerror(errno));
             } else {
                 self->last_interted->rune.code = conv[0];
             }
@@ -2915,7 +3006,7 @@ __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_litera
             }
             VtRune new_rune    = self->parser.char_state;
             new_rune.rune.code = res;
-            Vt_insert_char_at_cursor(self, new_rune);
+            Vt_insert_char_at_cursor(self, new_rune, true);
         }
     } else {
         switch (c) {
@@ -2977,7 +3068,7 @@ __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_litera
                 } else if (unlikely(self->charset_gl && (*self->charset_gl))) {
                     new_char.rune.code = (*(self->charset_gl))(c);
                 }
-                Vt_insert_char_at_cursor(self, new_char);
+                Vt_insert_char_at_cursor(self, new_char, true);
             }
         }
     }
@@ -3055,7 +3146,8 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
                     self->parser.state = PARSER_STATE_CHARSET_G3;
                     return;
 
-                /* Select default character set(<ESC>%@) or Select UTF-8 character set(<ESC>%G) */
+                /* Select default character set(<ESC>%@) or Select UTF-8 character set(<ESC>%G)
+                 */
                 case '%':
                     self->parser.state = PARSER_STATE_CHARSET;
                     return;

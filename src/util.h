@@ -72,6 +72,9 @@
 #define ARRAY_SIZE(_array) (sizeof((_array)) / sizeof((_array[0])))
 #define ARRAY_LAST(_array) (_array[(sizeof((_array)) / sizeof((_array[0]))) - 1])
 
+#define BOOL_FMT "%s"
+#define BOOL_AP(_b) ((_b) ? ("true") : ("false"))
+
 #define STATIC_ASSERT(cond, msg) typedef char static_assertion_##msg[(cond) ? 1 : -1]
 
 #define WRN(...)                                                                                   \
