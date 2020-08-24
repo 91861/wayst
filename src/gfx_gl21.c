@@ -930,7 +930,9 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
         fprintf(stderr, "GL_VENDOR = %s\n", glGetString(GL_VENDOR));
         fprintf(stderr, "GL_RENDERER = %s\n", glGetString(GL_RENDERER));
         fprintf(stderr, "GL_VERSION = %s\n", glGetString(GL_VERSION));
-        fprintf(stderr, "GL_SHADING_LANGUAGE_VERSION = %s\n", glGetString(GL_SHADING_LANGUAGE_VERSION));
+        fprintf(stderr,
+                "GL_SHADING_LANGUAGE_VERSION = %s\n",
+                glGetString(GL_SHADING_LANGUAGE_VERSION));
     }
 
     glDisable(GL_DEPTH_TEST);
@@ -2304,13 +2306,17 @@ static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const
                     color = gfx->is_main_font_rgb ? GLYPH_COLOR_LCD : GLYPH_COLOR_MONO;
                 } else {
                     GlyphMapEntry* g = GfxOpenGL21_get_cached_glyph(gfx, &cursor_char->rune);
-                    h                = (float)g->tex.h * gfx->sy;
-                    w                = (float)g->tex.w * gfx->sx;
-                    t                = (float)g->top * gfx->sy;
-                    l                = (float)g->left * gfx->sx;
-                    gsx              = -0.1 / g->tex.w;
-                    gsy              = -0.05 / g->tex.h;
-                    color            = g->color;
+                    if (!g) {
+                        glDisable(GL_SCISSOR_TEST);
+                        return;
+                    }
+                    h     = (float)g->tex.h * gfx->sy;
+                    w     = (float)g->tex.w * gfx->sx;
+                    t     = (float)g->top * gfx->sy;
+                    l     = (float)g->left * gfx->sx;
+                    gsx   = -0.1 / g->tex.w;
+                    gsy   = -0.05 / g->tex.h;
+                    color = g->color;
                     if (unlikely(h > gfx->line_height)) {
                         const float scale = h / gfx->line_height;
                         h /= scale;
@@ -2594,14 +2600,16 @@ void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
         if (repaint_indicator_visible) {
             Shader_use(&gfx->solid_fill_shader);
             glBindTexture(GL_TEXTURE_2D, 0);
-            float vertex_data[] = {
-                -1.0f, 1.0f,
-                -1.0f + gfx->sx * 50.0f, 1.0f,
-                -1.0f, 1.0f - gfx->sy * 50.0f
-            };
+            float vertex_data[] = { -1.0f, 1.0f,  -1.0f + gfx->sx * 50.0f,
+                                    1.0f,  -1.0f, 1.0f - gfx->sy * 50.0f };
             glBindBuffer(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
             ARRAY_BUFFER_SUB_OR_SWAP(vertex_data, gfx->flex_vbo.size, (sizeof vertex_data));
-            glVertexAttribPointer(gfx->solid_fill_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
+            glVertexAttribPointer(gfx->solid_fill_shader.attribs->location,
+                                  2,
+                                  GL_FLOAT,
+                                  GL_FALSE,
+                                  0,
+                                  0);
             glDrawArrays(GL_TRIANGLES, 0, 3);
         }
         repaint_indicator_visible = !repaint_indicator_visible;
