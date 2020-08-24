@@ -195,7 +195,7 @@ static void VtLine_copy(VtLine* dest, VtLine* source)
 
 static inline void VtLine_destroy(void* vt_, VtLine* self);
 
-DEF_VECTOR(VtLine, VtLine_destroy, void)
+DEF_VECTOR_DA(VtLine, VtLine_destroy, void)
 
 typedef struct _Vt
 {
