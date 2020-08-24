@@ -2223,13 +2223,11 @@ static void Vt_handle_multi_argument_SGR(Vt* self, Vector_char seq)
                     /* from 256 palette (one argument) */
                     long idx = MIN(strtol(args[2]->buf + 1, NULL, 10), 255);
 
-                    if (args[0]->buf[1] == '3')
+                    if (args[0]->buf[1] == '3') {
                         self->parser.char_state.fg = color_palette_256[idx];
-
-                    else if (args[0]->buf[1] == '4')
+                    } else if (args[0]->buf[1] == '4') {
                         self->parser.char_state.bg = ColorRGBA_from_RGB(color_palette_256[idx]);
-
-                    else if (args[0]->buf[1] == '5') {
+                    } else if (args[0]->buf[1] == '5') {
                         self->parser.char_state.linecolornotdefault = true;
                         self->parser.char_state.line                = color_palette_256[idx];
                     }
@@ -2320,6 +2318,17 @@ static void Vt_handle_DCS(Vt* self, char c)
             /* sixel or ReGIS */
             case '0':
                 break;
+
+            /* Synchronized update */
+            case '=':
+                if ((seq[1] == '1'|| seq[1] == '2') && seq[2] == 's') {
+                    if (seq[1] == '1') {
+                        // Begin synchronized update (BSU)
+                    } else {
+                        // End synchronized update (ESU)
+                    }
+                }
+                return;
 
             default:;
         }

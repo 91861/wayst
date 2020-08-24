@@ -1105,6 +1105,8 @@ static Vector_Vector_char expand_list_value(const char* const list)
         return values;
     }
 
+    Vector_char whitespace = Vector_new_char();
+
     bool in_string    = false;
     bool in_list      = false;
     bool escaped      = false;
@@ -1124,6 +1126,9 @@ static Vector_Vector_char expand_list_value(const char* const list)
             continue;
         }
         if (!escaped && c == '\"') {
+            if (!in_string) {
+                Vector_clear_char(&whitespace);
+            }
             in_string = !in_string;
             continue;
         }
@@ -1134,12 +1139,25 @@ static Vector_Vector_char expand_list_value(const char* const list)
         if (!in_string && !escaped && c == ',') {
             Vector_push_char(Vector_last_Vector_char(&values), '\0');
             Vector_push_Vector_char(&values, Vector_new_with_capacity_char(10));
+            Vector_clear_char(&whitespace);
             escaped = false;
             continue;
         }
         escaped = false;
         if (in_string || !isblank(c)) {
-            Vector_push_char(Vector_last_Vector_char(&values), c);
+            if (isblank(c) && Vector_last_Vector_char(&values)->size) {
+                /* May be whitespace inside the string, hold on to this and insert before the next
+                 * character if we get one */
+                Vector_push_char(&whitespace, c);
+            } else {
+                if (whitespace.size && !in_string) {
+                    Vector_pushv_char(Vector_last_Vector_char(&values),
+                                      whitespace.buf,
+                                      whitespace.size);
+                }
+                Vector_clear_char(&whitespace);
+                Vector_push_char(Vector_last_Vector_char(&values), c);
+            }
         }
     }
     Vector_push_char(Vector_last_Vector_char(&values), '\0');
@@ -1154,6 +1172,7 @@ static Vector_Vector_char expand_list_value(const char* const list)
     if (in_string) {
         WRN("String not terminated in \'%s\'\n", list);
     }
+    Vector_destroy_char(&whitespace);
 
     return values;
 }
@@ -1170,8 +1189,9 @@ static void settings_file_parse(FILE* f)
     char buf[1024 * 8] = { 0 };
     int  rd;
 
-    Vector_char key   = Vector_new_with_capacity_char(10);
-    Vector_char value = Vector_new_with_capacity_char(30);
+    Vector_char key        = Vector_new_with_capacity_char(10);
+    Vector_char value      = Vector_new_with_capacity_char(30);
+    Vector_char whitespace = Vector_new_char();
 
     bool in_list = false, in_comment = false, in_value = false, in_string = false, escaped = false;
 
@@ -1193,9 +1213,7 @@ static void settings_file_parse(FILE* f)
                     in_comment = false;
                 }
                 continue;
-            }
-
-            else if (in_value) {
+            } else if (in_value) {
                 if (c == '\\' && !escaped) {
                     escaped = true;
                     if (in_list) {
@@ -1203,6 +1221,17 @@ static void settings_file_parse(FILE* f)
                     }
                     continue;
                 } else if (c == '\"' && !escaped) {
+                    if (!in_string && value.size && !in_list) {
+                        Vector_push_char(&value, '\0');
+                        WRN("Error in config on line %u: Unexpected characters \'%s\' before "
+                            "\'\"\'. Did you mean \'\\\"\'?\n",
+                            line,
+                            value.buf);
+                        Vector_clear_char(&value);
+                    }
+                    if (!in_string) {
+                        Vector_clear_char(&whitespace);
+                    }
                     in_string = !in_string;
                     if (in_list) {
                         Vector_push_char(&value, c);
@@ -1226,17 +1255,21 @@ static void settings_file_parse(FILE* f)
                 if (c == '\n' && !in_list) {
                     Vector_push_char(&value, '\0');
                     handle_config_option(key.buf, value.buf, key_line);
+                    Vector_clear_char(&whitespace);
                     Vector_clear_char(&key);
                     Vector_clear_char(&value);
-                    in_value  = false;
+                    in_value = false;
+                    if (in_string) {
+                        WRN("Error in config on line %u: Expected \'\"\' before end of line\n",
+                            line - 1);
+                    }
                     in_string = false;
-                    in_list   = false;
                     continue;
                 } else if (escaped && !in_list) {
                     if (c == 'n') {
                         Vector_push_char(&value, '\n');
                     }
-                } else if (!iscntrl(c) && (in_string || !isblank(c))) {
+                } else if (!iscntrl(c)) {
                     switch (c) {
                         case ']':
                         case '[':
@@ -1244,7 +1277,16 @@ static void settings_file_parse(FILE* f)
                                 Vector_push_char(&value, '\\');
                             }
                     }
-                    Vector_push_char(&value, c);
+                    if (in_string || !isblank(c)) {
+                        if (whitespace.size) {
+                            Vector_pushv_char(&value, whitespace.buf, whitespace.size);
+                            Vector_clear_char(&whitespace);
+                        }
+                        Vector_push_char(&value, c);
+                    } else if (value.size) {
+                        Vector_push_char(&whitespace, c);
+                    }
+                    
                 }
                 escaped = false;
             }
@@ -1266,15 +1308,21 @@ static void settings_file_parse(FILE* f)
         }
     }
 
-    if (in_string) {
-        WRN("Error in config on line %u: String not terminated\n", line);
-    }
-    if (in_list) {
-        WRN("Error in config on line %u: List not terminated\n", line);
+    if (key.size) {
+        Vector_push_char(&key, '\0');
+        Vector_push_char(&value, '\0');
+        handle_config_option(key.buf, value.size > 1 ? value.buf : NULL, line);
     }
 
+    if (in_string) {
+        WRN("Error in config on line %u: Expected \'\"\' before end of file\n", line);
+    }
+    if (in_list) {
+        WRN("Error in config on line %u: Expected \']\' before end of file\n", line);
+    }
     Vector_destroy_char(&key);
     Vector_destroy_char(&value);
+    Vector_destroy_char(&whitespace);
 }
 
 static void find_config_path()
