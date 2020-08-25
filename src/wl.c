@@ -83,25 +83,27 @@ static struct wl_data_source_listener data_source_listener;
 static void                           cursor_set(struct wl_cursor* what, uint32_t serial);
 static void                           WindowWl_dont_swap_buffers(struct WindowBase* self);
 struct WindowBase*                    WindowWl_new(uint32_t w, uint32_t h);
-void       WindowWl_set_fullscreen(struct WindowBase* self, bool fullscreen);
-void       WindowWl_resize(struct WindowBase* self, uint32_t w, uint32_t h);
-void       WindowWl_events(struct WindowBase* self);
-TimePoint* WindowWl_process_timers(struct WindowBase* self);
-void       WindowWl_set_current_context(struct WindowBase* self);
-void       WindowWl_set_swap_interval(struct WindowBase* self, int32_t ival);
-void       WindowWl_set_wm_name(struct WindowBase* self, const char* title);
-void       WindowWl_set_title(struct WindowBase* self, const char* title);
-bool       WindowWl_maybe_swap(struct WindowBase* self);
-void       WindowWl_destroy(struct WindowBase* self);
-int        WindowWl_get_connection_fd(struct WindowBase* self);
-void       WindowWl_clipboard_send(struct WindowBase* self, const char* text);
-void       WindowWl_clipboard_get(struct WindowBase* self);
-void*      WindowWl_get_gl_ext_proc_adress(struct WindowBase* self, const char* name);
-uint32_t   WindowWl_get_keycode_from_name(struct WindowBase* self, char* name);
-void       WindowWl_set_pointer_style(struct WindowBase* self, enum MousePointerStyle style);
+static void       WindowWl_set_maximized(struct WindowBase* self, bool maximized);
+static void       WindowWl_set_fullscreen(struct WindowBase* self, bool fullscreen);
+static void       WindowWl_resize(struct WindowBase* self, uint32_t w, uint32_t h);
+static void       WindowWl_events(struct WindowBase* self);
+static TimePoint* WindowWl_process_timers(struct WindowBase* self);
+static void       WindowWl_set_current_context(struct WindowBase* self);
+static void       WindowWl_set_swap_interval(struct WindowBase* self, int32_t ival);
+static void       WindowWl_set_wm_name(struct WindowBase* self, const char* title);
+static void       WindowWl_set_title(struct WindowBase* self, const char* title);
+static bool       WindowWl_maybe_swap(struct WindowBase* self);
+static void       WindowWl_destroy(struct WindowBase* self);
+static int        WindowWl_get_connection_fd(struct WindowBase* self);
+static void       WindowWl_clipboard_send(struct WindowBase* self, const char* text);
+static void       WindowWl_clipboard_get(struct WindowBase* self);
+static void*      WindowWl_get_gl_ext_proc_adress(struct WindowBase* self, const char* name);
+static uint32_t   WindowWl_get_keycode_from_name(struct WindowBase* self, char* name);
+static void       WindowWl_set_pointer_style(struct WindowBase* self, enum MousePointerStyle style);
 
 static struct IWindow window_interface_wayland = {
     .set_fullscreen         = WindowWl_set_fullscreen,
+    .set_maximized          = WindowWl_set_maximized,
     .resize                 = WindowWl_resize,
     .events                 = WindowWl_events,
     .process_timers         = WindowWl_process_timers,
@@ -229,7 +231,7 @@ static inline xkb_keysym_t keysym_filter_compose(xkb_keysym_t sym)
 
 static void WindowWl_swap_buffers(struct WindowBase* self);
 
-void WindowWl_clipboard_send(struct WindowBase* self, const char* text)
+static void WindowWl_clipboard_send(struct WindowBase* self, const char* text)
 {
     if (!text)
         return;
@@ -251,7 +253,7 @@ void WindowWl_clipboard_send(struct WindowBase* self, const char* text)
     wl_data_device_set_selection(globalWl->data_device, w->data_source, globalWl->serial);
 }
 
-void WindowWl_clipboard_get(struct WindowBase* self)
+static void WindowWl_clipboard_get(struct WindowBase* self)
 {
     if (windowWl(self)->data_offer_mime) {
         LOG("last recorded wl_data_offer mime: \"%s\" \n", windowWl(self)->data_offer_mime);
@@ -1212,25 +1214,26 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h)
         ERR("EGL API binding error\n");
     }
 
-
     eglChooseConfig(globalWl->egl_display, cfg_attribs, &config, 1, &num_config);
 
     EGLint context_attribs[] = {
         EGL_CONTEXT_OPENGL_PROFILE_MASK,
         EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
-        EGL_CONTEXT_MAJOR_VERSION, 2,
-        EGL_CONTEXT_MINOR_VERSION, 1,
+        EGL_CONTEXT_MAJOR_VERSION,
+        2,
+        EGL_CONTEXT_MINOR_VERSION,
+        1,
         EGL_CONTEXT_OPENGL_ROBUST_ACCESS,
         EGL_FALSE,
-        #ifdef DEBUG
+#ifdef DEBUG
         EGL_CONTEXT_OPENGL_DEBUG,
         EGL_TRUE,
-        #endif
+#endif
         EGL_NONE,
     };
 
     windowWl(win)->egl_context =
-        eglCreateContext(globalWl->egl_display, config, EGL_NO_CONTEXT, context_attribs);
+      eglCreateContext(globalWl->egl_display, config, EGL_NO_CONTEXT, context_attribs);
 
     if (!windowWl(win)->egl_context) {
         ERR("failed to create EGL context");
@@ -1342,20 +1345,27 @@ static void WindowWl_set_no_context()
 
 void WindowWl_set_current_context(struct WindowBase* self)
 {
-    if (self)
+    if (self) {
         eglMakeCurrent(globalWl->egl_display,
                        windowWl(self)->egl_surface,
                        windowWl(self)->egl_surface,
                        windowWl(self)->egl_context);
-    else
+    } else {
         WindowWl_set_no_context();
+    }
 }
 
 void WindowWl_set_fullscreen(struct WindowBase* self, bool fullscreen)
 {
+    FLAG_UNSET(self->state_flags, WINDOW_IS_MAXIMIZED);
+
     if (fullscreen) {
+        self->previous_h = self->h;
+        self->previous_w = self->w;
+
         if (globalWl->xdg_shell) {
-            xdg_toplevel_set_fullscreen(windowWl(self)->xdg_toplevel, globalWl->output);
+            xdg_toplevel_set_fullscreen(windowWl(self)->xdg_toplevel,
+                                        windowWl(self)->active_output->output);
         } else {
             wl_shell_surface_set_fullscreen(windowWl(self)->shell_surface,
                                             WL_SHELL_SURFACE_FULLSCREEN_METHOD_DRIVER,
@@ -1370,6 +1380,10 @@ void WindowWl_set_fullscreen(struct WindowBase* self, bool fullscreen)
             wl_shell_surface_set_toplevel(windowWl(self)->shell_surface);
         }
 
+        if (self->previous_h && self->previous_w) {
+            WindowWl_resize(self, self->previous_w, self->previous_h);
+        }
+
         FLAG_UNSET(self->state_flags, WINDOW_IS_FULLSCREEN);
     }
 }
@@ -1377,8 +1391,10 @@ void WindowWl_set_fullscreen(struct WindowBase* self, bool fullscreen)
 void WindowWl_resize(struct WindowBase* self, uint32_t w, uint32_t h)
 {
     wl_egl_window_resize(windowWl(self)->egl_window, w, h, 0, 0);
-    self->w = w;
-    self->h = h;
+    self->previous_w = 0;
+    self->previous_h = 0;
+    self->w          = w;
+    self->h          = h;
     Window_notify_content_change(self);
 }
 
@@ -1456,7 +1472,7 @@ static void WindowWl_swap_buffers(struct WindowBase* self)
     wl_callback_add_listener(frame_callback, &frame_listener, self);
 }
 
-bool WindowWl_maybe_swap(struct WindowBase* self)
+static bool WindowWl_maybe_swap(struct WindowBase* self)
 {
     if (windowWl(self)->draw_next_frame && self->paint) {
         WindowWl_swap_buffers(self);
@@ -1467,7 +1483,7 @@ bool WindowWl_maybe_swap(struct WindowBase* self)
     }
 }
 
-void WindowWl_set_swap_interval(struct WindowBase* self, int32_t ival)
+static void WindowWl_set_swap_interval(struct WindowBase* self, int32_t ival)
 {
     ival = EGL_MIN_SWAP_INTERVAL + ival;
 
@@ -1479,7 +1495,7 @@ void WindowWl_set_swap_interval(struct WindowBase* self, int32_t ival)
     eglSwapInterval(globalWl->egl_display, ival);
 }
 
-void WindowWl_set_wm_name(struct WindowBase* self, const char* title)
+static void WindowWl_set_wm_name(struct WindowBase* self, const char* title)
 {
     if (globalWl->xdg_shell)
         xdg_toplevel_set_app_id(windowWl(self)->xdg_toplevel, title);
@@ -1487,15 +1503,47 @@ void WindowWl_set_wm_name(struct WindowBase* self, const char* title)
         wl_shell_surface_set_class(windowWl(self)->shell_surface, title);
 }
 
-void WindowWl_set_title(struct WindowBase* self, const char* title)
+static void WindowWl_set_maximized(struct WindowBase* self, bool maximized)
 {
-    if (globalWl->xdg_shell)
-        xdg_toplevel_set_title(windowWl(self)->xdg_toplevel, title);
-    else
-        wl_shell_surface_set_title(windowWl(self)->shell_surface, title);
+    if (maximized) {
+        if (Window_is_fullscreen(self)) {
+            WindowWl_set_fullscreen(self, false);
+        } else {
+            self->previous_w = self->w;
+            self->previous_h = self->h;
+        }
+
+        if (globalWl->xdg_shell) {
+            xdg_toplevel_set_maximized(windowWl(self)->xdg_toplevel);
+        } else {
+            wl_shell_surface_set_maximized(windowWl(self)->shell_surface, globalWl->output);
+        }
+        FLAG_SET(self->state_flags, WINDOW_IS_MAXIMIZED);
+    } else {
+        if (globalWl->xdg_shell) {
+            xdg_toplevel_unset_maximized(windowWl(self)->xdg_toplevel);
+        } else {
+            wl_shell_surface_set_toplevel(windowWl(self)->shell_surface);
+        }
+
+        if (self->previous_h && self->previous_w) {
+            WindowWl_resize(self, self->previous_w, self->previous_h);
+        }
+
+        FLAG_UNSET(self->state_flags, WINDOW_IS_MAXIMIZED);
+    }
 }
 
-void WindowWl_destroy(struct WindowBase* self)
+static void WindowWl_set_title(struct WindowBase* self, const char* title)
+{
+    if (globalWl->xdg_shell) {
+        xdg_toplevel_set_title(windowWl(self)->xdg_toplevel, title);
+    } else {
+        wl_shell_surface_set_title(windowWl(self)->shell_surface, title);
+    }
+}
+
+static void WindowWl_destroy(struct WindowBase* self)
 {
     WindowWl_set_no_context();
 
@@ -1521,11 +1569,13 @@ void WindowWl_destroy(struct WindowBase* self)
 
     wl_surface_destroy(windowWl(self)->surface);
 
-    if (globalWl->data_device_manager)
+    if (globalWl->data_device_manager) {
         wl_data_device_manager_destroy(globalWl->data_device_manager);
+    }
 
-    if (globalWl->data_device)
+    if (globalWl->data_device) {
         wl_data_device_destroy(globalWl->data_device);
+    }
 
     eglTerminate(globalWl->egl_display);
     eglReleaseThread();
@@ -1533,31 +1583,32 @@ void WindowWl_destroy(struct WindowBase* self)
     wl_registry_destroy(globalWl->registry);
     wl_display_disconnect(globalWl->display);
 
-    if (windowWl(self)->data_offer_mime)
+    if (windowWl(self)->data_offer_mime) {
         free((void*)windowWl(self)->data_offer_mime);
+    }
 
     Vector_destroy_WlOutputInfo(&windowWl(self)->outputs);
 
     free(self);
 }
 
-int WindowWl_get_connection_fd(struct WindowBase* self)
+static int WindowWl_get_connection_fd(struct WindowBase* self)
 {
     return wl_display_get_fd(globalWl->display);
 }
 
-void* WindowWl_get_gl_ext_proc_adress(struct WindowBase* self, const char* name)
+static void* WindowWl_get_gl_ext_proc_adress(struct WindowBase* self, const char* name)
 {
     return eglGetProcAddress(name);
 }
 
-uint32_t WindowWl_get_keycode_from_name(struct WindowBase* self, char* name)
+static uint32_t WindowWl_get_keycode_from_name(struct WindowBase* self, char* name)
 {
     xkb_keysym_t xkb_keysym = xkb_keysym_from_name(name, XKB_KEYSYM_CASE_INSENSITIVE);
     return xkb_keysym == XKB_KEY_NoSymbol ? 0 : xkb_keysym_to_utf32(xkb_keysym);
 }
 
-void WindowWl_set_pointer_style(struct WindowBase* self, enum MousePointerStyle style)
+static void WindowWl_set_pointer_style(struct WindowBase* self, enum MousePointerStyle style)
 {
     switch (style) {
         case MOUSE_POINTER_HIDDEN:

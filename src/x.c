@@ -49,28 +49,30 @@ static WindowStatic* global;
 #define globalX11       ((GlobalX11*)&global->extend_data)
 #define windowX11(base) ((WindowX11*)&base->extend_data)
 
-struct WindowBase* WindowX11_new(uint32_t w, uint32_t h);
-void               WindowX11_set_fullscreen(struct WindowBase* self, bool fullscreen);
-void               WindowX11_resize(struct WindowBase* self, uint32_t w, uint32_t h);
-void               WindowX11_events(struct WindowBase* self);
-void       WindowX11_set_wm_name(struct WindowBase* self, const char* title, const char* name);
-void       WindowX11_set_title(struct WindowBase* self, const char* title);
-void       WindowX11_set_swap_interval(struct WindowBase* self, int32_t ival);
-bool       WindowX11_maybe_swap(struct WindowBase* self);
-void       WindowX11_destroy(struct WindowBase* self);
-int        WindowX11_get_connection_fd(struct WindowBase* self);
-void       WindowX11_clipboard_get(struct WindowBase* self);
-void       WindowX11_clipboard_send(struct WindowBase* self, const char* text);
-void       WindowX11_set_pointer_style(struct WindowBase* self, enum MousePointerStyle style);
-void*      WindowX11_get_gl_ext_proc_adress(struct WindowBase* self, const char* name);
-uint32_t   WindowX11_get_keycode_from_name(struct WindowBase* self, char* name);
-TimePoint* WindowX11_process_timers(struct WindowBase* self)
+static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h);
+static void               WindowX11_set_fullscreen(struct WindowBase* self, bool fullscreen);
+static void               WindowX11_set_maximized(struct WindowBase* self, bool maximized);
+static void               WindowX11_resize(struct WindowBase* self, uint32_t w, uint32_t h);
+static void               WindowX11_events(struct WindowBase* self);
+static void     WindowX11_set_wm_name(struct WindowBase* self, const char* title, const char* name);
+static void     WindowX11_set_title(struct WindowBase* self, const char* title);
+static void     WindowX11_set_swap_interval(struct WindowBase* self, int32_t ival);
+static bool     WindowX11_maybe_swap(struct WindowBase* self);
+static void     WindowX11_destroy(struct WindowBase* self);
+static int      WindowX11_get_connection_fd(struct WindowBase* self);
+static void     WindowX11_clipboard_get(struct WindowBase* self);
+static void     WindowX11_clipboard_send(struct WindowBase* self, const char* text);
+static void     WindowX11_set_pointer_style(struct WindowBase* self, enum MousePointerStyle style);
+static void*    WindowX11_get_gl_ext_proc_adress(struct WindowBase* self, const char* name);
+static uint32_t WindowX11_get_keycode_from_name(struct WindowBase* self, char* name);
+static TimePoint* WindowX11_process_timers(struct WindowBase* self)
 {
     return NULL;
 }
 
 static struct IWindow window_interface_x11 = {
     .set_fullscreen         = WindowX11_set_fullscreen,
+    .set_maximized          = WindowX11_set_maximized,
     .resize                 = WindowX11_resize,
     .events                 = WindowX11_events,
     .process_timers         = WindowX11_process_timers,
@@ -114,7 +116,7 @@ typedef struct
     const char*          cliptext;
 } WindowX11;
 
-void WindowX11_clipboard_send(struct WindowBase* self, const char* text)
+static void WindowX11_clipboard_send(struct WindowBase* self, const char* text)
 {
     if (windowX11(self)->cliptext)
         free((void*)windowX11(self)->cliptext);
@@ -124,7 +126,7 @@ void WindowX11_clipboard_send(struct WindowBase* self, const char* text)
     XSetSelectionOwner(globalX11->display, sel, windowX11(self)->window, CurrentTime);
 }
 
-void WindowX11_clipboard_get(struct WindowBase* self)
+static void WindowX11_clipboard_get(struct WindowBase* self)
 {
     Atom   clip  = XInternAtom(globalX11->display, "CLIPBOARD", 0);
     Atom   utf8  = XInternAtom(globalX11->display, "UTF8_STRING", 0);
@@ -160,12 +162,12 @@ static void WindowX11_pointer(struct WindowBase* self, bool hide)
     }
 }
 
-void* WindowX11_get_gl_ext_proc_adress(struct WindowBase* self, const char* name)
+static void* WindowX11_get_gl_ext_proc_adress(struct WindowBase* self, const char* name)
 {
     return glXGetProcAddress((const GLubyte*)name);
 }
 
-struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
+static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
 {
     global = calloc(1, sizeof(WindowStatic) + sizeof(GlobalX11) - sizeof(uint8_t));
 
@@ -396,24 +398,24 @@ struct WindowBase* Window_new_x11(Pair_uint32_t res)
 
 static inline void WindowX11_fullscreen_change_state(struct WindowBase* self, const long arg)
 {
-
-    Atom wm_state      = XInternAtom(globalX11->display, "_NET_WM_STATE", True);
-    Atom wm_fullscreen = XInternAtom(globalX11->display, "_NET_WM_STATE_FULLSCREEN", True);
-
-    XClientMessageEvent e = { .type         = ClientMessage,
-                              .window       = windowX11(self)->window,
-                              .message_type = wm_state,
-                              .format       = 32,
-                              .data         = { { (long)arg, wm_fullscreen, 0 } } };
+    XEvent e               = { 0 };
+    e.type                 = ClientMessage;
+    e.xclient.window       = windowX11(self)->window;
+    e.xclient.message_type = XInternAtom(globalX11->display, "_NET_WM_STATE", True);
+    e.xclient.format       = 32;
+    e.xclient.data.l[0]    = (long)arg;
+    e.xclient.data.l[1]    = XInternAtom(globalX11->display, "_NET_WM_STATE_FULLSCREEN", True);
+    e.xclient.data.l[3]    = 0;
 
     XSendEvent(globalX11->display,
                DefaultRootWindow(globalX11->display),
                False,
                SubstructureRedirectMask | SubstructureNotifyMask,
                (XEvent*)&e);
+    XFlush(globalX11->display);
 }
 
-void WindowX11_set_fullscreen(struct WindowBase* self, bool fullscreen)
+static void WindowX11_set_fullscreen(struct WindowBase* self, bool fullscreen)
 {
     if (fullscreen && !FLAG_IS_SET(self->state_flags, WINDOW_IS_FULLSCREEN)) {
         WindowX11_fullscreen_change_state(self, _NET_WM_STATE_ADD);
@@ -424,7 +426,42 @@ void WindowX11_set_fullscreen(struct WindowBase* self, bool fullscreen)
     }
 }
 
-void WindowX11_resize(struct WindowBase* self, uint32_t w, uint32_t h)
+static void WindowX11_set_maximized(struct WindowBase* self, bool maximized)
+{
+    if (maximized) {
+        WindowX11_set_fullscreen(self, false);
+        FLAG_SET(self->state_flags, WINDOW_IS_MAXIMIZED);
+    } else {
+        FLAG_UNSET(self->state_flags, WINDOW_IS_MAXIMIZED);
+    }
+
+    XEvent e               = { 0 };
+    e.type                 = ClientMessage;
+    e.xclient.window       = windowX11(self)->window;
+    e.xclient.message_type = XInternAtom(globalX11->display, "_NET_WM_STATE", True);
+    e.xclient.format       = 32;
+    e.xclient.data.l[0]    = maximized ? _NET_WM_STATE_ADD : _NET_WM_STATE_REMOVE;
+    e.xclient.data.l[1]    = XInternAtom(globalX11->display, "_NET_WM_STATE_MAXIMIZED_VERT", True);
+    e.xclient.data.l[3]    = 0;
+
+    XSendEvent(globalX11->display,
+               DefaultRootWindow(globalX11->display),
+               False,
+               SubstructureRedirectMask | SubstructureNotifyMask,
+               &e);
+
+    e.xclient.data.l[1] = XInternAtom(globalX11->display, "_NET_WM_STATE_MAXIMIZED_HORZ", True);
+
+    XSendEvent(globalX11->display,
+               DefaultRootWindow(globalX11->display),
+               False,
+               SubstructureRedirectMask | SubstructureNotifyMask,
+               &e);
+
+    XFlush(globalX11->display);
+}
+
+static void WindowX11_resize(struct WindowBase* self, uint32_t w, uint32_t h)
 {
     XWindowChanges changes;
     self->w        = w;
@@ -437,7 +474,7 @@ void WindowX11_resize(struct WindowBase* self, uint32_t w, uint32_t h)
     Window_notify_content_change(self);
 }
 
-void WindowX11_events(struct WindowBase* self)
+static void WindowX11_events(struct WindowBase* self)
 {
     while (XPending(globalX11->display)) {
         XNextEvent(globalX11->display, &windowX11(self)->event);
@@ -680,16 +717,16 @@ void WindowX11_events(struct WindowBase* self)
     }
 }
 
-void WindowX11_set_current_context(struct WindowBase* self) {}
+static void WindowX11_set_current_context(struct WindowBase* self) {}
 
-void WindowX11_set_swap_interval(struct WindowBase* self, int32_t ival)
+static void WindowX11_set_swap_interval(struct WindowBase* self, int32_t ival)
 {
     if (glXSwapIntervalEXT) {
         glXSwapIntervalEXT(globalX11->display, windowX11(self)->window, ival);
     }
 }
 
-void WindowX11_set_title(struct WindowBase* self, const char* title)
+static void WindowX11_set_title(struct WindowBase* self, const char* title)
 {
     ASSERT(title, "string is NULL");
     XStoreName(globalX11->display, windowX11(self)->window, title);
@@ -704,14 +741,16 @@ void WindowX11_set_title(struct WindowBase* self, const char* title)
     XFlush(globalX11->display);
 }
 
-void WindowX11_set_wm_name(struct WindowBase* self, const char* class_name, const char* opt_name)
+static void WindowX11_set_wm_name(struct WindowBase* self,
+                                  const char*        class_name,
+                                  const char*        opt_name)
 {
     ASSERT(class_name, "class name is not NULL");
     XClassHint class_hint = { (char*)class_name, (char*)OR(opt_name, class_name) };
     XSetClassHint(globalX11->display, windowX11(self)->window, &class_hint);
 }
 
-bool WindowX11_maybe_swap(struct WindowBase* self)
+static bool WindowX11_maybe_swap(struct WindowBase* self)
 {
     if (self->paint && !FLAG_IS_SET(self->state_flags, WINDOW_IS_MINIMIZED)) {
         self->paint = false;
@@ -727,7 +766,7 @@ bool WindowX11_maybe_swap(struct WindowBase* self)
     }
 }
 
-void WindowX11_destroy(struct WindowBase* self)
+static void WindowX11_destroy(struct WindowBase* self)
 {
     XUndefineCursor(globalX11->display, windowX11(self)->window);
     XFreeCursor(globalX11->display, globalX11->cursor_beam);
@@ -749,18 +788,18 @@ void WindowX11_destroy(struct WindowBase* self)
     free(self);
 }
 
-int WindowX11_get_connection_fd(struct WindowBase* self)
+static int WindowX11_get_connection_fd(struct WindowBase* self)
 {
     return ConnectionNumber(globalX11->display);
 }
 
-uint32_t WindowX11_get_keycode_from_name(struct WindowBase* self, char* name)
+static uint32_t WindowX11_get_keycode_from_name(struct WindowBase* self, char* name)
 {
     KeyCode kcode = XStringToKeysym(name);
     return kcode == NoSymbol ? 0 : kcode;
 }
 
-void WindowX11_set_pointer_style(struct WindowBase* self, enum MousePointerStyle style)
+static void WindowX11_set_pointer_style(struct WindowBase* self, enum MousePointerStyle style)
 {
     switch (style) {
         case MOUSE_POINTER_HIDDEN:

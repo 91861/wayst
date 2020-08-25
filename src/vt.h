@@ -32,10 +32,13 @@
 #define VT_RUNE_MAX_COMBINE 2
 #endif
 
+typedef struct
+{
+    char* s;
+} DynStr;
 
-typedef struct {char* s;} DynStr;
-
-static void DynStr_destroy(DynStr* self) {
+static void DynStr_destroy(DynStr* self)
+{
     free(self->s);
     self->s = NULL;
 }
@@ -182,16 +185,13 @@ static void VtLine_copy(VtLine* dest, VtLine* source)
 {
     memcpy(dest, source, sizeof(VtLine));
     dest->was_reflown = false;
-    dest->reflowable = false;
-    dest->rejoinable = false;
+    dest->reflowable  = false;
+    dest->rejoinable  = false;
     dest->damage.type = VT_LINE_DAMAGE_FULL;
     memset(&dest->proxy, 0, sizeof(VtLineProxy));
     dest->data = Vector_new_with_capacity_VtRune(source->data.size);
     Vector_pushv_VtRune(&dest->data, source->data.buf, source->data.size);
 }
-
-/* TODO: Make a version of Vector that can bind an additional destructor argument, so
- * Vt_destroy_line_proxy doesn't have to be a global */
 
 static inline void VtLine_destroy(void* vt_, VtLine* self);
 
@@ -199,25 +199,30 @@ DEF_VECTOR_DA(VtLine, VtLine_destroy, void)
 
 typedef struct _Vt
 {
-    struct VtCallbacks
+    struct vt_callbacks_t
     {
         void* user_data;
 
         Pair_uint32_t (*on_window_size_requested)(void*);
+        Pair_uint32_t (*on_text_area_size_requested)(void*);
         Pair_uint32_t (*on_window_size_from_cells_requested)(void*, uint32_t r, uint32_t c);
         Pair_uint32_t (*on_number_of_cells_requested)(void*);
         void (*on_window_resize_requested)(void*, uint32_t w, uint32_t h);
         Pair_uint32_t (*on_window_position_requested)(void*);
+        bool (*on_minimized_state_requested)(void*);
+        bool (*on_fullscreen_state_requested)(void*);
         void (*on_action_performed)(void*);
         void (*on_repaint_required)(void*);
-        void (*on_bell_flash)(void*);
-
+        void (*on_visual_bell)(void*);
+        void (*on_desktop_notification_sent)(void*, const char* opt_title, const char* text);
+        void (*on_window_maximize_state_set)(void*, bool);
+        void (*on_window_fullscreen_state_set)(void*, bool);
+        void (*on_window_dimensions_set)(void*, int32_t, int32_t);
+        void (*on_text_area_dimensions_set)(void*, int32_t, int32_t);
         void (*on_title_changed)(void*, const char*);
-
         void (*on_clipboard_requested)(void*);
         void (*on_font_reload_requseted)(void*);
         void (*on_clipboard_sent)(void*, const char*);
-
         void (*destroy_proxy)(void*, VtLineProxy*);
     } callbacks;
 
@@ -232,7 +237,6 @@ typedef struct _Vt
     {
         bool        active;
         Vector_char buffer;
-
     } unicode_input;
 
     struct Selection
@@ -310,7 +314,8 @@ typedef struct _Vt
      * affect the following character.
      * By default G0 is designated as GL and G1 as GR.
      *
-     * GR has no effect in UTF-8 mode. C1 is used only if S8C1T is enabled.
+     * GR has no effect in UTF-8 mode. C1 is used only if S8C1T is enabled. In UTF-8 mode C1 can be
+     * accesed only with escape sequences.
      *
      * Historically this was used to input language specific characters or symbols (without
      * multi-byte sequences). Even though there is no need for this when using UTF-8, some modern

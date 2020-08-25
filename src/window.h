@@ -44,6 +44,7 @@ struct WindowBase;
 struct IWindow
 {
     void (*set_fullscreen)(struct WindowBase* self, bool fullscreen);
+    void (*set_maximized)(struct WindowBase* self, bool maximized);
     void (*resize)(struct WindowBase* self, uint32_t w, uint32_t h);
     void (*events)(struct WindowBase* self);
     TimePoint* (*process_timers)(struct WindowBase* self);
@@ -61,11 +62,19 @@ struct IWindow
 
 typedef struct WindowBase
 {
-    int32_t  w, h, x, y;
+    /* Window dimensions and position */
+    int32_t w, h, x, y;
+
+    /*
+     * Window dimensions used before window state was changed by maximizing or making it fullscreen.
+     */
+    int32_t previous_w, previous_h;
+
     int32_t  pointer_x, pointer_y;
     uint16_t state_flags;
     bool     paint;
-    struct WindowCallbacks
+
+    struct window_callbacks_t
     {
         void* user_data;
         void (*key_handler)(void* user_data, uint32_t code, uint32_t rawcode, uint32_t mods);
@@ -103,6 +112,11 @@ static void Window_update_title(struct WindowBase* self, const char* title)
 static inline void* Window_get_proc_adress(struct WindowBase* self, const char* procname)
 {
     return self->interface->get_gl_ext_proc_adress(self, procname);
+}
+
+static inline void Window_set_maximized(struct WindowBase* self, bool maximized)
+{
+    self->interface->set_maximized(self, maximized);
 }
 
 static inline void Window_set_fullscreen(struct WindowBase* self, bool fullscreen)

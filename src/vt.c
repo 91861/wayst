@@ -1199,14 +1199,26 @@ __attribute__((always_inline, flatten)) static inline int32_t short_sequence_get
 static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
 {
     switch (code) {
+
         /* Application Cursor Keys (DECCKM) */
         // FIXME: that should be some other separate mode
         case 1:
             self->modes.application_keypad = on;
             break;
 
-        case 5: /* DECSCNM -- Reverse video */
+        /* Column mode 132/80 (DECCOLM) */
+        case 3:
+            break;
+
+        /* Reverse video (DECSCNM) */
+        case 5:
             // TODO:
+            break;
+
+        /* DSR—Extended Cursor Position Report (DECXCPR) */
+        case 6:
+            // TODO:
+            WRN("DECXCPR not implemented\n");
             break;
 
         /* DECAWM */
@@ -1227,23 +1239,52 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
         case 12:
             break;
 
-            /* hide/show cursor (DECTCEM) */
+        /* Very visible cursor (CVVIS) */
+        /* case 12: */
+        /* break; */
+
+        /* Printer status request (DSR) */
+        case 15:
+            /* Printer not connected. */
+            Vt_output(self, "\e[?13n", 6);
+            break;
+
+        /* hide/show cursor (DECTCEM) */
         case 25:
             self->cursor.hidden = !on;
             break;
 
-            /* Very visible cursor (CVVIS) */
-            // case 12:
-            // break;
+        /* Page cursor-coupling mode (DECPCCM) */
+        case 64:
+        /* Vertical cursor-coupling mode (DECVCCM) */
+        case 61:
+            WRN("Page cursor-coupling not implemented\n");
+            break;
+
+        /* Numeric keypad (DECNKM) */
+        case 66:
+            WRN("DECNKM not implemented\n");
+            break;
+
+        /* Set Backarrow key to backspace/delete (DECBKM) */
+        case 67:
+            // TODO:
+            WRN("DECBKM not implemented\n");
+            break;
+
+        /* Keyboard usage (DECKBUM) */
+        case 68:
+            WRN("DECKBUM not implemented\n");
+            break;
 
         /* X11 xterm mouse protocol. */
         case 1000:
             self->modes.mouse_btn_report = on;
             break;
 
-        /* Hilite mouse tracking, xterm */
+        /* Highlight mouse tracking, xterm */
         case 1001:
-            WRN("Hilite mouse tracking not implemented\n");
+            WRN("Highlight mouse tracking not implemented\n");
             break;
 
         /* xterm cell motion mouse tracking */
@@ -1659,7 +1700,7 @@ static inline void Vt_handle_CSI(Vt* self, char c)
                 } break;
 
                 /* no args: 1:1, one arg: x:1 */
-                /* <ESC>[ Py ; Px f - move cursor to Px-Py (HVP) */
+                /* <ESC>[ Py ; Px f - move cursor to Px-Py (HVP) (deprecated) */
                 case 'f':
                 /* <ESC>[ Py ; Px H - move cursor to Px-Py (CUP) */
                 case 'H': {
@@ -1815,11 +1856,12 @@ static inline void Vt_handle_CSI(Vt* self, char c)
 
                 /* <ESC>[ Ps ; Ps ; Ps t - xterm windowOps (XTWINOPS)*/
                 case 't': {
-                    int nargs;
-                    int args[4];
+                    int32_t nargs;
+                    int32_t args[4];
 
+                    /* Set omitted args to -1 */
                     for (nargs = 0; seq && nargs < 4 && *seq != 't'; ++nargs) {
-                        *(args + nargs) = strtol(seq, NULL, 10);
+                        *(args + nargs) = *seq == ';' ? -1 : strtol(seq, NULL, 10);
                         seq             = strstr(seq, ";");
                         if (seq)
                             ++seq;
@@ -1832,55 +1874,196 @@ static inline void Vt_handle_CSI(Vt* self, char c)
 
                         /* de-iconyfy */
                         case 1:
+                            // TODO:
                             break;
 
                         /* iconyfy */
                         case 2:
+                            // TODO:
                             break;
 
                         /* move window to args[1]:args[2] */
                         case 3:
+                            // TODO:
                             break;
 
-                        /* resize in pixels */
+                        /* Resize window in pixels
+                         *
+                         * Omitted parameters reuse the current height or width. Zero parameters use
+                         * the display's height or width.
+                         *
+                         * FIXME: This should accounts for window decorations.
+                         */
                         case 4:
+                            if (nargs >= 2) {
+                                int32_t target_w = args[1];
+                                int32_t target_h = nargs >= 3 ? args[2] : -1;
+
+                                if (target_w == -1 || target_h == -1) {
+                                    Pair_uint32_t current_dims =
+                                      CALL_FP(self->callbacks.on_window_size_requested,
+                                              self->callbacks.user_data);
+
+                                    if (target_w == -1) {
+                                        target_w = current_dims.first;
+                                    }
+                                    if (target_h == -1) {
+                                        target_h = current_dims.second;
+                                    }
+                                }
+                                if (target_w == 0 || target_h == 0) {
+                                    // TODO: get display size
+                                    WRN("Display size in XTWINOPS not implemented\n");
+                                    break;
+                                }
+
+                                CALL_FP(self->callbacks.on_window_dimensions_set,
+                                        self->callbacks.user_data,
+                                        target_w,
+                                        target_h);
+                            } else {
+                                WRN("Invalid XTWINOPS sequence: %s\n", seq);
+                            }
                             break;
 
-                        /* raise window */
+                        /* Raise window */
                         case 5:
+                            // TODO:
                             break;
 
                         /* lower window */
                         case 6:
+                            // TODO:
                             break;
 
-                        /* refresh(?!) window */
+                        /* Refresh window */
                         case 7:
+                            CALL_FP(self->callbacks.on_action_performed, self->callbacks.user_data);
+                            CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
                             break;
 
-                        /* resize in characters */
-                        case 8:
-                            break;
+                        /* Resize in cells */
+                        case 8: {
+                            if (nargs >= 2) {
+                                int32_t target_rows = args[1];
+                                int32_t target_cols = nargs >= 3 ? args[2] : -1;
 
-                        case 9: {
-                            /* unmaximize window */
-                            if (args[1] == 0 && nargs >= 2) {
-                            }
+                                Pair_uint32_t target_text_area_dims =
+                                  CALL_FP(self->callbacks.on_window_size_from_cells_requested,
+                                          self->callbacks.user_data,
+                                          target_rows > 0 ? target_rows : 1,
+                                          target_cols > 0 ? target_cols : 1);
 
-                            /* maximize window */
-                            else if (args[1] == 1 && nargs >= 2) {
+                                Pair_uint32_t currnet_text_area_dims =
+                                  CALL_FP(self->callbacks.on_text_area_size_requested,
+                                          self->callbacks.user_data);
+
+                                if (target_cols == -1) {
+                                    target_text_area_dims.first = currnet_text_area_dims.first;
+                                }
+                                if (target_rows == -1) {
+                                    target_text_area_dims.second = currnet_text_area_dims.second;
+                                }
+                                if (target_cols == 0 || target_rows == 0) {
+                                    WRN("Display size in XTWINOPS not implemented\n");
+                                    break;
+                                }
+
+                                CALL_FP(self->callbacks.on_text_area_dimensions_set,
+                                        self->callbacks.user_data,
+                                        target_text_area_dims.first,
+                                        target_text_area_dims.second);
                             } else {
-                                WRN("Invalid CSI(WindowOps) sequence: %s\n", seq);
+                                WRN("Invalid XTWINOPS sequence: %s\n", seq);
                             }
                         } break;
 
-                        /* Report iconification state */
-                        case 11:
-                            /* if (iconified) */
-                            /*     write(CSI 1 t) */
-                            /* else */
-                            /*     write(CSI 2 t) */
+                        /* Maximize */
+                        case 9: {
+                            if (nargs >= 2) {
+                                switch (args[1]) {
+                                    /* Unmaximize */
+                                    case 0:
+                                        CALL_FP(self->callbacks.on_window_maximize_state_set,
+                                                self->callbacks.user_data,
+                                                false);
+                                        break;
+
+                                    /* invisible-island.net:
+                                     * `xterm uses Extended Window Manager Hints (EWMH) to maximize
+                                     * the window.  Some window managers have incomplete support for
+                                     * EWMH.  For instance, fvwm, flwm and quartz-wm advertise
+                                     * support for maximizing windows horizontally or vertically,
+                                     * but in fact equate those to the maximize operation.`
+                                     *
+                                     * Waylands xdg_shell/wl_shell have no concept of
+                                     * 'vertical/horizontal window maximization' so we should also
+                                     * treat that as regular maximization.
+                                     */
+                                    /* Maximize */
+                                    case 1:
+                                    /* Maximize vertically */
+                                    case 2:
+                                    /* Maximize horizontally */
+                                    case 3:
+                                        CALL_FP(self->callbacks.on_window_maximize_state_set,
+                                                self->callbacks.user_data,
+                                                true);
+                                        break;
+
+                                    default:
+                                        WRN("Invalid XTWINOPS: %s\n", seq);
+                                }
+                            } else {
+                                WRN("Invalid XTWINOPS: %s\n", seq);
+                            }
+                        } break;
+
+                        /* Fullscreen */
+                        case 10:
+                            if (nargs >= 2) {
+                                switch (args[1]) {
+                                    /* Disable */
+                                    case 0:
+                                        CALL_FP(self->callbacks.on_window_fullscreen_state_set,
+                                                self->callbacks.user_data,
+                                                false);
+                                        break;
+
+                                    /* Enable */
+                                    case 1:
+                                        CALL_FP(self->callbacks.on_window_fullscreen_state_set,
+                                                self->callbacks.user_data,
+                                                true);
+                                        break;
+
+                                        /* Toggle */
+                                    case 2: {
+                                        bool current_state =
+                                          CALL_FP(self->callbacks.on_fullscreen_state_requested,
+                                                  self->callbacks.user_data);
+                                        CALL_FP(self->callbacks.on_window_fullscreen_state_set,
+                                                self->callbacks.user_data,
+                                                !current_state);
+                                    } break;
+
+                                    default:
+                                        WRN("Invalid XTWINOPS: %s\n", seq);
+                                        break;
+                                }
+                            } else {
+                                WRN("Invalid XTWINOPS: %s\n", seq);
+                            }
                             break;
+
+                        /* Report iconification state */
+                        case 11: {
+                            bool is_minimized =
+                              CALL_FP(self->callbacks.on_minimized_state_requested,
+                                      self->callbacks.user_data);
+                            Vt_output_formated(self, "\e[%d", is_minimized ? 1 : 2);
+
+                        } break;
 
                         /* Report window position */
                         case 13: {
@@ -2321,11 +2504,19 @@ static void Vt_handle_DCS(Vt* self, char c)
 
             /* Synchronized update */
             case '=':
-                if ((seq[1] == '1'|| seq[1] == '2') && seq[2] == 's') {
+                if ((seq[1] == '1' || seq[1] == '2') && seq[2] == 's') {
                     if (seq[1] == '1') {
-                        // Begin synchronized update (BSU)
+                        /* Begin synchronized update (BSU) (iTerm2)
+                         *
+                         * Meant to reduce flicker when redrawing large portions of the screen.
+                         * The terminal should create a snapshot of the screen content and display
+                         * that until ESU is sent (or some kind of timeout in case the program
+                         * is killed/crashes).
+                         */
+
+                        // TODO: some way to deal with proxy object updates
                     } else {
-                        // End synchronized update (ESU)
+                        /* End synchronized update (ESU) (iTerm2) */
                     }
                 }
                 return;
@@ -2438,12 +2629,24 @@ static void Vt_handle_OSC(Vt* self, char c)
                 WRN("OSC 8 hyperlinks not implemented\n");
                 break;
 
-            /* sets dynamic colors for xterm colorOps */
+            /* Send Growl(some kind of notification daemon for OSX) notification (iTerm2) */
+            case 9:
+                CALL_FP(self->callbacks.on_desktop_notification_sent,
+                        self->callbacks.user_data,
+                        NULL,
+                        seq + 2 /* 9; */);
+                break;
+
+            /* Set title for tab (konsole extension) */
+            case 30:
+                break;
+
+            /* Set dynamic colors for xterm colorOps */
             case 10 ... 19:
                 WRN("Dynamic colors not implemented\n");
                 break;
 
-            /* coresponding colorOps resets */
+            /* Coresponding colorOps resets */
             case 110 ... 119:
                 // TODO: reset things, when there are things to reset
                 break;
@@ -2452,10 +2655,34 @@ static void Vt_handle_OSC(Vt* self, char c)
                 WRN("xterm fontOps not implemented\n");
                 break;
 
-            /* Send desktop notification */
-            case 777:
-                WRN("OSC 777 notifications not implemented\n");
-                break;
+            /* Send desktop notification (rxvt extension)
+             * OSC 777;notify;title;body ST */
+            case 777: {
+                Vector_Vector_char tokens = string_split_on(seq + 4 /* 777; */, ";", NULL, NULL);
+                if (tokens.size >= 2) {
+                    if (!strcmp(tokens.buf[0].buf + 1, "notify")) {
+                        if (tokens.size == 2) {
+                            CALL_FP(self->callbacks.on_desktop_notification_sent,
+                                    self->callbacks.user_data,
+                                    NULL,
+                                    tokens.buf[1].buf + 1);
+                        } else if (tokens.size == 3) {
+                            CALL_FP(self->callbacks.on_desktop_notification_sent,
+                                    self->callbacks.user_data,
+                                    tokens.buf[1].buf + 1,
+                                    tokens.buf[2].buf + 1);
+                        } else {
+                            WRN("Unexpected argument in OSC 777 \'%s\'\n", seq);
+                        }
+                    } else {
+                        WRN("Second argument to OSC 777 \'%s\' is not \'notify\'\n", seq);
+                    }
+                } else {
+                    WRN("OSC 777 \'%s\' not enough arguments\n", seq);
+                }
+
+                Vector_destroy_Vector_char(&tokens);
+            } break;
 
             default:
                 WRN("Unknown OSC: %s\n", self->parser.active_sequence.buf);
@@ -3021,7 +3248,7 @@ __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_litera
         switch (c) {
             case '\a':
                 if (!settings.no_flash) {
-                    CALL_FP(self->callbacks.on_bell_flash, self->callbacks.user_data);
+                    CALL_FP(self->callbacks.on_visual_bell, self->callbacks.user_data);
                 }
                 break;
 
@@ -3163,7 +3390,7 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
 
                 case 'g':
                     if (!settings.no_flash) {
-                        CALL_FP(self->callbacks.on_bell_flash, self->callbacks.user_data);
+                        CALL_FP(self->callbacks.on_visual_bell, self->callbacks.user_data);
                     }
                     self->parser.state = PARSER_STATE_LITERAL;
                     break;
@@ -3179,6 +3406,14 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
                     self->modes.application_keypad = false;
                     self->parser.state             = PARSER_STATE_LITERAL;
                     return;
+
+                /* Disable Manual Input (DMI) */
+                case '`':
+                /* Enable Manual Input (EMI) */
+                case 'b':
+                    WRN("Manual input not implemented\n");
+                    self->parser.state = PARSER_STATE_LITERAL;
+                    break;
 
                 /* Reset initial state (RIS) */
                 case 'c':
@@ -3217,6 +3452,31 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
                     self->cursor.col   = self->saved_cursor_pos;
                     self->parser.state = PARSER_STATE_LITERAL;
                     return;
+
+                /* Back Index (DECBI) (VT400)
+                 *
+                 * This control function moves the cursor backward one column. If the cursor is at
+                 * the left margin, all screen data within the margins moves onecolumn to the right.
+                 * The column shifted past the right margin is lost
+                 */
+                case '6':
+
+                /* Forward Index (DECFI) (VT400)
+                 *
+                 * This control function moves the cursor forward one column. If the cursor is at
+                 * the right margin, all screen data within the margins moves onecolumn to the left.
+                 * The column shifted past the left margin is lost.
+                 **/
+                case '9':
+                    WRN("VT400 shifting cursor movement not implemented\n");
+                    self->parser.state = PARSER_STATE_LITERAL;
+                    break;
+
+                /* Coding Method Delimiter (CMD) */
+                case 'd':
+                    WRN("CMD not implemented\n");
+                    self->parser.state = PARSER_STATE_LITERAL;
+                    break;
 
                 /* Invoke the G2 Character Set into GL (VT200 mode only) (LS2) */
                 case 'n':
@@ -3260,7 +3520,7 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
                     self->parser.state         = PARSER_STATE_LITERAL;
                     break;
 
-                /* Old title set sequence */
+                /* Old (tab)title set sequence */
                 case 'k':
                     self->parser.state = PARSER_STATE_TITLE;
                     break;
@@ -3632,13 +3892,13 @@ static bool Vt_maybe_handle_unicode_input_key(Vt*      self,
             CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
         } else if (isxdigit(key)) {
             if (self->unicode_input.buffer.size > 8) {
-                CALL_FP(self->callbacks.on_bell_flash, self->callbacks.user_data);
+                CALL_FP(self->callbacks.on_visual_bell, self->callbacks.user_data);
             } else {
                 Vector_push_char(&self->unicode_input.buffer, key);
                 CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
             }
         } else {
-            CALL_FP(self->callbacks.on_bell_flash, self->callbacks.user_data);
+            CALL_FP(self->callbacks.on_visual_bell, self->callbacks.user_data);
         }
         return true;
     }

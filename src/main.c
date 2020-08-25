@@ -103,14 +103,14 @@ typedef struct
 static void App_update_scrollbar_dims(App* self);
 static void App_update_scrollbar_vis(App* self);
 static void App_update_cursor(App* self);
-void        App_do_autoscroll(App* self);
-void        App_notify_content_change(void* self);
+static void App_do_autoscroll(App* self);
+static void App_notify_content_change(void* self);
 static void App_clamp_cursor(App* self, Pair_uint32_t chars);
 static void App_set_monitor_callbacks(App* self);
 static void App_set_callbacks(App* self);
 static void App_maybe_resize(App* self, Pair_uint32_t newres);
 
-void* App_load_extension_proc_address(void* self, const char* name)
+static void* App_load_extension_proc_address(void* self, const char* name)
 {
     App*  app  = self;
     void* addr = Window_get_proc_adress(app->win, name);
@@ -120,7 +120,7 @@ void* App_load_extension_proc_address(void* self, const char* name)
     return addr;
 }
 
-void App_create_window(App* self, Pair_uint32_t res)
+static void App_create_window(App* self, Pair_uint32_t res)
 {
     if (!settings.x11_is_default)
 #ifndef NOWL
@@ -140,7 +140,7 @@ void App_create_window(App* self, Pair_uint32_t res)
     }
 }
 
-void App_init(App* self)
+static void App_init(App* self)
 {
     memset(self, 0, sizeof(App));
     self->monitor = Monitor_new();
@@ -176,7 +176,7 @@ void App_init(App* self)
     self->resolution         = size;
 }
 
-void App_run(App* self)
+static void App_run(App* self)
 {
     while (!(self->exit || Window_is_closed(self->win))) {
         int timeout_ms = self->swap_performed
@@ -281,12 +281,12 @@ static void App_maybe_resize(App* self, Pair_uint32_t newres)
     }
 }
 
-void App_clipboard_handler(void* self, const char* text)
+static void App_clipboard_handler(void* self, const char* text)
 {
     Vt_handle_clipboard(&((App*)self)->vt, text);
 }
 
-void App_reload_font(void* self)
+static void App_reload_font(void* self)
 {
     App* app = self;
     Freetype_reload_fonts(&app->freetype);
@@ -297,57 +297,57 @@ void App_reload_font(void* self)
     Window_maybe_swap(app->win);
 }
 
-uint32_t App_get_key_code(void* self, char* name)
+static uint32_t App_get_key_code(void* self, char* name)
 {
     return Window_get_keysym_from_name(((App*)self)->win, name);
 }
 
-void App_notify_content_change(void* self)
+static void App_notify_content_change(void* self)
 {
     Window_notify_content_change(((App*)self)->win);
 }
 
-void App_clipboard_send(void* self, const char* text)
+static void App_clipboard_send(void* self, const char* text)
 {
     Window_clipboard_send(((App*)self)->win, text);
 }
 
-void App_clipboard_get(void* self)
+static void App_clipboard_get(void* self)
 {
     Window_clipboard_get(((App*)self)->win);
 }
 
-Pair_uint32_t App_window_size(void* self)
+static Pair_uint32_t App_window_size(void* self)
 {
     return Window_size(((App*)self)->win);
 }
 
-Pair_uint32_t App_window_position(void* self)
+static Pair_uint32_t App_window_position(void* self)
 {
     return Window_position(((App*)self)->win);
 }
 
-Pair_uint32_t App_pixels(void* self, uint32_t rows, uint32_t columns)
+static Pair_uint32_t App_pixels(void* self, uint32_t rows, uint32_t columns)
 {
     return Gfx_pixels(((App*)self)->gfx, rows, columns);
 }
 
-Pair_uint32_t App_get_char_size(void* self)
+static Pair_uint32_t App_get_char_size(void* self)
 {
     return Gfx_get_char_size(((App*)self)->gfx);
 }
 
-void App_update_title(void* self, const char* title)
+static void App_update_title(void* self, const char* title)
 {
     Window_update_title(((App*)self)->win, title);
 }
 
-void App_flash(void* self)
+static void App_flash(void* self)
 {
     Gfx_flash(((App*)self)->gfx);
 }
 
-void App_action(void* self)
+static void App_action(void* self)
 {
     Gfx_notify_action(((App*)self)->gfx);
 }
@@ -761,7 +761,7 @@ static void App_update_scrollbar_vis(App* self)
     self->last_scrolling = vt->scrolling_visual;
 }
 
-void App_do_autoscroll(App* self)
+static void App_do_autoscroll(App* self)
 {
     Vt* vt = &self->vt;
     App_update_scrollbar_vis(self);
@@ -913,13 +913,13 @@ static bool App_maybe_consume_click(App*     self,
     return false;
 }
 
-void App_button_handler(void*    self,
-                        uint32_t button,
-                        bool     state,
-                        int32_t  x,
-                        int32_t  y,
-                        int32_t  ammount,
-                        uint32_t mods)
+static void App_button_handler(void*    self,
+                               uint32_t button,
+                               bool     state,
+                               int32_t  x,
+                               int32_t  y,
+                               int32_t  ammount,
+                               uint32_t mods)
 {
     App* app             = self;
     Vt*  vt              = &app->vt;
@@ -949,7 +949,7 @@ void App_button_handler(void*    self,
     }
 }
 
-void App_motion_handler(void* self, uint32_t button, int32_t x, int32_t y)
+static void App_motion_handler(void* self, uint32_t button, int32_t x, int32_t y)
 {
     App* app = self;
     x        = CLAMP(x - app->ui.pixel_offset_x, 0, (int32_t)app->resolution.first);
@@ -959,7 +959,7 @@ void App_motion_handler(void* self, uint32_t button, int32_t x, int32_t y)
     }
 }
 
-void App_destroy_proxy_handler(void* self, VtLineProxy* proxy)
+static void App_destroy_proxy_handler(void* self, VtLineProxy* proxy)
 {
     App* app = self;
     Gfx_destroy_proxy(app->gfx, proxy->data);
@@ -971,6 +971,59 @@ static void App_set_monitor_callbacks(App* self)
     self->monitor.callbacks.user_data = self;
 }
 
+static void App_send_desktop_notification(void* self, const char* opt_title, const char* text)
+{
+    const char* argv[] = { "notify-send", OR(opt_title, text), opt_title ? text : NULL, NULL };
+    spawn_process(NULL, argv[0], (char**)argv, true, false);
+}
+
+static bool App_minimized(void* self)
+{
+    App* app = self;
+    return Window_is_minimized(app->win);
+}
+
+static bool App_fullscreen(void* self)
+{
+    App* app = self;
+    return Window_is_fullscreen(app->win);
+}
+
+static void App_set_maximized_state(void* self, bool maximize)
+{
+    App* app = self;
+    Window_set_maximized(app->win, maximize);
+}
+
+static void App_set_fullscreen_state(void* self, bool fullscreen)
+{
+    App* app = self;
+    Window_set_fullscreen(app->win, fullscreen);
+}
+
+static void App_set_window_size(void* self, int32_t width, int32_t height)
+{
+    App* app = self;
+    Window_resize(app->win, width, height);
+}
+
+static void App_set_text_area_size(void* self, int32_t width, int32_t height)
+{
+    App* app = self;
+    Window_resize(app->win, width + 2 * settings.padding, height + 2 * settings.padding);
+}
+
+static Pair_uint32_t App_text_area_size(void* self)
+{
+    App* app = self;
+
+    Pair_uint32_t win_size = Window_size(app->win);
+    win_size.first -= settings.padding;
+    win_size.second -= settings.padding;
+
+    return win_size;
+}
+
 static void App_set_callbacks(App* self)
 {
     self->vt.callbacks.user_data                           = self;
@@ -978,13 +1031,21 @@ static void App_set_callbacks(App* self)
     self->vt.callbacks.on_clipboard_sent                   = App_clipboard_send;
     self->vt.callbacks.on_clipboard_requested              = App_clipboard_get;
     self->vt.callbacks.on_window_size_requested            = App_window_size;
+    self->vt.callbacks.on_text_area_size_requested         = App_text_area_size;
     self->vt.callbacks.on_window_position_requested        = App_window_position;
     self->vt.callbacks.on_window_size_from_cells_requested = App_pixels;
     self->vt.callbacks.on_number_of_cells_requested        = App_get_char_size;
+    self->vt.callbacks.on_minimized_state_requested        = App_minimized;
+    self->vt.callbacks.on_fullscreen_state_requested       = App_fullscreen;
     self->vt.callbacks.on_title_changed                    = App_update_title;
-    self->vt.callbacks.on_bell_flash                       = App_flash;
+    self->vt.callbacks.on_visual_bell                      = App_flash;
+    self->vt.callbacks.on_window_maximize_state_set        = App_set_maximized_state;
+    self->vt.callbacks.on_window_fullscreen_state_set      = App_set_fullscreen_state;
+    self->vt.callbacks.on_window_dimensions_set            = App_set_window_size;
+    self->vt.callbacks.on_text_area_dimensions_set         = App_set_text_area_size;
     self->vt.callbacks.on_action_performed                 = App_action;
     self->vt.callbacks.on_font_reload_requseted            = App_reload_font;
+    self->vt.callbacks.on_desktop_notification_sent        = App_send_desktop_notification;
     self->vt.callbacks.destroy_proxy                       = App_destroy_proxy_handler;
 
     self->win->callbacks.user_data               = self;
@@ -1010,4 +1071,3 @@ int main(int argc, char** argv)
     App_run(&application);
     settings_cleanup();
 }
-
