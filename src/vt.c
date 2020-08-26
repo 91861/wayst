@@ -1377,7 +1377,7 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
     }
 }
 
-static inline void Vt_handle_CSI(Vt* self, char c)
+__attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
 {
     Vector_push_char(&self->parser.active_sequence, c);
 
@@ -1385,13 +1385,13 @@ static inline void Vt_handle_CSI(Vt* self, char c)
                                    self->parser.active_sequence.size)) {
         CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
         Vector_push_char(&self->parser.active_sequence, '\0');
-        char* seq       = self->parser.active_sequence.buf;
-        char  last_char = self->parser.active_sequence.buf[self->parser.active_sequence.size - 2];
-
-        /* char  second_last_char = */
-        /*   self->parser.active_sequence.size < 3 */
-        /*     ? '\0' */
-        /*     : self->parser.active_sequence.buf[self->parser.active_sequence.size - 3]; */
+        char* seq        = self->parser.active_sequence.buf;
+        char  first_char = *seq;
+        char  last_char  = self->parser.active_sequence.buf[self->parser.active_sequence.size - 2];
+        char  second_last_char =
+          self->parser.active_sequence.size < 3
+            ? '\0'
+            : self->parser.active_sequence.buf[self->parser.active_sequence.size - 3];
 
         bool is_single_arg = !strchr(seq, ';') && !strchr(seq, ':');
 
@@ -1401,737 +1401,1161 @@ static inline void Vt_handle_CSI(Vt* self, char c)
         break;                                                                                     \
     }
 
-        if (*seq == '?') {
-            /* sequence starts with question mark */
-            switch (last_char) {
-                /* <ESC>[? Pm h - DEC Private Mode Set (DECSET) */
-                case 'h':
-                /* <ESC>[? Pm l - DEC Private Mode Reset (DECRST) */
-                case 'l': {
-                    bool               is_enable = last_char == 'h';
-                    Vector_Vector_char tokens    = string_split_on(seq + 1, ";:", NULL, NULL);
-                    for (Vector_char* token = NULL;
-                         (token = Vector_iter_Vector_char(&tokens, token));) {
-                        errno     = 0;
-                        long code = strtol(token->buf + 1, NULL, 10);
-                        if (code && !errno) {
-                            Vt_handle_dec_mode(self, code, is_enable);
-                        } else {
-                            WRN("Invalid %s argument: \'%s\'\n",
-                                is_enable ? "DECSET" : "DECRST",
-                                token->buf + 1);
+        switch (first_char) {
+
+            /* <ESC>[! ... */
+            case '!': {
+                switch (last_char) {
+                    /* <ESC>[!p - Soft terminal reset (DECSTR), VT220 and up. */
+                    case 'p': {
+                        WRN("DECSTR not implemented\n");
+                    } break;
+
+                    default:
+                        WRN("Unknown CSI sequence: %s\n", seq);
+                }
+            } break;
+
+            /* <ESC>[? ... */
+            case '?': {
+                switch (second_last_char) {
+
+                    /* <ESC>[? ... $ ... */
+                    case '$': {
+                        switch (last_char) {
+
+                            /* <ESC>[? Ps $p - Request DEC private mode (DECRQM). VT300 and up
+                             *
+                             * Ps - mode id as per DECSET/DECSET
+                             *
+                             * reply:
+                             *   CSI? <mode id>;<value> $y
+                             */
+                            case 'p': {
+                                /* Not recognized */
+                                WRN("DEC mode state reports not implemented\n");
+                            } break;
+
+                            default:
+                                WRN("Unknown CSI sequence: %s\n", seq);
                         }
-                    }
-                    Vector_destroy_Vector_char(&tokens);
-                } break;
+                    } break;
 
-                /* <ESC>[? Ps i -  Media Copy (MC), DEC-specific */
-                case 'i':
-                    break;
-
-                    /* <ESC>[? Ps n Device Status Report (DSR, DEC-specific) */
-                case 'n': {
-                    int arg = short_sequence_get_int_argument(seq);
-                    /* 6 - report cursor position */
-                    if (arg == 6) {
-                        Vt_output_formated(self,
-                                           "\e[%zu;%zuR",
-                                           Vt_get_cursor_row_screen(self) + 1,
-                                           self->cursor.col + 1);
-                    } else {
-                        WRN("Unimplemented DSR(DEC) code: %d\n", arg);
-                    }
-                } break;
-
-                default:
-                    WRN("Unknown CSI sequence: %s\n", seq);
-            }
-        } else if (*seq == '>') {
-            switch (last_char) {
-                /* <ESC>[> Pp m / <ESC>[> Pp ; Pv m - Set/reset key modifier options (XTMODKEYS)
-                 * Pp = 0 - modifyKeyboard.
-                 * Pp = 1 - modifyCursorKeys.
-                 * Pp = 2 - modifyFunctionKeys.
-                 * Pp = 4 - modifyOtherKeys.
-                 */
-                case 'm':
-                    // TODO:
-                    break;
-
-                /* <ESC>[> Ps n - Disable key modifier options, xterm
-                 * Pp = 0 - modifyKeyboard.
-                 * Pp = 1 - modifyCursorKeys.
-                 * Pp = 2 - modifyFunctionKeys.
-                 * Pp = 4 - modifyOtherKeys.
-                 */
-                case 'n':
-                    // TODO:
-                    break;
-
-                /* <ESC>[ > Ps c - Send Device Attributes (Secondary DA) */
-                case 'c': {
-                    MULTI_ARG_IS_ERROR
-                    int arg = short_sequence_get_int_argument(seq);
-                    if (arg == 0) {
-                        /* report VT100, firmware ver. 0, ROM number 0 */
-                        Vt_output(self, "\e[>0;0;0c", 9);
-                    }
-                } break;
-
-                default:
-                    WRN("Unknown CSI sequence: %s\n", seq);
-            }
-        } else if (*seq == '#') {
-            switch (last_char) {
-                case '}':
-                case '{': {
-                    WRN("XTPUSHSGR/XTPOPSGR not implemented\n");
-                } break;
-
-                default:
-                    WRN("Unknown CSI sequence: %s\n", seq);
-            }
-        } else if (*seq == '=') {
-            switch (last_char) {
-                /* <ESC>[ = Ps c - Send Device Attributes (Tertiary DA). */
-                case 'c': {
-                    MULTI_ARG_IS_ERROR
-                    int arg = short_sequence_get_int_argument(seq);
-                    if (arg == 0) {
-                        Vt_output(self, "\e[?6c", 5);
-                    }
-                } break;
-
-                default:
-                    WRN("Unknown CSI sequence: %s\n", seq);
-            }
-        } else {
-            switch (last_char) {
-                /* <ESC>[ Ps ; ... m - change one or more text attributes (SGR) */
-                case 'm': {
-                    Vector_pop_n_char(&self->parser.active_sequence, 2); // 'm', '\0'
-                    Vector_push_char(&self->parser.active_sequence, '\0');
-                    Vt_handle_multi_argument_SGR(self, self->parser.active_sequence);
-                } break;
-
-                /* <ESC>[ Ps K - clear(erase) line right of cursor (EL)
-                 * none/0 - right 1 - left 2 - all */
-                case 'K': {
-                    MULTI_ARG_IS_ERROR
-                    int arg = *seq == 'K' ? 0 : short_sequence_get_int_argument(seq);
-                    switch (arg) {
-                        case 0:
-                            Vt_clear_right(self);
-                            break;
-
-                        case 2:
-                            Vt_clear_right(self);
-                            /* fallthrough */
-                        case 1:
-                            Vt_clear_left(self);
-                            break;
-
-                        default:
-                            WRN("Unknown CSI(EL) sequence: %s\n", seq);
-                    }
-                } break;
-
-                /* <ECS>[ Ps @ - Insert Ps Chars (ICH) */
-                case '@': {
-                    MULTI_ARG_IS_ERROR // TODO: (SL), ECMA-48
-                      int arg = short_sequence_get_int_argument(seq);
-                    for (int i = 0; i < arg; ++i) {
-                        Vt_insert_char_at_cursor_with_shift(self, blank_space);
-                    }
-                } break;
-
-                /* <ESC>[ Ps a - move cursor right (forward) Ps lines (HPR) */
-                case 'a':
-                /* <ESC>[ Ps C - move cursor right (forward) Ps lines (CUF) */
-                case 'C': {
-                    MULTI_ARG_IS_ERROR
-                    int arg = short_sequence_get_int_argument(seq);
-                    for (int i = 0; i < arg; ++i)
-                        Vt_cursor_right(self);
-                } break;
-
-                /* <ESC>[ Ps L - Insert line at cursor shift rest down (IL) */
-                case 'L': {
-                    MULTI_ARG_IS_ERROR
-                    int arg = short_sequence_get_int_argument(seq);
-                    for (int i = 0; i < arg; ++i)
-                        Vt_insert_line(self);
-                } break;
-
-                /* <ESC>[ Ps D - move cursor left (back) Ps lines (CUB) */
-                case 'D': {
-                    MULTI_ARG_IS_ERROR
-                    int arg = short_sequence_get_int_argument(seq);
-                    for (int i = 0; i < arg; ++i)
-                        Vt_cursor_left(self);
-                } break;
-
-                /* <ESC>[ Ps A - move cursor up Ps lines (CUU) */
-                case 'A': {
-                    MULTI_ARG_IS_ERROR // TODO: (SL), ECMA-48
-                      int arg = short_sequence_get_int_argument(seq);
-                    for (int i = 0; i < arg; ++i)
-                        Vt_cursor_up(self);
-                } break;
-
-                /* <ESC>[ Ps e - move cursor down Ps lines (VPR) */
-                case 'e':
-                /* <ESC>[ Ps B - move cursor down Ps lines (CUD) */
-                case 'B': {
-                    MULTI_ARG_IS_ERROR
-                    int arg = short_sequence_get_int_argument(seq);
-                    for (int i = 0; i < arg; ++i)
-                        Vt_cursor_down(self);
-                } break;
-
-                /* <ESC>[ Ps ` - move cursor to column Ps (CBT)*/
-                case '`':
-                /* <ESC>[ Ps G - move cursor to column Ps (CHA)*/
-                case 'G': {
-                    MULTI_ARG_IS_ERROR
-                    Vt_move_cursor_to_column(self, short_sequence_get_int_argument(seq) - 1);
-                } break;
-
-                /* <ESC>[ Ps J - Erase display (ED) - clear... */
-                case 'J': {
-                    MULTI_ARG_IS_ERROR
-                    if (*seq == 'J') /* ...from cursor to end of screen */
-                        Vt_erase_to_end(self);
-                    else {
-                        int arg = short_sequence_get_int_argument(seq);
-                        switch (arg) {
-                            case 1: /* ...from start to cursor */
-                                if (Vt_scroll_region_not_default(self)) {
-                                    Vt_clear_above(self);
-                                } else {
-                                    Vt_scroll_out_above(self);
-                                }
-                                break;
-
-                            case 3: /* ...whole display + scrollback buffer */
-                                /* if (settings.allow_scrollback_clear) { */
-                                /*     Vt_clear_display_and_scrollback(self); */
-                                /* } */
-                                break;
-
-                            case 2: /* ...whole display. Contents should not
-                                     * actually be removed, but saved to scroll
-                                     * history if no scroll region is set */
-                                if (self->alt_lines.buf) {
-                                    Vt_clear_display_and_scrollback(self);
-                                } else {
-                                    if (Vt_scroll_region_not_default(self)) {
-                                        Vt_clear_above(self);
-                                        Vt_erase_to_end(self);
+                    default:
+                        switch (last_char) {
+                            /* <ESC>[? Pm h - DEC Private Mode Set (DECSET) */
+                            case 'h':
+                            /* <ESC>[? Pm l - DEC Private Mode Reset (DECRST) */
+                            case 'l': {
+                                bool               is_enable = last_char == 'h';
+                                Vector_Vector_char tokens =
+                                  string_split_on(seq + 1, ";:", NULL, NULL);
+                                for (Vector_char* token = NULL;
+                                     (token = Vector_iter_Vector_char(&tokens, token));) {
+                                    errno     = 0;
+                                    long code = strtol(token->buf + 1, NULL, 10);
+                                    if (code && !errno) {
+                                        Vt_handle_dec_mode(self, code, is_enable);
                                     } else {
-                                        Vt_scroll_out_all_content(self);
+                                        WRN("Invalid %s argument: \'%s\'\n",
+                                            is_enable ? "DECSET" : "DECRST",
+                                            token->buf + 1);
                                     }
                                 }
+                                Vector_destroy_Vector_char(&tokens);
+                            } break;
+
+                            /* <ESC>[? Ps i -  Media Copy (MC), DEC-specific */
+                            case 'i':
                                 break;
+
+                                /* <ESC>[? Ps n Device Status Report (DSR, DEC-specific) */
+                            case 'n': {
+                                int arg = short_sequence_get_int_argument(seq);
+                                /* 6 - report cursor position */
+                                if (arg == 6) {
+                                    Vt_output_formated(self,
+                                                       "\e[%zu;%zuR",
+                                                       Vt_get_cursor_row_screen(self) + 1,
+                                                       self->cursor.col + 1);
+                                } else {
+                                    WRN("Unimplemented DSR(DEC) code: %d\n", arg);
+                                }
+                            } break;
+
+                            default:
+                                WRN("Unknown CSI sequence: %s\n", seq);
                         }
-                    }
-                } break;
+                }
+            } break;
 
-                /* <ESC>[ Ps d - move cursor to row Ps (VPA) */
-                case 'd': {
-                    MULTI_ARG_IS_ERROR
-                    /* origin is 1:1 */
-                    Vt_move_cursor(self,
-                                   self->cursor.col,
-                                   short_sequence_get_int_argument(seq) - 1);
-                } break;
+            /* <ESC>[> ... */
+            case '>': {
+                switch (last_char) {
+                    /* <ESC>[> Pp m / <ESC>[> Pp ; Pv m - Set/reset key modifier options (XTMODKEYS)
+                     * Pp = 0 - modifyKeyboard.
+                     * Pp = 1 - modifyCursorKeys.
+                     * Pp = 2 - modifyFunctionKeys.
+                     * Pp = 4 - modifyOtherKeys.
+                     */
+                    case 'm':
+                        // TODO:
+                        // break;
 
-                /* <ESC>[ Ps ; Ps r - Set scroll region (top;bottom) (DECSTBM)
-                 * default: full window */
-                case 'r': {
-                    uint32_t top, bottom;
-
-                    if (*seq != 'r') {
-                        if (sscanf(seq, "%u;%u", &top, &bottom) == EOF) {
-                            WRN("invalid CSI(DECSTBM) sequence %s\n", seq);
-                            break;
-                        }
-                        --top;
-                        --bottom;
-                    } else {
-                        top    = 0;
-                        bottom = CALL_FP(self->callbacks.on_number_of_cells_requested,
-                                         self->callbacks.user_data)
-                                   .second -
-                                 1;
-                    }
-
-                    self->scroll_region_top    = top;
-                    self->scroll_region_bottom = bottom;
-                } break;
-
-                /* <ESC>[ Pn I - cursor forward ps tabulations (CHT) */
-                case 'I': {
-                    MULTI_ARG_IS_ERROR
-                    // TODO:
-                } break;
-
-                /* <ESC>[ Pn Z - cursor backward ps tabulations (CBT) */
-                case 'Z': {
-                    MULTI_ARG_IS_ERROR
-                    // TODO:
-                } break;
-
-                /* <ESC>[ Pn g - tabulation clear (TBC) */
-                case 'g': {
-                    MULTI_ARG_IS_ERROR
-                    int arg = short_sequence_get_int_argument(seq);
-
-                    switch (arg) {
-                        case 0:
-                            // TODO: clear currnet tabstop
-                            break;
-                        case 3:
-                            // TODO: clear all tabstops
-                            break;
-                        default:;
-                    }
-
-                } break;
-
-                /* no args: 1:1, one arg: x:1 */
-                /* <ESC>[ Py ; Px f - move cursor to Px-Py (HVP) (deprecated) */
-                case 'f':
-                /* <ESC>[ Py ; Px H - move cursor to Px-Py (CUP) */
-                case 'H': {
-                    uint32_t x = 1, y = 1;
-                    if (*seq != 'H' && sscanf(seq, "%u;%u", &y, &x) == EOF) {
-                        WRN("invalid CSI(CUP) sequence %s\n", seq);
+                    /* <ESC>[> Ps n - Disable key modifier options, xterm
+                     * Pp = 0 - modifyKeyboard.
+                     * Pp = 1 - modifyCursorKeys.
+                     * Pp = 2 - modifyFunctionKeys.
+                     * Pp = 4 - modifyOtherKeys.
+                     */
+                    case 'n':
+                        // TODO:
+                        WRN("XTMODKEYS not implemented\n");
                         break;
-                    }
-                    --x;
-                    --y;
-                    Vt_move_cursor(self, x, y);
-                } break;
 
-                /* <ESC>[...c - Send device attributes (Primary DA) */
-                case 'c': {
-                    /* report VT 102 */
-                    Vt_output(self, "\e[?6c", 5);
-                } break;
-
-                /* <ESC>[...n - Device status report (DSR) */
-                case 'n': {
-                    MULTI_ARG_IS_ERROR
-                    int arg = short_sequence_get_int_argument(seq);
-                    if (arg == 5) {
-                        /* 5 - is terminal ok
-                         *  ok - 0, not ok - 3 */
-                        Vt_output(self, "\e[0n", 4);
-                    } else if (arg == 6) {
-                        /* 6 - report cursor position */
-                        Vt_output_formated(self,
-                                           "\e[%zu;%zuR",
-                                           Vt_get_cursor_row_screen(self) + 1,
-                                           self->cursor.col + 1);
-                    } else {
-                        WRN("Unimplemented DSR code: %d\n", arg);
-                    }
-                } break;
-
-                /* <ESC>[ Ps M - Delete lines (default = 1) (DL) */
-                case 'M': {
-                    MULTI_ARG_IS_ERROR
-                    int arg = short_sequence_get_int_argument(seq);
-                    for (int i = 0; i < arg; ++i)
-                        Vt_delete_line(self);
-                } break;
-
-                /* <ESC>[ Ps S - Scroll up (default = 1) (SU) */
-                case 'S': {
-                    MULTI_ARG_IS_ERROR
-                    int arg = short_sequence_get_int_argument(seq);
-                    for (int i = 0; i < arg; ++i)
-                        Vt_scroll_up(self);
-                } break;
-
-                /* <ESC>[ Ps T - Scroll down (default = 1) (SD) */
-                case 'T': {
-                    MULTI_ARG_IS_ERROR
-                    int arg = short_sequence_get_int_argument(seq);
-                    for (int i = 0; i < arg; ++i)
-                        Vt_scroll_down(self);
-                } break;
-
-                /* <ESC>[ Ps X - Erase Ps Character(s) (default = 1) (ECH) */
-                case 'X':
-                    MULTI_ARG_IS_ERROR
-                    Vt_erase_chars(self, short_sequence_get_int_argument(seq));
-                    break;
-
-                /* <ESC>[ Ps P - Delete Ps Character(s) (default = 1) (DCH) */
-                case 'P':
-                    MULTI_ARG_IS_ERROR
-                    Vt_delete_chars(self, short_sequence_get_int_argument(seq));
-                    break;
-
-                /* <ESC>[ Ps b -  Repeat the preceding graphic character Ps times (REP)
-                 * in xterm any cursor movement or SGR sequences after inserting the character
-                 * cause this to have no effect */
-                case 'b': {
-                    MULTI_ARG_IS_ERROR
-                    if (likely(self->last_interted)) {
+                    /* <ESC>[ > Ps c - Send Device Attributes (Secondary DA) */
+                    case 'c': {
+                        MULTI_ARG_IS_ERROR
                         int arg = short_sequence_get_int_argument(seq);
-                        for (int i = 0; i < arg; ++i) {
-                            Vt_insert_char_at_cursor(self, *self->last_interted, false);
+                        if (arg == 0) {
+                            /* report VT100, firmware ver. 0, ROM number 0 */
+                            Vt_output(self, "\e[>0;0;0c", 9);
                         }
-                    }
-                } break;
+                    } break;
 
-                /* <ESC>[ Ps i -  Media Copy (MC) Local printing related commands */
-                case 'i':
-                    break;
+                    default:
+                        WRN("Unknown CSI sequence: %s\n", seq);
+                }
+            } break;
 
-                /* <ESC>[ Ps q - Set cursor style (DECSCUSR) */
-                case 'q': {
-                    MULTI_ARG_IS_ERROR
-                    int arg = short_sequence_get_int_argument(seq);
-                    switch (arg) {
-                        case 0:
-                        case 1:
-                            self->cursor.type     = CURSOR_BLOCK;
-                            self->cursor.blinking = false;
-                            break;
-                        case 2:
-                            self->cursor.type     = CURSOR_BLOCK;
-                            self->cursor.blinking = true;
-                            break;
-                        case 3:
-                            self->cursor.type     = CURSOR_UNDERLINE;
-                            self->cursor.blinking = true;
-                            break;
-                        case 4:
-                            self->cursor.type     = CURSOR_UNDERLINE;
-                            self->cursor.blinking = false;
-                            break;
-                        case 5:
-                            self->cursor.type     = CURSOR_BEAM;
-                            self->cursor.blinking = true;
-                            break;
-                        case 6:
-                            self->cursor.type     = CURSOR_BEAM;
-                            self->cursor.blinking = false;
-                            break;
+            /* <ESC>[= ... */
+            case '=': {
+                switch (last_char) {
+                    /* <ESC>[ = Ps c - Send Device Attributes (Tertiary DA). */
+                    case 'c': {
+                        MULTI_ARG_IS_ERROR
+                        int arg = short_sequence_get_int_argument(seq);
+                        if (arg == 0) {
+                            Vt_output(self, "\e[?6c", 5);
+                        }
+                    } break;
 
-                        default:
-                            WRN("Unknown DECSCUR code: %d\n", arg);
-                    }
-                } break;
+                    default:
+                        WRN("Unknown CSI sequence: %s\n", seq);
+                }
+            } break;
 
-                /* <ESC>[  Pm... l - Reset Mode (RM) */
-                case 'l': {
-                    MULTI_ARG_IS_ERROR
-                    switch (short_sequence_get_int_argument(seq)) {
-                        case 4:
-                            // TODO: turn off IRM
-                            break;
-                    }
-                } break;
+            /* <ESC>[... */
+            default: {
+                switch (second_last_char) {
+                    /* <ESC>[ .. ; .. SP ?  */
+                    case ' ':
+                        switch (last_char) {
+                            /* <ECS>[ Ps SP @ - Shift left Ps columns(s) (default = 1) (SL), ECMA-48
+                             */
+                            case '@': {
+                                WRN("SL not implemented\n");
+                            } break;
 
-                /* <ESC>[u - Restore cursor (SCORC, also ANSI.SYS) */
-                /* <ESC>[Ps SP u - Set margin-bell volume (DECSMBV), VT520 */
-                case 'u':
-                    if (*seq == 'u') {
-                        // TODO: cursor restore
-                    } else {
-                        WRN("DECSMBV not implemented\n");
-                    }
-                    break;
+                            /* <ESC>[ Ps SP A - Shift right Ps columns(s) (default = 1) (SR),
+                             * ECMA-48 */
+                            case 'A': {
+                                WRN("SP not implemented\n");
+                            } break;
 
-                /* <ESC>[s - Save cursor (SCOSC, also ANSI.SYS) available only when DECLRMM is
-                 * disabled */
-                case 's': {
-                    // TODO: save cursor
-                } break;
-
-                /* <ESC>[ Ps ; Ps ; Ps t - xterm windowOps (XTWINOPS)*/
-                case 't': {
-                    int32_t nargs;
-                    int32_t args[4];
-
-                    /* Set omitted args to -1 */
-                    for (nargs = 0; seq && nargs < 4 && *seq != 't'; ++nargs) {
-                        *(args + nargs) = *seq == ';' ? -1 : strtol(seq, NULL, 10);
-                        seq             = strstr(seq, ";");
-                        if (seq)
-                            ++seq;
-                    }
-
-                    if (!nargs)
-                        break;
-
-                    switch (args[0]) {
-
-                        /* de-iconyfy */
-                        case 1:
-                            // TODO:
-                            break;
-
-                        /* iconyfy */
-                        case 2:
-                            // TODO:
-                            break;
-
-                        /* move window to args[1]:args[2] */
-                        case 3:
-                            // TODO:
-                            break;
-
-                        /* Resize window in pixels
-                         *
-                         * Omitted parameters reuse the current height or width. Zero parameters use
-                         * the display's height or width.
-                         *
-                         * FIXME: This should accounts for window decorations.
-                         */
-                        case 4:
-                            if (nargs >= 2) {
-                                int32_t target_w = args[1];
-                                int32_t target_h = nargs >= 3 ? args[2] : -1;
-
-                                if (target_w == -1 || target_h == -1) {
-                                    Pair_uint32_t current_dims =
-                                      CALL_FP(self->callbacks.on_window_size_requested,
-                                              self->callbacks.user_data);
-
-                                    if (target_w == -1) {
-                                        target_w = current_dims.first;
-                                    }
-                                    if (target_h == -1) {
-                                        target_h = current_dims.second;
-                                    }
-                                }
-                                if (target_w == 0 || target_h == 0) {
-                                    // TODO: get display size
-                                    WRN("Display size in XTWINOPS not implemented\n");
-                                    break;
-                                }
-
-                                CALL_FP(self->callbacks.on_window_dimensions_set,
-                                        self->callbacks.user_data,
-                                        target_w,
-                                        target_h);
-                            } else {
-                                WRN("Invalid XTWINOPS sequence: %s\n", seq);
-                            }
-                            break;
-
-                        /* Raise window */
-                        case 5:
-                            // TODO:
-                            break;
-
-                        /* lower window */
-                        case 6:
-                            // TODO:
-                            break;
-
-                        /* Refresh window */
-                        case 7:
-                            CALL_FP(self->callbacks.on_action_performed, self->callbacks.user_data);
-                            CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
-                            break;
-
-                        /* Resize in cells */
-                        case 8: {
-                            if (nargs >= 2) {
-                                int32_t target_rows = args[1];
-                                int32_t target_cols = nargs >= 3 ? args[2] : -1;
-
-                                Pair_uint32_t target_text_area_dims =
-                                  CALL_FP(self->callbacks.on_window_size_from_cells_requested,
-                                          self->callbacks.user_data,
-                                          target_rows > 0 ? target_rows : 1,
-                                          target_cols > 0 ? target_cols : 1);
-
-                                Pair_uint32_t currnet_text_area_dims =
-                                  CALL_FP(self->callbacks.on_text_area_size_requested,
-                                          self->callbacks.user_data);
-
-                                if (target_cols == -1) {
-                                    target_text_area_dims.first = currnet_text_area_dims.first;
-                                }
-                                if (target_rows == -1) {
-                                    target_text_area_dims.second = currnet_text_area_dims.second;
-                                }
-                                if (target_cols == 0 || target_rows == 0) {
-                                    WRN("Display size in XTWINOPS not implemented\n");
-                                    break;
-                                }
-
-                                CALL_FP(self->callbacks.on_text_area_dimensions_set,
-                                        self->callbacks.user_data,
-                                        target_text_area_dims.first,
-                                        target_text_area_dims.second);
-                            } else {
-                                WRN("Invalid XTWINOPS sequence: %s\n", seq);
-                            }
-                        } break;
-
-                        /* Maximize */
-                        case 9: {
-                            if (nargs >= 2) {
-                                switch (args[1]) {
-                                    /* Unmaximize */
+                            /* <ESC>[ Ps SP q - Set cursor style (DECSCUSR) */
+                            case 'q': {
+                                MULTI_ARG_IS_ERROR
+                                int arg = short_sequence_get_int_argument(seq);
+                                switch (arg) {
                                     case 0:
-                                        CALL_FP(self->callbacks.on_window_maximize_state_set,
-                                                self->callbacks.user_data,
-                                                false);
-                                        break;
-
-                                    /* invisible-island.net:
-                                     * `xterm uses Extended Window Manager Hints (EWMH) to maximize
-                                     * the window.  Some window managers have incomplete support for
-                                     * EWMH.  For instance, fvwm, flwm and quartz-wm advertise
-                                     * support for maximizing windows horizontally or vertically,
-                                     * but in fact equate those to the maximize operation.`
-                                     *
-                                     * Waylands xdg_shell/wl_shell have no concept of
-                                     * 'vertical/horizontal window maximization' so we should also
-                                     * treat that as regular maximization.
-                                     */
-                                    /* Maximize */
                                     case 1:
-                                    /* Maximize vertically */
+                                        self->cursor.type     = CURSOR_BLOCK;
+                                        self->cursor.blinking = false;
+                                        break;
                                     case 2:
-                                    /* Maximize horizontally */
+                                        self->cursor.type     = CURSOR_BLOCK;
+                                        self->cursor.blinking = true;
+                                        break;
                                     case 3:
-                                        CALL_FP(self->callbacks.on_window_maximize_state_set,
-                                                self->callbacks.user_data,
-                                                true);
+                                        self->cursor.type     = CURSOR_UNDERLINE;
+                                        self->cursor.blinking = true;
+                                        break;
+                                    case 4:
+                                        self->cursor.type     = CURSOR_UNDERLINE;
+                                        self->cursor.blinking = false;
+                                        break;
+                                    case 5:
+                                        self->cursor.type     = CURSOR_BEAM;
+                                        self->cursor.blinking = true;
+                                        break;
+                                    case 6:
+                                        self->cursor.type     = CURSOR_BEAM;
+                                        self->cursor.blinking = false;
                                         break;
 
                                     default:
-                                        WRN("Invalid XTWINOPS: %s\n", seq);
+                                        WRN("Unknown DECSCUR code: %d\n", arg);
                                 }
-                            } else {
-                                WRN("Invalid XTWINOPS: %s\n", seq);
-                            }
-                        } break;
+                            } break;
+                        }
+                        break;
 
-                        /* Fullscreen */
-                        case 10:
-                            if (nargs >= 2) {
-                                switch (args[1]) {
-                                    /* Disable */
+                    /* <ESC>[ .. ; .. "?  */
+                    case '\"':
+                        switch (last_char) {
+                            /* <ESC>[ Ps "q - Select character protection attribute (DECSCA), VT220.
+                             *
+                             * 0 => DECSED and DECSEL can erase (default).
+                             * 1 => DECSED and DECSEL cannot erase.
+                             * 2 => DECSED and DECSEL can erase.
+                             */
+                            case 'q': {
+                                WRN("Character protection not implemented\n");
+                            } break;
+
+                            /* <ESC>[ Pl ; Pc "p - Set conformance level (DECSCL), VT220 and up.
+                             * (Pl)
+                             *   61 => level 1, e.g., VT100.
+                             *   62 => level 2, e.g., VT200.
+                             *   63 => level 3, e.g., VT300.
+                             *   64 => level 4, e.g., VT400.
+                             *   65 => level 5, e.g., VT500.
+                             * (Pc)
+                             *   0 => 8-bit controls.
+                             *   1 => 7-bit controls (DEC factory default).
+                             *   2 => 8-bit controls.
+                             */
+                            case 'p': {
+                                WRN("DEC conformance levels not implemented\n");
+                            } break;
+
+                            default:
+                                WRN("Unknown CSI sequence: %s\n", seq);
+                        }
+                        break;
+
+                    /* <ESC>[ .. ; .. #?  */
+                    case '#':
+                        switch (last_char) {
+                            /* <ESC>[ Pm #{ - Push video attributes onto stack (XTPUSHSGR), xterm.
+                             *
+                             * The optional parameters correspond to the SGR encoding for video
+                             * attributes, except for colors (which do not have a unique SGR code):
+                             * 1  => Bold
+                             * 2  => Faint
+                             * 3  => Italicized
+                             * 4  => Underlined
+                             * 5  => Blink
+                             * 7  => Inverse
+                             * 8  => Invisible
+                             * 9  => Crossed-out characters
+                             * 21 => Doubly-underlined
+                             * 30 => Foreground color
+                             * 31 => Background color
+                             */
+                            case '{': {
+                                MULTI_ARG_IS_ERROR
+                                WRN("XTPUSHSGR not implemented\n");
+                            } break;
+
+                            /* <ESC>[ Pt ; Pl ; Pb ; Pr #|
+                             *
+                             * Report selected graphic rendition (XTREPORTSGR), xterm. The
+                             * response is an SGR sequence which contains the attributes which
+                             * are common to all cells in a rectangle. Pt ; Pl ; Pb ; Pr denotes
+                             * the rectangle.
+                             */
+                            case '|': {
+                                MULTI_ARG_IS_ERROR
+                                WRN("XTREPORTSGR not implemented\n");
+                            } break;
+
+                            /* <ESC>[#} - Pop video attributes from stack (XTPOPSGR), xterm.
+                             *
+                             * Popping restores the video-attributes which were saved using
+                             * XTPUSHSGR to their previous state.
+                             */
+                            case '}':
+
+                            /* <ESC>[#q - Alias for <ESC>[#} */
+                            case 'q': {
+                                MULTI_ARG_IS_ERROR
+                                WRN("XTPOPSGR not implemented\n");
+                            } break;
+
+                            /* <ESC>[ Pm #P - Push current dynamic and ANSI-palette colors onto
+                             * stack (XTPUSHCOLORS), xterm.
+                             *
+                             * Parameters (integers in the range 1 through 10, since the default 0
+                             * will push) may be used to store the palette into the stack without
+                             * pushing.
+                             */
+                            case 'P': {
+                                MULTI_ARG_IS_ERROR
+                                WRN("XTPUSHCOLORS not implemented\n");
+                            } break;
+
+                            /* <ESC>[ Pm #Q -  Pop stack to set dynamic- and ANSI-palette
+                             * colors (XTPOPCOLORS), xterm.
+                             *
+                             * Parameters (integers in the range 1 through 10, since the default
+                             * 0 will pop) may be used to restore the palette from the stack
+                             * without popping.
+                             */
+                            case 'Q': {
+                                MULTI_ARG_IS_ERROR
+                                WRN("XTPOPCOLORS not implemented\n");
+                            } break;
+
+                            /* <ESC> #R
+                             * Report the current entry on the palette stack, and the number of
+                             * palettes stored on the stack, using the same form as XTPOPCOLOR
+                             * (default = 0) (XTREPORTCOLORS), xterm.
+                             */
+                            case 'R': {
+                                MULTI_ARG_IS_ERROR
+                                WRN("XTREPORTCOLORS not implemented\n");
+                            } break;
+
+                            default:
+                                WRN("Unknown CSI sequence: %s\n", seq);
+                        }
+                        break;
+
+                    /* <ESC>[ .. ; .. '?  */
+                    case '\'':
+                        switch (last_char) {
+
+                                /* <ESC>[ Pt ; Pl ; Pb ; Pr 'w - Enable Filter Rectangle (DECEFR),
+                                 * VT420 and up
+                                 *
+                                 * Parameters are [top;left;bottom;right]. Defines the coordinates
+                                 * of a filter rectangle and activates it. Anytime the locator is
+                                 * detected outside of the filter rectangle, an outside rectangle
+                                 * event is generated and the rectangle is disabled. Filter
+                                 * rectangles are always treated as "one-shot" events. Any
+                                 * parameters that are omitted default to the current locator
+                                 * position. If all parameters are omitted, any locator motion
+                                 * will be reported. DECELR always cancels any previous rectangle
+                                 * definition.
+                                 */
+                            case 'w': {
+                                WRN("Filter rectangle locator events not implemented\n");
+                            } break;
+
+                            /* <ESC>[ Ps ; Pu 'z - Enable Locator Reporting (DECELR)
+                             * (Ps)
+                             *   0 => Locator disabled (default)
+                             *   1 => Locator enabled
+                             *   2 => Locator enabled for one report
+                             * (Pu) <coordinate unit>
+                             *   0, 2 => Cells (default)
+                             *   1    => Pixels
+                             */
+                            case 'z': {
+                                WRN("Locator reporting not implemented\n");
+                            } break;
+
+                            /* <ESC>[ Pm '{ - Select Locator Events (DECSLE)
+                             *
+                             * 0 => Explicit host request only (DECRQLP) (default)
+                             * 1 => on button down ON
+                             * 2 => on button down OFF
+                             * 3 => on button up ON
+                             * 4 => on button up OFF
+                             */
+                            case '{': {
+                                WRN("Locator events not implemented\n");
+                            } break;
+
+                            /* <ESC>[ Ps '| - Request Locator Position (DECRQLP)
+                             *
+                             * Valid values for the parameter are 0, 1 or omitted => transmit a
+                             * single DECLRP locator report.
+                             *
+                             * If Locator Reporting has been enabled by a DECELR, xterm will respond
+                             * with a DECLRP Locator Report.  This report is also generated on
+                             * button up and down events if they have been enabled with a DECSLE, or
+                             * when the locator is detected outside of a filter rectangle, if filter
+                             * rectangles have been enabled with a DECEFR.
+                             *
+                             * CSI Pe ; Pb ; Pr ; Pc ; Pp &w
+                             * Parameters are [event;button;row;column;page].
+                             * Valid values for the event:
+                             * (Pe)
+                             *   0  =>  locator unavailable - no other parameters sent.
+                             *   1  =>  request - xterm received a DECRQLP.
+                             *   2  =>  left button down.
+                             *   3  =>  left button up.
+                             *   4  =>  middle button down.
+                             *   5  =>  middle button up.
+                             *   6  =>  right button down.
+                             *   7  =>  right button up.
+                             *   8  =>  M4 button down.
+                             *   9  =>  M4 button up.
+                             *   10 =>  locator outside filter rectangle.
+                             *
+                             * The "button" parameter is a bitmask indicating which buttons are
+                             * pressed: Pb = 0  =>  no buttons down. Pb & 1  =>  right button down.
+                             * Pb & 2  =>  middle button down.
+                             * Pb & 4  =>  left button down.
+                             * Pb & 8  =>  M4 button down.
+                             *
+                             * The "row" and "column" parameters are the coordinates of the locator
+                             * position in the xterm window, encoded as ASCII decimal. The "page"
+                             * parameter is not used by xterm.
+                             */
+                            case '|': {
+                                /* locator unavailable */
+                                Vt_output(self, "\e[0&w", 5);
+                            } break;
+
+                            /* <ESC>['} - Insert Ps Column(s) (default = 1) (DECIC), VT420 and up */
+                            case '}': {
+                                WRN("DECIC not implemented\n");
+                            } break;
+
+                            /* <ESC>['~ - Delete Ps Column(s) (default = 1) (DECDC), VT420 and up */
+                            case '~': {
+                                WRN("DECDC not implemented\n");
+                            } break;
+
+                            default:
+                                WRN("Unknown CSI sequence: %s\n", seq);
+                        }
+                        break;
+
+                    /* <ESC>[ .. ; .. * ..  */
+                    case '*':
+                        switch (last_char) {
+                            /* <ESC>[ Ps *x - Select Attribute Change Extent (DECSACE), VT420 and up
+                             * (Ps)
+                             *   0, 1 => from start to end position, wrapped
+                             *   2    => rectangle (exact)
+                             */
+                            case 'x': {
+                                MULTI_ARG_IS_ERROR
+                                WRN("DECSACE not implemented\n");
+                            } break;
+
+                            /* <ESC>[ Pi ; Pg ; Pt ; Pl ; Pb ; Pr *y
+                             * Request Checksum of Rectangular Area (DECRQCRA), VT420 and up
+                             *
+                             * Response is DCS Pi ! ~ x x x x ST Pi is the request id. Pg is the
+                             * page number. Pt ; Pl ; Pb ; Pr denotes the rectangle. The x's are
+                             * hexadecimal digits 0-9 and A-F.
+                             */
+                            case 'y': {
+                                WRN("DECRQCRA not implemented\n");
+                            } break;
+
+                            /* <ESC>[*| - Select number of lines per screen (DECSNLS), VT420 and up
+                             */
+                            case '|': {
+                                WRN("DECSNLS not implemented\n");
+                            } break;
+
+                            default:
+                                WRN("Unknown CSI sequence: %s\n", seq);
+                        }
+                        break;
+
+                    /* <ESC>[ .. ; .. $ ..  */
+                    case '$':
+                        switch (last_char) {
+
+                            /* <ESC>[ Ps $p - Request ANSI mode (DECRQM). VT300 and up */
+                            case 'p': {
+                                // TODO:
+                                /* Not recognized */
+                                Vt_output(self, "\e[0$p", 5);
+                            } break;
+
+                            /* <ESC>[ Pt ; Pl ; Pb ; Pr ; Ps $r - Change Attributes in Rectangular
+                             * Area (DECCARA), VT400 and up
+                             *
+                             * Pt ; Pl ; Pb ; Pr denotes the rectangle.
+                             * Ps denotes the SGR attributes to change: 0, 1, 4, 5, 7
+                             */
+                            case 'r': {
+                                WRN("DECCARA not implemented\n");
+                            } break;
+
+                            /* <ESC>[ Pt ; Pl ; Pb ; Pr ; Ps $t - Reverse Attributes in Rectangular
+                             * Area (DECRARA), VT400 and up
+                             *
+                             * Pt ; Pl ; Pb ; Pr denotes the rectangle. Ps denotes the attributes to
+                             * reverse, i.e.,  1, 4, 5, 7.
+                             */
+                            case 't': {
+                                WRN("DECRARA not implemented\n");
+                            } break;
+
+                            /* <ESC>[ Ps $w - Request presentation state report (DECRQPSR), VT320
+                             * and up
+                             *
+                             * (Ps)
+                             *   0 => error
+                             *   1 => cursor information report (DECCIR)
+                             *     Response is DCS 1 $ u Pt ST Refer to the VT420 programming
+                             *     manual, which requires six pages to document the data string Pt,
+                             *   2 => tab stop report (DECTABSR). Response is DCS 2 $ u Pt ST The
+                             *     data string Pt is a list of the tab-stops, separated by "/"
+                             *     characters.
+                             */
+                            case 'w': {
+                                WRN("DECRQPSR not implemented\n");
+                            } break;
+
+                            /* <ESC>[ Pc ; Pt ; Pl ; Pb ; Pr $x - Fill Rectangular Area (DECFRA),
+                             * VT420 and up
+                             *
+                             * Pc is the character to use
+                             * Pt ; Pl ; Pb ; Pr denotes the rectangle
+                             */
+                            case 'x': {
+                                WRN("DECFRA not implemented\n");
+                            } break;
+
+                            /* <ESC>[ Pt ; Pl ; Pb ; Pr $z
+                             * Erase Rectangular Area (DECERA), VT400 and up
+                             */
+                            case 'z': {
+                                WRN("DECERA not implemented\n");
+                            } break;
+
+                            /* <ESC>[ Pt ; Pl ; Pb ; Pr ${
+                             * Selective Erase Rectangular Area (DECSERA), VT400 and up
+                             */
+                            case '{': {
+                                WRN("DECSERA not implemented\n");
+                            } break;
+
+                            /* <ESC>[ Ps $| - Select columns per page (DECSCPP), VT340 */
+                            case '|': {
+                                WRN("DECSCPP not implemented\n");
+                            } break;
+
+                            default:
+                                WRN("Unknown CSI sequence: %s\n", seq);
+                        }
+                        break;
+
+                        /* <ESC>[ .. ; .. ?  */
+                    default: {
+                        switch (last_char) {
+                            /* <ESC>[ Ps ; ... m - change one or more text attributes (SGR) */
+                            case 'm': {
+                                Vector_pop_n_char(&self->parser.active_sequence, 2); // 'm', '\0'
+                                Vector_push_char(&self->parser.active_sequence, '\0');
+                                Vt_handle_multi_argument_SGR(self, self->parser.active_sequence);
+                            } break;
+
+                            /* <ESC>[ Ps K - clear(erase) line right of cursor (EL)
+                             * none/0 - right 1 - left 2 - all */
+                            case 'K': {
+                                MULTI_ARG_IS_ERROR
+                                int arg = *seq == 'K' ? 0 : short_sequence_get_int_argument(seq);
+                                switch (arg) {
                                     case 0:
-                                        CALL_FP(self->callbacks.on_window_fullscreen_state_set,
-                                                self->callbacks.user_data,
-                                                false);
+                                        Vt_clear_right(self);
                                         break;
 
-                                    /* Enable */
+                                    case 2:
+                                        Vt_clear_right(self);
+                                        /* fallthrough */
                                     case 1:
-                                        CALL_FP(self->callbacks.on_window_fullscreen_state_set,
-                                                self->callbacks.user_data,
-                                                true);
+                                        Vt_clear_left(self);
                                         break;
 
-                                        /* Toggle */
-                                    case 2: {
-                                        bool current_state =
-                                          CALL_FP(self->callbacks.on_fullscreen_state_requested,
-                                                  self->callbacks.user_data);
-                                        CALL_FP(self->callbacks.on_window_fullscreen_state_set,
-                                                self->callbacks.user_data,
-                                                !current_state);
+                                    default:
+                                        WRN("Unknown CSI(EL) sequence: %s\n", seq);
+                                }
+                            } break;
+
+                            /* <ECS>[ Ps @ - Insert Ps Chars (ICH) */
+                            case '@': {
+                                MULTI_ARG_IS_ERROR
+                                int arg = short_sequence_get_int_argument(seq);
+                                for (int i = 0; i < arg; ++i) {
+                                    Vt_insert_char_at_cursor_with_shift(self, blank_space);
+                                }
+                            } break;
+
+                            /* <ESC>[ Ps a - move cursor right (forward) Ps lines (HPR) */
+                            case 'a':
+                            /* <ESC>[ Ps C - move cursor right (forward) Ps lines (CUF) */
+                            case 'C': {
+                                MULTI_ARG_IS_ERROR
+                                int arg = short_sequence_get_int_argument(seq);
+                                for (int i = 0; i < arg; ++i)
+                                    Vt_cursor_right(self);
+                            } break;
+
+                            /* <ESC>[ Ps L - Insert line at cursor shift rest down (IL) */
+                            case 'L': {
+                                MULTI_ARG_IS_ERROR
+                                int arg = short_sequence_get_int_argument(seq);
+                                for (int i = 0; i < arg; ++i)
+                                    Vt_insert_line(self);
+                            } break;
+
+                            /* <ESC>[ Ps D - move cursor left (back) Ps lines (CUB) */
+                            case 'D': {
+                                MULTI_ARG_IS_ERROR
+                                int arg = short_sequence_get_int_argument(seq);
+                                for (int i = 0; i < arg; ++i)
+                                    Vt_cursor_left(self);
+                            } break;
+
+                            /* <ESC>[ Ps A - move cursor up Ps lines (CUU) */
+                            case 'A': {
+                                MULTI_ARG_IS_ERROR
+                                int arg = short_sequence_get_int_argument(seq);
+                                for (int i = 0; i < arg; ++i)
+                                    Vt_cursor_up(self);
+                            } break;
+
+                            /* <ESC>[ Ps e - move cursor down Ps lines (VPR) */
+                            case 'e':
+                            /* <ESC>[ Ps B - move cursor down Ps lines (CUD) */
+                            case 'B': {
+                                MULTI_ARG_IS_ERROR
+                                int arg = short_sequence_get_int_argument(seq);
+                                for (int i = 0; i < arg; ++i)
+                                    Vt_cursor_down(self);
+                            } break;
+
+                            /* <ESC>[ Ps ` - move cursor to column Ps (CBT)*/
+                            case '`':
+                            /* <ESC>[ Ps G - move cursor to column Ps (CHA)*/
+                            case 'G': {
+                                MULTI_ARG_IS_ERROR
+                                Vt_move_cursor_to_column(self,
+                                                         short_sequence_get_int_argument(seq) - 1);
+                            } break;
+
+                            /* <ESC>[ Ps J - Erase display (ED) - clear... */
+                            case 'J': {
+                                MULTI_ARG_IS_ERROR
+                                if (*seq == 'J') /* ...from cursor to end of screen */
+                                    Vt_erase_to_end(self);
+                                else {
+                                    int arg = short_sequence_get_int_argument(seq);
+                                    switch (arg) {
+                                        case 1: /* ...from start to cursor */
+                                            if (Vt_scroll_region_not_default(self)) {
+                                                Vt_clear_above(self);
+                                            } else {
+                                                Vt_scroll_out_above(self);
+                                            }
+                                            break;
+
+                                        case 3: /* ...whole display + scrollback buffer */
+                                            /* if (settings.allow_scrollback_clear) { */
+                                            /*     Vt_clear_display_and_scrollback(self); */
+                                            /* } */
+                                            break;
+
+                                        case 2: /* ...whole display. Contents should not
+                                                 * actually be removed, but saved to scroll
+                                                 * history if no scroll region is set */
+                                            if (self->alt_lines.buf) {
+                                                Vt_clear_display_and_scrollback(self);
+                                            } else {
+                                                if (Vt_scroll_region_not_default(self)) {
+                                                    Vt_clear_above(self);
+                                                    Vt_erase_to_end(self);
+                                                } else {
+                                                    Vt_scroll_out_all_content(self);
+                                                }
+                                            }
+                                            break;
+                                    }
+                                }
+                            } break;
+
+                            /* <ESC>[ Ps d - move cursor to row Ps (VPA) */
+                            case 'd': {
+                                MULTI_ARG_IS_ERROR
+                                /* origin is 1:1 */
+                                Vt_move_cursor(self,
+                                               self->cursor.col,
+                                               short_sequence_get_int_argument(seq) - 1);
+                            } break;
+
+                            /* <ESC>[ Ps ; Ps r - Set scroll region (top;bottom) (DECSTBM)
+                             * default: full window */
+                            case 'r': {
+                                uint32_t top, bottom;
+
+                                if (*seq != 'r') {
+                                    if (sscanf(seq, "%u;%u", &top, &bottom) == EOF) {
+                                        WRN("invalid CSI(DECSTBM) sequence %s\n", seq);
+                                        break;
+                                    }
+                                    --top;
+                                    --bottom;
+                                } else {
+                                    top    = 0;
+                                    bottom = CALL_FP(self->callbacks.on_number_of_cells_requested,
+                                                     self->callbacks.user_data)
+                                               .second -
+                                             1;
+                                }
+
+                                self->scroll_region_top    = top;
+                                self->scroll_region_bottom = bottom;
+                            } break;
+
+                            /* <ESC>[ Pn I - cursor forward ps tabulations (CHT) */
+                            case 'I': {
+                                MULTI_ARG_IS_ERROR
+                                // TODO:
+                            } break;
+
+                            /* <ESC>[ Pn Z - cursor backward ps tabulations (CBT) */
+                            case 'Z': {
+                                MULTI_ARG_IS_ERROR
+                                // TODO:
+                            } break;
+
+                            /* <ESC>[ Pn g - tabulation clear (TBC) */
+                            case 'g': {
+                                MULTI_ARG_IS_ERROR
+                                int arg = short_sequence_get_int_argument(seq);
+
+                                switch (arg) {
+                                    case 0:
+                                        // TODO: clear currnet tabstop
+                                        break;
+                                    case 3:
+                                        // TODO: clear all tabstops
+                                        break;
+                                    default:;
+                                }
+
+                            } break;
+
+                            /* no args: 1:1, one arg: x:1 */
+                            /* <ESC>[ Py ; Px f - move cursor to Px-Py (HVP) (deprecated) */
+                            case 'f':
+                            /* <ESC>[ Py ; Px H - move cursor to Px-Py (CUP) */
+                            case 'H': {
+                                uint32_t x = 1, y = 1;
+                                if (*seq != 'H' && sscanf(seq, "%u;%u", &y, &x) == EOF) {
+                                    WRN("invalid CSI(CUP) sequence %s\n", seq);
+                                    break;
+                                }
+                                --x;
+                                --y;
+                                Vt_move_cursor(self, x, y);
+                            } break;
+
+                            /* <ESC>[...c - Send device attributes (Primary DA) */
+                            case 'c': {
+                                /* report VT 102 */
+                                Vt_output(self, "\e[?6c", 5);
+                            } break;
+
+                            /* <ESC>[...n - Device status report (DSR) */
+                            case 'n': {
+                                MULTI_ARG_IS_ERROR
+                                int arg = short_sequence_get_int_argument(seq);
+                                if (arg == 5) {
+                                    /* 5 - is terminal ok
+                                     *  ok - 0, not ok - 3 */
+                                    Vt_output(self, "\e[0n", 4);
+                                } else if (arg == 6) {
+                                    /* 6 - report cursor position */
+                                    Vt_output_formated(self,
+                                                       "\e[%zu;%zuR",
+                                                       Vt_get_cursor_row_screen(self) + 1,
+                                                       self->cursor.col + 1);
+                                } else {
+                                    WRN("Unimplemented DSR code: %d\n", arg);
+                                }
+                            } break;
+
+                            /* <ESC>[ Ps M - Delete lines (default = 1) (DL) */
+                            case 'M': {
+                                MULTI_ARG_IS_ERROR
+                                int arg = short_sequence_get_int_argument(seq);
+                                for (int i = 0; i < arg; ++i)
+                                    Vt_delete_line(self);
+                            } break;
+
+                            /* <ESC>[ Ps S - Scroll up (default = 1) (SU) */
+                            case 'S': {
+                                MULTI_ARG_IS_ERROR
+                                int arg = short_sequence_get_int_argument(seq);
+                                for (int i = 0; i < arg; ++i)
+                                    Vt_scroll_up(self);
+                            } break;
+
+                            /* <ESC>[ Ps T - Scroll down (default = 1) (SD) */
+                            case 'T': {
+                                MULTI_ARG_IS_ERROR
+                                int arg = short_sequence_get_int_argument(seq);
+                                for (int i = 0; i < arg; ++i)
+                                    Vt_scroll_down(self);
+                            } break;
+
+                            /* <ESC>[ Ps X - Erase Ps Character(s) (default = 1) (ECH) */
+                            case 'X':
+                                MULTI_ARG_IS_ERROR
+                                Vt_erase_chars(self, short_sequence_get_int_argument(seq));
+                                break;
+
+                            /* <ESC>[ Ps P - Delete Ps Character(s) (default = 1) (DCH) */
+                            case 'P':
+                                MULTI_ARG_IS_ERROR
+                                Vt_delete_chars(self, short_sequence_get_int_argument(seq));
+                                break;
+
+                            /* <ESC>[ Ps b -  Repeat the preceding graphic character Ps times (REP)
+                             * in xterm any cursor movement or SGR sequences after inserting the
+                             * character cause this to have no effect */
+                            case 'b': {
+                                MULTI_ARG_IS_ERROR
+                                if (likely(self->last_interted)) {
+                                    int arg = short_sequence_get_int_argument(seq);
+                                    for (int i = 0; i < arg; ++i) {
+                                        Vt_insert_char_at_cursor(self, *self->last_interted, false);
+                                    }
+                                }
+                            } break;
+
+                            /* <ESC>[ Ps i -  Media Copy (MC) Local printing related commands */
+                            case 'i':
+                                break;
+
+                            /* <ESC>[  Pm... l - Reset Mode (RM) */
+                            case 'l': {
+                                MULTI_ARG_IS_ERROR
+                                switch (short_sequence_get_int_argument(seq)) {
+                                    case 4:
+                                        // TODO: turn off IRM
+                                        break;
+                                }
+                            } break;
+
+                            /* <ESC>[u - Restore cursor (SCORC, also ANSI.SYS) */
+                            /* <ESC>[Ps SP u - Set margin-bell volume (DECSMBV), VT520 */
+                            case 'u':
+                                if (*seq == 'u') {
+                                    // TODO: cursor restore
+                                } else {
+                                    WRN("DECSMBV not implemented\n");
+                                }
+                                break;
+
+                            /* <ESC>[s - Save cursor (SCOSC, also ANSI.SYS) available only when
+                             * DECLRMM is disabled */
+                            case 's': {
+                                // TODO: save cursor
+                            } break;
+
+                            /* <ESC>[ Ps q - Manipulate keyboard LEDs (DECLL), VT100 */
+                            case 'q':
+                                break;
+
+                            /* <ESC>[ Ps ; Ps ; Ps t - xterm windowOps (XTWINOPS)*/
+                            case 't': {
+                                int32_t nargs;
+                                int32_t args[4];
+
+                                /* Set omitted args to -1 */
+                                for (nargs = 0; seq && nargs < 4 && *seq != 't'; ++nargs) {
+                                    *(args + nargs) = *seq == ';' ? -1 : strtol(seq, NULL, 10);
+                                    seq             = strstr(seq, ";");
+                                    if (seq)
+                                        ++seq;
+                                }
+
+                                if (!nargs)
+                                    break;
+
+                                switch (args[0]) {
+
+                                    /* de-iconyfy */
+                                    case 1:
+                                        // TODO:
+                                        break;
+
+                                    /* iconyfy */
+                                    case 2:
+                                        // TODO:
+                                        break;
+
+                                    /* move window to args[1]:args[2] */
+                                    case 3:
+                                        // TODO:
+                                        break;
+
+                                    /* Resize window in pixels
+                                     *
+                                     * Omitted parameters reuse the current height or width. Zero
+                                     * parameters use the display's height or width.
+                                     *
+                                     * FIXME: This should accounts for window decorations.
+                                     */
+                                    case 4:
+                                        if (nargs >= 2) {
+                                            int32_t target_w = args[1];
+                                            int32_t target_h = nargs >= 3 ? args[2] : -1;
+
+                                            if (target_w == -1 || target_h == -1) {
+                                                Pair_uint32_t current_dims =
+                                                  CALL_FP(self->callbacks.on_window_size_requested,
+                                                          self->callbacks.user_data);
+
+                                                if (target_w == -1) {
+                                                    target_w = current_dims.first;
+                                                }
+                                                if (target_h == -1) {
+                                                    target_h = current_dims.second;
+                                                }
+                                            }
+                                            if (target_w == 0 || target_h == 0) {
+                                                // TODO: get display size
+                                                WRN("Display size in XTWINOPS not implemented\n");
+                                                break;
+                                            }
+
+                                            CALL_FP(self->callbacks.on_window_dimensions_set,
+                                                    self->callbacks.user_data,
+                                                    target_w,
+                                                    target_h);
+                                        } else {
+                                            WRN("Invalid XTWINOPS sequence: %s\n", seq);
+                                        }
+                                        break;
+
+                                    /* Raise window */
+                                    case 5:
+                                        // TODO:
+                                        break;
+
+                                    /* lower window */
+                                    case 6:
+                                        // TODO:
+                                        break;
+
+                                    /* Refresh window */
+                                    case 7:
+                                        CALL_FP(self->callbacks.on_action_performed,
+                                                self->callbacks.user_data);
+                                        CALL_FP(self->callbacks.on_repaint_required,
+                                                self->callbacks.user_data);
+                                        break;
+
+                                    /* Resize in cells */
+                                    case 8: {
+                                        if (nargs >= 2) {
+                                            int32_t target_rows = args[1];
+                                            int32_t target_cols = nargs >= 3 ? args[2] : -1;
+
+                                            Pair_uint32_t target_text_area_dims = CALL_FP(
+                                              self->callbacks.on_window_size_from_cells_requested,
+                                              self->callbacks.user_data,
+                                              target_rows > 0 ? target_rows : 1,
+                                              target_cols > 0 ? target_cols : 1);
+
+                                            Pair_uint32_t currnet_text_area_dims =
+                                              CALL_FP(self->callbacks.on_text_area_size_requested,
+                                                      self->callbacks.user_data);
+
+                                            if (target_cols == -1) {
+                                                target_text_area_dims.first =
+                                                  currnet_text_area_dims.first;
+                                            }
+                                            if (target_rows == -1) {
+                                                target_text_area_dims.second =
+                                                  currnet_text_area_dims.second;
+                                            }
+                                            if (target_cols == 0 || target_rows == 0) {
+                                                WRN("Display size in XTWINOPS not implemented\n");
+                                                break;
+                                            }
+
+                                            CALL_FP(self->callbacks.on_text_area_dimensions_set,
+                                                    self->callbacks.user_data,
+                                                    target_text_area_dims.first,
+                                                    target_text_area_dims.second);
+                                        } else {
+                                            WRN("Invalid XTWINOPS sequence: %s\n", seq);
+                                        }
                                     } break;
 
-                                    default:
-                                        WRN("Invalid XTWINOPS: %s\n", seq);
+                                    /* Maximize */
+                                    case 9: {
+                                        if (nargs >= 2) {
+                                            switch (args[1]) {
+                                                /* Unmaximize */
+                                                case 0:
+                                                    CALL_FP(
+                                                      self->callbacks.on_window_maximize_state_set,
+                                                      self->callbacks.user_data,
+                                                      false);
+                                                    break;
+
+                                                /* invisible-island.net:
+                                                 * `xterm uses Extended Window Manager Hints (EWMH)
+                                                 * to maximize the window.  Some window managers
+                                                 * have incomplete support for EWMH.  For instance,
+                                                 * fvwm, flwm and quartz-wm advertise support for
+                                                 * maximizing windows horizontally or vertically,
+                                                 * but in fact equate those to the maximize
+                                                 * operation.`
+                                                 *
+                                                 * Waylands xdg_shell/wl_shell have no concept of
+                                                 * 'vertical/horizontal window maximization' so we
+                                                 * should also treat that as regular maximization.
+                                                 */
+                                                /* Maximize */
+                                                case 1:
+                                                /* Maximize vertically */
+                                                case 2:
+                                                /* Maximize horizontally */
+                                                case 3:
+                                                    CALL_FP(
+                                                      self->callbacks.on_window_maximize_state_set,
+                                                      self->callbacks.user_data,
+                                                      true);
+                                                    break;
+
+                                                default:
+                                                    WRN("Invalid XTWINOPS: %s\n", seq);
+                                            }
+                                        } else {
+                                            WRN("Invalid XTWINOPS: %s\n", seq);
+                                        }
+                                    } break;
+
+                                    /* Fullscreen */
+                                    case 10:
+                                        if (nargs >= 2) {
+                                            switch (args[1]) {
+                                                /* Disable */
+                                                case 0:
+                                                    CALL_FP(self->callbacks
+                                                              .on_window_fullscreen_state_set,
+                                                            self->callbacks.user_data,
+                                                            false);
+                                                    break;
+
+                                                /* Enable */
+                                                case 1:
+                                                    CALL_FP(self->callbacks
+                                                              .on_window_fullscreen_state_set,
+                                                            self->callbacks.user_data,
+                                                            true);
+                                                    break;
+
+                                                    /* Toggle */
+                                                case 2: {
+                                                    bool current_state = CALL_FP(
+                                                      self->callbacks.on_fullscreen_state_requested,
+                                                      self->callbacks.user_data);
+                                                    CALL_FP(self->callbacks
+                                                              .on_window_fullscreen_state_set,
+                                                            self->callbacks.user_data,
+                                                            !current_state);
+                                                } break;
+
+                                                default:
+                                                    WRN("Invalid XTWINOPS: %s\n", seq);
+                                                    break;
+                                            }
+                                        } else {
+                                            WRN("Invalid XTWINOPS: %s\n", seq);
+                                        }
                                         break;
+
+                                    /* Report iconification state */
+                                    case 11: {
+                                        bool is_minimized =
+                                          CALL_FP(self->callbacks.on_minimized_state_requested,
+                                                  self->callbacks.user_data);
+                                        Vt_output_formated(self, "\e[%d", is_minimized ? 1 : 2);
+
+                                    } break;
+
+                                    /* Report window position */
+                                    case 13: {
+                                        Pair_uint32_t pos =
+                                          CALL_FP(self->callbacks.on_window_position_requested,
+                                                  self->callbacks.user_data);
+                                        Vt_output_formated(self,
+                                                           "\e[3;%d;%d;t",
+                                                           pos.first,
+                                                           pos.second);
+                                    } break;
+
+                                    /* Report window size in pixels */
+                                    case 14: {
+                                        Vt_output_formated(self,
+                                                           "\e[4;%d;%d;t",
+                                                           self->ws.ws_xpixel,
+                                                           self->ws.ws_ypixel);
+                                    } break;
+
+                                    /* Report text area size in chars */
+                                    case 18: {
+                                        Vt_output_formated(self,
+                                                           "\e[8;%d;%d;t",
+                                                           self->ws.ws_col,
+                                                           self->ws.ws_row);
+
+                                    } break;
+
+                                    /* Report window size in chars */
+                                    case 19: {
+                                        Vt_output_formated(self,
+                                                           "\e[9;%d;%d;t",
+                                                           self->ws.ws_col,
+                                                           self->ws.ws_row);
+
+                                    } break;
+
+                                    /* Report icon name */
+                                    case 20:
+                                        /* Report window title */
+                                    case 21: {
+                                        Vt_output_formated(self, "\e]L%s\e\\", self->title);
+                                    } break;
+
+                                    /* push title to stack */
+                                    case 22:
+                                        Vt_push_title(self);
+                                        LOG("Title stack push\n");
+                                        break;
+
+                                    /* pop title from stack */
+                                    case 23:
+                                        Vt_pop_title(self);
+                                        LOG("Title stack pop\n");
+                                        break;
+
+                                    /* Resize window to args[1] lines (DECSLPP) */
+                                    default: {
+                                        // int arg = short_sequence_get_int_argument(seq);
+                                        // uint32_t ypixels = gfx_pixels(arg, 0).first;
+                                    }
                                 }
-                            } else {
-                                WRN("Invalid XTWINOPS: %s\n", seq);
-                            }
-                            break;
 
-                        /* Report iconification state */
-                        case 11: {
-                            bool is_minimized =
-                              CALL_FP(self->callbacks.on_minimized_state_requested,
-                                      self->callbacks.user_data);
-                            Vt_output_formated(self, "\e[%d", is_minimized ? 1 : 2);
+                            } break;
 
-                        } break;
+                            default:
+                                WRN("Unknown CSI sequence: %s\n", seq);
 
-                        /* Report window position */
-                        case 13: {
-                            Pair_uint32_t pos =
-                              CALL_FP(self->callbacks.on_window_position_requested,
-                                      self->callbacks.user_data);
-                            Vt_output_formated(self, "\e[3;%d;%d;t", pos.first, pos.second);
-                        } break;
-
-                        /* Report window size in pixels */
-                        case 14: {
-                            Vt_output_formated(self,
-                                               "\e[4;%d;%d;t",
-                                               self->ws.ws_xpixel,
-                                               self->ws.ws_ypixel);
-                        } break;
-
-                        /* Report text area size in chars */
-                        case 18: {
-                            Vt_output_formated(self,
-                                               "\e[8;%d;%d;t",
-                                               self->ws.ws_col,
-                                               self->ws.ws_row);
-
-                        } break;
-
-                        /* Report window size in chars */
-                        case 19: {
-                            Vt_output_formated(self,
-                                               "\e[9;%d;%d;t",
-                                               self->ws.ws_col,
-                                               self->ws.ws_row);
-
-                        } break;
-
-                        /* Report icon name */
-                        case 20:
-                            /* Report window title */
-                        case 21: {
-                            Vt_output_formated(self, "\e]L%s\e\\", self->title);
-                        } break;
-
-                        /* push title to stack */
-                        case 22:
-                            Vt_push_title(self);
-                            LOG("Title stack push\n");
-                            break;
-
-                        /* pop title from stack */
-                        case 23:
-                            Vt_pop_title(self);
-                            LOG("Title stack pop\n");
-                            break;
-
-                        /* Resize window to args[1] lines (DECSLPP) */
-                        default: {
-                            // int arg = short_sequence_get_int_argument(seq);
-                            // uint32_t ypixels = gfx_pixels(arg, 0).first;
-                        }
+                        } // end switch (last_char)
                     }
-
-                } break;
-
-                default:
-                    WRN("Unknown CSI sequence: %s\n", seq);
-
-            } // end switch
-        }
+                } // end switch (second_last_char)
+            }
+        } // end switch (first_char)
 
         Vector_destroy_char(&self->parser.active_sequence);
         self->parser.active_sequence = Vector_new_char();
@@ -2181,7 +2605,7 @@ static inline void Vt_alt_buffer_off(Vt* self, bool save_mouse)
 
 /**
  * Interpret a single argument SGR command */
-static void Vt_handle_single_argument_SGR(Vt* self, char* command)
+__attribute__((hot)) static void Vt_handle_single_argument_SGR(Vt* self, char* command)
 {
     int cmd = *command ? strtol(command, NULL, 10) : 0;
 
@@ -2463,7 +2887,7 @@ static void Vt_handle_multi_argument_SGR(Vt* self, Vector_char seq)
         } else {
             Vt_handle_single_argument_SGR(self, token->buf + 1);
         }
-    } // end for
+    }
 
     Vector_destroy_Vector_char(&tokens);
 }
