@@ -1217,18 +1217,10 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h)
     eglChooseConfig(globalWl->egl_display, cfg_attribs, &config, 1, &num_config);
 
     EGLint context_attribs[] = {
-        EGL_CONTEXT_OPENGL_PROFILE_MASK,
-        EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
         EGL_CONTEXT_MAJOR_VERSION,
         2,
         EGL_CONTEXT_MINOR_VERSION,
         1,
-        EGL_CONTEXT_OPENGL_ROBUST_ACCESS,
-        EGL_FALSE,
-#ifdef DEBUG
-        EGL_CONTEXT_OPENGL_DEBUG,
-        EGL_TRUE,
-#endif
         EGL_NONE,
     };
 
