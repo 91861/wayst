@@ -826,6 +826,8 @@ __attribute__((cold)) void Vt_dump_info(Vt* self)
     printf("Modes:\n");
     printf("  application keypad:               " BOOL_FMT "\n",
            BOOL_AP(self->modes.application_keypad));
+    printf("  application keypad cursor:        " BOOL_FMT "\n",
+           BOOL_AP(self->modes.application_keypad_cursor));
     printf("  auto repeat:                      " BOOL_FMT "\n", BOOL_AP(self->modes.auto_repeat));
     printf("  bracketed paste:                  " BOOL_FMT "\n",
            BOOL_AP(self->modes.bracketed_paste));
@@ -1200,13 +1202,24 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
 {
     switch (code) {
 
-        /* Application Cursor Keys (DECCKM) */
-        // FIXME: that should be some other separate mode
+        /* Cursor Keys Mode (DEC Private) (DECCKM)
+         *
+         * This is a private parameter applicable to set mode (SM) and reset mode (RM) control
+         * sequences. This mode is only effective when the terminal is in keypad application mode
+         * (see DECKPAM) and the ANSI/VT52 mode (DECANM) is set (see DECANM). Under these
+         * conditions, if the cursor key mode is reset, the four cursor function keys will send ANSI
+         * cursor control commands. If cursor key mode is set, the four cursor function keys will
+         * send application functions.
+         */
         case 1:
-            self->modes.application_keypad = on;
+            self->modes.application_keypad_cursor = on;
             break;
 
-        /* Column mode 132/80 (DECCOLM) */
+        /* Column mode 132/80 (DECCOLM)
+         *
+         * The reset state causes a maximum of 80 columns on the screen. The set state causes a
+         * maximum of 132 columns on the screen.
+         */
         case 3:
             break;
 
@@ -3362,7 +3375,7 @@ static void Vt_delete_chars(Vt* self, size_t n)
 static inline void Vt_scroll_out_all_content(Vt* self)
 {
     int64_t to_add = 0;
-    for (size_t i = Vt_visual_bottom_line(self); i >= Vt_visual_top_line(self); --i) {
+    for (size_t i = Vt_visual_bottom_line(self); i > Vt_visual_top_line(self); --i) {
         if (self->lines.buf[i].data.size) {
             to_add += i;
             break;
@@ -3819,13 +3832,13 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
                     self->parser.state = PARSER_STATE_LITERAL;
                     break;
 
-                /* Application Keypad (DECPAM) */
+                /* Application Keypad (DECKPAM) */
                 case '=':
                     self->modes.application_keypad = true;
                     self->parser.state             = PARSER_STATE_LITERAL;
                     return;
 
-                /* Normal Keypad (DECPNM) */
+                /* Normal Keypad (DECKPNM) */
                 case '>':
                     self->modes.application_keypad = false;
                     self->parser.state             = PARSER_STATE_LITERAL;
@@ -4165,29 +4178,9 @@ void Vt_get_visible_lines(const Vt* self, VtLine** out_begin, VtLine** out_end)
     }
 }
 
-static const char* normal_keypad_response(const uint32_t key)
-{
-    switch (key) {
-        case XKB_KEY_Up:
-            return "\e[A";
-        case XKB_KEY_Down:
-            return "\e[B";
-        case XKB_KEY_Right:
-            return "\e[C";
-        case XKB_KEY_Left:
-            return "\e[D";
-        case XKB_KEY_End:
-            return "\e[F";
-        case XKB_KEY_Home:
-            return "\e[H";
-        case 127:
-            return "\e[P";
-        default:
-            return NULL;
-    }
-}
 
-static const char* application_keypad_response(const uint32_t key)
+
+static const char* application_cursor_key_response(const uint32_t key)
 {
     switch (key) {
         case XKB_KEY_Up:
@@ -4202,18 +4195,32 @@ static const char* application_keypad_response(const uint32_t key)
             return "\eOF";
         case XKB_KEY_Home:
             return "\eOH";
-        case XKB_KEY_KP_Enter:
-            return "\eOM";
-        case XKB_KEY_KP_Multiply:
-            return "\eOj";
-        case XKB_KEY_KP_Add:
-            return "\eOk";
-        case XKB_KEY_KP_Separator:
-            return "\eOl";
-        case XKB_KEY_KP_Subtract:
-            return "\eOm";
-        case XKB_KEY_KP_Divide:
-            return "\eOo";
+        case 127:
+            return "\e[3~";
+        default:
+            return NULL;
+    }
+}
+
+static const char* Vt_get_normal_cursor_key_response(Vt* self, const uint32_t key)
+{
+    if (self->modes.application_keypad_cursor) {
+        return application_cursor_key_response(key);
+    }
+
+    switch (key) {
+        case XKB_KEY_Up:
+            return "\e[A";
+        case XKB_KEY_Down:
+            return "\e[B";
+        case XKB_KEY_Right:
+            return "\e[C";
+        case XKB_KEY_Left:
+            return "\e[D";
+        case XKB_KEY_End:
+            return "\e[F";
+        case XKB_KEY_Home:
+            return "\e[H";
         case 127:
             return "\e[3~";
         default:
@@ -4223,7 +4230,7 @@ static const char* application_keypad_response(const uint32_t key)
 
 /**
  * Get response format string in normal keypad mode */
-static const char* normal_mod_keypad_response(const uint32_t key)
+static const char* mod_cursor_key_response(const uint32_t key)
 {
     switch (key) {
         case XKB_KEY_Up:
@@ -4238,28 +4245,8 @@ static const char* normal_mod_keypad_response(const uint32_t key)
             return "\e[1;%dF";
         case XKB_KEY_Home:
             return "\e[1;%dH";
-        default:
-            return NULL;
-    }
-}
-
-/**
- * Get response format string in application keypad mode */
-static const char* application_mod_keypad_response(const uint32_t key)
-{
-    switch (key) {
-        case XKB_KEY_Up:
-            return "\e[1;%dA";
-        case XKB_KEY_Down:
-            return "\e[1;%dB";
-        case XKB_KEY_Right:
-            return "\e[1;%dC";
-        case XKB_KEY_Left:
-            return "\e[1;%dD";
-        case XKB_KEY_End:
-            return "\e[1;%dF";
-        case XKB_KEY_Home:
-            return "\e[1;%dH";
+        case 127:
+            return "\e[3;%d~";
         default:
             return NULL;
     }
@@ -4336,15 +4323,13 @@ static bool Vt_maybe_handle_keypad_key(Vt* self, uint32_t key, uint32_t mods)
 {
     const char* resp = NULL;
     if (mods) {
-        resp = self->modes.application_keypad ? application_mod_keypad_response(key)
-                                              : normal_mod_keypad_response(key);
+        resp = mod_cursor_key_response(key);
         if (resp) {
             Vt_output_formated(self, resp, mods + 1);
             return true;
         }
     } else {
-        bool appl_key = self->modes.application_keypad;
-        resp          = appl_key ? application_keypad_response(key) : normal_keypad_response(key);
+        resp = Vt_get_normal_cursor_key_response(self, key);
         if (resp) {
             Vt_output(self, resp, strlen(resp));
             return true;
@@ -4363,31 +4348,63 @@ static bool Vt_maybe_handle_function_key(Vt* self, uint32_t key, uint32_t mods)
         int f_num = (key + 1) - XKB_KEY_F1;
         if (mods) {
             if (f_num < 5) {
-                Vt_output_formated(self, "\e[[1;%u%c", mods + 1, f_num + 'O');
+                Vt_output_formated(self, "\e[1;%u%c", mods + 1, f_num + 'O');
             } else if (f_num == 5) {
                 Vt_output_formated(self, "\e[%d;%u~", f_num + 10, mods + 1);
-            } else {
+            } else if (f_num < 11) {
                 Vt_output_formated(self, "\e[%d;%u~", f_num + 11, mods + 1);
+            } else {
+                Vt_output_formated(self, "\e[%d;%u~", f_num + 12, mods + 1);
             }
         } else {
             if (f_num < 5) {
                 Vt_output_formated(self, "\eO%c", f_num + 'O');
             } else if (f_num == 5) {
                 Vt_output_formated(self, "\e[%d~", f_num + 10);
-            } else {
+            } else if (f_num < 11) {
                 Vt_output_formated(self, "\e[%d~", f_num + 11);
+            } else {
+                Vt_output_formated(self, "\e[%d~", f_num + 12);
             }
         }
         return true;
-    } else if (key == XKB_KEY_Insert) {
-        Vt_output(self, "\e[2~", 4);
-        return true;
-    } else if (key == XKB_KEY_Page_Up) {
-        Vt_output(self, "\e[5~", 4);
-        return true;
-    } else if (key == XKB_KEY_Page_Down) {
-        Vt_output(self, "\e[6~", 4);
-        return true;
+    } else /* not f-key */ {
+        if (mods) {
+            if (key == XKB_KEY_Insert) {
+                Vt_output_formated(self, "\e[2;%u~", mods + 1);
+                return true;
+            } else if (key == XKB_KEY_Delete) {
+                Vt_output_formated(self, "\e[3;%u~", mods + 1);
+                return true;
+            } else if (key == XKB_KEY_Home) {
+                Vt_output_formated(self, "\e[1;%u~", mods + 1);
+                return true;
+            } else if (key == XKB_KEY_End) {
+                Vt_output_formated(self, "\e[4;%u~", mods + 1);
+                return true;
+            } else if (key == XKB_KEY_Page_Up) {
+                Vt_output_formated(self, "\e[5;%u~", mods + 1);
+                return true;
+            } else if (key == XKB_KEY_Page_Down) {
+                Vt_output_formated(self, "\e[6;%u~", mods + 1);
+                return true;
+            }
+
+        } else /* no mods */ {
+            if (key == XKB_KEY_Insert) {
+                Vt_output(self, "\e[2~", 4);
+                return true;
+            } else if (key == XKB_KEY_Delete) {
+                Vt_output(self, "\e[3~", 4);
+                return true;
+            } else if (key == XKB_KEY_Page_Up) {
+                Vt_output(self, "\e[5~", 4);
+                return true;
+            } else if (key == XKB_KEY_Page_Down) {
+                Vt_output(self, "\e[6~", 4);
+                return true;
+            }
+        }
     }
 
     return false;
@@ -4414,14 +4431,45 @@ static uint32_t numpad_key_convert(uint32_t key)
             return '.';
         case XKB_KEY_KP_Space:
             return ' ';
+
+        case XKB_KEY_KP_Up:
+            return XKB_KEY_Up;
+        case XKB_KEY_KP_Down:
+            return XKB_KEY_Down;
+        case XKB_KEY_KP_Left:
+            return XKB_KEY_Left;
+        case XKB_KEY_KP_Right:
+            return XKB_KEY_Right;
+
+        case XKB_KEY_KP_Page_Up:
+            return XKB_KEY_Page_Up;
+        case XKB_KEY_KP_Page_Down:
+            return XKB_KEY_Page_Down;
+
+        case XKB_KEY_KP_Insert:
+            return XKB_KEY_Insert;
         case XKB_KEY_KP_Delete:
             return XKB_KEY_Delete;
         case XKB_KEY_KP_Home:
             return XKB_KEY_Home;
         case XKB_KEY_KP_End:
             return XKB_KEY_End;
+        case XKB_KEY_KP_Begin:
+            return XKB_KEY_Begin;
         case XKB_KEY_KP_Tab:
             return XKB_KEY_Tab;
+        case XKB_KEY_KP_Enter:
+            return XKB_KEY_Return;
+
+        case XKB_KEY_KP_F1:
+            return XKB_KEY_F1;
+        case XKB_KEY_KP_F2:
+            return XKB_KEY_F2;
+        case XKB_KEY_KP_F3:
+            return XKB_KEY_F3;
+        case XKB_KEY_KP_F4:
+            return XKB_KEY_F4;
+
         case XKB_KEY_KP_0 ... XKB_KEY_KP_9:
             return '0' + key - XKB_KEY_KP_0;
         default:
@@ -4435,10 +4483,11 @@ void Vt_handle_key(void* _self, uint32_t key, uint32_t rawkey, uint32_t mods)
 {
     Vt* self = _self;
 
+    key = numpad_key_convert(key);
+
     if (!Vt_maybe_handle_unicode_input_key(self, key, rawkey, mods) &&
         !Vt_maybe_handle_keypad_key(self, key, mods) &&
         !Vt_maybe_handle_function_key(self, key, mods)) {
-        key = numpad_key_convert(key);
 
         if (FLAG_IS_SET(mods, MODIFIER_ALT) && !self->modes.no_alt_sends_esc) {
             Vector_push_char(&self->output, '\e');

@@ -360,6 +360,7 @@ typedef struct _Vt
         uint8_t no_auto_wrap : 1;
         uint8_t auto_repeat : 1;
         uint8_t application_keypad : 1;
+        uint8_t application_keypad_cursor : 1;
     } modes;
 
 } Vt;

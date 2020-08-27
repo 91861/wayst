@@ -638,10 +638,24 @@ static void keyboard_handle_key(void*               data,
         utf = xkb_state_key_get_utf32(globalWl->xkb.state, code);
     }
 
-    bool is_not_consumed = utf ? true : !keysym_is_consumed(sym);
-
     uint32_t final_mods = 0;
     uint32_t mods       = xkb_state_serialize_mods(globalWl->xkb.state, XKB_STATE_MODS_EFFECTIVE);
+
+    LOG("Wl::key{ key: %d code: %d state: %d repeat: %d sym: %d rawsym: %d utfcode: %d }\n",
+        key,
+        code,
+        state,
+        is_repeat_event,
+        sym,
+        rawsym,
+        utf);
+
+    // xkb will signal a failed conversion to utf32 by returning 0, but 0 is the expected result for
+    // Ctrl + `
+    bool utf_conversion_success =
+      utf || (sym == XKB_KEY_grave && FLAG_IS_SET(mods, globalWl->xkb.ctrl_mask));
+
+    bool is_not_consumed = utf_conversion_success ? true : !keysym_is_consumed(sym);
 
     if (FLAG_IS_SET(mods, globalWl->xkb.ctrl_mask)) {
         FLAG_SET(final_mods, MODIFIER_CONTROL);
@@ -653,7 +667,7 @@ static void keyboard_handle_key(void*               data,
         FLAG_SET(final_mods, MODIFIER_SHIFT);
     }
 
-    uint32_t final = utf ? utf : sym;
+    uint32_t final = utf_conversion_success ? utf : sym;
 
     if (state == WL_KEYBOARD_KEY_STATE_PRESSED && is_not_consumed) {
         globalWl->keycode_to_repeat = key;
@@ -1217,11 +1231,7 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h)
     eglChooseConfig(globalWl->egl_display, cfg_attribs, &config, 1, &num_config);
 
     EGLint context_attribs[] = {
-        EGL_CONTEXT_MAJOR_VERSION,
-        2,
-        EGL_CONTEXT_MINOR_VERSION,
-        1,
-        EGL_NONE,
+        EGL_CONTEXT_MAJOR_VERSION, 2, EGL_CONTEXT_MINOR_VERSION, 1, EGL_NONE,
     };
 
     windowWl(win)->egl_context =
