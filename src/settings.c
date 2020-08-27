@@ -293,6 +293,8 @@ static void find_font()
         Vector_last_StyledFontInfo(&settings.styled_fonts)->family_name = strdup("Monospace");
     }
 
+    int loaded_fonts = 0;
+
     for (StyledFontInfo* i = NULL; (i = Vector_iter_StyledFontInfo(&settings.styled_fonts, i));) {
         char* main_family  = i->family_name;
         char* regular_file = FontconfigContext_get_file(&fc_context,
@@ -339,6 +341,8 @@ static void find_font()
 
         if (!regular_file) {
             WRN("Could not find font \'%s\'\n", i->family_name);
+        } else {
+            ++loaded_fonts;
         }
 
         if (unlikely(settings.debug_font)) {
@@ -349,6 +353,10 @@ static void find_font()
                    OR(italic_file, "(none)"),
                    OR(bold_italic_file, "(none)"));
         }
+    }
+
+    if (!loaded_fonts) {
+        ERR("Failed to load any primary font");
     }
 
     for (UnstyledFontInfo* i = NULL;

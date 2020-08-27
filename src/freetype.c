@@ -412,6 +412,7 @@ Freetype Freetype_new()
     self.symbol_faces = Vector_new_FreetypeFace();
     self.color_faces  = Vector_new_FreetypeFace();
     FT_Error e        = 0;
+
     if (!self.initialized) {
         if ((e = FT_Init_FreeType(&self.ft))) {
             ERR("Failed to initialize freetype %s", ft_error_to_string(e));
@@ -421,6 +422,7 @@ Freetype Freetype_new()
         }
         self.initialized = true;
     }
+
     enum FreetypeOutputTextureType output_type;
     switch (settings.lcd_filter) {
         case LCD_FILTER_V_BGR:

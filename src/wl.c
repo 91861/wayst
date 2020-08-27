@@ -1205,13 +1205,13 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h)
 
     EGLint major, minor;
     if (eglInitialize(globalWl->egl_display, &major, &minor) != EGL_TRUE) {
-        ERR("EGL init error\n");
+        ERR("EGL init error %s", egl_get_error_string(eglGetError()));
     }
 
     LOG("EGL Initialized %d.%d\n", major, minor);
 
     if (eglBindAPI(EGL_OPENGL_API) != EGL_TRUE) {
-        ERR("EGL API binding error\n");
+        ERR("EGL API binding error %s", egl_get_error_string(eglGetError()));
     }
 
     eglChooseConfig(globalWl->egl_display, cfg_attribs, &config, 1, &num_config);
@@ -1228,7 +1228,7 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h)
       eglCreateContext(globalWl->egl_display, config, EGL_NO_CONTEXT, context_attribs);
 
     if (!windowWl(win)->egl_context) {
-        ERR("failed to create EGL context");
+        ERR("failed to create EGL context %s", egl_get_error_string(eglGetError()));
     }
 
     windowWl(win)->surface = wl_compositor_create_surface(globalWl->compositor);
@@ -1302,8 +1302,9 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h)
     }
 
     EGLint eglerror = eglGetError();
-    if (eglerror != EGL_SUCCESS)
+    if (eglerror != EGL_SUCCESS) {
         WRN("EGL Error %s\n", egl_get_error_string(eglerror));
+    }
 
     struct wl_callback* frame_callback = wl_surface_frame(windowWl(win)->surface);
     wl_callback_add_listener(frame_callback, &frame_listener, win);
