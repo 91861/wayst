@@ -30,8 +30,6 @@
 
 static APIENTRY PFNGLXSWAPINTERVALEXTPROC glXSwapIntervalEXT = NULL;
 
-DEF_VECTOR(int, NULL)
-
 static int32_t convert_modifier_mask(unsigned int x_mask)
 {
     int32_t mods = 0;
@@ -273,18 +271,11 @@ static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
       glXQueryExtensionsString(globalX11->display, DefaultScreen(globalX11->display));
     LOG("GLX extensions: %s\n", exts);
 
-    Vector_int context_attribs = Vector_new_int();
-    Vector_pushv_int(&context_attribs,
-                     (int[]){ GLX_CONTEXT_MAJOR_VERSION_ARB, 2, GLX_CONTEXT_MINOR_VERSION_ARB, 1 },
-                     4);
-
-    if (strstr(exts, "GLX_ARB_create_context_profile")) {
-        Vector_pushv_int(&context_attribs,
-                         (int[]){ GLX_CONTEXT_PROFILE_MASK_ARB, GLX_CONTEXT_CORE_PROFILE_BIT_ARB },
-                         2);
-    }
-
-    Vector_push_int(&context_attribs, None);
+    static const int context_attrs[] = { GLX_CONTEXT_MAJOR_VERSION_ARB,
+                                         2,
+                                         GLX_CONTEXT_MINOR_VERSION_ARB,
+                                         1,
+                                         None };
 
     if (strstr(exts, "_swap_control")) {
         glXSwapIntervalEXT = (APIENTRY PFNGLXSWAPINTERVALEXTPROC)glXGetProcAddressARB(
@@ -308,9 +299,8 @@ static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
                                                                  fb_cfg[fb_cfg_sel],
                                                                  0,
                                                                  True,
-                                                                 context_attribs.buf);
+                                                                 context_attrs);
     }
-    Vector_destroy_int(&context_attribs);
 
     if (!windowX11(win)->glx_context) {
         ERR("Failed to create GLX context");

@@ -74,17 +74,14 @@ static void        Vt_mark_proxy_damaged_cell(Vt* self, size_t line, size_t rune
 
 static inline VtLine VtLine_new()
 {
-    return (VtLine){ .damage =
-                       (struct VtLineDamage){
-                         .type  = VT_LINE_DAMAGE_FULL,
-                         .front = 0,
-                         .end   = 0,
-                         .shift = 0,
-                       },
-                     .reflowable = true,
-                     .rejoinable = false,
-                     .data       = Vector_new_VtRune(),
-                     .proxy      = { { 0 } } };
+    VtLine line;
+    memset(&line, 0, sizeof(VtLine));
+
+    line.damage.type = VT_LINE_DAMAGE_FULL;
+    line.reflowable = true;
+    line.data = Vector_new_VtRune();
+
+    return line;
 }
 
 static void Vt_output(Vt* self, const char* buf, size_t len)
@@ -2286,9 +2283,9 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                     if (seq)
                                         ++seq;
                                 }
-
-                                if (!nargs)
+                                if (!nargs) {
                                     break;
+                                }
 
                                 switch (args[0]) {
 
@@ -2315,9 +2312,13 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                      * FIXME: This should accounts for window decorations.
                                      */
                                     case 4:
+                                        if (!settings.windowops_manip) {
+                                            break;
+                                        }
+                                        
                                         if (nargs >= 2) {
-                                            int32_t target_w = args[1];
-                                            int32_t target_h = nargs >= 3 ? args[2] : -1;
+                                            int32_t target_h = args[1];
+                                            int32_t target_w = nargs >= 3 ? args[2] : -1;
 
                                             if (target_w == -1 || target_h == -1) {
                                                 Pair_uint32_t current_dims =
@@ -2358,6 +2359,9 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
 
                                     /* Refresh window */
                                     case 7:
+                                        if (!settings.windowops_manip) {
+                                            break;
+                                        }
                                         CALL_FP(self->callbacks.on_action_performed,
                                                 self->callbacks.user_data);
                                         CALL_FP(self->callbacks.on_repaint_required,
@@ -2366,6 +2370,9 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
 
                                     /* Resize in cells */
                                     case 8: {
+                                        if (!settings.windowops_manip) {
+                                            break;
+                                        }
                                         if (nargs >= 2) {
                                             int32_t target_rows = args[1];
                                             int32_t target_cols = nargs >= 3 ? args[2] : -1;
@@ -2373,8 +2380,8 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                             Pair_uint32_t target_text_area_dims = CALL_FP(
                                               self->callbacks.on_window_size_from_cells_requested,
                                               self->callbacks.user_data,
-                                              target_rows > 0 ? target_rows : 1,
-                                              target_cols > 0 ? target_cols : 1);
+                                              target_cols > 0 ? target_cols : 1,
+                                              target_rows > 0 ? target_rows : 1);
 
                                             Pair_uint32_t currnet_text_area_dims =
                                               CALL_FP(self->callbacks.on_text_area_size_requested,
@@ -2404,6 +2411,9 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
 
                                     /* Maximize */
                                     case 9: {
+                                        if (!settings.windowops_manip) {
+                                            break;
+                                        }
                                         if (nargs >= 2) {
                                             switch (args[1]) {
                                                 /* Unmaximize */
@@ -2448,7 +2458,10 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                     } break;
 
                                     /* Fullscreen */
-                                    case 10:
+                                case 10: {
+                                        if (!settings.windowops_manip) {
+                                            break;
+                                        }
                                         if (nargs >= 2) {
                                             switch (args[1]) {
                                                 /* Disable */
@@ -2485,10 +2498,14 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                         } else {
                                             WRN("Invalid XTWINOPS: %s\n", seq);
                                         }
+                                }
                                         break;
 
                                     /* Report iconification state */
                                     case 11: {
+                                        if (!settings.windowops_info) {
+                                            break;
+                                        }
                                         bool is_minimized =
                                           CALL_FP(self->callbacks.on_minimized_state_requested,
                                                   self->callbacks.user_data);
@@ -2498,6 +2515,9 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
 
                                     /* Report window position */
                                     case 13: {
+                                        if (!settings.windowops_info) {
+                                            break;
+                                        }
                                         Pair_uint32_t pos =
                                           CALL_FP(self->callbacks.on_window_position_requested,
                                                   self->callbacks.user_data);
@@ -2509,6 +2529,9 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
 
                                     /* Report window size in pixels */
                                     case 14: {
+                                        if (!settings.windowops_info) {
+                                            break;
+                                        }
                                         Vt_output_formated(self,
                                                            "\e[4;%d;%d;t",
                                                            self->ws.ws_xpixel,
@@ -2517,6 +2540,9 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
 
                                     /* Report text area size in chars */
                                     case 18: {
+                                        if (!settings.windowops_info) {
+                                            break;
+                                        }
                                         Vt_output_formated(self,
                                                            "\e[8;%d;%d;t",
                                                            self->ws.ws_col,
@@ -2526,6 +2552,9 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
 
                                     /* Report window size in chars */
                                     case 19: {
+                                        if (!settings.windowops_info) {
+                                            break;
+                                        }
                                         Vt_output_formated(self,
                                                            "\e[9;%d;%d;t",
                                                            self->ws.ws_col,
@@ -2537,6 +2566,9 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                     case 20:
                                         /* Report window title */
                                     case 21: {
+                                        if (!settings.windowops_info) {
+                                            break;
+                                        }
                                         Vt_output_formated(self, "\e]L%s\e\\", self->title);
                                     } break;
 

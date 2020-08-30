@@ -23,6 +23,8 @@
 #include "util.h"
 #include "wcwidth/wcwidth.h"
 
+DEF_PAIR(GLuint);
+
 #define NUM_BUCKETS 256
 
 #ifndef ATLAS_SIZE_LIMIT
@@ -41,9 +43,11 @@
 #define N_RECYCLED_TEXTURES 5
 #endif
 
-#define PROXY_INDEX_TEXTURE       0
-#define PROXY_INDEX_TEXTURE_BLINK 1
-#define PROXY_INDEX_TEXTURE_SIZE  2
+#define PROXY_INDEX_TEXTURE           0
+#define PROXY_INDEX_TEXTURE_BLINK     1
+#define PROXY_INDEX_DEPTHBUFFER       3
+#define PROXY_INDEX_DEPTHBUFFER_BLINK 4
+#define PROXY_INDEX_SIZE              2
 
 #include "gl_exts/glext.h"
 
@@ -228,16 +232,20 @@ DEF_VECTOR(vertex_t, NULL);
 
 typedef struct
 {
-    GLuint  id;
+    GLuint  color_tex;
+    GLuint  depth_rb;
     int32_t width;
 } LineTexture;
 
 static void LineTexture_destroy(LineTexture* self)
 {
-    if (self->id) {
-        glDeleteTextures(1, &self->id);
+    if (self->color_tex) {
+        ASSERT(self->depth_rb, "deleted texture has depth renderbuffer");
+        glDeleteTextures(1, &self->color_tex);
+        glDeleteRenderbuffers(1, &self->depth_rb);
+        self->color_tex = 0;
+        self->depth_rb  = 0;
     }
-    self->id = 0;
 }
 
 typedef struct
@@ -265,7 +273,7 @@ typedef struct
 
     /* pen position to begin drawing font */
     float    pen_begin;
-    float    pen_begin_pixels;
+    int      pen_begin_pixels;
     uint32_t win_w, win_h;
     float    line_height, glyph_width;
     uint16_t line_height_pixels, glyph_width_pixels;
@@ -332,9 +340,9 @@ typedef struct
 
 #define gfxOpenGL21(gfx) ((GfxOpenGL21*)&gfx->extend_data)
 
-GLuint GfxOpenGL21_pop_recycled_texture(GfxOpenGL21* self);
-void   GfxOpenGL21_load_font(Gfx* self);
-void   GfxOpenGL21_destroy_recycled_proxies(GfxOpenGL21* self);
+Pair_GLuint GfxOpenGL21_pop_recycled(GfxOpenGL21* self);
+void        GfxOpenGL21_load_font(Gfx* self);
+void        GfxOpenGL21_destroy_recycled(GfxOpenGL21* self);
 
 void          GfxOpenGL21_destroy(Gfx* self);
 void          GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui);
@@ -863,7 +871,7 @@ __attribute__((cold)) static Texture create_squiggle_texture(uint32_t w,
 void GfxOpenGL21_resize(Gfx* self, uint32_t w, uint32_t h)
 {
     GfxOpenGL21* gl21 = gfxOpenGL21(self);
-    GfxOpenGL21_destroy_recycled_proxies(gl21);
+    GfxOpenGL21_destroy_recycled(gl21);
 
     gl21->win_w              = w;
     gl21->win_h              = h;
@@ -1211,7 +1219,7 @@ static void GfxOpenGL21_generate_line_quads(GfxOpenGL21*  gfx,
             gfx->has_blinking_text = true;
         }
 
-        float tex_end_x   = -1.0f + vt_line->proxy.data[PROXY_INDEX_TEXTURE_SIZE] * gfx->sx;
+        float tex_end_x   = -1.0f + vt_line->proxy.data[PROXY_INDEX_SIZE] * gfx->sx;
         float tex_begin_y = 1.0f - gfx->line_height_pixels * (line_index + 1) * gfx->sy;
         Vector_push_GlyphBufferData(gfx->vec_glyph_buffer,
                                     (GlyphBufferData){ {
@@ -1487,7 +1495,7 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                          ColorRGBA_get_float(active_bg_color, 1),
                          ColorRGBA_get_float(active_bg_color, 2),
                          ColorRGBA_get_float(active_bg_color, 3));
-            glClear(GL_COLOR_BUFFER_BIT);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
             { // for each block of characters with the same background color
                 ColorRGB      active_fg_color              = settings.fg;
@@ -1582,9 +1590,9 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                                      * pixel */
                                     float x3 = -1.0f +
                                                (float)column * gfx->glyph_width_pixels * scalex +
-                                               l + (scalex * 0.5);
-                                    float y3 =
-                                      -1.0f + gfx->pen_begin_pixels * scaley - t + (scaley * 0.5);
+                                               l; // + (scalex * 0.5);
+                                    float y3 = -1.0f + gfx->pen_begin_pixels * scaley -
+                                               t; // + (scaley * 0.5);
                                     Vector_push_GlyphBufferData(
                                       target,
                                       (GlyphBufferData){ {
@@ -1956,47 +1964,71 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
     uint32_t     texture_height       = gfx->line_height_pixels;
     bool         has_underlined_chars = false;
     GLuint       final_texture        = 0;
+    GLuint       final_depthbuffer    = 0;
+
+    int32_t* proxy_data = vt_line->proxy.data;
+
+    size_t proxy_tex_idx = is_for_blinking ? PROXY_INDEX_TEXTURE_BLINK : PROXY_INDEX_TEXTURE;
+    size_t proxy_depth_idx =
+      is_for_blinking ? PROXY_INDEX_DEPTHBUFFER_BLINK : PROXY_INDEX_DEPTHBUFFER;
+
+    GLuint   recovered_texture     = 0;
+    GLuint   recovered_depthbuffer = 0;
+    uint32_t recovered_width       = 0;
 
     // Try to reuse the texture that is already there
-    Texture recovered = {
-        .id =
-          vt_line->proxy.data[is_for_blinking ? PROXY_INDEX_TEXTURE_BLINK : PROXY_INDEX_TEXTURE],
-        .w = vt_line->proxy.data[PROXY_INDEX_TEXTURE_SIZE],
-    };
+    recovered_texture     = proxy_data[proxy_tex_idx];
+    recovered_depthbuffer = proxy_data[proxy_depth_idx];
+    recovered_width       = proxy_data[PROXY_INDEX_SIZE];
 
-    bool can_reuse = recovered.id && recovered.w >= texture_width;
+    bool can_reuse = recovered_texture && recovered_width >= texture_width;
 
     /* TODO:
-     * render the recovered texture onto the new one and set damage mode to remaining range? */
+     * --render-- pixel transfer the recovered texture onto the new one and set damage mode to
+     * remaining range? */
     if (!can_reuse) {
         vt_line->damage.type = VT_LINE_DAMAGE_FULL;
     }
 
     if (can_reuse) {
-        final_texture        = recovered.id;
-        actual_texture_width = recovered.w;
+        final_texture        = recovered_texture;
+        final_depthbuffer    = recovered_depthbuffer;
+        actual_texture_width = recovered_width;
+
         glBindFramebuffer(GL_FRAMEBUFFER, gfx->line_framebuffer);
-        glBindTexture(GL_TEXTURE_2D, recovered.id);
+
+        glBindTexture(GL_TEXTURE_2D, recovered_texture);
         glFramebufferTexture2D(GL_FRAMEBUFFER,
                                GL_COLOR_ATTACHMENT0,
                                GL_TEXTURE_2D,
-                               recovered.id,
+                               recovered_texture,
                                0);
-        glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, 0);
-        glViewport(0, 0, recovered.w, recovered.h);
+        glBindRenderbuffer(GL_RENDERBUFFER, recovered_depthbuffer);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER,
+                                  GL_DEPTH_ATTACHMENT,
+                                  GL_RENDERBUFFER,
+                                  recovered_depthbuffer);
+
+        glViewport(0, 0, actual_texture_width, texture_height);
+
         gl_check_error();
     } else {
         if (!is_for_blinking) {
-            GfxOpenGL21_destroy_proxy((void*)gfx - offsetof(Gfx, extend_data), vt_line->proxy.data);
+            GfxOpenGL21_destroy_proxy((void*)((uint8_t*)gfx - offsetof(Gfx, extend_data)),
+                                      vt_line->proxy.data);
         }
         if (!vt_line->data.size) {
             return;
         }
 
-        GLuint  recycle_id    = gfx->recycled_textures[0].id;
-        int32_t recycle_width = gfx->recycled_textures[0].width;
-        if (recycle_id && recycle_width >= (int32_t)texture_width) {
-            final_texture        = GfxOpenGL21_pop_recycled_texture(gfx);
+        GLuint  recycle_tex_id = gfx->recycled_textures[0].color_tex;
+        int32_t recycle_width  = gfx->recycled_textures[0].width;
+
+        if (recycle_tex_id && recycle_width >= (int32_t)texture_width) {
+            Pair_GLuint recycled = GfxOpenGL21_pop_recycled(gfx);
+            ASSERT(recycled.second, "recovered texture has a depth rb");
+            final_texture        = recycled.first;
+            final_depthbuffer    = recycled.second;
             actual_texture_width = recycle_width;
             glBindFramebuffer(GL_FRAMEBUFFER, gfx->line_framebuffer);
             glBindTexture(GL_TEXTURE_2D, final_texture);
@@ -2005,10 +2037,14 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
                                    GL_TEXTURE_2D,
                                    final_texture,
                                    0);
-            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, 0);
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER,
+                                      GL_DEPTH_ATTACHMENT,
+                                      GL_RENDERBUFFER,
+                                      final_depthbuffer);
             gl_check_error();
+
         } else {
-            glBindFramebuffer(GL_FRAMEBUFFER, gfx->line_framebuffer);
+            // Generate new framebuffer attachments
             glGenTextures(1, &final_texture);
             glBindTexture(GL_TEXTURE_2D, final_texture);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -2022,12 +2058,24 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
                          GL_RGBA,
                          GL_UNSIGNED_BYTE,
                          0);
+
+            glGenRenderbuffers(1, &final_depthbuffer);
+            glBindRenderbuffer(GL_RENDERBUFFER, final_depthbuffer);
+            glRenderbufferStorage(GL_RENDERBUFFER,
+                                  GL_DEPTH_COMPONENT,
+                                  actual_texture_width,
+                                  texture_height);
+
+            glBindFramebuffer(GL_FRAMEBUFFER, gfx->line_framebuffer);
             glFramebufferTexture2D(GL_FRAMEBUFFER,
                                    GL_COLOR_ATTACHMENT0,
                                    GL_TEXTURE_2D,
                                    final_texture,
                                    0);
-            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, 0);
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER,
+                                      GL_DEPTH_ATTACHMENT,
+                                      GL_RENDERBUFFER,
+                                      final_depthbuffer);
             gl_check_error();
         }
     }
@@ -2053,15 +2101,22 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
     }
     // TODO: VT_LINE_DAMAGE_SHIFT
 
-    glClear(GL_COLOR_BUFFER_BIT);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    glEnable(GL_DEPTH_TEST);
+
+    glDepthMask(GL_TRUE);
+    glDepthFunc(GL_LEQUAL);
+    glDepthRange(0.0f, 1.0f);
 
     /* Keep track of gl state to avoid unnececery changes */
     int_fast8_t bound_resources = BOUND_RESOURCES_NONE;
 
     switch (vt_line->damage.type) {
         case VT_LINE_DAMAGE_RANGE: {
+
             size_t range_begin_idx = vt_line->damage.front;
             size_t range_end_idx   = vt_line->damage.end + 1;
 
@@ -2129,14 +2184,16 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
 
     // set proxy data to generated texture
     if (unlikely(is_for_blinking)) {
-        vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK] = final_texture;
+        vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK]     = final_texture;
+        vt_line->proxy.data[PROXY_INDEX_DEPTHBUFFER_BLINK] = final_depthbuffer;
     } else {
-        vt_line->proxy.data[PROXY_INDEX_TEXTURE]      = final_texture;
-        vt_line->proxy.data[PROXY_INDEX_TEXTURE_SIZE] = actual_texture_width;
-        vt_line->damage.type                          = VT_LINE_DAMAGE_NONE;
-        vt_line->damage.shift                         = 0;
-        vt_line->damage.front                         = 0;
-        vt_line->damage.end                           = 0;
+        vt_line->proxy.data[PROXY_INDEX_TEXTURE]     = final_texture;
+        vt_line->proxy.data[PROXY_INDEX_DEPTHBUFFER] = final_depthbuffer;
+        vt_line->proxy.data[PROXY_INDEX_SIZE]        = actual_texture_width;
+        vt_line->damage.type                         = VT_LINE_DAMAGE_NONE;
+        vt_line->damage.shift                        = 0;
+        vt_line->damage.front                        = 0;
+        vt_line->damage.end                          = 0;
     }
 
     static float debug_tint = 0.0f;
@@ -2169,13 +2226,26 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
         }
     }
 
+    glDisable(GL_DEPTH_TEST);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, gfx->line_framebuffer);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, 0);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    gl_check_error();
+
     glViewport(0, 0, gfx->win_w, gfx->win_h);
 
+    // There are no blinking characters, but their resources still exist
     if (!has_blinking_chars && vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK]) {
         // TODO: recycle
         glDeleteTextures(1, (GLuint*)&vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK]);
         vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK] = 0;
+
+        ASSERT(vt_line->proxy.data[PROXY_INDEX_DEPTHBUFFER_BLINK],
+               "deleted proxy texture has depth rb");
+        glDeleteRenderbuffers(1, (GLuint*)&vt_line->proxy.data[PROXY_INDEX_DEPTHBUFFER_BLINK]);
+        vt_line->proxy.data[PROXY_INDEX_DEPTHBUFFER_BLINK] = 0;
     }
 
     if (unlikely(has_blinking_chars && !is_for_blinking)) {
@@ -2616,75 +2686,100 @@ void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
     }
 }
 
-void GfxOpenGL21_destroy_recycled_proxies(GfxOpenGL21* self)
+void GfxOpenGL21_destroy_recycled(GfxOpenGL21* self)
 {
     for (uint_fast8_t i = 0; i < ARRAY_SIZE(self->recycled_textures); ++i) {
-        if (self->recycled_textures[i].id) {
-            glDeleteTextures(1, &self->recycled_textures[i].id);
+        if (self->recycled_textures[i].color_tex) {
+            glDeleteTextures(1, &self->recycled_textures[i].color_tex);
+            glDeleteRenderbuffers(1, &self->recycled_textures[i].depth_rb);
         }
-        self->recycled_textures[i].id    = 0;
-        self->recycled_textures[i].width = 0;
+        self->recycled_textures[i].color_tex = 0;
+        self->recycled_textures[i].depth_rb  = 0;
+        self->recycled_textures[i].width     = 0;
     }
 }
 
-void GfxOpenGL21_push_recycled_texture(GfxOpenGL21* self, GLuint tex_id, int32_t width)
+void GfxOpenGL21_push_recycled(GfxOpenGL21* self, GLuint tex_id, GLuint rb_id, int32_t width)
 {
     uint_fast8_t insert_point;
     for (insert_point = 0; insert_point < N_RECYCLED_TEXTURES; ++insert_point) {
         if (width > self->recycled_textures[insert_point].width) {
-            if (likely(ARRAY_LAST(self->recycled_textures).id)) {
-                glDeleteTextures(1, &ARRAY_LAST(self->recycled_textures).id);
+            if (likely(ARRAY_LAST(self->recycled_textures).color_tex)) {
+                ASSERT(ARRAY_LAST(self->recycled_textures).depth_rb,
+                       "deleted texture has depth rb");
+                glDeleteTextures(1, &ARRAY_LAST(self->recycled_textures).color_tex);
+                glDeleteRenderbuffers(1, &ARRAY_LAST(self->recycled_textures).depth_rb);
             }
             void*  src = self->recycled_textures + insert_point;
             void*  dst = self->recycled_textures + insert_point + 1;
             size_t n = sizeof(*self->recycled_textures) * (N_RECYCLED_TEXTURES - insert_point - 1);
             memmove(dst, src, n);
-            self->recycled_textures[insert_point].id    = tex_id;
-            self->recycled_textures[insert_point].width = width;
+            self->recycled_textures[insert_point].color_tex = tex_id;
+            self->recycled_textures[insert_point].depth_rb  = rb_id;
+            self->recycled_textures[insert_point].width     = width;
             return;
         }
     }
     glDeleteTextures(1, &tex_id);
 }
 
-GLuint GfxOpenGL21_pop_recycled_texture(GfxOpenGL21* self)
+Pair_GLuint GfxOpenGL21_pop_recycled(GfxOpenGL21* self)
 {
-    GLuint ret = self->recycled_textures[0].id;
+    Pair_GLuint ret = { .first  = self->recycled_textures[0].color_tex,
+                        .second = self->recycled_textures[0].depth_rb };
+
     memmove(self->recycled_textures,
             self->recycled_textures + 1,
             sizeof(*self->recycled_textures) * (N_RECYCLED_TEXTURES - 1));
-    ARRAY_LAST(self->recycled_textures).id    = 0;
-    ARRAY_LAST(self->recycled_textures).width = 0;
+
+    ARRAY_LAST(self->recycled_textures).color_tex = 0;
+    ARRAY_LAST(self->recycled_textures).depth_rb  = 0;
+    ARRAY_LAST(self->recycled_textures).width     = 0;
 
     return ret;
 }
 
 __attribute__((hot)) void GfxOpenGL21_destroy_proxy(Gfx* self, int32_t* proxy)
 {
-    /* try to store for reuse */
     if (unlikely(proxy[PROXY_INDEX_TEXTURE] &&
                  ARRAY_LAST(gfxOpenGL21(self)->recycled_textures).width <
-                   proxy[PROXY_INDEX_TEXTURE_SIZE])) {
+                   proxy[PROXY_INDEX_SIZE])) {
 
-        GfxOpenGL21_push_recycled_texture(gfxOpenGL21(self),
-                                          proxy[PROXY_INDEX_TEXTURE],
-                                          proxy[PROXY_INDEX_TEXTURE_SIZE]);
+        GfxOpenGL21_push_recycled(gfxOpenGL21(self),
+                                  proxy[PROXY_INDEX_TEXTURE],
+                                  proxy[PROXY_INDEX_DEPTHBUFFER],
+                                  proxy[PROXY_INDEX_SIZE]);
 
         if (unlikely(proxy[PROXY_INDEX_TEXTURE_BLINK])) {
-            GfxOpenGL21_push_recycled_texture(gfxOpenGL21(self),
-                                              proxy[PROXY_INDEX_TEXTURE_BLINK],
-                                              proxy[PROXY_INDEX_TEXTURE_SIZE]);
+            GfxOpenGL21_push_recycled(gfxOpenGL21(self),
+                                      proxy[PROXY_INDEX_TEXTURE_BLINK],
+                                      proxy[PROXY_INDEX_DEPTHBUFFER_BLINK],
+                                      proxy[PROXY_INDEX_SIZE]);
         }
     } else if (likely(proxy[PROXY_INDEX_TEXTURE])) {
         /* delete starting from first */
-        glDeleteTextures(unlikely(proxy[PROXY_INDEX_TEXTURE_BLINK]) ? 2 : 1,
-                         (GLuint*)&proxy[PROXY_INDEX_TEXTURE]);
+        ASSERT(proxy[PROXY_INDEX_DEPTHBUFFER], "deleted proxy texture has a renderbuffer");
+
+        int del_num = unlikely(proxy[PROXY_INDEX_TEXTURE_BLINK]) ? 2 : 1;
+
+        if (del_num == 2) {
+            ASSERT(proxy[PROXY_INDEX_DEPTHBUFFER_BLINK],
+                   "deleted proxy texture has a renderbuffer");
+        }
+
+        glDeleteTextures(del_num, (GLuint*)&proxy[PROXY_INDEX_TEXTURE]);
+        glDeleteRenderbuffers(del_num, (GLuint*)&proxy[PROXY_INDEX_DEPTHBUFFER]);
+
     } else if (unlikely(proxy[PROXY_INDEX_TEXTURE_BLINK])) {
+        ASSERT_UNREACHABLE;
         glDeleteTextures(1, (GLuint*)&proxy[PROXY_INDEX_TEXTURE_BLINK]);
+        glDeleteRenderbuffers(1, (GLuint*)&proxy[PROXY_INDEX_DEPTHBUFFER_BLINK]);
     }
-    proxy[PROXY_INDEX_TEXTURE]       = 0;
-    proxy[PROXY_INDEX_TEXTURE_BLINK] = 0;
-    proxy[PROXY_INDEX_TEXTURE_SIZE]  = 0;
+    proxy[PROXY_INDEX_SIZE]              = 0;
+    proxy[PROXY_INDEX_TEXTURE]           = 0;
+    proxy[PROXY_INDEX_TEXTURE_BLINK]     = 0;
+    proxy[PROXY_INDEX_DEPTHBUFFER]       = 0;
+    proxy[PROXY_INDEX_DEPTHBUFFER_BLINK] = 0;
 }
 
 void GfxOpenGL21_destroy(Gfx* self)
@@ -2694,7 +2789,7 @@ void GfxOpenGL21_destroy(Gfx* self)
     glBindTexture(GL_TEXTURE_2D, 0);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
 
-    GfxOpenGL21_destroy_recycled_proxies(gfxOpenGL21(self));
+    GfxOpenGL21_destroy_recycled(gfxOpenGL21(self));
 
     Atlas_destroy(gfxOpenGL21(self)->atlas);
     if (settings.has_bold_fonts) {

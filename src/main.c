@@ -29,13 +29,6 @@
 #include "ui.h"
 #include "vt.h"
 
-#ifndef SCROLLBAR_HIDE_DELAY_MS
-#define SCROLLBAR_HIDE_DELAY_MS 1500
-#endif
-
-#ifndef SCROLLBAR_FADE_TIME_MS
-#define SCROLLBAR_FADE_TIME_MS 150
-#endif
 
 #ifndef DOUBLE_CLICK_DELAY_MS
 #define DOUBLE_CLICK_DELAY_MS 300
@@ -43,14 +36,6 @@
 
 #ifndef AUTOSCROLL_DELAY_MS
 #define AUTOSCROLL_DELAY_MS 50
-#endif
-
-#ifndef SCROLLBAR_MIN_LEN_PX
-#define SCROLLBAR_MIN_LEN_PX 20
-#endif
-
-#ifndef SCROLLBAR_WIDTH_PX
-#define SCROLLBAR_WIDTH_PX 10
 #endif
 
 typedef struct
@@ -169,11 +154,13 @@ static void App_init(App* self)
 
     Monitor_watch_window_system_fd(&self->monitor, Window_get_connection_fd(self->win));
 
-    self->ui.scrollbar.width = SCROLLBAR_WIDTH_PX;
+    self->ui.scrollbar.width = settings.scrollbar_width_px;
     self->ui.pixel_offset_x  = 0;
     self->ui.pixel_offset_y  = 0;
     self->swap_performed     = false;
     self->resolution         = size;
+
+    Window_events(self->win);
 }
 
 static void App_run(App* self)
@@ -635,7 +622,7 @@ static void App_update_cursor(App* self)
 static void App_update_scrollbar_dims(App* self)
 {
     Vt*     vt                = &self->vt;
-    double  minimum_length    = (2.0 / self->resolution.second) * SCROLLBAR_MIN_LEN_PX;
+    double  minimum_length    = (2.0 / self->resolution.second) * settings.scrollbar_length_px;
     double  length            = 2.0 / vt->lines.size * vt->ws.ws_row;
     double  extra_length      = length > minimum_length ? 0.0 : (minimum_length - length);
     int32_t scrollable_lines  = Vt_top_line(&self->vt);
@@ -645,8 +632,8 @@ static void App_update_scrollbar_dims(App* self)
     self->ui.scrollbar.top    = (2.0 - length - extra_length) * fraction_scrolled;
     int64_t ms                = TimePoint_is_ms_ahead(self->scrollbar_hide_time);
 
-    if (ms > 0 && ms < SCROLLBAR_FADE_TIME_MS && !self->vt.scrolling_visual) {
-        self->ui.scrollbar.opacity = ((float)ms / SCROLLBAR_FADE_TIME_MS);
+    if (ms > 0 && ms < settings.scrollbar_fade_time_ms && !self->vt.scrolling_visual) {
+        self->ui.scrollbar.opacity = ((float)ms / settings.scrollbar_fade_time_ms);
         App_notify_content_change(self);
     } else {
         self->ui.scrollbar.opacity = 1.0f;
@@ -748,9 +735,9 @@ static void App_update_scrollbar_vis(App* self)
     Vt* vt = &self->vt;
     if (!vt->scrolling_visual) {
         if (self->last_scrolling) {
-            self->scrollbar_hide_time = TimePoint_ms_from_now(SCROLLBAR_HIDE_DELAY_MS);
+            self->scrollbar_hide_time = TimePoint_ms_from_now(settings.scrollbar_hide_delay_ms);
         } else if (self->ui.scrollbar.dragging) {
-            self->scrollbar_hide_time = TimePoint_ms_from_now(SCROLLBAR_HIDE_DELAY_MS);
+            self->scrollbar_hide_time = TimePoint_ms_from_now(settings.scrollbar_hide_delay_ms);
         } else if (TimePoint_passed(self->scrollbar_hide_time)) {
             if (self->ui.scrollbar.visible) {
                 self->ui.scrollbar.visible = false;

@@ -133,6 +133,8 @@ typedef struct
 
     bool     dynamic_title;
     bool     bsp_sends_del;
+    bool     windowops_manip;
+    bool     windowops_info;
     uint32_t rows, cols;
 
     const char** shell_argv;
@@ -176,6 +178,10 @@ typedef struct
     int8_t  padd_glyph_x;
     int8_t  padd_glyph_y;
 
+    uint16_t scrollbar_width_px, scrollbar_length_px;
+    uint16_t scrollbar_hide_delay_ms;
+    uint16_t scrollbar_fade_time_ms;
+    
     bool    allow_scrollback_clear;
     bool    scroll_on_output;
     bool    scroll_on_key;

@@ -131,7 +131,7 @@ DEF_VECTOR(VtUriRange, VtUriRange_destroy)
 
 typedef struct
 {
-    int32_t data[4];
+    int32_t data[6];
 } VtLineProxy;
 
 typedef struct

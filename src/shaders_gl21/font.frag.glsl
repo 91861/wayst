@@ -12,8 +12,9 @@ void main() {
 
     vec3 c = texture2D(tex, tex_coord).rgb;
 
-    gl_FragData[0] = vec4(mix(bclr.r, clr.r, c.r),
-                          mix(bclr.g, clr.g, c.g),
-                          mix(bclr.b, clr.b, c.b),
-                          bclr.a + (c.r + c.g + c.b)/3.0);
+    gl_FragDepth = 1.0 - length(c) / length(vec3(1, 1, 1));
+    gl_FragColor = vec4(mix(bclr.r, clr.r, c.r),
+                        mix(bclr.g, clr.g, c.g),
+                        mix(bclr.b, clr.b, c.b),
+                        bclr.a + (c.r + c.g + c.b)/3.0);
 }

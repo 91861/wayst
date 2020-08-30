@@ -471,8 +471,8 @@ static void settings_make_default()
         .font_dpi           = 96,
         .lcd_filter         = LCD_FILTER_H_RGB,
 
-        .bg     = { .r = 0, .g = 0, .b = 0, .a = 240 },
-        .bghl   = { .r = 50, .g = 50, .b = 50, .a = 240 },
+        .bg     = { .r = 0,   .g = 0,   .b = 0,  .a = 240 },
+        .bghl   = { .r = 50,  .g = 50,  .b = 50, .a = 240 },
         .fg     = { .r = 255, .g = 255, .b = 255 },
         .fghl   = { .r = 255, .g = 255, .b = 255 },
 
@@ -480,12 +480,20 @@ static void settings_make_default()
         .dynamic_title       = true,
 
         .padding_center = true,
-        .padding = 0,
-        .padd_glyph_x = 0,
-        .padd_glyph_y = 0,
+        .padding        = 0,
+        .padd_glyph_x   = 0,
+        .padd_glyph_y   = 0,
+
+        .scrollbar_width_px      = 10,
+        .scrollbar_length_px     = 20,
+        .scrollbar_fade_time_ms  = 150,
+        .scrollbar_hide_delay_ms = 1500,
 
         .cols = 80,
         .rows = 24,
+
+        .windowops_manip = true,
+        .windowops_info  = true,
 
         .colorscheme_preset   = 0,
         ._explicit_colors_set = calloc(1, 21),
@@ -504,10 +512,10 @@ static void settings_make_default()
         .debug_pty = false,
         .debug_gfx = false,
 
-        .enable_cursor_blink = true,
+        .enable_cursor_blink      = true,
         .cursor_blink_interval_ms = 750,
-        .cursor_blink_suspend_ms = 500,
-        .cursor_blink_end_s = 15,
+        .cursor_blink_suspend_ms  = 500,
+        .cursor_blink_end_s       = 15,
     };
 }
 
@@ -539,7 +547,7 @@ static void settings_complete_defaults()
 
 static void print_help_and_exit()
 {
-#define MAX_OPT_PADDING 25
+#define MAX_OPT_PADDING 28
 
     printf("Usage: %s [options...] [-e/x command args...]\n", EXE_FNAME);
     for (uint32_t i = 0; i < OPT_SENTINEL_IDX; ++i) {
@@ -729,6 +737,17 @@ static void handle_option(const char opt, const int array_index, const char* val
                 L_PROCESS_MULTI_ARG_PACK_END
         } break;
 
+        case OPT_WINDOWOPS_IDX: {
+            L_PROCESS_MULTI_ARG_PACK_BEGIN(value)
+            case 0:
+                settings.windowops_manip = strtob(buf.buf);
+                break;
+            case 1:
+                settings.windowops_info = strtob(buf.buf);
+                break;
+                L_PROCESS_MULTI_ARG_PACK_END
+        } break;
+
         case OPT_GLYPH_PADDING_IDX: {
             L_PROCESS_MULTI_ARG_PACK_BEGIN(value)
             case 0:
@@ -736,6 +755,23 @@ static void handle_option(const char opt, const int array_index, const char* val
                 break;
             case 1:
                 settings.padd_glyph_y = CLAMP(strtol(buf.buf, NULL, 10), 0, INT8_MAX);
+                break;
+                L_PROCESS_MULTI_ARG_PACK_END
+        } break;
+
+        case OPT_SCROLLBAR_IDX: {
+            L_PROCESS_MULTI_ARG_PACK_BEGIN(value)
+            case 0:
+                settings.scrollbar_width_px = CLAMP(strtol(buf.buf, NULL, 10), 0, INT16_MAX);
+                break;
+            case 1:
+                settings.scrollbar_length_px = CLAMP(strtol(buf.buf, NULL, 10), 0, INT16_MAX);
+                break;
+            case 2:
+                settings.scrollbar_hide_delay_ms = CLAMP(strtol(buf.buf, NULL, 10), 0, INT16_MAX);
+                break;
+            case 3:
+                settings.scrollbar_fade_time_ms = CLAMP(strtol(buf.buf, NULL, 10), 0, INT16_MAX);
                 break;
                 L_PROCESS_MULTI_ARG_PACK_END
         } break;
@@ -1015,6 +1051,8 @@ static void handle_option(const char opt, const int array_index, const char* val
                 case OPT_BIND_KEY_QUIT_IDX:
                     command = &settings.key_commands[KCMD_QUIT];
                     break;
+                default:
+                    ASSERT_UNREACHABLE;
             }
             command->mods     = mods;
             command->is_name  = true;
@@ -1294,7 +1332,6 @@ static void settings_file_parse(FILE* f)
                     } else if (value.size) {
                         Vector_push_char(&whitespace, c);
                     }
-                    
                 }
                 escaped = false;
             }
