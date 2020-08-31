@@ -272,8 +272,9 @@ typedef struct
     GLuint full_framebuffer_quad_vbo;
 
     /* pen position to begin drawing font */
-    float    pen_begin;
-    int      pen_begin_pixels;
+    float    pen_begin_y;
+    int      pen_begin_pixels_y;
+    int      pen_begin_pixels_x;
     uint32_t win_w, win_h;
     float    line_height, glyph_width;
     uint16_t line_height_pixels, glyph_width_pixels;
@@ -335,7 +336,6 @@ typedef struct
     float flash_fraction;
 
     Freetype* freetype;
-
 } GfxOpenGL21;
 
 #define gfxOpenGL21(gfx) ((GfxOpenGL21*)&gfx->extend_data)
@@ -873,21 +873,29 @@ void GfxOpenGL21_resize(Gfx* self, uint32_t w, uint32_t h)
     GfxOpenGL21* gl21 = gfxOpenGL21(self);
     GfxOpenGL21_destroy_recycled(gl21);
 
-    gl21->win_w              = w;
-    gl21->win_h              = h;
-    gl21->sx                 = 2.0f / gl21->win_w;
-    gl21->sy                 = 2.0f / gl21->win_h;
+    gl21->win_w = w;
+    gl21->win_h = h;
+
+    gl21->sx = 2.0f / gl21->win_w;
+    gl21->sy = 2.0f / gl21->win_h;
+
     gl21->line_height_pixels = gl21->freetype->line_height_pixels + settings.padd_glyph_y;
     gl21->glyph_width_pixels = gl21->freetype->glyph_width_pixels + settings.padd_glyph_x;
     gl21->gw                 = gl21->freetype->gw;
-    FreetypeOutput* output   = Freetype_load_ascii_glyph(gl21->freetype, '(', FT_STYLE_REGULAR);
-    uint32_t        hber     = output->ft_slot->metrics.horiBearingY / 64 / 2 / 2 + 1;
-    gl21->pen_begin          = gl21->sy * (gl21->line_height_pixels / 2.0) + gl21->sy * hber;
-    gl21->pen_begin_pixels   = (float)(gl21->line_height_pixels / 1.75) + (float)hber;
-    uint32_t height          = (gl21->line_height_pixels + settings.padd_glyph_y) * 64;
-    gl21->line_height        = (float)height * gl21->sy / 64.0;
-    gl21->glyph_width        = gl21->glyph_width_pixels * gl21->sx;
-    gl21->max_cells_in_line  = gl21->win_w / gl21->glyph_width_pixels;
+
+    FreetypeOutput* output =
+      Freetype_load_ascii_glyph(gl21->freetype, settings.center_char, FT_STYLE_REGULAR);
+    uint32_t hber = output->ft_slot->metrics.horiBearingY / 64 / 2 / 2 + 1;
+
+    gl21->pen_begin_y = gl21->sy * (gl21->line_height_pixels / 2.0) + gl21->sy * hber;
+    gl21->pen_begin_pixels_y =
+      (float)(gl21->line_height_pixels / 1.75) + (float)hber + settings.offset_glyph_y;
+    gl21->pen_begin_pixels_x = settings.offset_glyph_x;
+
+    uint32_t height         = (gl21->line_height_pixels + settings.padd_glyph_y) * 64;
+    gl21->line_height       = (float)height * gl21->sy / 64.0;
+    gl21->glyph_width       = gl21->glyph_width_pixels * gl21->sx;
+    gl21->max_cells_in_line = gl21->win_w / gl21->glyph_width_pixels;
 
     Pair_uint32_t cells = GfxOpenGL21_get_char_size(self);
     cells               = GfxOpenGL21_pixels(self, cells.first, cells.second);
@@ -994,7 +1002,7 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
 
     glGenBuffers(1, &gl21->full_framebuffer_quad_vbo);
     glBindBuffer(GL_ARRAY_BUFFER, gl21->full_framebuffer_quad_vbo);
-    float vertex_data[] = {
+    static const float vertex_data[] = {
         1.0f, 1.0f, -1.0f, 1.0f, -1.0f, -1.0f, 1.0f, -1.0f,
     };
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_data), vertex_data, GL_STATIC_DRAW);
@@ -1586,13 +1594,11 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                                     double t = (double)g->top * scaley;
                                     double l = (double)g->left * scalex;
 
-                                    /* (scalex/y * 0.5) at the end to put it in the middle of the
-                                     * pixel */
                                     float x3 = -1.0f +
                                                (float)column * gfx->glyph_width_pixels * scalex +
-                                               l; // + (scalex * 0.5);
-                                    float y3 = -1.0f + gfx->pen_begin_pixels * scaley -
-                                               t; // + (scaley * 0.5);
+                                               l + gfx->pen_begin_pixels_x * scalex;
+                                    float y3 = -1.0f + gfx->pen_begin_pixels_y * scaley - t;
+
                                     Vector_push_GlyphBufferData(
                                       target,
                                       (GlyphBufferData){ {
@@ -1760,9 +1766,8 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                                     }
                                     float x3 = -1.0f +
                                                (double)(column * gfx->glyph_width_pixels) * scalex +
-                                               l + (scalex * 0.5);
-                                    float y3 = -1.0f + (double)gfx->pen_begin_pixels * scaley - t +
-                                               (scaley * 0.5);
+                                               l + gfx->pen_begin_pixels_x * scalex;
+                                    float y3 = -1.0f + (double)gfx->pen_begin_pixels_y * scaley - t;
 
                                     Vector_GlyphBufferData* target = &gfx->_vec_glyph_buffer;
 
@@ -2368,10 +2373,11 @@ static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const
                 int32_t         atlas_offset = Atlas_select(source_atlas, cursor_char->rune.code);
                 if (atlas_offset >= 0) {
                     struct AtlasCharInfo* g = &source_atlas->char_info[atlas_offset];
-                    h                       = (float)g->rows * gfx->sy;
-                    w                       = (float)g->width * gfx->sx;
-                    t                       = (float)g->top * gfx->sy;
-                    l                       = (float)g->left * gfx->sx;
+
+                    h = (float)g->rows * gfx->sy;
+                    w = (float)g->width * gfx->sx;
+                    t = (float)g->top * gfx->sy;
+                    l = (float)g->left * gfx->sx;
                     memcpy(tc, g->tex_coords, sizeof tc);
                     color = gfx->is_main_font_rgb ? GLYPH_COLOR_LCD : GLYPH_COLOR_MONO;
                 } else {
@@ -2395,10 +2401,11 @@ static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const
                         l /= scale;
                     }
                 }
-                float x3 =
-                  -1.0f + (float)col * gfx->glyph_width_pixels * gfx->sx + l + (gfx->sx * 0.5);
-                float y3 = +1.0f - gfx->pen_begin_pixels * gfx->sy -
-                           (float)row * gfx->line_height_pixels * gfx->sy + t - (gfx->sy * 0.5);
+                float x3 = -1.0f + (float)col * gfx->glyph_width_pixels * gfx->sx + l +
+                           gfx->pen_begin_pixels_x * gfx->sx;
+                float y3 = +1.0f - gfx->pen_begin_pixels_y * gfx->sy -
+                           (float)row * gfx->line_height_pixels * gfx->sy + t;
+
                 Vector_clear_GlyphBufferData(gfx->vec_glyph_buffer);
                 Vector_push_GlyphBufferData(gfx->vec_glyph_buffer,
                                             (GlyphBufferData){ {
@@ -2487,8 +2494,8 @@ static void GfxOpenGL21_draw_unicode_input(GfxOpenGL21* gfx, const Vt* vt)
     memcpy(tc, g->tex_coords, sizeof tc);
 
     float x3 = -1.0f + (float)col * gfx->glyph_width_pixels * gfx->sx + l;
-    float y3 =
-      +1.0f - gfx->pen_begin_pixels * gfx->sy - (float)row * gfx->line_height_pixels * gfx->sy + t;
+    float y3 = +1.0f - gfx->pen_begin_pixels_y * gfx->sy -
+               (float)row * gfx->line_height_pixels * gfx->sy + t;
 
     Vector_push_GlyphBufferData(gfx->vec_glyph_buffer,
                                 (GlyphBufferData){ {
@@ -2498,25 +2505,29 @@ static void GfxOpenGL21_draw_unicode_input(GfxOpenGL21* gfx, const Vt* vt)
                                   { x3, y3 - h, tc[0], tc[3] },
                                 } });
     vertex_t lnbuf[] = {
-        { -1.0f + (float)col * gfx->glyph_width_pixels * gfx->sx,
-          +1.0f - gfx->pen_begin_pixels * gfx->sy -
+        { -1.0f + (float)col * gfx->glyph_width_pixels * gfx->sx +
+            gfx->pen_begin_pixels_x * gfx->sx,
+          +1.0f - gfx->pen_begin_pixels_y * gfx->sy -
             (float)row * gfx->line_height_pixels * gfx->sy },
-        { -1.0f + (float)(col + 1) * gfx->glyph_width_pixels * gfx->sx,
-          +1.0f - gfx->pen_begin_pixels * gfx->sy -
+        { -1.0f + (float)(col + 1) * gfx->glyph_width_pixels * gfx->sx +
+            gfx->pen_begin_pixels_x * gfx->sx,
+          +1.0f - gfx->pen_begin_pixels_y * gfx->sy -
             (float)row * gfx->line_height_pixels * gfx->sy },
     };
 
     for (size_t i = 0; i < vt->unicode_input.buffer.size; ++i) {
         atlas_offset = Atlas_select(gfx->atlas, vt->unicode_input.buffer.buf[i]);
-        g            = &gfx->atlas->char_info[atlas_offset];
-        h            = (float)g->rows * gfx->sy;
-        w            = (float)g->width * gfx->sx;
-        t            = (float)g->top * gfx->sy;
-        l            = (float)g->left * gfx->sx;
+
+        g = &gfx->atlas->char_info[atlas_offset];
+        h = (float)g->rows * gfx->sy;
+        w = (float)g->width * gfx->sx;
+        t = (float)g->top * gfx->sy;
+        l = (float)g->left * gfx->sx;
         memcpy(tc, g->tex_coords, sizeof tc);
 
-        x3 = -1.0f + (float)(col + i + 1) * gfx->glyph_width_pixels * gfx->sx + l;
-        y3 = +1.0f - gfx->pen_begin_pixels * gfx->sy -
+        x3 = -1.0f + (float)(col + i + 1) * gfx->glyph_width_pixels * gfx->sx + l +
+             gfx->pen_begin_pixels_x * gfx->sx;
+        y3 = +1.0f - gfx->pen_begin_pixels_y * gfx->sy -
              (float)row * gfx->line_height_pixels * gfx->sy + t;
 
         Vector_push_GlyphBufferData(gfx->vec_glyph_buffer,
@@ -2538,17 +2549,20 @@ static void GfxOpenGL21_draw_unicode_input(GfxOpenGL21* gfx, const Vt* vt)
     glDrawArrays(GL_QUADS, 0, 4 * (vt->unicode_input.buffer.size + 1));
     glVertexAttribPointer(gfx->line_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
     newsize = sizeof(lnbuf);
+
     if (newsize > gfx->flex_vbo.size) {
         gfx->flex_vbo.size = newsize;
         glBufferData(GL_ARRAY_BUFFER, newsize, lnbuf, GL_STREAM_DRAW);
     } else {
         glBufferSubData(GL_ARRAY_BUFFER, 0, newsize, lnbuf);
     }
+
     glUseProgram(gfx->line_shader.id);
     glUniform3f(gfx->line_shader.uniforms[1].location,
                 ColorRGB_get_float(settings.fg, 0),
                 ColorRGB_get_float(settings.fg, 1),
                 ColorRGB_get_float(settings.fg, 2));
+
     glDrawArrays(GL_LINES, 0, 2);
     glDisable(GL_SCISSOR_TEST);
 }

@@ -18,27 +18,23 @@
 #include "util.h"
 #include "vector.h"
 
-// configuration file subdirectory
-#ifndef CFG_SDIR_NAME
-#define CFG_SDIR_NAME "wayst"
+#ifndef CONFIG_SUBDIRECTORY_NAME
+#define CONFIG_SUBDIRECTORY_NAME "wayst"
 #endif
 
-// configuration file name
-#ifndef CFG_FNAME
-#define CFG_FNAME "config"
+#ifndef CONFIG_FILE_NAME
+#define CONFIG_FILE_NAME "config"
 #endif
 
-// default title format
 #ifndef DFT_TITLE_FMT
 #define DFT_TITLE_FMT "%2$s - %1$s"
 #endif
 
-// default term value
 #ifndef DFT_TERM
 #define DFT_TERM "xterm-256color"
 #endif
 
-// point size in inches for converting font sizes
+/* point size in inches for converting font sizes */
 #define PT_AS_INCH 0.0138889
 
 DEF_VECTOR(char, NULL);
@@ -48,7 +44,7 @@ static Vector_Vector_char expand_list_value(const char* const list);
 
 ColorRGB color_palette_256[257];
 
-const char* const colors_default[8][18] = {
+static const char* const colors_default[8][18] = {
     {
       /* wayst */
       "000000",
@@ -221,9 +217,7 @@ const char* const colors_default[8][18] = {
 
 Settings settings;
 
-/**
- * Set default colorscheme  */
-static void settings_colorscheme_default(uint8_t idx)
+static void settings_colorscheme_load_preset(uint8_t idx)
 {
     if (idx >= ARRAY_SIZE(colors_default)) {
         idx = 0;
@@ -456,8 +450,10 @@ static void settings_make_default()
         .color_fonts  = Vector_new_with_capacity_UnstyledFontInfo(1),
 
         .term        = AString_new_static(DFT_TERM),
+        .vte_version = AString_new_static("5602"),
+        
         .locale      = AString_new_uninitialized(),
-        .title       = AString_new_static(APP_NAME),
+        .title       = AString_new_static(APPLICATION_NAME),
         .user_app_id = NULL,
 
         .font_style_regular     = AString_new_uninitialized(),
@@ -483,6 +479,9 @@ static void settings_make_default()
         .padding        = 0,
         .padd_glyph_x   = 0,
         .padd_glyph_y   = 0,
+        .offset_glyph_x = 0,
+        .offset_glyph_y = 0,
+        .center_char    = '(',
 
         .scrollbar_width_px      = 10,
         .scrollbar_length_px     = 20,
@@ -540,7 +539,7 @@ static void settings_complete_defaults()
     setlocale(LC_CTYPE, settings.locale.str);
     LOG("Using locale: %s\n", settings.locale.str);
 
-    settings_colorscheme_default(settings.colorscheme_preset);
+    settings_colorscheme_load_preset(settings.colorscheme_preset);
     free(settings._explicit_colors_set);
     settings._explicit_colors_set = NULL;
 }
@@ -549,7 +548,7 @@ static void print_help_and_exit()
 {
 #define MAX_OPT_PADDING 28
 
-    printf("Usage: %s [options...] [-e/x command args...]\n", EXE_FNAME);
+    printf("Usage: %s [options...] [-e/x command args...]\n", EXECUTABLE_FILE_NAME);
     for (uint32_t i = 0; i < OPT_SENTINEL_IDX; ++i) {
         if (long_options[i].has_arg == no_argument && long_options[i].val) {
             printf(" -%c, ", long_options[i].val);
@@ -910,6 +909,38 @@ static void handle_option(const char opt, const int array_index, const char* val
             Vector_destroy_Vector_char(&values);
         } break;
 
+        case OPT_VTE_VERSION_IDX: {
+            Vector_Vector_char values = expand_list_value(value);
+            if (values.buf[0].buf[0]) {
+                AString_replace_with_dynamic(&settings.vte_version, strdup(values.buf[0].buf));
+            } else {
+                AString_destroy(&settings.vte_version);
+            }
+            Vector_destroy_Vector_char(&values);
+        } break;
+
+        case OPT_GLYPH_ALIGN_IDX: {
+            char user_center_char = *value;
+            if (isascii(user_center_char) && isgraph(user_center_char)) {
+                settings.center_char = user_center_char;
+            } else {
+                WRN("Cannot align to \'%c\'(%d), must be graphic ASCII character\n",
+                    user_center_char,
+                    user_center_char);
+            }
+            if (value[1] != ':') {
+                break;
+            }
+            L_PROCESS_MULTI_ARG_PACK_BEGIN(value + 2)
+            case 0:
+                settings.offset_glyph_y = CLAMP(strtol(buf.buf, NULL, 10), INT8_MIN, INT8_MAX);
+                break;
+            case 1:
+                settings.offset_glyph_x = CLAMP(strtol(buf.buf, NULL, 10), INT8_MIN, INT8_MAX);
+                break;
+                L_PROCESS_MULTI_ARG_PACK_END
+        } break;
+
         case OPT_LOCALE_IDX: {
             Vector_Vector_char values = expand_list_value(value);
             AString_replace_with_dynamic(&settings.locale, strdup(value));
@@ -1132,7 +1163,7 @@ static void handle_config_option(const char* key, const char* val, uint32_t line
         WRN("Error in config on line %u: invalid option \'%s\'. \'%s -h\' to list options\n",
             line,
             key,
-            EXE_FNAME);
+            EXECUTABLE_FILE_NAME);
     }
 }
 
@@ -1378,11 +1409,13 @@ static void find_config_path()
 
     char* tmp = NULL;
     if ((tmp = getenv("XDG_CONFIG_HOME"))) {
-        AString_replace_with_dynamic(&settings.config_path,
-                                     asprintf("%s/%s/%s", tmp, CFG_SDIR_NAME, CFG_FNAME));
+        AString_replace_with_dynamic(
+          &settings.config_path,
+          asprintf("%s/%s/%s", tmp, CONFIG_SUBDIRECTORY_NAME, CONFIG_FILE_NAME));
     } else if ((tmp = getenv("HOME"))) {
-        AString_replace_with_dynamic(&settings.config_path,
-                                     asprintf("%s/.config/%s/%s", tmp, CFG_SDIR_NAME, CFG_FNAME));
+        AString_replace_with_dynamic(
+          &settings.config_path,
+          asprintf("%s/.config/%s/%s", tmp, CONFIG_SUBDIRECTORY_NAME, CONFIG_FILE_NAME));
     } else {
         WRN("Could not find config directory\n");
     }

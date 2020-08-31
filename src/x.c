@@ -91,19 +91,14 @@ static struct IWindow window_interface_x11 = {
 
 typedef struct
 {
-    Display*     display;
-    XVisualInfo* visual_info;
-    Atom         wm_delete;
+    Display* display;
+    Atom     wm_delete;
 
     Cursor cursor_hidden;
     Cursor cursor_beam;
 
     XIM im;
     XIC ic;
-
-    XIMStyles* im_styles;
-    XIMStyle   im_style;
-
 } GlobalX11;
 
 typedef struct
@@ -152,17 +147,6 @@ static void WindowX11_setup_pointer(struct WindowBase* self)
     globalX11->cursor_beam   = XCreateFontCursor(globalX11->display, XC_xterm);
 }
 
-static void WindowX11_pointer(struct WindowBase* self, bool hide)
-{
-    if (hide && !FLAG_IS_SET(self->state_flags, WINDOW_IS_POINTER_HIDDEN)) {
-        XDefineCursor(globalX11->display, windowX11(self)->window, globalX11->cursor_hidden);
-        FLAG_SET(self->state_flags, WINDOW_IS_POINTER_HIDDEN);
-    } else if (!hide && FLAG_IS_SET(self->state_flags, WINDOW_IS_POINTER_HIDDEN)) {
-        XUndefineCursor(globalX11->display, windowX11(self)->window);
-        FLAG_UNSET(self->state_flags, WINDOW_IS_POINTER_HIDDEN);
-    }
-}
-
 static void* WindowX11_get_gl_ext_proc_adress(struct WindowBase* self, const char* name)
 {
     return glXGetProcAddress((const GLubyte*)name);
@@ -170,7 +154,9 @@ static void* WindowX11_get_gl_ext_proc_adress(struct WindowBase* self, const cha
 
 static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
 {
-    global = calloc(1, sizeof(WindowStatic) + sizeof(GlobalX11) - sizeof(uint8_t));
+    if (!global) {
+        global = calloc(1, sizeof(WindowStatic) + sizeof(GlobalX11) - sizeof(uint8_t));
+    }
 
     globalX11->display = XOpenDisplay(NULL);
     if (!globalX11->display) {
@@ -195,15 +181,17 @@ static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
 
     XSetLocaleModifiers("@im=none");
     globalX11->im = XOpenIM(globalX11->display, NULL, NULL, NULL);
+    if (!globalX11->im) {
+        ERR("Failed to open input method");
+    }
     globalX11->ic = XCreateIC(globalX11->im,
                               XNInputStyle,
                               XIMPreeditNothing | XIMStatusNothing,
                               XNClientWindow,
                               windowX11(win)->window,
                               NULL);
-
     if (!globalX11->ic) {
-        ERR("Failed to create IC\n");
+        ERR("Failed to create input context");
     }
     XSetICFocus(globalX11->ic);
 
@@ -217,45 +205,80 @@ static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
                                           GLX_DOUBLEBUFFER,
                                           True,
                                           GLX_RED_SIZE,
-                                          8,
+                                          1,
                                           GLX_GREEN_SIZE,
-                                          8,
+                                          1,
                                           GLX_BLUE_SIZE,
-                                          8,
+                                          1,
                                           GLX_ALPHA_SIZE,
-                                          8,
+                                          1,
                                           GLX_DEPTH_SIZE,
-                                          16,
+                                          GLX_DONT_CARE,
                                           None };
 
-    int          fb_cfg_cnt;
-    GLXFBConfig* fb_cfg     = glXChooseFBConfig(globalX11->display,
-                                            DefaultScreen(globalX11->display),
-                                            visual_attribs,
-                                            &fb_cfg_cnt);
-    int          fb_cfg_sel = 0;
-    for (fb_cfg_sel = 0; fb_cfg_sel < fb_cfg_cnt; ++fb_cfg_sel) {
-        globalX11->visual_info = glXGetVisualFromFBConfig(globalX11->display, fb_cfg[fb_cfg_sel]);
-        if (!globalX11->visual_info) {
-            continue;
-        }
-        XRenderPictFormat* pf =
-          XRenderFindVisualFormat(globalX11->display, globalX11->visual_info->visual);
-        if (pf->direct.alphaMask > 0) {
-            break;
-        }
-        XFree(globalX11->visual_info);
+    int          framebuffer_config_count;
+    GLXFBConfig* framebuffer_configs = glXChooseFBConfig(globalX11->display,
+                                                         DefaultScreen(globalX11->display),
+                                                         visual_attribs,
+                                                         &framebuffer_config_count);
+    if (!framebuffer_configs) {
+        ERR("glXChooseFBConfig failed");
     }
 
-    if (!globalX11->visual_info) {
-        ERR("Failed to get X11 visual info");
+    XVisualInfo* visual_info = NULL;
+
+    int framebuffer_config_selected_idx = -1;
+
+    for (int i = 0; i < framebuffer_config_count; ++i) {
+        visual_info = glXGetVisualFromFBConfig(globalX11->display, framebuffer_configs[i]);
+        if (!visual_info) {
+            continue;
+        }
+
+        XRenderPictFormat* visual_pict_format =
+          XRenderFindVisualFormat(globalX11->display, visual_info->visual);
+
+        if (!visual_pict_format) {
+            continue;
+        }
+
+        LOG("X::Visual picture format{depth: %d, r:%d(%d), g:%d(%d), b:%d(%d), a:%d(%d), type: %d, "
+            "pf id: %lu}\n",
+            visual_pict_format->depth,
+            visual_pict_format->direct.red,
+            visual_pict_format->direct.redMask,
+            visual_pict_format->direct.green,
+            visual_pict_format->direct.greenMask,
+            visual_pict_format->direct.blue,
+            visual_pict_format->direct.blueMask,
+            visual_pict_format->direct.alpha,
+            visual_pict_format->direct.alphaMask,
+            visual_pict_format->type,
+            visual_pict_format->id);
+
+        if (visual_pict_format->direct.alphaMask > 0 && visual_pict_format->direct.redMask > 0 &&
+            visual_pict_format->direct.greenMask > 0 && visual_pict_format->direct.blueMask > 0 &&
+            visual_pict_format->depth >= 32) {
+            LOG("X::Visual picture format selected\n");
+            framebuffer_config_selected_idx = i;
+            break;
+        }
+        XFree(visual_info);
+    }
+
+    if (framebuffer_config_selected_idx < 0) {
+        ERR("No suitable framebuffer configuration found");
+    }
+
+    if (!visual_info) {
+        ERR("Failed to get visual info");
     }
 
     windowX11(win)->set_win_attribs = (XSetWindowAttributes){
         .colormap = windowX11(win)->colormap =
           XCreateColormap(globalX11->display,
-                          RootWindow(globalX11->display, globalX11->visual_info->screen),
-                          globalX11->visual_info->visual,
+                          RootWindow(globalX11->display, visual_info->screen),
+                          visual_info->visual,
                           AllocNone),
         .border_pixel      = 0,
         .background_pixmap = None,
@@ -269,7 +292,7 @@ static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
 
     const char* exts =
       glXQueryExtensionsString(globalX11->display, DefaultScreen(globalX11->display));
-    LOG("GLX extensions: %s\n", exts);
+    LOG("X::GLX extensions: %s\n", exts);
 
     static const int context_attrs[] = { GLX_CONTEXT_MAJOR_VERSION_ARB,
                                          2,
@@ -290,41 +313,46 @@ static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
         glXCreateContextAttribsARB = (PFNGLXCREATECONTEXTATTRIBSARBPROC)glXGetProcAddressARB(
           (const GLubyte*)"glXCreateContextAttribsARB");
     }
+
     if (!glXCreateContextAttribsARB) {
         WRN("glXCreateContextAttribsARB not found\n");
         windowX11(win)->glx_context =
-          glXCreateNewContext(globalX11->display, fb_cfg[fb_cfg_sel], GLX_RGBA_TYPE, 0, True);
+          glXCreateNewContext(globalX11->display,
+                              framebuffer_configs[framebuffer_config_selected_idx],
+                              GLX_RGBA_TYPE,
+                              0,
+                              True);
     } else {
-        windowX11(win)->glx_context = glXCreateContextAttribsARB(globalX11->display,
-                                                                 fb_cfg[fb_cfg_sel],
-                                                                 0,
-                                                                 True,
-                                                                 context_attrs);
+        windowX11(win)->glx_context =
+          glXCreateContextAttribsARB(globalX11->display,
+                                     framebuffer_configs[framebuffer_config_selected_idx],
+                                     0,
+                                     True,
+                                     context_attrs);
     }
 
     if (!windowX11(win)->glx_context) {
         ERR("Failed to create GLX context");
     }
 
-    windowX11(win)->window =
-      XCreateWindow(globalX11->display,
-                    RootWindow(globalX11->display, globalX11->visual_info->screen),
-                    0,
-                    0,
-                    win->w,
-                    win->h,
-                    0,
-                    globalX11->visual_info->depth,
-                    InputOutput,
-                    globalX11->visual_info->visual,
-                    CWBorderPixel | CWColormap | CWEventMask,
-                    &windowX11(win)->set_win_attribs);
+    windowX11(win)->window = XCreateWindow(globalX11->display,
+                                           RootWindow(globalX11->display, visual_info->screen),
+                                           0,
+                                           0,
+                                           win->w,
+                                           win->h,
+                                           0,
+                                           visual_info->depth,
+                                           InputOutput,
+                                           visual_info->visual,
+                                           CWBorderPixel | CWColormap | CWEventMask,
+                                           &windowX11(win)->set_win_attribs);
     if (!windowX11(win)->window) {
         ERR("Failed to create X11 window");
     }
 
-    XFree(fb_cfg);
-    XFree(globalX11->visual_info);
+    XFree(framebuffer_configs);
+    XFree(visual_info);
 
     Atom win_type_normal = XInternAtom(globalX11->display, "_NET_WM_WINDOW_TYPE_NORMAL", False);
     XChangeProperty(globalX11->display,
@@ -335,16 +363,6 @@ static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
                     PropModeReplace,
                     (unsigned char*)&win_type_normal,
                     1);
-
-    /* char* wm_class = OR(settings.user_app_id, APP_NAME); */
-    /* XChangeProperty(globalX11->display, */
-    /*                 windowX11(win)->window, */
-    /*                 XInternAtom(globalX11->display, "WM_CLASS", False), */
-    /*                 XInternAtom(globalX11->display, "UTF8_STRING", False), */
-    /*                 8, */
-    /*                 PropModeReplace, */
-    /*                 (unsigned char*)wm_class, */
-    /*                 strlen(wm_class)); */
 
     /* XChangeProperty(globalX11->display, */
     /*                 windowX11(win)->window, */
@@ -357,7 +375,7 @@ static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
 
     /* XSetIconName(globalX11->display, windowX11(win)->window, "wayst"); */
 
-    XClassHint class_hint = { APP_NAME, "CLASS" };
+    XClassHint class_hint = { APPLICATION_NAME, "CLASS" };
     XWMHints   wm_hints   = { .flags = InputHint, .input = 1 };
     XSetWMProperties(globalX11->display,
                      windowX11(win)->window,
@@ -390,7 +408,7 @@ struct WindowBase* Window_new_x11(Pair_uint32_t res)
 
     win->title = NULL;
     WindowX11_set_wm_name(win,
-                          OR(settings.user_app_id, APP_NAME),
+                          OR(settings.user_app_id, APPLICATION_NAME),
                           OR(settings.user_app_id_2, NULL));
     WindowX11_set_title(win, settings.title.str);
 
@@ -718,7 +736,10 @@ static void WindowX11_events(struct WindowBase* self)
     }
 }
 
-static void WindowX11_set_current_context(struct WindowBase* self) {}
+static void WindowX11_set_current_context(struct WindowBase* self)
+{
+    glXMakeCurrent(globalX11->display, windowX11(self)->window, windowX11(self)->glx_context);
+}
 
 static void WindowX11_set_swap_interval(struct WindowBase* self, int32_t ival)
 {

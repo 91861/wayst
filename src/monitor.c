@@ -49,7 +49,6 @@ void sighandler(int sig)
     }
 }
 
-
 Monitor Monitor_new()
 {
     static bool instances_initialized = false;
@@ -84,7 +83,9 @@ void Monitor_fork_new_pty(Monitor* self, uint32_t cols, uint32_t rows)
         unsetenv("LINES");
         unsetenv("TERMCAP");
         setenv("COLORTERM", "truecolor", 1);
-        setenv("VTE_VERSION", "5602", 1);
+        if (settings.vte_version.str) {
+            setenv("VTE_VERSION", settings.vte_version.str, 1);
+        }
         setenv("TERM", settings.term.str, 1);
 
         if (execvp(settings.shell.str, (char**)settings.shell_argv)) {

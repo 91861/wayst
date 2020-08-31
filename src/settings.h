@@ -10,14 +10,12 @@
 #define VERSION "0.0.0"
 #endif
 
-// executable name
-#ifndef EXE_FNAME
-#define EXE_FNAME "wayst"
+#ifndef EXECUTABLE_FILE_NAME
+#define EXECUTABLE_FILE_NAME "wayst"
 #endif
 
-// application name
-#ifndef APP_NAME
-#define APP_NAME "Wayst"
+#ifndef APPLICATION_NAME
+#define APPLICATION_NAME "Wayst"
 #endif
 
 // default lcd filter
@@ -150,7 +148,7 @@ typedef struct
 
     bool has_bold_fonts, has_italic_fonts, has_bold_italic_fonts, has_symbol_fonts, has_color_fonts;
 
-    AString term, locale, title;
+    AString term, vte_version, locale, title;
 
     char* user_app_id;
     char* user_app_id_2;
@@ -168,20 +166,25 @@ typedef struct
 
     int         colorscheme_preset;
     Colorscheme colorscheme;
-    bool*       _explicit_colors_set;
+
+    /* bool[] that records if a given color index was set by user configuration. This is needed
+     * because the colorscheme option may be be received after color options and in that case it
+     * should not overwrite user settings */
+    bool* _explicit_colors_set;
 
     ColorRGBA bell_flash;
     bool      no_flash;
 
     bool    padding_center;
     uint8_t padding;
-    int8_t  padd_glyph_x;
-    int8_t  padd_glyph_y;
+    int8_t  padd_glyph_x, padd_glyph_y;
+    char    center_char;
+    int8_t  offset_glyph_x, offset_glyph_y;
 
     uint16_t scrollbar_width_px, scrollbar_length_px;
     uint16_t scrollbar_hide_delay_ms;
     uint16_t scrollbar_fade_time_ms;
-    
+
     bool    allow_scrollback_clear;
     bool    scroll_on_output;
     bool    scroll_on_key;
@@ -227,7 +230,7 @@ static inline void KeyCommand_name_to_code(KeyCommand* cmd)
         if (!code) {
             WRN("Invalid key name \'%s\'\n", cmd->key.name);
         } else {
-            LOG("Converting key name \'%s\' to keysym %u\n", cmd->key.name, code);
+            LOG("settings::key name \'%s\' -> keysym %u\n", cmd->key.name, code);
         }
         free(cmd->key.name);
         cmd->key.code = code;
