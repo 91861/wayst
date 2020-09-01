@@ -330,6 +330,7 @@ typedef struct _Vt
     char32_t (**charset_single_shift)(char); // not available on VT100
 
     uint8_t tabstop;
+    bool* tab_ruler;
 
     Vector_VtLine lines, alt_lines;
 
