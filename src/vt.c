@@ -26,8 +26,6 @@
 
 #include "wcwidth/wcwidth.h"
 
-VtRune blank_space;
-
 static inline size_t Vt_top_line(const Vt* const self);
 void                 Vt_visual_scroll_to(Vt* self, size_t line);
 void                 Vt_visual_scroll_up(Vt* self);
@@ -66,13 +64,23 @@ static void          Vt_move_cursor_to_column(Vt* self, uint32_t c);
 static void          Vt_set_title(Vt* self, const char* title);
 static void          Vt_push_title(Vt* self);
 static void          Vt_pop_title(Vt* self);
-static inline void   Vt_insert_char_at_cursor(Vt* self, VtRune c, bool apply_color_modifications);
-static inline void   Vt_insert_char_at_cursor_with_shift(Vt* self, VtRune c);
-static Vector_char line_to_string(Vector_VtRune* line, size_t begin, size_t end, const char* tail);
-static inline void Vt_mark_proxy_fully_damaged(Vt* self, size_t idx);
-static void        Vt_mark_proxy_damaged_cell(Vt* self, size_t line, size_t rune);
-static void        Vt_init_tab_ruler(Vt* self);
-static void        Vt_reset_tab_ruler(Vt* self);
+static void          Vt_insert_char_at_cursor(Vt* self, VtRune c);
+static void          Vt_insert_char_at_cursor_with_shift(Vt* self, VtRune c);
+static bool          Vt_alt_buffer_enabled(Vt* self);
+static Vector_char   rune_vec_to_string(Vector_VtRune* line,
+                                        size_t         begin,
+                                        size_t         end,
+                                        const char*    tail);
+static Vector_char   VtLine_to_string(VtLine* line, size_t begin, size_t end, const char* tail);
+static Vector_char   Vt_line_to_string(Vt*         self,
+                                       size_t      idx,
+                                       size_t      begin,
+                                       size_t      end,
+                                       const char* tail);
+static inline void   Vt_mark_proxy_fully_damaged(Vt* self, size_t idx);
+static void          Vt_mark_proxy_damaged_cell(Vt* self, size_t line, size_t rune);
+static void          Vt_init_tab_ruler(Vt* self);
+static void          Vt_reset_tab_ruler(Vt* self);
 
 static inline VtLine VtLine_new()
 {
@@ -116,6 +124,91 @@ static inline VtRune* Vt_cursor_cell(Vt* self)
     return &self->lines.buf[self->cursor.row].data.buf[self->cursor.col];
 }
 
+static void Vt_bell(Vt* self)
+{
+    if (!settings.no_flash) {
+        CALL_FP(self->callbacks.on_visual_bell, self->callbacks.user_data);
+    }
+    if (self->modes.pop_on_bell) {
+        // TODO: CALL_FP(self->callbacks.on_raise, self->callbacks.user_data);
+    }
+    if (self->modes.urgency_on_bell) {
+        // TODO: CALL_FP(self->callbacks.on_set_urgent, self->callbacks.user_data);
+    }
+}
+
+static void Vt_set_fg_color_custom(Vt* self, ColorRGB color)
+{
+    self->parser.char_state.fg_is_palette_entry = false;
+    self->parser.char_state.fg_data.rgb         = color;
+}
+
+static void Vt_set_fg_color_palette(Vt* self, int16_t index)
+{
+    ASSERT(index >= 0 && index <= 256, "in palette range");
+    self->parser.char_state.fg_is_palette_entry = true;
+    self->parser.char_state.fg_data.index       = index;
+}
+
+static void Vt_set_fg_color_default(Vt* self)
+{
+    self->parser.char_state.fg_is_palette_entry = true;
+    self->parser.char_state.fg_data.index       = VT_RUNE_PALETTE_INDEX_TERM_DEFAULT;
+}
+
+static void Vt_set_bg_color_custom(Vt* self, ColorRGBA color)
+{
+    self->parser.char_state.bg_is_palette_entry = false;
+    self->parser.char_state.bg_data.rgba        = color;
+}
+
+static void Vt_set_bg_color_palette(Vt* self, int16_t index)
+{
+    ASSERT(index >= 0 && index <= 256, "in palette range");
+    self->parser.char_state.bg_is_palette_entry = true;
+    self->parser.char_state.bg_data.index       = index;
+}
+
+static void Vt_set_bg_color_default(Vt* self)
+{
+    self->parser.char_state.bg_is_palette_entry = true;
+    self->parser.char_state.bg_data.index       = VT_RUNE_PALETTE_INDEX_TERM_DEFAULT;
+}
+
+static void Vt_set_line_color_custom(Vt* self, ColorRGB color)
+{
+    self->parser.char_state.line_color_not_default  = true;
+    self->parser.char_state.ln_clr_is_palette_entry = false;
+    self->parser.char_state.ln_clr_data.rgb         = color;
+}
+
+static void Vt_set_line_color_palette(Vt* self, int16_t index)
+{
+    ASSERT(index >= 0 && index <= 256, "in palette range");
+    self->parser.char_state.ln_clr_is_palette_entry = true;
+    self->parser.char_state.ln_clr_data.index       = index;
+}
+
+static void Vt_set_line_color_default(Vt* self)
+{
+    self->parser.char_state.line_color_not_default = false;
+}
+
+static ColorRGB Vt_active_fg_color(const Vt* self)
+{
+    return Vt_rune_fg(self, &self->parser.char_state);
+}
+
+static ColorRGBA Vt_active_bg_color(const Vt* self)
+{
+    return Vt_rune_bg(self, &self->parser.char_state);
+}
+
+static ColorRGB Vt_active_line_color(const Vt* self)
+{
+    return Vt_rune_ln_clr(self, &self->parser.char_state);
+}
+
 /**
  * Get string from selected region */
 Vector_char Vt_select_region_to_string(Vt* self)
@@ -128,11 +221,7 @@ Vector_char Vt_select_region_to_string(Vt* self)
     if (begin_line == end_line && self->selection.mode != SELECT_MODE_NONE) {
         begin_char_idx = MIN(self->selection.begin_char_idx, self->selection.end_char_idx);
         end_char_idx   = MAX(self->selection.begin_char_idx, self->selection.end_char_idx);
-
-        return line_to_string(&self->lines.buf[begin_line].data,
-                              begin_char_idx,
-                              end_char_idx + 1,
-                              "");
+        return Vt_line_to_string(self, begin_line, begin_char_idx, end_char_idx + 1, "");
     } else if (self->selection.begin_line < self->selection.end_line) {
         begin_char_idx = self->selection.begin_char_idx;
         end_char_idx   = self->selection.end_char_idx;
@@ -142,31 +231,24 @@ Vector_char Vt_select_region_to_string(Vt* self)
     }
 
     if (self->selection.mode == SELECT_MODE_NORMAL) {
-        ret = line_to_string(&self->lines.buf[begin_line].data,
-                             begin_char_idx,
-                             0,
-                             self->lines.buf[begin_line + 1].rejoinable ? "" : "\n");
+        char* term = self->lines.buf[begin_line + 1].rejoinable ? "" : "\n";
+        ret        = Vt_line_to_string(self, begin_line, begin_char_idx, 0, term);
         Vector_pop_char(&ret);
         for (size_t i = begin_line + 1; i < end_line; ++i) {
-            tmp = line_to_string(&self->lines.buf[i].data,
-                                 0,
-                                 0,
-                                 self->lines.buf[i + 1].rejoinable ? "" : "\n");
+            char* term_mid = self->lines.buf[i + 1].rejoinable ? "" : "\n";
+            tmp            = Vt_line_to_string(self, i, 0, 0, term_mid);
             Vector_pushv_char(&ret, tmp.buf, tmp.size - 1);
             Vector_destroy_char(&tmp);
         }
-        tmp = line_to_string(&self->lines.buf[end_line].data, 0, end_char_idx + 1, "");
+        tmp = Vt_line_to_string(self, end_line, 0, end_char_idx + 1, "");
         Vector_pushv_char(&ret, tmp.buf, tmp.size - 1);
         Vector_destroy_char(&tmp);
     } else if (self->selection.mode == SELECT_MODE_BOX) {
-        ret =
-          line_to_string(&self->lines.buf[begin_line].data, begin_char_idx, end_char_idx + 1, "\n");
+        ret = Vt_line_to_string(self, begin_line, begin_char_idx, end_char_idx + 1, "\n");
         Vector_pop_char(&ret);
         for (size_t i = begin_line + 1; i <= end_line; ++i) {
-            tmp = line_to_string(&self->lines.buf[i].data,
-                                 begin_char_idx,
-                                 end_char_idx + 1,
-                                 i == end_line ? "" : "\n");
+            char* term = i == end_line ? "" : "\n";
+            tmp        = Vt_line_to_string(self, i, begin_char_idx, end_char_idx + 1, term);
             Vector_pushv_char(&ret, tmp.buf, tmp.size - 1);
             Vector_destroy_char(&tmp);
         }
@@ -181,11 +263,13 @@ Vector_char Vt_select_region_to_string(Vt* self)
  * initialize selection region to cell by clicked pixel */
 void Vt_select_init(Vt* self, enum SelectMode mode, int32_t x, int32_t y)
 {
-    self->selection.next_mode            = mode;
-    x                                    = CLAMP(x, 0, self->ws.ws_xpixel);
-    y                                    = CLAMP(y, 0, self->ws.ws_ypixel);
-    size_t click_x                       = (double)x / self->pixels_per_cell_x;
-    size_t click_y                       = (double)y / self->pixels_per_cell_y;
+    self->selection.next_mode = mode;
+
+    x              = CLAMP(x, 0, self->ws.ws_xpixel);
+    y              = CLAMP(y, 0, self->ws.ws_ypixel);
+    size_t click_x = (double)x / self->pixels_per_cell_x;
+    size_t click_y = (double)y / self->pixels_per_cell_y;
+
     self->selection.click_begin_char_idx = click_x;
     self->selection.click_begin_line     = Vt_visual_top_line(self) + click_y;
 }
@@ -194,9 +278,11 @@ void Vt_select_init(Vt* self, enum SelectMode mode, int32_t x, int32_t y)
  * initialize selection region to cell by cell screen coordinates */
 void Vt_select_init_cell(Vt* self, enum SelectMode mode, int32_t x, int32_t y)
 {
-    self->selection.next_mode            = mode;
-    x                                    = CLAMP(x, 0, Vt_col(self));
-    y                                    = CLAMP(y, 0, Vt_row(self));
+    self->selection.next_mode = mode;
+
+    x = CLAMP(x, 0, Vt_col(self));
+    y = CLAMP(y, 0, Vt_row(self));
+
     self->selection.click_begin_char_idx = x;
     self->selection.click_begin_line     = Vt_visual_top_line(self) + y;
 }
@@ -205,15 +291,19 @@ void Vt_select_init_cell(Vt* self, enum SelectMode mode, int32_t x, int32_t y)
  * initialize selection region to clicked word */
 void Vt_select_init_word(Vt* self, int32_t x, int32_t y)
 {
-    self->selection.mode   = SELECT_MODE_NORMAL;
-    x                      = CLAMP(x, 0, self->ws.ws_xpixel);
-    y                      = CLAMP(y, 0, self->ws.ws_ypixel);
-    size_t         click_x = (double)x / self->pixels_per_cell_x;
-    size_t         click_y = (double)y / self->pixels_per_cell_y;
-    Vector_VtRune* ln      = &self->lines.buf[Vt_visual_top_line(self) + click_y].data;
-    size_t         cmax    = ln->size;
-    size_t         begin   = click_x;
-    size_t         end     = click_x;
+    self->selection.mode = SELECT_MODE_NORMAL;
+
+    x = CLAMP(x, 0, self->ws.ws_xpixel);
+    y = CLAMP(y, 0, self->ws.ws_ypixel);
+
+    size_t click_x = (double)x / self->pixels_per_cell_x;
+    size_t click_y = (double)y / self->pixels_per_cell_y;
+
+    Vector_VtRune* ln = &self->lines.buf[Vt_visual_top_line(self) + click_y].data;
+
+    size_t cmax  = ln->size;
+    size_t begin = click_x;
+    size_t end   = click_x;
     while (begin - 1 < cmax && begin > 0 && !isspace(ln->buf[begin - 1].rune.code)) {
         --begin;
     }
@@ -230,19 +320,27 @@ void Vt_select_init_word(Vt* self, int32_t x, int32_t y)
  * initialize selection region to clicked line */
 void Vt_select_init_line(Vt* self, int32_t y)
 {
-    self->selection.mode           = SELECT_MODE_NORMAL;
-    y                              = CLAMP(y, 0, self->ws.ws_ypixel);
-    size_t click_y                 = (double)y / self->pixels_per_cell_y;
+    self->selection.mode = SELECT_MODE_NORMAL;
+
+    y = CLAMP(y, 0, self->ws.ws_ypixel);
+
+    size_t click_y = (double)y / self->pixels_per_cell_y;
+
     self->selection.begin_char_idx = 0;
     self->selection.end_char_idx   = Vt_col(self);
     self->selection.begin_line = self->selection.end_line = Vt_visual_top_line(self) + click_y;
     Vt_mark_proxy_fully_damaged(self, self->selection.begin_line);
 }
 
-static inline void Vt_mark_proxy_fully_damaged(Vt* self, size_t idx)
+static void Vt_mark_line_proxy_fully_damaged(Vt* self, VtLine* line)
 {
     CALL_FP(self->callbacks.on_action_performed, self->callbacks.user_data);
-    self->lines.buf[idx].damage.type = VT_LINE_DAMAGE_FULL;
+    line->damage.type = VT_LINE_DAMAGE_FULL;
+}
+
+static void Vt_mark_proxy_fully_damaged(Vt* self, size_t idx)
+{
+    Vt_mark_line_proxy_fully_damaged(self, &self->lines.buf[idx]);
 }
 
 static void Vt_mark_proxy_damaged_cell(Vt* self, size_t line, size_t rune)
@@ -256,8 +354,9 @@ static void Vt_mark_proxy_damaged_cell(Vt* self, size_t line, size_t rune)
             break;
 
         case VT_LINE_DAMAGE_RANGE: {
-            size_t lo                          = MIN(self->lines.buf[line].damage.front, rune);
-            size_t hi                          = MAX(self->lines.buf[line].damage.end, rune);
+            size_t lo = MIN(self->lines.buf[line].damage.front, rune);
+            size_t hi = MAX(self->lines.buf[line].damage.end, rune);
+
             self->lines.buf[line].damage.front = lo;
             self->lines.buf[line].damage.end   = hi;
         } break;
@@ -280,10 +379,15 @@ static inline void Vt_mark_proxies_damaged_in_region(Vt* self, size_t begin, siz
     }
 }
 
+static inline void Vt_clear_line_proxy(Vt* self, VtLine* line)
+{
+    Vt_mark_line_proxy_fully_damaged(self, line);
+    CALL_FP(self->callbacks.destroy_proxy, self->callbacks.user_data, &line->proxy);
+}
+
 static inline void Vt_clear_proxy(Vt* self, size_t idx)
 {
-    Vt_mark_proxy_fully_damaged(self, idx);
-    CALL_FP(self->callbacks.destroy_proxy, self->callbacks.user_data, &self->lines.buf[idx].proxy);
+    Vt_clear_line_proxy(self, &self->lines.buf[idx]);
 }
 
 static inline void Vt_clear_proxies_in_region(Vt* self, size_t begin, size_t end)
@@ -298,9 +402,9 @@ static inline void Vt_clear_proxies_in_region(Vt* self, size_t begin, size_t end
 void Vt_clear_all_proxies(Vt* self)
 {
     Vt_clear_proxies_in_region(self, 0, self->lines.size - 1);
-    if (self->alt_lines.buf) {
+    if (Vt_alt_buffer_enabled(self)) {
         for (size_t i = 0; i < self->alt_lines.size - 1; ++i) {
-            Vt_clear_proxy(self, i);
+            Vt_clear_line_proxy(self, &self->alt_lines.buf[i]);
         }
     }
 }
@@ -315,8 +419,9 @@ static inline void Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(
     if (self->selection.mode) {
         size_t selection_lo = MIN(self->selection.begin_line, self->selection.end_line);
         size_t selection_hi = MAX(self->selection.begin_line, self->selection.end_line);
-        size_t start        = MAX(selection_lo, self->scroll_region_top);
-        size_t end = MIN(MIN(selection_hi, self->scroll_region_bottom - 1), self->lines.size - 1);
+
+        size_t start = MAX(selection_lo, self->scroll_region_top);
+        size_t end   = MIN(MIN(selection_hi, self->scroll_region_bottom - 1), self->lines.size - 1);
         Vt_mark_proxies_damaged_in_region(self, start ? (start - 1) : 0, end + 1);
     }
 }
@@ -324,12 +429,12 @@ static inline void Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(
 void Vt_select_commit(Vt* self)
 {
     if (self->selection.next_mode != SELECT_MODE_NONE) {
-        self->selection.mode       = self->selection.next_mode;
-        self->selection.next_mode  = SELECT_MODE_NONE;
-        self->selection.begin_line = self->selection.end_line = self->selection.click_begin_line;
-        self->selection.begin_char_idx                        = self->selection.end_char_idx =
-          self->selection.click_begin_char_idx;
-
+        self->selection.mode           = self->selection.next_mode;
+        self->selection.next_mode      = SELECT_MODE_NONE;
+        self->selection.begin_line     = self->selection.click_begin_line;
+        self->selection.end_line       = self->selection.click_begin_line;
+        self->selection.begin_char_idx = self->selection.click_begin_char_idx;
+        self->selection.end_char_idx   = self->selection.click_begin_char_idx;
         Vt_mark_proxies_damaged_in_selected_region(self);
         CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
     }
@@ -338,8 +443,9 @@ void Vt_select_commit(Vt* self)
 void Vt_select_set_end(Vt* self, int32_t x, int32_t y)
 {
     if (self->selection.mode != SELECT_MODE_NONE) {
-        x              = CLAMP(x, 0, self->ws.ws_xpixel);
-        y              = CLAMP(y, 0, self->ws.ws_ypixel);
+        x = CLAMP(x, 0, self->ws.ws_xpixel);
+        y = CLAMP(y, 0, self->ws.ws_ypixel);
+
         size_t click_x = (double)x / self->pixels_per_cell_x;
         size_t click_y = (double)y / self->pixels_per_cell_y;
         Vt_select_set_end_cell(self, click_x, click_y);
@@ -349,9 +455,11 @@ void Vt_select_set_end(Vt* self, int32_t x, int32_t y)
 void Vt_select_set_end_cell(Vt* self, int32_t x, int32_t y)
 {
     if (self->selection.mode != SELECT_MODE_NONE) {
-        size_t old_end               = self->selection.end_line;
-        x                            = CLAMP(x, 0, Vt_col(self));
-        y                            = CLAMP(y, 0, Vt_row(self));
+        size_t old_end = self->selection.end_line;
+
+        x = CLAMP(x, 0, Vt_col(self));
+        y = CLAMP(y, 0, Vt_row(self));
+
         self->selection.end_line     = Vt_visual_top_line(self) + y;
         self->selection.end_char_idx = x;
 
@@ -365,8 +473,9 @@ void Vt_select_set_end_cell(Vt* self, int32_t x, int32_t y)
 void Vt_select_set_front(Vt* self, int32_t x, int32_t y)
 {
     if (self->selection.mode != SELECT_MODE_NONE) {
-        x              = CLAMP(x, 0, self->ws.ws_xpixel);
-        y              = CLAMP(y, 0, self->ws.ws_ypixel);
+        x = CLAMP(x, 0, self->ws.ws_xpixel);
+        y = CLAMP(y, 0, self->ws.ws_ypixel);
+
         size_t click_x = (double)x / self->pixels_per_cell_x;
         size_t click_y = (double)y / self->pixels_per_cell_y;
         Vt_select_set_front_cell(self, click_x, click_y);
@@ -376,9 +485,11 @@ void Vt_select_set_front(Vt* self, int32_t x, int32_t y)
 void Vt_select_set_front_cell(Vt* self, int32_t x, int32_t y)
 {
     if (self->selection.mode != SELECT_MODE_NONE) {
-        size_t old_front               = self->selection.begin_line;
-        x                              = CLAMP(x, 0, Vt_col(self));
-        y                              = CLAMP(y, 0, Vt_row(self));
+        size_t old_front = self->selection.begin_line;
+
+        x = CLAMP(x, 0, Vt_col(self));
+        y = CLAMP(y, 0, Vt_row(self));
+
         self->selection.begin_line     = Vt_visual_top_line(self) + y;
         self->selection.begin_char_idx = x;
 
@@ -439,8 +550,9 @@ static inline char32_t char_sub_gfx(char original)
 
     if (unlikely(original >= 'a' && original <= '~')) {
         return substitutes[original - 'a'];
-    } else
+    } else {
         return original;
+    }
 }
 
 /**
@@ -516,9 +628,9 @@ __attribute__((cold)) char* pty_string_prettyfy(const char* str, int32_t max)
         }
 
         const char* ctr = control_char_get_pretty_string(*s);
-        if (ctr)
+        if (ctr) {
             Vector_pushv_char(&fmt, ctr, strlen(ctr));
-        else {
+        } else {
             if (important) {
                 switch (*s) {
                     case 'H':
@@ -594,7 +706,10 @@ __attribute__((cold)) char* pty_string_prettyfy(const char* str, int32_t max)
 
 /**
  * get utf-8 text from @param line in range from @param begin to @param end */
-static Vector_char line_to_string(Vector_VtRune* line, size_t begin, size_t end, const char* tail)
+static Vector_char rune_vec_to_string(Vector_VtRune* line,
+                                      size_t         begin,
+                                      size_t         end,
+                                      const char*    tail)
 {
     Vector_char res;
     end   = MIN(end ? end : line->size, line->size);
@@ -602,8 +717,9 @@ static Vector_char line_to_string(Vector_VtRune* line, size_t begin, size_t end,
 
     if (begin >= end) {
         res = Vector_new_with_capacity_char(2);
-        if (tail)
+        if (tail) {
             Vector_pushv_char(&res, tail, strlen(tail) + 1);
+        }
         return res;
     }
     res = Vector_new_with_capacity_char(end - begin);
@@ -635,6 +751,20 @@ static Vector_char line_to_string(Vector_VtRune* line, size_t begin, size_t end,
     }
 
     return res;
+}
+
+static Vector_char VtLine_to_string(VtLine* line, size_t begin, size_t end, const char* tail)
+{
+    return rune_vec_to_string(&line->data, begin, end, tail);
+}
+
+static Vector_char Vt_line_to_string(Vt*         self,
+                                     size_t      idx,
+                                     size_t      begin,
+                                     size_t      end,
+                                     const char* tail)
+{
+    return VtLine_to_string(&self->lines.buf[idx], begin, end, tail);
 }
 
 /**
@@ -696,8 +826,7 @@ static Vector_Vector_char string_split_on(const char* str,
     return ret;
 }
 
-__attribute__((hot)) static inline bool is_csi_sequence_terminated(const char*  seq,
-                                                                   const size_t size)
+static inline bool is_csi_sequence_terminated(const char* seq, const size_t size)
 {
     if (!size) {
         return false;
@@ -709,10 +838,356 @@ __attribute__((hot)) static inline bool is_csi_sequence_terminated(const char*  
 
 static inline bool is_string_sequence_terminated(const char* seq, const size_t size)
 {
-    if (!size)
+    if (!size) {
         return false;
+    }
 
     return seq[size - 1] == '\a' || (size > 1 && seq[size - 2] == '\e' && seq[size - 1] == '\\');
+}
+
+static void generate_color_palette_entry(ColorRGB* color, int16_t idx)
+{
+    ASSERT(idx >= 0, "index not negative");
+    ASSERT(color, "got color*");
+
+    if (idx < 16) {
+        /* Primary - from colorscheme */
+        *color = settings.colorscheme.color[idx];
+    } else if (idx < 232) {
+        /* Extended */
+        int16_t tmp = idx - 16;
+        color->b    = (double)((tmp % 6) * 255) / 5.0;
+        color->g    = (double)(((tmp /= 6) % 6) * 255) / 5.0;
+        color->r    = (double)(((tmp / 6) % 6) * 255) / 5.0;
+    } else {
+        /* Grayscale */
+        double tmp = (double)((idx - 232) * 10 + 8) / 256.0 * 255.0;
+
+        *color = (ColorRGB){
+            .r = tmp,
+            .g = tmp,
+            .b = tmp,
+        };
+    }
+}
+
+static void Vt_reset_color_palette_entry(Vt* self, int16_t idx)
+{
+    generate_color_palette_entry(&self->colors.palette_256[idx], idx);
+}
+
+static void Vt_init_color_palette(Vt* self)
+{
+    for (int16_t i = 0; i < 256; ++i) {
+        Vt_reset_color_palette_entry(self, i);
+    }
+}
+
+static const char* const color_palette_names[] = {
+    "Grey0",
+    "NavyBlue",
+    "DarkBlue",
+    "Blue3",
+    "Blue3",
+    "Blue1",
+    "DarkGreen",
+    "DeepSkyBlue4",
+    "DeepSkyBlue4",
+    "DeepSkyBlue4",
+    "DodgerBlue3",
+    "DodgerBlue2",
+    "Green4",
+    "SpringGreen4",
+    "Turquoise4",
+    "DeepSkyBlue3",
+    "DeepSkyBlue3",
+    "DodgerBlue1",
+    "Green3",
+    "SpringGreen3",
+    "DarkCyan",
+    "LightSeaGreen",
+    "DeepSkyBlue2",
+    "DeepSkyBlue1",
+    "Green3",
+    "SpringGreen3",
+    "SpringGreen2",
+    "Cyan3",
+    "DarkTurquoise",
+    "Turquoise2",
+    "Green1",
+    "SpringGreen2",
+    "SpringGreen1",
+    "MediumSpringGreen",
+    "Cyan2",
+    "Cyan1",
+    "DarkRed",
+    "DeepPink4",
+    "Purple4",
+    "Purple4",
+    "Purple3",
+    "BlueViolet",
+    "Orange4",
+    "Grey37",
+    "MediumPurple4",
+    "SlateBlue3",
+    "SlateBlue3",
+    "RoyalBlue1",
+    "Chartreuse4",
+    "DarkSeaGreen4",
+    "PaleTurquoise4",
+    "SteelBlue",
+    "SteelBlue3",
+    "CornflowerBlue",
+    "Chartreuse3",
+    "DarkSeaGreen4",
+    "CadetBlue",
+    "CadetBlue",
+    "SkyBlue3",
+    "SteelBlue1",
+    "Chartreuse3",
+    "PaleGreen3",
+    "SeaGreen3",
+    "Aquamarine3",
+    "MediumTurquoise",
+    "SteelBlue1",
+    "Chartreuse2",
+    "SeaGreen2",
+    "SeaGreen1",
+    "SeaGreen1",
+    "Aquamarine1",
+    "DarkSlateGray2",
+    "DarkRed",
+    "DeepPink4",
+    "DarkMagenta",
+    "DarkMagenta",
+    "DarkViolet",
+    "Purple",
+    "Orange4",
+    "LightPink4",
+    "Plum4",
+    "MediumPurple3",
+    "MediumPurple3",
+    "SlateBlue1",
+    "Yellow4",
+    "Wheat4",
+    "Grey53",
+    "LightSlateGrey",
+    "MediumPurple",
+    "LightSlateBlue",
+    "Yellow4",
+    "DarkOliveGreen3",
+    "DarkSeaGreen",
+    "LightSkyBlue3",
+    "LightSkyBlue3",
+    "SkyBlue2",
+    "Chartreuse2",
+    "DarkOliveGreen3",
+    "PaleGreen3",
+    "DarkSeaGreen3",
+    "DarkSlateGray3",
+    "SkyBlue1",
+    "Chartreuse1",
+    "LightGreen",
+    "LightGreen",
+    "PaleGreen1",
+    "Aquamarine1",
+    "DarkSlateGray1",
+    "Red3",
+    "DeepPink4",
+    "MediumVioletRed",
+    "Magenta3",
+    "DarkViolet",
+    "Purple",
+    "DarkOrange3",
+    "IndianRed",
+    "HotPink3",
+    "MediumOrchid3",
+    "MediumOrchid",
+    "MediumPurple2",
+    "DarkGoldenrod",
+    "LightSalmon3",
+    "RosyBrown",
+    "Grey63",
+    "MediumPurple2",
+    "MediumPurple1",
+    "Gold3",
+    "DarkKhaki",
+    "NavajoWhite3",
+    "Grey69",
+    "LightSteelBlue3",
+    "LightSteelBlue",
+    "Yellow3",
+    "DarkOliveGreen3",
+    "DarkSeaGreen3",
+    "DarkSeaGreen2",
+    "LightCyan3",
+    "LightSkyBlue1",
+    "GreenYellow",
+    "DarkOliveGreen2",
+    "PaleGreen1",
+    "DarkSeaGreen2",
+    "DarkSeaGreen1",
+    "PaleTurquoise1",
+    "Red3",
+    "DeepPink3",
+    "DeepPink3",
+    "Magenta3",
+    "Magenta3",
+    "Magenta2",
+    "DarkOrange3",
+    "IndianRed",
+    "HotPink3",
+    "HotPink2",
+    "Orchid",
+    "MediumOrchid1",
+    "Orange3",
+    "LightSalmon3",
+    "LightPink3",
+    "Pink3",
+    "Plum3",
+    "Violet",
+    "Gold3",
+    "LightGoldenrod3",
+    "Tan",
+    "MistyRose3",
+    "Thistle3",
+    "Plum2",
+    "Yellow3",
+    "Khaki3",
+    "LightGoldenrod2",
+    "LightYellow3",
+    "Grey84",
+    "LightSteelBlue1",
+    "Yellow2",
+    "DarkOliveGreen1",
+    "DarkOliveGreen1",
+    "DarkSeaGreen1",
+    "Honeydew2",
+    "LightCyan1",
+    "Red1",
+    "DeepPink2",
+    "DeepPink1",
+    "DeepPink1",
+    "Magenta2",
+    "Magenta1",
+    "OrangeRed1",
+    "IndianRed1",
+    "IndianRed1",
+    "HotPink",
+    "HotPink",
+    "MediumOrchid1",
+    "DarkOrange",
+    "Salmon1",
+    "LightCoral",
+    "PaleVioletRed1",
+    "Orchid2",
+    "Orchid1",
+    "Orange1",
+    "SandyBrown",
+    "LightSalmon1",
+    "LightPink1",
+    "Pink1",
+    "Plum1",
+    "Gold1",
+    "LightGoldenrod2",
+    "LightGoldenrod2",
+    "NavajoWhite1",
+    "MistyRose1",
+    "Thistle1",
+    "Yellow1",
+    "LightGoldenrod1",
+    "Khaki1",
+    "Wheat1",
+    "Cornsilk1",
+    "Grey100",
+    "Grey3",
+    "Grey7",
+    "Grey11",
+    "Grey15",
+    "Grey19",
+    "Grey23",
+    "Grey27",
+    "Grey30",
+    "Grey35",
+    "Grey39",
+    "Grey42",
+    "Grey46",
+    "Grey50",
+    "Grey54",
+    "Grey58",
+    "Grey62",
+    "Grey66",
+    "Grey70",
+    "Grey74",
+    "Grey78",
+    "Grey82",
+    "Grey85",
+    "Grey89",
+    "Grey93",
+};
+
+static int palette_color_index_from_xterm_name(const char* name)
+{
+    for (uint16_t i = 0; i < ARRAY_SIZE(color_palette_names); ++i) {
+        if (strcasecmp(color_palette_names[i], name)) {
+            return i + 16;
+        }
+    }
+    return 0;
+}
+
+static ColorRGB color_from_xterm_name(const char* name, bool* fail)
+{
+    for (uint16_t i = 0; i < ARRAY_SIZE(color_palette_names); ++i) {
+        if (strcasecmp(color_palette_names[i], name)) {
+            ColorRGB color;
+            generate_color_palette_entry(&color, i + 16);
+            return color;
+        }
+    }
+    if (fail) {
+        *fail = true;
+    }
+    return (ColorRGB){ 0 };
+}
+
+const char* name_from_color_palette_index(uint16_t index)
+{
+    if (index < 16 || index > 255) {
+        return NULL;
+    } else {
+        return color_palette_names[index - 16];
+    }
+}
+
+/**
+ * Parse a color form xterm name or as XParseColor() */
+static void set_rgb_color_from_xterm_string(ColorRGB* color, const char* string)
+{
+    bool     failed = false;
+    ColorRGB c;
+    if (strstr(string, "rgbi:")) {
+        c = ColorRGB_from_xorg_rgb_intensity_specification(string, &failed);
+    } else if (strstr(string, "rgb:")) {
+        c = ColorRGB_from_xorg_rgb_specification(string, &failed);
+    } else if (*string == '#') {
+        c = ColorRGB_from_xorg_old_rgb_specification(string, &failed);
+    } else {
+        c = color_from_xterm_name(string, &failed);
+    }
+
+    if (!failed) {
+        *color = c;
+    } else {
+        WRN("Failed to parse \'%s\' as color\n", string);
+    }
+}
+
+static void set_rgba_color_from_xterm_string(ColorRGBA* color, const char* string)
+{
+    ColorRGB c;
+    set_rgb_color_from_xterm_string(&c, string);
+    *color = ColorRGBA_from_RGB(c);
 }
 
 static void Vt_hard_reset(Vt* self)
@@ -721,23 +1196,36 @@ static void Vt_hard_reset(Vt* self)
     Vt_select_end(self);
     Vt_clear_display_and_scrollback(self);
     Vt_move_cursor(self, 0, 0);
-    self->tabstop              = 8;
-    self->parser.state         = PARSER_STATE_LITERAL;
+
+    self->parser.state = PARSER_STATE_LITERAL;
+
     self->charset_g0           = NULL;
     self->charset_g1           = NULL;
     self->charset_g2           = NULL;
     self->charset_g3           = NULL;
     self->charset_single_shift = NULL;
     self->last_interted        = NULL;
-    self->scroll_region_top    = 0;
+
+    self->scroll_region_top = 0;
     self->scroll_region_bottom =
       CALL_FP(self->callbacks.on_number_of_cells_requested, self->callbacks.user_data).second - 1;
+
     Vector_clear_DynStr(&self->title_stack);
     free(self->title);
     self->title = NULL;
+
+    self->colors.bg = settings.bg;
+    self->colors.fg = settings.fg;
+
+    self->colors.highlight.bg = settings.bghl;
+    self->colors.highlight.fg = settings.fghl;
+
+    Vt_init_color_palette(self);
+
+    self->tabstop = 8;
     Vt_reset_tab_ruler(self);
 
-    //TODO: Clear DECUDK
+    // TODO: Clear DECUDK
 }
 
 static void Vt_soft_reset(Vt* self)
@@ -767,16 +1255,15 @@ void Vt_init(Vt* self, uint32_t cols, uint32_t rows)
     self->parser.state         = PARSER_STATE_LITERAL;
     self->parser.in_mb_seq     = false;
 
-    self->parser.char_state = blank_space = (VtRune){
-        .rune          = ((Rune){ .code = ' ', .combine = { 0 }, .style = VT_RUNE_NORMAL }),
-        .bg            = settings.bg,
-        .fg            = settings.fg,
-        .dim           = false,
-        .hidden        = false,
-        .blinkng       = false,
-        .underlined    = false,
-        .strikethrough = false,
-    };
+    self->colors.bg = settings.bg;
+    self->colors.fg = settings.fg;
+
+    self->colors.highlight.bg = settings.bghl;
+    self->colors.highlight.fg = settings.fghl;
+
+    Vt_reset_text_attribs(self);
+
+    memcpy(&self->blank_space, &self->parser.char_state, sizeof(VtRune));
 
     self->parser.active_sequence = Vector_new_char();
     self->output                 = Vector_new_char();
@@ -797,6 +1284,13 @@ void Vt_init(Vt* self, uint32_t cols, uint32_t rows)
     self->title_stack = Vector_new_DynStr();
 
     self->unicode_input.buffer = Vector_new_char();
+
+    self->xterm_modify_keyboard      = VT_XT_MODIFY_KEYBOARD_DFT;
+    self->xterm_modify_cursor_keys   = VT_XT_MODIFY_CURSOR_KEYS_DFT;
+    self->xterm_modify_function_keys = VT_XT_MODIFY_FUNCTION_KEYS_DFT;
+    self->xterm_modify_other_keys    = VT_XT_MODIFY_OTHER_KEYS_DFT;
+
+    Vt_init_color_palette(self);
 }
 
 static void Vt_init_tab_ruler(Vt* self)
@@ -869,8 +1363,9 @@ void Vt_visual_scroll_down(Vt* self)
 {
     if (self->scrolling_visual && Vt_top_line(self) > self->visual_scroll_top) {
         ++self->visual_scroll_top;
-        if (self->visual_scroll_top == Vt_top_line(self))
+        if (self->visual_scroll_top == Vt_top_line(self)) {
             self->scrolling_visual = false;
+        }
     }
 }
 
@@ -891,11 +1386,14 @@ __attribute__((cold)) void Vt_dump_info(Vt* self)
     static int dump_index = 0;
     printf("\n====================[ STATE DUMP %2d ]====================\n", dump_index++);
     printf("Active character attributes:\n");
-    printf("  foreground color:   " COLOR_RGB_FMT "\n", COLOR_RGB_AP(self->parser.char_state.fg));
-    printf("  background color:   " COLOR_RGBA_FMT "\n", COLOR_RGBA_AP(self->parser.char_state.bg));
+    printf("  foreground color:   " COLOR_RGB_FMT "\n",
+           COLOR_RGB_AP((Vt_rune_fg(self, &self->parser.char_state))));
+    printf("  background color:   " COLOR_RGBA_FMT "\n",
+           COLOR_RGBA_AP((Vt_rune_bg(self, &self->parser.char_state))));
     printf("  line color uses fg: " BOOL_FMT "\n",
-           BOOL_AP(!self->parser.char_state.linecolornotdefault));
-    printf("  line color:         " COLOR_RGB_FMT "\n", COLOR_RGB_AP(self->parser.char_state.line));
+           BOOL_AP(!self->parser.char_state.line_color_not_default));
+    printf("  line color:         " COLOR_RGB_FMT "\n",
+           COLOR_RGB_AP((Vt_rune_ln_clr(self, &self->parser.char_state))));
     printf("  dim:                " BOOL_FMT "\n", BOOL_AP(self->parser.char_state.dim));
     printf("  hidden:             " BOOL_FMT "\n", BOOL_AP(self->parser.char_state.hidden));
     printf("  blinking:           " BOOL_FMT "\n", BOOL_AP(self->parser.char_state.blinkng));
@@ -905,7 +1403,7 @@ __attribute__((cold)) void Vt_dump_info(Vt* self)
            BOOL_AP(self->parser.char_state.doubleunderline));
     printf("  curly underline:    " BOOL_FMT "\n", BOOL_AP(self->parser.char_state.curlyunderline));
     printf("  overline:           " BOOL_FMT "\n", BOOL_AP(self->parser.char_state.overline));
-    printf("  inverted:           " BOOL_FMT "\n", BOOL_AP(self->parser.color_inverted));
+    printf("  inverted:           " BOOL_FMT "\n", BOOL_AP(self->parser.char_state.invert));
     printf("Tab ruler:\n");
     printf("  tabstop: %d\n  ", self->tabstop);
     for (int i = 0; i < Vt_col(self); ++i) {
@@ -965,7 +1463,7 @@ __attribute__((cold)) void Vt_dump_info(Vt* self)
     printf("| | |  BUFFER: %s\n", (self->alt_lines.buf ? "ALTERNATE" : "MAIN"));
     printf("V V V  \n");
     for (size_t i = 0; i < self->lines.size; ++i) {
-        Vector_char str = line_to_string(&self->lines.buf[i].data, 0, 0, "");
+        Vector_char str = rune_vec_to_string(&self->lines.buf[i].data, 0, 0, "");
         printf(
           "%c %c %c %4zu%c s:%3zu dmg:%d proxy{%3d,%3d,%3d,%3d} reflow{%d,%d,%d} data{%.50s%s}\n",
           i == Vt_top_line(self) ? 'v' : i == Vt_bottom_line(self) ? '^' : ' ',
@@ -1066,8 +1564,9 @@ static void Vt_reflow_expand(Vt* self, uint32_t x)
     int underflow = -((int64_t)self->lines.size - Vt_row(self));
 
     if (underflow > 0) {
-        for (int i = 0; i < (int)MIN(underflow, removals); ++i)
+        for (int i = 0; i < (int)MIN(underflow, removals); ++i) {
             Vector_push_VtLine(&self->lines, VtLine_new());
+        }
     }
 
     /* do not scroll past end of screen (self->ws was not updated yet, so Vt_scroll_down does not
@@ -1180,18 +1679,20 @@ static void Vt_trim_columns(Vt* self)
             size_t s = self->lines.buf[i].data.size;
             Vector_pop_n_VtRune(&self->lines.buf[i].data, s - Vt_col(self));
 
-            if (self->lines.buf[i].was_reflown)
+            if (self->lines.buf[i].was_reflown) {
                 continue;
+            }
 
             s = self->lines.buf[i].data.size;
 
             for (blanks = 0; blanks < s; ++blanks) {
                 if (!(self->lines.buf[i].data.buf[s - 1 - blanks].rune.code == ' ' &&
-                      ColorRGBA_eq(settings.bg, self->lines.buf[i].data.buf[s - 1 - blanks].bg))) {
+                      ColorRGBA_eq(
+                        self->colors.bg,
+                        Vt_rune_bg(self, &self->lines.buf[i].data.buf[s - 1 - blanks])))) {
                     break;
                 }
             }
-
             Vector_pop_n_VtRune(&self->lines.buf[i].data, blanks);
         }
     }
@@ -1205,8 +1706,10 @@ void Vt_resize(Vt* self, uint32_t x, uint32_t y)
     if (!self->alt_lines.buf) {
         Vt_trim_columns(self);
     }
+
     self->saved_cursor_pos  = MIN(self->saved_cursor_pos, x);
     self->saved_active_line = MIN(self->saved_active_line, self->lines.size);
+
     static uint16_t ox = 0, oy = 0;
     if (x != ox || y != oy) {
         if (!self->alt_lines.buf && !Vt_scroll_region_not_default(self)) {
@@ -1284,7 +1787,7 @@ void Vt_resize(Vt* self, uint32_t x, uint32_t y)
 __attribute__((always_inline, flatten)) static inline int32_t short_sequence_get_int_argument(
   const char* seq)
 {
-    return *seq == 0 || seq[1] == 0 ? 1 : strtol(seq, NULL, 10);
+    return *seq == 0 || seq[1] == 0 ? 1 : atoi(seq);
 }
 
 static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
@@ -1438,14 +1941,14 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
             self->modes.no_alt_sends_esc = on;
             break;
 
-        /* bell sets urgent WM hint */
+        /* Bell sets urgent WM hint */
         case 1042:
-            WRN("Urgency hints not implemented\n");
+            self->modes.urgency_on_bell = on;
             break;
 
-        /* bell raises window */
+        /* Bell raises window */
         case 1043:
-            WRN("xterm popOnBell not implemented\n");
+            self->modes.pop_on_bell = on;
             break;
 
         /* Use alternate screen buffer, xterm */
@@ -1490,11 +1993,13 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
         char* seq        = self->parser.active_sequence.buf;
         char  first_char = *seq;
         char  last_char  = self->parser.active_sequence.buf[self->parser.active_sequence.size - 2];
-        char  second_last_char =
-          self->parser.active_sequence.size < 3
-            ? '\0'
-            : self->parser.active_sequence.buf[self->parser.active_sequence.size - 3];
-
+        char  second_last_char;
+        if (self->parser.active_sequence.size < 3) {
+            second_last_char = '\0';
+        } else {
+            second_last_char =
+              self->parser.active_sequence.buf[self->parser.active_sequence.size - 3];
+        }
         bool is_single_arg = !strchr(seq, ';') && !strchr(seq, ':');
 
 #define MULTI_ARG_IS_ERROR                                                                         \
@@ -1554,8 +2059,8 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                   string_split_on(seq + 1, ";:", NULL, NULL);
                                 for (Vector_char* token = NULL;
                                      (token = Vector_iter_Vector_char(&tokens, token));) {
-                                    errno     = 0;
-                                    long code = strtol(token->buf + 1, NULL, 10);
+                                    errno         = 0;
+                                    uint32_t code = atoi(token->buf + 1);
                                     if (code && !errno) {
                                         Vt_handle_dec_mode(self, code, is_enable);
                                     } else {
@@ -1594,26 +2099,84 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
             /* <ESC>[> ... */
             case '>': {
                 switch (last_char) {
-                    /* <ESC>[> Pp m / <ESC>[> Pp ; Pv m - Set/reset key modifier options (XTMODKEYS)
-                     * Pp = 0 - modifyKeyboard.
-                     * Pp = 1 - modifyCursorKeys.
-                     * Pp = 2 - modifyFunctionKeys.
-                     * Pp = 4 - modifyOtherKeys.
-                     */
-                    case 'm':
-                        // TODO:
-                        // break;
+                        /* <ESC>[> Pp m / <ESC>[> Pp ; Pv m - Set/reset key modifier options
+                         * (XTMODKEYS)
+                         *
+                         * 0 => modifyKeyboard
+                         * 1 => modifyCursorKeys
+                         * 2 => modifyFunctionKeys
+                         * 4 => modifyOtherKeys */
+                    case 'm': {
+                        int resource, value;
+                        int nargs = sscanf(seq, "%d;%d", &resource, &value);
+                        if (nargs == EOF) {
+                            goto invalid;
+                        }
+                        if (!nargs) {
+                            self->xterm_modify_keyboard      = VT_XT_MODIFY_KEYBOARD_DFT;
+                            self->xterm_modify_cursor_keys   = VT_XT_MODIFY_CURSOR_KEYS_DFT;
+                            self->xterm_modify_function_keys = VT_XT_MODIFY_FUNCTION_KEYS_DFT;
+                            self->xterm_modify_other_keys    = VT_XT_MODIFY_OTHER_KEYS_DFT;
+                            break;
+                        }
 
-                    /* <ESC>[> Ps n - Disable key modifier options, xterm
-                     * Pp = 0 - modifyKeyboard.
-                     * Pp = 1 - modifyCursorKeys.
-                     * Pp = 2 - modifyFunctionKeys.
-                     * Pp = 4 - modifyOtherKeys.
-                     */
-                    case 'n':
-                        // TODO:
-                        WRN("XTMODKEYS not implemented\n");
+                        switch (resource) {
+                            case 0:
+                                self->xterm_modify_keyboard =
+                                  nargs == 2 ? value : VT_XT_MODIFY_KEYBOARD_DFT;
+                                break;
+                            case 1:
+                                self->xterm_modify_cursor_keys =
+                                  nargs == 2 ? value : VT_XT_MODIFY_CURSOR_KEYS_DFT;
+                                break;
+                            case 2:
+                                self->xterm_modify_function_keys =
+                                  nargs == 2 ? value : VT_XT_MODIFY_FUNCTION_KEYS_DFT;
+                                break;
+                            case 4:
+                                self->xterm_modify_other_keys =
+                                  nargs == 2 ? value : VT_XT_MODIFY_OTHER_KEYS_DFT;
+                                break;
+                            default:
+                                goto invalid;
+                        }
+
                         break;
+                    invalid:
+                        WRN("Invalid XTMODKEYS command \'%s\'\n", seq);
+                    } break;
+
+                        /* <ESC>[> Ps n - Disable key modifier options, xterm
+                         *
+                         * This control sequence corresponds to a resource value of "-1", which
+                         * cannot be set with the other sequence
+                         *
+                         * If the parameter is omitted, modifyFunctionKeys is disabled
+                         *
+                         * 0 => modifyKeyboard
+                         * 1 => modifyCursorKeys
+                         * 2 => modifyFunctionKeys
+                         * 4 => modifyOtherKeys */
+                    case 'n': {
+                        MULTI_ARG_IS_ERROR
+                        int arg = seq[1] == 'n' ? 2 : short_sequence_get_int_argument(seq);
+                        switch (arg) {
+                            case 0:
+                                self->xterm_modify_keyboard = -1;
+                                break;
+                            case 1:
+                                self->xterm_modify_cursor_keys = -1;
+                                break;
+                            case 2:
+                                self->xterm_modify_function_keys = -1;
+                                break;
+                            case 4:
+                                self->xterm_modify_other_keys = -1;
+                                break;
+                            default:
+                                WRN("Invalid XTMODKEYS command \'%s\'\n", seq);
+                        }
+                    } break;
 
                     /* <ESC>[ > Ps c - Send Device Attributes (Secondary DA) */
                     case 'c': {
@@ -1829,19 +2392,19 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                     case '\'':
                         switch (last_char) {
 
-                                /* <ESC>[ Pt ; Pl ; Pb ; Pr 'w - Enable Filter Rectangle (DECEFR),
-                                 * VT420 and up
-                                 *
-                                 * Parameters are [top;left;bottom;right]. Defines the coordinates
-                                 * of a filter rectangle and activates it. Anytime the locator is
-                                 * detected outside of the filter rectangle, an outside rectangle
-                                 * event is generated and the rectangle is disabled. Filter
-                                 * rectangles are always treated as "one-shot" events. Any
-                                 * parameters that are omitted default to the current locator
-                                 * position. If all parameters are omitted, any locator motion
-                                 * will be reported. DECELR always cancels any previous rectangle
-                                 * definition.
-                                 */
+                            /* <ESC>[ Pt ; Pl ; Pb ; Pr 'w - Enable Filter Rectangle (DECEFR),
+                             * VT420 and up
+                             *
+                             * Parameters are [top;left;bottom;right]. Defines the coordinates
+                             * of a filter rectangle and activates it. Anytime the locator is
+                             * detected outside of the filter rectangle, an outside rectangle
+                             * event is generated and the rectangle is disabled. Filter
+                             * rectangles are always treated as "one-shot" events. Any
+                             * parameters that are omitted default to the current locator
+                             * position. If all parameters are omitted, any locator motion
+                             * will be reported. DECELR always cancels any previous rectangle
+                             * definition.
+                             */
                             case 'w': {
                                 WRN("Filter rectangle locator events not implemented\n");
                             } break;
@@ -2081,7 +2644,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                 MULTI_ARG_IS_ERROR
                                 int arg = short_sequence_get_int_argument(seq);
                                 for (int i = 0; i < arg; ++i) {
-                                    Vt_insert_char_at_cursor_with_shift(self, blank_space);
+                                    Vt_insert_char_at_cursor_with_shift(self, self->blank_space);
                                 }
                             } break;
 
@@ -2336,7 +2899,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                 if (likely(self->last_interted)) {
                                     int arg = short_sequence_get_int_argument(seq);
                                     for (int i = 0; i < arg; ++i) {
-                                        Vt_insert_char_at_cursor(self, *self->last_interted, false);
+                                        Vt_insert_char_at_cursor(self, *self->last_interted);
                                     }
                                 }
                             } break;
@@ -2382,7 +2945,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
 
                                 /* Set omitted args to -1 */
                                 for (nargs = 0; seq && nargs < 4 && *seq != 't'; ++nargs) {
-                                    *(args + nargs) = *seq == ';' ? -1 : strtol(seq, NULL, 10);
+                                    *(args + nargs) = *seq == ';' ? -1 : atoi(seq);
                                     seq             = strstr(seq, ";");
                                     if (seq)
                                         ++seq;
@@ -2751,11 +3314,16 @@ static inline void Vt_alt_buffer_off(Vt* self, bool save_mouse)
     }
 }
 
+static bool Vt_alt_buffer_enabled(Vt* self)
+{
+    return self->alt_lines.buf;
+}
+
 /**
  * Interpret a single argument SGR command */
 __attribute__((hot)) static void Vt_handle_single_argument_SGR(Vt* self, char* command)
 {
-    int cmd = *command ? strtol(command, NULL, 10) : 0;
+    int cmd = *command ? atoi(command) : 0;
 
 #define MAYBE_DISABLE_ALL_UNDERLINES                                                               \
     if (!settings.allow_multiple_underlines) {                                                     \
@@ -2809,15 +3377,10 @@ __attribute__((hot)) static void Vt_handle_single_argument_SGR(Vt* self, char* c
             break;
 
         /* Inverse
-         *
          * There is no clear definition of what this should actually do, but reversing all colors,
-         * after bg and fg were determined, seems to be the widely accepted behavior. So swaping
-         * parser->char_state::{bg, fg} right here will not work because all color change sequences
-         * should be inverted if this is set. We can get away with not storing this for each VtRune
-         * by changing the colors when a character is inserted.
-         */
+         * after bg and fg were determined, seems to be the widely accepted behavior. */
         case 7:
-            self->parser.color_inverted = true;
+            self->parser.char_state.invert = true;
             break;
 
         /* Invisible, i.e., hidden, ECMA-48 2nd, VT300 */
@@ -2904,7 +3467,7 @@ __attribute__((hot)) static void Vt_handle_single_argument_SGR(Vt* self, char* c
 
         /* Positive (not inverse), ECMA-48 3rd */
         case 27:
-            self->parser.color_inverted = false;
+            self->parser.char_state.invert = false;
             break;
 
         /* Visible (not hidden), ECMA-48 3rd, VT300 */
@@ -2919,37 +3482,41 @@ __attribute__((hot)) static void Vt_handle_single_argument_SGR(Vt* self, char* c
 
         /* Set foreground color to default, ECMA-48 3rd */
         case 39:
-            self->parser.char_state.fg = settings.fg;
+            Vt_set_fg_color_default(self);
             break;
 
         /* Set background color to default, ECMA-48 3rd */
         case 49:
-            self->parser.char_state.bg = settings.bg;
+            Vt_set_bg_color_default(self);
             break;
 
         /* Set underline color to default (widely supported extension) */
         case 59:
-            self->parser.char_state.linecolornotdefault = false;
+            self->parser.char_state.line_color_not_default = false;
             break;
 
             /* Disable all ideogram attributes */
             /* case 65: */
             /*     break; */
 
+        case 30 ... 37:
+            Vt_set_fg_color_palette(self, cmd - 30);
+            break;
+
+        case 40 ... 47:
+            Vt_set_bg_color_palette(self, cmd - 40);
+            break;
+
+        case 90 ... 97:
+            Vt_set_fg_color_palette(self, cmd - 82);
+            break;
+
+        case 100 ... 107:
+            Vt_set_bg_color_palette(self, cmd - 92);
+            break;
+
         default:
-            if (30 <= cmd && cmd <= 37) {
-                self->parser.char_state.fg = settings.colorscheme.color[cmd - 30];
-            } else if (40 <= cmd && cmd <= 47) {
-                self->parser.char_state.bg =
-                  ColorRGBA_from_RGB(settings.colorscheme.color[cmd - 40]);
-            } else if (90 <= cmd && cmd <= 97) {
-                self->parser.char_state.fg = settings.colorscheme.color[cmd - 82];
-            } else if (100 <= cmd && cmd <= 107) {
-                self->parser.char_state.bg =
-                  ColorRGBA_from_RGB(settings.colorscheme.color[cmd - 92]);
-            } else {
-                WRN("Unknown SGR code: %d\n", cmd);
-            }
+            WRN("Unknown SGR code: %d\n", cmd);
     }
 }
 
@@ -2976,52 +3543,44 @@ static void Vt_handle_multi_argument_SGR(Vt* self, Vector_char seq)
                 (args[2] = (token = Vector_iter_Vector_char(&tokens, token)))) {
                 if (!strcmp(args[1]->buf + 1, "5")) {
                     /* from 256 palette (one argument) */
-                    long idx = MIN(strtol(args[2]->buf + 1, NULL, 10), 255);
-
+                    uint32_t idx = MIN(atoi(args[2]->buf + 1), 255);
                     if (args[0]->buf[1] == '3') {
-                        self->parser.char_state.fg = color_palette_256[idx];
+                        Vt_set_fg_color_palette(self, idx);
                     } else if (args[0]->buf[1] == '4') {
-                        self->parser.char_state.bg = ColorRGBA_from_RGB(color_palette_256[idx]);
+                        Vt_set_bg_color_palette(self, idx);
                     } else if (args[0]->buf[1] == '5') {
-                        self->parser.char_state.linecolornotdefault = true;
-                        self->parser.char_state.line                = color_palette_256[idx];
+                        Vt_set_line_color_palette(self, idx);
                     }
-
                 } else if (!strcmp(args[1]->buf + 1, "2")) {
                     /* sent as 24-bit rgb (three arguments) */
                     if ((args[3] = (token = Vector_iter_Vector_char(&tokens, token))) &&
                         (args[4] = (token = Vector_iter_Vector_char(&tokens, token)))) {
-                        long c[3] = { MIN(strtol(args[2]->buf + 1, NULL, 10), 255),
-                                      MIN(strtol(args[3]->buf + 1, NULL, 10), 255),
-                                      MIN(strtol(args[4]->buf + 1, NULL, 10), 255) };
+                        uint32_t c[3] = { MIN(atoi(args[2]->buf + 1), 255),
+                                          MIN(atoi(args[3]->buf + 1), 255),
+                                          MIN(atoi(args[4]->buf + 1), 255) };
 
                         if (args[0]->buf[1] == '3') {
-                            self->parser.char_state.fg =
-                              (ColorRGB){ .r = c[0], .g = c[1], .b = c[2] };
+                            ColorRGB clr = { .r = c[0], .g = c[1], .b = c[2] };
+                            Vt_set_fg_color_custom(self, clr);
                         } else if (args[0]->buf[1] == '4') {
-                            self->parser.char_state.bg =
-                              (ColorRGBA){ .r = c[0], .g = c[1], .b = c[2], .a = 255 };
+                            ColorRGBA clr = { .r = c[0], .g = c[1], .b = c[2], .a = 255 };
+                            Vt_set_bg_color_custom(self, clr);
                         } else if (args[0]->buf[1] == '5') {
-                            self->parser.char_state.linecolornotdefault = true;
-                            self->parser.char_state.line =
-                              (ColorRGB){ .r = c[0], .g = c[1], .b = c[2] };
+                            ColorRGB clr = { .r = c[0], .g = c[1], .b = c[2] };
+                            Vt_set_line_color_custom(self, clr);
                         }
                     }
                 }
             }
         } else if (!strcmp(token->buf + 1, "4")) {
-
             /* possible curly underline */
             if ((args[1] = (token = Vector_iter_Vector_char(&tokens, token)))) {
-
                 /* enable this only on "4:3" not "4;3" */
                 if (!strcmp(args[1]->buf, ":3")) {
-
                     if (!settings.allow_multiple_underlines) {
                         self->parser.char_state.underlined      = false;
                         self->parser.char_state.doubleunderline = false;
                     }
-
                     self->parser.char_state.curlyunderline = true;
                 } else {
                     Vt_handle_single_argument_SGR(self, args[0]->buf + 1);
@@ -3031,12 +3590,10 @@ static void Vt_handle_multi_argument_SGR(Vt* self, Vector_char seq)
                 Vt_handle_single_argument_SGR(self, args[0]->buf + 1);
                 break; // end of sequence
             }
-
         } else {
             Vt_handle_single_argument_SGR(self, token->buf + 1);
         }
     }
-
     Vector_destroy_Vector_char(&tokens);
 }
 
@@ -3092,7 +3649,6 @@ static void Vt_handle_DCS(Vt* self, char c)
                     }
                 }
                 return;
-
             default:;
         }
 
@@ -3135,12 +3691,12 @@ static void Vt_handle_OSC(Vt* self, char c)
             Vector_pop_char(&self->parser.active_sequence);
         }
         Vector_push_char(&self->parser.active_sequence, '\0');
-        char* seq  = self->parser.active_sequence.buf;
-        int   arg  = 0;
-        char* text = seq;
+        char*    seq  = self->parser.active_sequence.buf;
+        uint32_t arg  = 0;
+        char*    text = seq;
 
         if (isdigit(*seq)) {
-            arg = strtol(seq, &text, 10);
+            arg = strtoul(seq, &text, 10);
             if (text && !(*text == ';' || *text == ':')) {
                 text = seq;
             } else if (text && *text) {
@@ -3166,21 +3722,88 @@ static void Vt_handle_OSC(Vt* self, char c)
                 WRN("OSC 3 not implemented\n");
                 break;
 
-            /* Modify regular color palette */
-            case 4:
+            /* Modify regular color palette
+             *
+             * Any number of c/spec pairs may be given
+             *
+             * If a "?" is given rather than a name or RGB specification, xterm replies with a
+             * control sequence of the same form which can be used to set the corresponding color.
+             */
+            case 4: {
+                seq += 2;
+                char *arg_idx, *arg_clr;
+                while ((arg_idx = strsep(&seq, ";")) && (arg_clr = strsep(&seq, ";"))) {
+                    uint32_t index = atoi(arg_idx);
+                    if (index >= ARRAY_SIZE(self->colors.palette_256)) {
+                        continue;
+                    }
+                    if (*arg_clr == '?') {
+                        ColorRGB color = self->colors.palette_256[index];
+                        Vt_output_formated(self,
+                                           "\e]4;%u;rgb:%x/%x/%x\a",
+                                           index,
+                                           color.r,
+                                           color.g,
+                                           color.b);
+                    } else {
+                        set_rgb_color_from_xterm_string(&self->colors.palette_256[index], arg_clr);
+                    }
+                }
+                Vt_clear_all_proxies(self);
+                CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
+            } break;
+
+            /* 104 ; c Reset Color Number
+             * It is reset to the color specified by the corresponding X resource. Any number of
+             * c parameters may be given.  These parameters correspond to the ANSI colors 0-7,
+             * their bright versions 8-15, and if supported, the remainder of the 88-color or
+             * 256-color table. If no parameters are given, the entire table will be reset.
+             */
+            case 104: {
+                seq += 3;
+                if (!*seq) {
+                    Vt_init_color_palette(self);
+                } else {
+                    ++seq;
+                    for (char* index; (index = strsep(&seq, ";"));) {
+                        uint32_t idx = atoi(index);
+                        if (idx >= ARRAY_SIZE(self->colors.palette_256)) {
+                            continue;
+                        }
+                        Vt_reset_color_palette_entry(self, idx);
+                    }
+                }
+                Vt_clear_all_proxies(self);
+                CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
+            } break;
+
             /* Modify special color palette */
             case 5:
-            /* enable/disable special color */
+            /* Enable/disable special color */
             case 6:
+
+            /* 105 ; c Reset Special Color Number c.
+             * It is reset to the color specified by the corresponding X resource. Any number
+             * of c parameters may be given.  These parameters corre- spond to the special
+             * colors which can be set using an OSC 5 control (or by adding the maximum number
+             * of colors using an OSC 4  control).
+             */
+            case 105:
+
+            /* 1 0 6 ; c ; f  Enable/disable Special Color Number c.
+             * The second parameter tells xterm to enable the corresponding color mode if
+             * nonzero, disable it if zero
+             */
+            case 106:
                 // TODO:
-                WRN("Dynamic colors not implemented\n");
+                WRN("Dynamic colors not implemented \'%s\'\n", seq);
                 break;
 
             /* pwd info as URI */
             case 7: {
                 free(self->work_dir);
                 char* uri = seq + 2; // 7;
-                if (streq_wildcard(uri, "file:*") && strlen(uri) >= 8) {
+                if (streq_wildcard(uri, "file:*") && strnlen(uri, 8) == 8) {
                     uri += 7; // skip 'file://'
 
                     /* skip hostname */
@@ -3213,18 +3836,185 @@ static void Vt_handle_OSC(Vt* self, char c)
             case 30:
                 break;
 
-            /* Set dynamic colors for xterm colorOps */
-            case 10 ... 19:
-                WRN("Dynamic colors not implemented\n");
-                break;
+            /* Set dynamic colors for xterm colorOps
+             *
+             * If a "?" is given rather than a name or RGB specification, xterm replies with a
+             * control sequence of the same form which can be used to set the corresponding
+             * dynamic color.
+             */
+            case 10 ... 19: {
+                bool query = *(seq + 3) == '?';
+                if (query) {
+                    switch (arg) {
+                        /* VT100 text foreground color */
+                        case 10: {
+                            Vt_output_formated(self,
+                                               "\e]%d;rgb:%3d/%3d/%3d\a",
+                                               arg,
+                                               self->colors.fg.r,
+                                               self->colors.fg.g,
+                                               self->colors.fg.b);
+                        } break;
 
-            /* Coresponding colorOps resets */
-            case 110 ... 119:
-                // TODO: reset things, when there are things to reset
-                break;
+                        /* VT100 text background color */
+                        case 11: {
+                            Vt_output_formated(self,
+                                               "\e]%d;rgb:%3d/%3d/%3d\a",
+                                               arg,
+                                               self->colors.bg.r,
+                                               self->colors.bg.g,
+                                               self->colors.bg.b);
+                        } break;
+
+                        /* highlight background color */
+                        case 17: {
+                            Vt_output_formated(self,
+                                               "\e]%d;rgb:%3d/%3d/%3d\a",
+                                               arg,
+                                               self->colors.highlight.bg.r,
+                                               self->colors.highlight.bg.g,
+                                               self->colors.highlight.bg.b);
+                        } break;
+
+                        /* highlight foreground color */
+                        case 19: {
+                            Vt_output_formated(self,
+                                               "\e]%d;rgb:%3d/%3d/%3d\a",
+                                               arg,
+                                               self->colors.highlight.fg.r,
+                                               self->colors.highlight.fg.g,
+                                               self->colors.highlight.fg.b);
+                        } break;
+
+                        /* Tektronix background color */
+                        case 16:
+                        /* pointer foreground color */
+                        case 13:
+                        /* pointer background color */
+                        case 14:
+                        /* text cursor color */
+                        case 12:
+                        /* Tektronix foreground color */
+                        case 15:
+                        /* Tektronix cursor color */
+                        case 18:
+                            WRN("Unimplemented color \'%d\'\n", arg);
+                            break;
+
+                        default:
+                            ASSERT_UNREACHABLE;
+                            break;
+                    }
+                } else {
+                    /*
+                     * At least one parameter is expected. Each successive parameter changes the
+                     * next color in the list.
+                     */
+
+                    char* sequence_arg = seq + 3;
+                    while (sequence_arg && *sequence_arg) {
+                        switch (arg) {
+                            /* VT100 text foreground color */
+                            case 10: {
+                                set_rgb_color_from_xterm_string(&self->colors.fg, sequence_arg);
+                            } break;
+
+                            /* VT100 text background color */
+                            case 11: {
+                                set_rgba_color_from_xterm_string(&self->colors.bg, sequence_arg);
+                            } break;
+
+                            /* highlight background color */
+                            case 17: {
+                                set_rgba_color_from_xterm_string(&self->colors.highlight.bg,
+                                                                 sequence_arg);
+                            } break;
+
+                            /* highlight foreground color */
+                            case 19: {
+                                set_rgb_color_from_xterm_string(&self->colors.highlight.fg,
+                                                                sequence_arg);
+                            } break;
+
+                            /* Tektronix background color */
+                            case 16:
+                            /* text cursor color */
+                            case 12:
+                            /* Tektronix foreground color */
+                            case 15:
+                            /* Tektronix cursor color */
+                            case 18:
+                            /* pointer foreground color */
+                            case 13:
+                            /* pointer background color */
+                            case 14:
+                            default:
+                                break;
+                        }
+                        sequence_arg = strstr(sequence_arg, ";");
+                        if (!sequence_arg || !*sequence_arg) {
+                            break;
+                        }
+                        ++sequence_arg;
+                        ++arg;
+                    }
+                    Vt_clear_all_proxies(self);
+                    CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
+                }
+            } break;
+
+            /* Coresponding resets */
+            case 110 ... 119: {
+                switch (arg - 100) {
+                    /* VT100 text foreground color */
+                    case 10:
+                    /* text cursor color */
+                    case 12:
+                    /* Tektronix foreground color */
+                    case 15:
+                    /* Tektronix cursor color */
+                    case 18: {
+                        self->colors.fg = settings.fg;
+                    } break;
+
+                    /* VT100 text background color */
+                    case 11:
+                    /* Tektronix background color */
+                    case 16: {
+                        self->colors.bg = settings.bg;
+                    } break;
+
+                    /* pointer foreground color */
+                    case 13:
+                        break;
+
+                    /* pointer background color */
+                    case 14:
+                        break;
+
+                    /* highlight background color */
+                    case 17: {
+                        self->colors.highlight.bg = settings.bghl;
+                    } break;
+
+                    /* highlight foreground color */
+                    case 19: {
+                        self->colors.highlight.fg = settings.fghl;
+                    } break;
+
+                    default:
+                        ASSERT_UNREACHABLE;
+                        break;
+                }
+            } break;
 
             case 50:
                 WRN("xterm fontOps not implemented\n");
+                break;
+
+            /* Manipulate selection data */
+            case 52:
+                WRN("Selection manipulation not implemented\n");
                 break;
 
             /* Send desktop notification (rxvt extension)
@@ -3288,9 +4078,9 @@ static void Vt_reset_text_attribs(Vt* self)
 {
     memset(&self->parser.char_state, 0, sizeof(self->parser.char_state));
     self->parser.char_state.rune.code = ' ';
-    self->parser.char_state.bg        = settings.bg;
-    self->parser.char_state.fg        = settings.fg;
-    self->parser.color_inverted       = false;
+    Vt_set_bg_color_default(self);
+    Vt_set_fg_color_default(self);
+    Vt_set_line_color_default(self);
 }
 
 /**
@@ -3362,12 +4152,9 @@ static void Vt_scroll_up(Vt* self)
 static void Vt_scroll_down(Vt* self)
 {
     self->last_interted = NULL;
-    Vector_insert_VtLine(&self->lines,
-                         Vector_at_VtLine(&self->lines, Vt_get_scroll_region_top(self)),
-                         VtLine_new());
-    Vector_remove_at_VtLine(&self->lines,
-                            MAX(Vt_top_line(self), Vt_get_scroll_region_bottom(self)),
-                            1);
+    Vector_insert_at_VtLine(&self->lines, Vt_get_scroll_region_top(self), VtLine_new());
+    size_t rm_idx = MAX(Vt_top_line(self), Vt_get_scroll_region_bottom(self));
+    Vector_remove_at_VtLine(&self->lines, rm_idx, 1);
     Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
 }
 
@@ -3376,8 +4163,9 @@ static void Vt_scroll_down(Vt* self)
 static void Vt_cursor_down(Vt* self)
 {
     self->last_interted = NULL;
-    if (self->cursor.row < Vt_bottom_line(self))
+    if (self->cursor.row < Vt_bottom_line(self)) {
         ++self->cursor.row;
+    }
     CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
 }
 
@@ -3386,8 +4174,9 @@ static void Vt_cursor_down(Vt* self)
 static void Vt_cursor_up(Vt* self)
 {
     self->last_interted = NULL;
-    if (self->cursor.row > Vt_top_line(self))
+    if (self->cursor.row > Vt_top_line(self)) {
         --self->cursor.row;
+    }
     CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
 }
 
@@ -3453,34 +4242,32 @@ static void Vt_delete_chars(Vt* self, size_t n)
                             Vt_cursor_line(self)->data.size - Vt_col(self));
     }
 
-    Vector_remove_at_VtRune(&Vt_cursor_line(self)->data,
-                            self->cursor.col,
-                            MIN(Vt_cursor_line(self)->data.size == self->cursor.col
-                                  ? Vt_cursor_line(self)->data.size - self->cursor.col
-                                  : Vt_cursor_line(self)->data.size,
-                                n));
+    size_t rm_size = Vt_cursor_line(self)->data.size == self->cursor.col
+                       ? Vt_cursor_line(self)->data.size - self->cursor.col
+                       : Vt_cursor_line(self)->data.size;
+    Vector_remove_at_VtRune(&Vt_cursor_line(self)->data, self->cursor.col, MIN(rm_size, n));
 
     /* Fill line to the cursor position with spaces with original propreties
      * before scolling so we get the expected result, when we... */
-    VtRune tmp        = self->parser.char_state;
-    bool   tmp_invert = self->parser.color_inverted;
+    VtRune tmp = self->parser.char_state;
 
     Vt_reset_text_attribs(self);
-    self->parser.color_inverted = false;
 
-    if (self->lines.buf[self->cursor.row].data.size >= 2) {
-        self->parser.char_state.bg =
-          Vt_cursor_line(self)->data.buf[Vt_cursor_line(self)->data.size - 2].bg;
+    if (Vt_cursor_line(self)->data.size >= 2) {
+        self->parser.char_state.bg_data =
+          Vt_cursor_line(self)->data.buf[Vt_cursor_line(self)->data.size - 2].bg_data;
+
+        self->parser.char_state.bg_is_palette_entry =
+          Vt_cursor_line(self)->data.buf[Vt_cursor_line(self)->data.size - 2].bg_is_palette_entry;
     } else {
-        self->parser.char_state.bg = settings.bg;
+        Vt_set_bg_color_default(self);
     }
 
     for (uint16_t i = Vt_cursor_line(self)->data.size - 1; i < Vt_col(self); ++i) {
         Vector_push_VtRune(&Vt_cursor_line(self)->data, self->parser.char_state);
     }
 
-    self->parser.char_state     = tmp;
-    self->parser.color_inverted = tmp_invert;
+    self->parser.char_state = tmp;
 
     if (Vt_cursor_line(self)->data.size > Vt_col(self)) {
         Vector_pop_n_VtRune(&Vt_cursor_line(self)->data,
@@ -3545,6 +4332,7 @@ static inline void Vt_clear_display_and_scrollback(Vt* self)
     Vt_mark_proxy_fully_damaged(self, self->cursor.row);
     Vector_destroy_VtLine(&self->lines);
     self->lines = Vector_new_VtLine(self);
+
     for (uint16_t i = 0; i < Vt_row(self); ++i) {
         Vector_push_VtLine(&self->lines, VtLine_new());
         Vt_empty_line_fill_bg(self, self->lines.size - 1);
@@ -3584,9 +4372,7 @@ static inline void Vt_clear_right(Vt* self)
 
 /**
  * Insert character literal at cursor position, deal with reaching column limit */
-__attribute__((hot)) static inline void Vt_insert_char_at_cursor(Vt*    self,
-                                                                 VtRune c,
-                                                                 bool   apply_color_modifications)
+__attribute__((hot)) static void Vt_insert_char_at_cursor(Vt* self, VtRune c)
 {
     CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
 
@@ -3601,13 +4387,7 @@ __attribute__((hot)) static inline void Vt_insert_char_at_cursor(Vt*    self,
     }
 
     while (Vt_cursor_line(self)->data.size <= self->cursor.col) {
-        Vector_push_VtRune(&Vt_cursor_line(self)->data, blank_space);
-    }
-
-    if (apply_color_modifications && unlikely(self->parser.color_inverted)) {
-        ColorRGB tmp = c.fg;
-        c.fg         = ColorRGB_from_RGBA(c.bg);
-        c.bg         = ColorRGBA_from_RGB(tmp);
+        Vector_push_VtRune(&Vt_cursor_line(self)->data, self->blank_space);
     }
 
     VtRune* insert_point = &self->lines.buf[self->cursor.row].data.buf[self->cursor.col];
@@ -3635,7 +4415,7 @@ __attribute__((hot)) static inline void Vt_insert_char_at_cursor(Vt*    self,
     }
 }
 
-static inline void Vt_insert_char_at_cursor_with_shift(Vt* self, VtRune c)
+static void Vt_insert_char_at_cursor_with_shift(Vt* self, VtRune c)
 {
     if (unlikely(self->cursor.col >= (size_t)Vt_col(self))) {
         if (unlikely(self->modes.no_auto_wrap)) {
@@ -3655,7 +4435,7 @@ static inline void Vt_empty_line_fill_bg(Vt* self, size_t idx)
     ASSERT(self->lines.buf[idx].data.size == 0, "line is empty");
 
     Vt_mark_proxy_fully_damaged(self, idx);
-    if (!ColorRGBA_eq(self->parser.char_state.bg, settings.bg)) {
+    if (!ColorRGBA_eq(Vt_active_bg_color(self), self->colors.bg)) {
         for (uint16_t i = 0; i < Vt_col(self); ++i) {
             Vector_push_VtRune(&self->lines.buf[idx].data, self->parser.char_state);
         }
@@ -3704,7 +4484,8 @@ static inline void Vt_move_cursor_to_column(Vt* self, uint32_t columns)
  * Add a character as a combining character for that rune */
 static void VtRune_push_combining(VtRune* self, char32_t codepoint)
 {
-    ASSERT(unicode_is_combining(codepoint), "must be a combining character");
+    ASSERT(unicode_is_combining(codepoint), "is a combining character");
+
     for (uint_fast8_t i = 0; i < ARRAY_SIZE(self->rune.combine); ++i) {
         if (!self->rune.combine[i]) {
             self->rune.combine[i] = codepoint;
@@ -3719,7 +4500,7 @@ static void VtRune_push_combining(VtRune* self, char32_t codepoint)
  * @return was succesfull  */
 static bool VtRune_try_normalize_as_property(VtRune* self, char32_t codepoint)
 {
-    if (!self->linecolornotdefault) {
+    if (!self->line_color_not_default) {
         switch (codepoint) {
             case 0x00001AB6: /* COMBINING WIGGLY LINE BELOW */
                 self->curlyunderline = true;
@@ -3802,14 +4583,12 @@ __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_litera
             }
             VtRune new_rune    = self->parser.char_state;
             new_rune.rune.code = res;
-            Vt_insert_char_at_cursor(self, new_rune, true);
+            Vt_insert_char_at_cursor(self, new_rune);
         }
     } else {
         switch (c) {
             case '\a':
-                if (!settings.no_flash) {
-                    CALL_FP(self->callbacks.on_visual_bell, self->callbacks.user_data);
-                }
+                Vt_bell(self);
                 break;
 
             case '\b':
@@ -3865,7 +4644,7 @@ __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_litera
                 } else if (unlikely(self->charset_gl && (*self->charset_gl))) {
                     new_char.rune.code = (*(self->charset_gl))(c);
                 }
-                Vt_insert_char_at_cursor(self, new_char, true);
+                Vt_insert_char_at_cursor(self, new_char);
             }
         }
     }
@@ -3956,9 +4735,7 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
                     return;
 
                 case 'g':
-                    if (!settings.no_flash) {
-                        CALL_FP(self->callbacks.on_visual_bell, self->callbacks.user_data);
-                    }
+                    Vt_bell(self);
                     self->parser.state = PARSER_STATE_LITERAL;
                     break;
 
@@ -4239,10 +5016,9 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
 
 static void Vt_shrink_scrollback(Vt* self)
 {
-    /* alt buffer is active */
-    if (self->alt_lines.buf)
+    if (Vt_alt_buffer_enabled(self)) {
         return;
-
+    }
     int64_t ln_cnt = self->lines.size;
     if (unlikely(ln_cnt > MAX(settings.scrollback * 1.1, Vt_row(self)))) {
         int64_t to_remove = ln_cnt - settings.scrollback - Vt_row(self);
@@ -4255,14 +5031,12 @@ static inline void Vt_clear_proxies(Vt* self)
 {
     if (self->scrolling_visual) {
         if (self->visual_scroll_top > Vt_row(self) * 5) {
-            Vt_clear_proxies_in_region(self,
-                                       Vt_visual_bottom_line(self) + 4 * Vt_row(self),
-                                       self->lines.size - 1);
+            size_t begin = Vt_visual_bottom_line(self) + 4 * Vt_row(self);
+            Vt_clear_proxies_in_region(self, begin, self->lines.size - 1);
         }
     } else if (self->lines.size > Vt_row(self)) {
-        Vt_clear_proxies_in_region(self,
-                                   0,
-                                   Vt_visual_top_line(self) ? Vt_visual_top_line(self) - 1 : 0);
+        size_t end = Vt_visual_top_line(self) ? Vt_visual_top_line(self) - 1 : 0;
+        Vt_clear_proxies_in_region(self, 0, end);
     }
 }
 
@@ -4693,8 +5467,9 @@ void Vt_handle_clipboard(void* self, const char* text)
 {
     Vt* vt = self;
 
-    if (!text)
+    if (!text) {
         return;
+    }
 
     size_t len = strlen(text);
 
@@ -4730,7 +5505,7 @@ static void Vt_set_title(Vt* self, const char* title)
 void Vt_destroy(Vt* self)
 {
     Vector_destroy_VtLine(&self->lines);
-    if (self->alt_lines.buf) {
+    if (Vt_alt_buffer_enabled(self)) {
         Vector_destroy_VtLine(&self->alt_lines);
     }
     Vector_destroy_char(&self->parser.active_sequence);

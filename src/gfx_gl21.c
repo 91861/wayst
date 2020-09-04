@@ -1273,6 +1273,7 @@ static uint_fast32_t GfxOpenGL21_draw_line_quads(GfxOpenGL21*  gfx,
  *
  * Should only be called by GfxOpenGL21_rasterize_line() */
 __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_underline_range(
+  const Vt*    vt,
   GfxOpenGL21* gfx,
   VtLine*      vt_line,
   Pair_size_t  range,
@@ -1297,10 +1298,7 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_underline_ra
     }
 
     // lines are drawn in the same color as the character, unless the line color was explicitly set
-    ColorRGB line_color = vt_line->data.buf[range.first].linecolornotdefault
-                            ? vt_line->data.buf[range.first].line
-                            : vt_line->data.buf[range.first].fg;
-
+    ColorRGB line_color = Vt_rune_ln_clr(vt, &vt_line->data.buf[range.first]);
     glDisable(GL_SCISSOR_TEST);
 
     for (const VtRune* each_rune = vt_line->data.buf + range.first;
@@ -1309,9 +1307,9 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_underline_ra
 
         /* text column where this should be drawn */
         size_t   column = each_rune - vt_line->data.buf;
-        ColorRGB nc     = {};
+        ColorRGB nc     = {0};
         if (each_rune != vt_line->data.buf + range.second) {
-            nc = each_rune->linecolornotdefault ? each_rune->line : each_rune->fg;
+            nc = Vt_rune_ln_clr(vt, each_rune);
         }
         // State has changed
         if (!ColorRGB_eq(line_color, nc) || each_rune == vt_line->data.buf + range.second ||
@@ -1465,7 +1463,7 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
     const double scaley = 2.0f / texture_dims.second;
 
     GLint     bg_pixels_begin          = range.first * gfx->glyph_width_pixels, bg_pixels_end;
-    ColorRGBA active_bg_color          = settings.bg;
+    ColorRGBA active_bg_color          = vt->colors.bg;
     VtRune*   each_rune                = vt_line->data.buf + range.first;
     VtRune*   same_bg_block_begin_rune = each_rune;
 
@@ -1485,7 +1483,8 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
         }
 
 #define L_CALC_BG_COLOR                                                                            \
-    Vt_is_cell_selected(vt, idx_each_rune, visual_line_index) ? settings.bghl : each_rune->bg
+    Vt_is_cell_selected(vt, idx_each_rune, visual_line_index) ? vt->colors.highlight.bg            \
+                                                              : Vt_rune_bg(vt, each_rune)
 
         if (idx_each_rune == range.second || !ColorRGBA_eq(L_CALC_BG_COLOR, active_bg_color)) {
             int32_t extra_width = 0;
@@ -1515,10 +1514,10 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
 
 #define L_CALC_DIM_BLEND_COLOR                                                                     \
     (unlikely(each_rune_same_bg->dim)                                                              \
-       ? ColorRGB_new_from_blend(each_rune_same_bg->fg,                                            \
+       ? ColorRGB_new_from_blend(Vt_rune_fg(vt, each_rune_same_bg),                               \
                                  ColorRGB_from_RGBA(active_bg_color),                              \
                                  DIM_COLOR_BLEND_FACTOR)                                           \
-       : each_rune_same_bg->fg)
+       : Vt_rune_fg(vt, each_rune_same_bg))
 
 // it's very unlikely that this will be needed as selected region changes the bg color, but
 // technically the bg highlight color could be exactly the same as the background
@@ -1527,7 +1526,7 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
       ? L_CALC_DIM_BLEND_COLOR                                                                     \
       : unlikely(                                                                                  \
           Vt_is_cell_selected(vt, each_rune_same_bg - vt_line->data.buf, visual_line_index))       \
-          ? settings.fghl                                                                          \
+          ? vt->colors.highlight.fg                                                                \
           : L_CALC_DIM_BLEND_COLOR
 
                     if (each_rune_same_bg == each_rune ||
@@ -1911,7 +1910,7 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                                 unlikely(Vt_is_cell_selected(vt,
                                                              each_rune_same_bg - vt_line->data.buf,
                                                              visual_line_index))) {
-                                active_fg_color = settings.fghl;
+                                active_fg_color = vt->colors.highlight.fg;
                             } else {
                                 active_fg_color = L_CALC_DIM_BLEND_COLOR;
                             }
@@ -1930,9 +1929,9 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                 same_bg_block_begin_rune = each_rune;
                 // update active bg color;
                 if (unlikely(Vt_is_cell_selected(vt, idx_each_rune, visual_line_index))) {
-                    active_bg_color = settings.bghl;
+                    active_bg_color = vt->colors.highlight.bg;
                 } else {
-                    active_bg_color = each_rune->bg;
+                    active_bg_color = Vt_rune_bg(vt, each_rune);
                 }
             }
         } // end if bg color changed
@@ -2090,10 +2089,10 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
     glViewport(0, 0, texture_width, texture_height);
     glBindTexture(GL_TEXTURE_2D, 0);
     glUseProgram(0);
-    glClearColor(ColorRGBA_get_float(settings.bg, 0),
-                 ColorRGBA_get_float(settings.bg, 1),
-                 ColorRGBA_get_float(settings.bg, 2),
-                 ColorRGBA_get_float(settings.bg, 3));
+    glClearColor(ColorRGBA_get_float(vt->colors.bg, 0),
+                 ColorRGBA_get_float(vt->colors.bg, 1),
+                 ColorRGBA_get_float(vt->colors.bg, 2),
+                 ColorRGBA_get_float(vt->colors.bg, 3));
 
     if (vt_line->damage.type == VT_LINE_DAMAGE_RANGE) {
         glEnable(GL_SCISSOR_TEST);
@@ -2152,6 +2151,7 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
                                               &has_underlined_chars);
             if (has_underlined_chars) {
                 _GfxOpenGL21_rasterize_line_underline_range(
+                  vt,
                   gfx,
                   vt_line,
                   (Pair_size_t){ range_begin_idx, range_end_idx },
@@ -2175,6 +2175,7 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
                                               &has_underlined_chars);
             if (has_underlined_chars) {
                 _GfxOpenGL21_rasterize_line_underline_range(
+                  vt,
                   gfx,
                   vt_line,
                   (Pair_size_t){ 0, length },
@@ -2311,14 +2312,14 @@ static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const
                 break;
         }
 
-        ColorRGB *clr, *clr_bg;
-        VtRune*   cursor_char = NULL;
+        ColorRGB clr, clr_bg;
+        VtRune*         cursor_char = NULL;
         if (vt->lines.size > ui->cursor->row && vt->lines.buf[ui->cursor->row].data.size > col) {
-            clr         = &vt->lines.buf[ui->cursor->row].data.buf[col].fg;
-            clr_bg      = (ColorRGB*)&vt->lines.buf[ui->cursor->row].data.buf[col].bg;
+            clr         = Vt_rune_fg(vt, &vt->lines.buf[ui->cursor->row].data.buf[col]);
+            clr_bg      = ColorRGB_from_RGBA( Vt_rune_bg(vt, &vt->lines.buf[ui->cursor->row].data.buf[col]));
             cursor_char = &vt->lines.buf[ui->cursor->row].data.buf[col];
         } else {
-            clr = &settings.fg;
+            clr = vt->colors.fg;
         }
 
         if (!filled_block) {
@@ -2327,9 +2328,9 @@ static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const
             glBindBuffer(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
             glVertexAttribPointer(gfx->line_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
             glUniform3f(gfx->line_shader.uniforms[1].location,
-                        ColorRGB_get_float(*clr, 0),
-                        ColorRGB_get_float(*clr, 1),
-                        ColorRGB_get_float(*clr, 2));
+                        ColorRGB_get_float(clr, 0),
+                        ColorRGB_get_float(clr, 1),
+                        ColorRGB_get_float(clr, 2));
             size_t newsize = gfx->vec_vertex_buffer.size * sizeof(vertex_t);
             ARRAY_BUFFER_SUB_OR_SWAP(gfx->vec_vertex_buffer.buf, gfx->flex_vbo.size, newsize);
             glDrawArrays(gfx->vec_vertex_buffer.size == 2 ? GL_LINES : GL_LINE_LOOP,
@@ -2341,9 +2342,9 @@ static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const
                       gfx->win_h - (row + 1) * gfx->line_height_pixels - gfx->pixel_offset_y,
                       gfx->glyph_width_pixels,
                       gfx->line_height_pixels);
-            glClearColor(ColorRGB_get_float(*clr, 0),
-                         ColorRGB_get_float(*clr, 1),
-                         ColorRGB_get_float(*clr, 2),
+            glClearColor(ColorRGB_get_float(clr, 0),
+                         ColorRGB_get_float(clr, 1),
+                         ColorRGB_get_float(clr, 2),
                          1.0f);
             glClear(GL_COLOR_BUFFER_BIT);
 
@@ -2419,24 +2420,24 @@ static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const
                 if (color == GLYPH_COLOR_LCD) {
                     glUseProgram(gfx->font_shader.id);
                     glUniform3f(gfx->font_shader.uniforms[1].location,
-                                ColorRGB_get_float(*clr_bg, 0),
-                                ColorRGB_get_float(*clr_bg, 1),
-                                ColorRGB_get_float(*clr_bg, 2));
+                                ColorRGB_get_float(clr_bg, 0),
+                                ColorRGB_get_float(clr_bg, 1),
+                                ColorRGB_get_float(clr_bg, 2));
                     glUniform4f(gfx->font_shader.uniforms[2].location,
-                                ColorRGB_get_float(*clr, 0),
-                                ColorRGB_get_float(*clr, 1),
-                                ColorRGB_get_float(*clr, 2),
+                                ColorRGB_get_float(clr, 0),
+                                ColorRGB_get_float(clr, 1),
+                                ColorRGB_get_float(clr, 2),
                                 1.0f);
                 } else if (color == GLYPH_COLOR_MONO) {
                     glUseProgram(gfx->font_shader_gray.id);
                     glUniform3f(gfx->font_shader_gray.uniforms[1].location,
-                                ColorRGB_get_float(*clr_bg, 0),
-                                ColorRGB_get_float(*clr_bg, 1),
-                                ColorRGB_get_float(*clr_bg, 2));
+                                ColorRGB_get_float(clr_bg, 0),
+                                ColorRGB_get_float(clr_bg, 1),
+                                ColorRGB_get_float(clr_bg, 2));
                     glUniform4f(gfx->font_shader_gray.uniforms[2].location,
-                                ColorRGB_get_float(*clr, 0),
-                                ColorRGB_get_float(*clr, 1),
-                                ColorRGB_get_float(*clr, 2),
+                                ColorRGB_get_float(clr, 0),
+                                ColorRGB_get_float(clr, 1),
+                                ColorRGB_get_float(clr, 2),
                                 1.0f);
                 } else {
                     glUseProgram(gfx->image_shader.id);
@@ -2460,22 +2461,22 @@ static void GfxOpenGL21_draw_unicode_input(GfxOpenGL21* gfx, const Vt* vt)
               gfx->glyph_width_pixels * (vt->unicode_input.buffer.size + 1),
               gfx->line_height_pixels);
 
-    glClearColor(ColorRGBA_get_float(settings.bg, 0),
-                 ColorRGBA_get_float(settings.bg, 1),
-                 ColorRGBA_get_float(settings.bg, 2),
-                 ColorRGBA_get_float(settings.bg, 3));
+    glClearColor(ColorRGBA_get_float(vt->colors.bg, 0),
+                 ColorRGBA_get_float(vt->colors.bg, 1),
+                 ColorRGBA_get_float(vt->colors.bg, 2),
+                 ColorRGBA_get_float(vt->colors.bg, 3));
     glClear(GL_COLOR_BUFFER_BIT);
 
     glUseProgram(gfx->font_shader.id);
     glUniform3f(gfx->font_shader.uniforms[1].location,
-                ColorRGB_get_float(settings.fg, 0),
-                ColorRGB_get_float(settings.fg, 1),
-                ColorRGB_get_float(settings.fg, 2));
+                ColorRGB_get_float(vt->colors.fg, 0),
+                ColorRGB_get_float(vt->colors.fg, 1),
+                ColorRGB_get_float(vt->colors.fg, 2));
     glUniform4f(gfx->font_shader.uniforms[2].location,
-                ColorRGBA_get_float(settings.bg, 0),
-                ColorRGBA_get_float(settings.bg, 1),
-                ColorRGBA_get_float(settings.bg, 2),
-                ColorRGBA_get_float(settings.bg, 3));
+                ColorRGBA_get_float(vt->colors.bg, 0),
+                ColorRGBA_get_float(vt->colors.bg, 1),
+                ColorRGBA_get_float(vt->colors.bg, 2),
+                ColorRGBA_get_float(vt->colors.bg, 3));
 
     glBindBuffer(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
     glVertexAttribPointer(gfx->font_shader.attribs->location, 4, GL_FLOAT, GL_FALSE, 0, 0);
@@ -2559,9 +2560,9 @@ static void GfxOpenGL21_draw_unicode_input(GfxOpenGL21* gfx, const Vt* vt)
 
     glUseProgram(gfx->line_shader.id);
     glUniform3f(gfx->line_shader.uniforms[1].location,
-                ColorRGB_get_float(settings.fg, 0),
-                ColorRGB_get_float(settings.fg, 1),
-                ColorRGB_get_float(settings.fg, 2));
+                ColorRGB_get_float(vt->colors.fg, 0),
+                ColorRGB_get_float(vt->colors.fg, 1),
+                ColorRGB_get_float(vt->colors.fg, 2));
 
     glDrawArrays(GL_LINES, 0, 2);
     glDisable(GL_SCISSOR_TEST);
@@ -2629,10 +2630,10 @@ void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
     Vt_get_visible_lines(vt, &begin, &end);
     glDisable(GL_SCISSOR_TEST);
     glViewport(0, 0, gfx->win_w, gfx->win_h);
-    glClearColor(ColorRGBA_get_float(settings.bg, 0),
-                 ColorRGBA_get_float(settings.bg, 1),
-                 ColorRGBA_get_float(settings.bg, 2),
-                 ColorRGBA_get_float(settings.bg, 3));
+    glClearColor(ColorRGBA_get_float(vt->colors.bg, 0),
+                 ColorRGBA_get_float(vt->colors.bg, 1),
+                 ColorRGBA_get_float(vt->colors.bg, 2),
+                 ColorRGBA_get_float(vt->colors.bg, 3));
     glClear(GL_COLOR_BUFFER_BIT);
     for (VtLine* i = begin; i < end; ++i) {
         GfxOpenGL21_rasterize_line(gfx, vt, i, i - begin, false);

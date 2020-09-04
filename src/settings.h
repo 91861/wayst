@@ -202,7 +202,6 @@ typedef struct
     int32_t cursor_blink_end_s;
 } Settings;
 
-extern ColorRGB color_palette_256[257];
 extern Settings settings;
 
 void settings_init(int argc, char** argv);

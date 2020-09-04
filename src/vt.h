@@ -84,23 +84,39 @@ typedef struct
     } style : 3;
 } Rune;
 
+#define VT_RUNE_PALETTE_INDEX_TERM_DEFAULT (-1)
+
 /**
  * Represents a single character */
 typedef struct
 {
-    Rune      rune;
-    ColorRGB  fg;
-    ColorRGB  line;
-    ColorRGBA bg;
-    uint8_t   linecolornotdefault : 1;
-    uint8_t   dim : 1;
-    uint8_t   hidden : 1;
-    uint8_t   blinkng : 1;
-    uint8_t   underlined : 1;
-    uint8_t   strikethrough : 1;
-    uint8_t   doubleunderline : 1;
-    uint8_t   curlyunderline : 1;
-    uint8_t   overline : 1;
+    Rune rune;
+
+    union vt_rune_rgb_color_variant_t
+    {
+        ColorRGB rgb;
+        int16_t  index;
+    } ln_clr_data, fg_data;
+
+    union vt_rune_rgba_color_variant_t
+    {
+        ColorRGBA rgba;
+        int16_t   index;
+    } bg_data;
+
+    bool bg_is_palette_entry : 1;
+    bool fg_is_palette_entry : 1;
+    bool ln_clr_is_palette_entry : 1;
+    bool line_color_not_default : 1;
+    bool invert : 1;
+    bool dim : 1;
+    bool hidden : 1;
+    bool blinkng : 1;
+    bool underlined : 1;
+    bool strikethrough : 1;
+    bool doubleunderline : 1;
+    bool curlyunderline : 1;
+    bool overline : 1;
 
 } VtRune;
 
@@ -295,7 +311,6 @@ typedef struct _Vt
         mbstate_t input_mbstate;
 
         VtRune char_state; // records currently selected character properties
-        bool   color_inverted;
 
         Vector_char active_sequence;
     } parser;
@@ -303,6 +318,28 @@ typedef struct _Vt
     char*         title;
     char*         work_dir;
     Vector_DynStr title_stack;
+
+    struct terminal_colors_t
+    {
+        ColorRGBA bg;
+        ColorRGB  fg;
+
+        // TODO:
+        /* struct terminal_cursor_colors_t */
+        /* { */
+        /*     bool enabled; */
+        /*     ColorRGBA bg; */
+        /*     ColorRGB  fg; */
+        /* } cursor; */
+
+        struct terminal_highlight_colors_t
+        {
+            ColorRGBA bg;
+            ColorRGB  fg;
+        } highlight;
+
+        ColorRGB palette_256[256];
+    } colors;
 
     /**
      * Character set is composed of C0 (7-bit control characters), C1 (8-bit control characters), GL
@@ -330,11 +367,13 @@ typedef struct _Vt
     char32_t (**charset_single_shift)(char); // not available on VT100
 
     uint8_t tabstop;
-    bool* tab_ruler;
+    bool*   tab_ruler;
 
     Vector_VtLine lines, alt_lines;
 
     VtRune* last_interted;
+
+    VtRune blank_space;
 
     Cursor cursor;
 
@@ -362,9 +401,78 @@ typedef struct _Vt
         uint8_t auto_repeat : 1;
         uint8_t application_keypad : 1;
         uint8_t application_keypad_cursor : 1;
+        uint8_t pop_on_bell : 1;
+        uint8_t urgency_on_bell : 1;
     } modes;
 
+#define VT_XT_MODIFY_KEYBOARD_DFT 0
+    int8_t xterm_modify_keyboard;
+
+#define VT_XT_MODIFY_CURSOR_KEYS_DFT 2
+    int8_t xterm_modify_cursor_keys;
+
+#define VT_XT_MODIFY_FUNCTION_KEYS_DFT 2
+    int8_t xterm_modify_function_keys;
+
+#define VT_XT_MODIFY_OTHER_KEYS_DFT 0
+    int8_t xterm_modify_other_keys;
+
 } Vt;
+
+static ColorRGB Vt_rune_fg_no_invert(const Vt* self, const VtRune* rune);
+
+static ColorRGBA Vt_rune_bg_no_invert(const Vt* self, const VtRune* rune)
+{
+    if (!rune->bg_is_palette_entry) {
+        return rune->bg_data.rgba;
+    } else if (rune->bg_data.index == VT_RUNE_PALETTE_INDEX_TERM_DEFAULT) {
+        return self->colors.bg;
+    } else {
+        return ColorRGBA_from_RGB(self->colors.palette_256[rune->bg_data.index]);
+    }
+}
+
+static ColorRGBA Vt_rune_bg(const Vt* self, const VtRune* rune)
+{
+    if (rune->invert) {
+        return ColorRGBA_from_RGB(Vt_rune_fg_no_invert(self, rune));
+    } else {
+        return Vt_rune_bg_no_invert(self, rune);
+    }
+}
+
+static ColorRGB Vt_rune_fg_no_invert(const Vt* self, const VtRune* rune)
+{
+    if (!rune->fg_is_palette_entry) {
+        return rune->fg_data.rgb;
+    } else if (rune->fg_data.index == VT_RUNE_PALETTE_INDEX_TERM_DEFAULT) {
+        return self->colors.fg;
+    } else {
+        return self->colors.palette_256[rune->fg_data.index];
+    }
+}
+
+static ColorRGB Vt_rune_fg(const Vt* self, const VtRune* rune)
+{
+    if (rune->invert) {
+        return ColorRGB_from_RGBA(Vt_rune_bg_no_invert(self, rune));
+    } else {
+        return Vt_rune_fg_no_invert(self, rune);
+    }
+}
+
+static ColorRGB Vt_rune_ln_clr(const Vt* self, const VtRune* rune)
+{
+    if (rune->line_color_not_default) {
+        if (rune->ln_clr_is_palette_entry) {
+            return self->colors.palette_256[rune->ln_clr_data.index];
+        } else {
+            return rune->ln_clr_data.rgb;
+        }
+    } else {
+        return Vt_rune_fg(self, rune);
+    }
+}
 
 static inline void VtLine_destroy(void* vt_, VtLine* self)
 {

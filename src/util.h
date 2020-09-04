@@ -380,7 +380,9 @@ static int spawn_process(const char* opt_work_directory,
             } else if (pid < 0) {
                 exit(EXIT_FAILURE);
             }
-            chdir(opt_work_directory);
+            if (opt_work_directory) {
+                chdir(opt_work_directory);
+            }
         }
 
         umask(0);

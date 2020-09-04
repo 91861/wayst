@@ -42,8 +42,6 @@ DEF_VECTOR(Vector_char, Vector_destroy_char);
 
 static Vector_Vector_char expand_list_value(const char* const list);
 
-ColorRGB color_palette_256[257];
-
 static const char* const colors_default[8][18] = {
     {
       /* wayst */
@@ -241,37 +239,14 @@ static void settings_colorscheme_load_preset(uint8_t idx)
 }
 
 /**
- * Initialize 256 color palette */
-static void init_color_palette()
-{
-    for (int_fast16_t i = 0; i < 257; ++i) {
-        if (i < 16) {
-            /* Primary - from colorscheme */
-            color_palette_256[i] = settings.colorscheme.color[i];
-        } else if (i < 232) {
-            /* Extended */
-            int_fast16_t tmp       = i - 16;
-            color_palette_256[i].b = (double)((tmp % 6) * 255) / 5.0;
-            color_palette_256[i].g = (double)(((tmp /= 6) % 6) * 255) / 5.0;
-            color_palette_256[i].r = (double)(((tmp / 6) % 6) * 255) / 5.0;
-        } else {
-            /* Grayscale */
-            double tmp           = (double)((i - 232) * 10 + 8) / 256.0 * 255.0;
-            color_palette_256[i] = (ColorRGB){
-                .r = tmp,
-                .g = tmp,
-                .b = tmp,
-            };
-        }
-    }
-}
-
-/**
  * Use fontconfig to get font files */
 static void find_font()
 {
 #define L_DROP_IF_SAME(file1, file2)                                                               \
     if (file2 && file1 && !strcmp(file1, file2)) {                                                 \
+        if (unlikely(settings.debug_font)) {                                                       \
+            fprintf(stderr, "Dropping redundant font file \'%s\'\n", file1);                       \
+        }                                                                                          \
         free(file1);                                                                               \
         file1 = NULL;                                                                              \
     }
@@ -281,6 +256,21 @@ static void find_font()
 
     char* default_file =
       FontconfigContext_get_file(&fc_context, NULL, NULL, settings.font_size, NULL);
+    char* default_file_bold = FontconfigContext_get_file(&fc_context,
+                                                         NULL,
+                                                         OR(settings.font_style_bold.str, "Bold"),
+                                                         settings.font_size,
+                                                         NULL);
+    char* default_file_italic = FontconfigContext_get_file(&fc_context,
+                                                         NULL,
+                                                         OR(settings.font_style_italic.str, "Italic"),
+                                                         settings.font_size,
+                                                         NULL);
+    char* default_file_bold_italic = FontconfigContext_get_file(&fc_context,
+                                                         NULL,
+                                                         OR(settings.font_style_italic.str, "Bold:Italic"),
+                                                         settings.font_size,
+                                                         NULL);
 
     if (!settings.styled_fonts.size) {
         Vector_push_StyledFontInfo(&settings.styled_fonts, (StyledFontInfo){ 0 });
@@ -302,6 +292,8 @@ static void find_font()
                                                      OR(settings.font_style_bold.str, "Bold"),
                                                      settings.font_size,
                                                      NULL);
+        L_DROP_IF_SAME(bold_file, default_file);
+        L_DROP_IF_SAME(bold_file, default_file_bold);
         L_DROP_IF_SAME(bold_file, regular_file);
         L_DROP_IF_SAME(bold_file, default_file);
         char* italic_file = FontconfigContext_get_file(&fc_context,
@@ -309,6 +301,8 @@ static void find_font()
                                                        OR(settings.font_style_italic.str, "Italic"),
                                                        settings.font_size,
                                                        NULL);
+        L_DROP_IF_SAME(italic_file, default_file);
+        L_DROP_IF_SAME(italic_file, default_file_italic);
         L_DROP_IF_SAME(italic_file, regular_file);
         L_DROP_IF_SAME(italic_file, default_file);
         char* bold_italic_file =
@@ -317,6 +311,10 @@ static void find_font()
                                      OR(settings.font_style_italic.str, "Bold:Italic"),
                                      settings.font_size,
                                      NULL);
+        L_DROP_IF_SAME(bold_italic_file, default_file);
+        L_DROP_IF_SAME(bold_italic_file, default_file_bold_italic);
+        L_DROP_IF_SAME(bold_italic_file, default_file_bold);
+        L_DROP_IF_SAME(bold_italic_file, default_file_italic);
         L_DROP_IF_SAME(bold_italic_file, regular_file);
         L_DROP_IF_SAME(bold_italic_file, bold_file);
         L_DROP_IF_SAME(bold_italic_file, italic_file);
@@ -350,7 +348,9 @@ static void find_font()
     }
 
     if (!loaded_fonts) {
-        ERR("Failed to load any primary font");
+        ERR("Failed to load any primary font. \'" EXECUTABLE_FILE_NAME
+            " --%s\' to display font info on start",
+            long_options[OPT_DEBUG_FONT_IDX].name);
     }
 
     for (UnstyledFontInfo* i = NULL;
@@ -384,6 +384,10 @@ static void find_font()
     }
 
     free(default_file);
+    free(default_file_bold);
+    free(default_file_italic);
+    free(default_file_bold_italic);
+
     FontconfigContext_destroy(&fc_context);
 }
 
@@ -781,6 +785,7 @@ static void handle_option(const char opt, const int array_index, const char* val
 
         case OPT_FONT_IDX: {
             Vector_Vector_char values = expand_list_value(value);
+            Vector_clear_StyledFontInfo(&settings.styled_fonts);
             for (Vector_char* i = NULL; (i = Vector_iter_Vector_char(&values, i));) {
                 Vector_push_StyledFontInfo(&settings.styled_fonts, (StyledFontInfo){ 0 });
                 Vector_last_StyledFontInfo(&settings.styled_fonts)->family_name = strdup(i->buf);
@@ -790,6 +795,7 @@ static void handle_option(const char opt, const int array_index, const char* val
 
         case OPT_FONT_FALLBACK_IDX: {
             Vector_Vector_char values = expand_list_value(value);
+            Vector_clear_UnstyledFontInfo(&settings.symbol_fonts);
             for (Vector_char* i = NULL; (i = Vector_iter_Vector_char(&values, i));) {
                 Vector_push_UnstyledFontInfo(&settings.symbol_fonts, (UnstyledFontInfo){ 0 });
                 Vector_last_UnstyledFontInfo(&settings.symbol_fonts)->family_name = strdup(i->buf);
@@ -799,6 +805,7 @@ static void handle_option(const char opt, const int array_index, const char* val
 
         case OPT_FONT_FALLBACK2_IDX: {
             Vector_Vector_char values = expand_list_value(value);
+            Vector_clear_UnstyledFontInfo(&settings.color_fonts);
             for (Vector_char* i = NULL; (i = Vector_iter_Vector_char(&values, i));) {
                 Vector_push_UnstyledFontInfo(&settings.color_fonts, (UnstyledFontInfo){ 0 });
                 Vector_last_UnstyledFontInfo(&settings.color_fonts)->family_name = strdup(i->buf);
@@ -1227,7 +1234,7 @@ static Vector_Vector_char expand_list_value(const char* const list)
                  * character if we get one */
                 Vector_push_char(&whitespace, c);
             } else {
-                if (whitespace.size && !in_string) {
+                if (whitespace.size) {
                     Vector_pushv_char(Vector_last_Vector_char(&values),
                                       whitespace.buf,
                                       whitespace.size);
@@ -1449,7 +1456,6 @@ void settings_init(int argc, char** argv)
     }
     settings_get_opts(argc, argv, false);
     settings_complete_defaults();
-    init_color_palette();
 }
 
 void settings_cleanup()
