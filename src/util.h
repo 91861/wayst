@@ -256,6 +256,7 @@ DEF_PAIR(int16_t);
 DEF_PAIR(int32_t);
 DEF_PAIR(int64_t);
 DEF_PAIR(char);
+DEF_PAIR(char32_t);
 DEF_PAIR(int);
 DEF_PAIR(unsigned);
 DEF_PAIR(short);

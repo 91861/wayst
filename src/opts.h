@@ -267,18 +267,18 @@ static const char* long_options_descriptions[][2] = {
     [OPT_H_FG_COLOR_IDX]  = { arg_color, "Highlighted text foreground color" },
     [OPT_NO_FLASH_IDX]    = { NULL, "Disable visual bell" },
     [OPT_COLORSCHEME_IDX] = { "name/int",
-                              "Colorscheme: wayst, linux, xterm, rxvt, yaru, tango, orchis, "
+                              "Colorscheme name/index: wayst, linux, xterm, rxvt, yaru, tango, orchis, "
                               "solarized" },
 
-    [OPT_FONT_IDX]               = { "[name,...]", "Primary font families (default: Monospace)" },
+    [OPT_FONT_IDX]               = { "[font, ...]", "Primary fonts (default: Monospace)" },
     [OPT_FONT_STYLE_REGULAR_IDX] = { arg_name, "Font style to use as default (default: Regular)" },
     [OPT_FONT_STYLE_BOLD_IDX]    = { arg_name, "Font style to use as bold (default: Bold)" },
     [OPT_FONT_STYLE_ITALIC_IDX]  = { arg_name, "Font style to use as italic (default: Italic)" },
     [OPT_FONT_STYLE_BOLD_ITALIC_IDX] = { arg_name,
                                          "Font style to use as bold italic (default: "
                                          "Bold:Italic)" },
-    [OPT_FONT_FALLBACK_IDX]          = { "[name,...]", "Symbol font families" },
-    [OPT_FONT_FALLBACK2_IDX]         = { "[name,...]", "Color bitmap font families" },
+    [OPT_FONT_FALLBACK_IDX]          = { "[font, ...]", "Symbol fonts" },
+    [OPT_FONT_FALLBACK2_IDX]         = { "[font, ...]", "Color bitmap fonts" },
 
     [OPT_FONT_SIZE_IDX]     = { arg_int, "Font size" },
     [OPT_DPI_IDX]           = { arg_int, "Font dpi (default: 96)" },

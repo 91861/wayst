@@ -261,16 +261,18 @@ static void find_font()
                                                          OR(settings.font_style_bold.str, "Bold"),
                                                          settings.font_size,
                                                          NULL);
-    char* default_file_italic = FontconfigContext_get_file(&fc_context,
-                                                         NULL,
-                                                         OR(settings.font_style_italic.str, "Italic"),
-                                                         settings.font_size,
-                                                         NULL);
-    char* default_file_bold_italic = FontconfigContext_get_file(&fc_context,
-                                                         NULL,
-                                                         OR(settings.font_style_italic.str, "Bold:Italic"),
-                                                         settings.font_size,
-                                                         NULL);
+    char* default_file_italic =
+      FontconfigContext_get_file(&fc_context,
+                                 NULL,
+                                 OR(settings.font_style_italic.str, "Italic"),
+                                 settings.font_size,
+                                 NULL);
+    char* default_file_bold_italic =
+      FontconfigContext_get_file(&fc_context,
+                                 NULL,
+                                 OR(settings.font_style_italic.str, "Bold:Italic"),
+                                 settings.font_size,
+                                 NULL);
 
     if (!settings.styled_fonts.size) {
         Vector_push_StyledFontInfo(&settings.styled_fonts, (StyledFontInfo){ 0 });
@@ -284,13 +286,13 @@ static void find_font()
         char* regular_file = FontconfigContext_get_file(&fc_context,
                                                         main_family,
                                                         settings.font_style_regular.str,
-                                                        settings.font_size,
+                                                        settings.font_size + i->size_offset,
                                                         &is_bitmap);
         L_DROP_IF_SAME(regular_file, default_file);
         char* bold_file = FontconfigContext_get_file(&fc_context,
                                                      main_family,
                                                      OR(settings.font_style_bold.str, "Bold"),
-                                                     settings.font_size,
+                                                     settings.font_size + i->size_offset,
                                                      NULL);
         L_DROP_IF_SAME(bold_file, default_file);
         L_DROP_IF_SAME(bold_file, default_file_bold);
@@ -299,7 +301,7 @@ static void find_font()
         char* italic_file = FontconfigContext_get_file(&fc_context,
                                                        main_family,
                                                        OR(settings.font_style_italic.str, "Italic"),
-                                                       settings.font_size,
+                                                       settings.font_size + i->size_offset,
                                                        NULL);
         L_DROP_IF_SAME(italic_file, default_file);
         L_DROP_IF_SAME(italic_file, default_file_italic);
@@ -309,7 +311,7 @@ static void find_font()
           FontconfigContext_get_file(&fc_context,
                                      main_family,
                                      OR(settings.font_style_italic.str, "Bold:Italic"),
-                                     settings.font_size,
+                                     settings.font_size + i->size_offset,
                                      NULL);
         L_DROP_IF_SAME(bold_italic_file, default_file);
         L_DROP_IF_SAME(bold_italic_file, default_file_bold_italic);
@@ -552,7 +554,7 @@ static void print_help_and_exit()
 {
 #define MAX_OPT_PADDING 28
 
-    printf("Usage: %s [options...] [-e/x command args...]\n", EXECUTABLE_FILE_NAME);
+    printf("Usage: %s [options...] [-e/x command args...]\n\nOPTIONS:\n", EXECUTABLE_FILE_NAME);
     for (uint32_t i = 0; i < OPT_SENTINEL_IDX; ++i) {
         if (long_options[i].has_arg == no_argument && long_options[i].val) {
             printf(" -%c, ", long_options[i].val);
@@ -605,6 +607,22 @@ static void print_version_and_exit()
            "\n");
 
     exit(EXIT_SUCCESS);
+}
+
+static Pair_char32_t parse_codepoint_range(char* arg)
+{
+    Pair_char32_t range = { .first = 0, .second = UINT_LEAST32_MAX };
+    if (strnlen(arg, 3) < 3) {
+        return range;
+    }
+    if (*arg != '.') {
+        range.first = strtoul(arg, &arg, (arg[0] == 'u' || arg[0] == 'U') ? 16 : 10);
+    }
+    arg += 2;
+    if (*arg) {
+        range.second = strtoul(arg, NULL, arg[0] == 'u' ? 16 : 10);
+    }
+    return range;
 }
 
 static void handle_option(const char opt, const int array_index, const char* value)
@@ -788,7 +806,21 @@ static void handle_option(const char opt, const int array_index, const char* val
             Vector_clear_StyledFontInfo(&settings.styled_fonts);
             for (Vector_char* i = NULL; (i = Vector_iter_Vector_char(&values, i));) {
                 Vector_push_StyledFontInfo(&settings.styled_fonts, (StyledFontInfo){ 0 });
-                Vector_last_StyledFontInfo(&settings.styled_fonts)->family_name = strdup(i->buf);
+                StyledFontInfo* this_entry   = Vector_last_StyledFontInfo(&settings.styled_fonts);
+                this_entry->codepoint_ranges = Vector_new_Pair_char32_t();
+
+                char* str               = i->buf;
+                char* arg               = strsep(&str, ":");
+                this_entry->family_name = strdup(arg);
+
+                while ((arg = strsep(&str, ":"))) {
+                    if (strstr(arg, "..")) {
+                        Vector_push_Pair_char32_t(&this_entry->codepoint_ranges,
+                                                  parse_codepoint_range(arg));
+                    } else {
+                        this_entry->size_offset = CLAMP(atoi(arg), INT8_MIN, INT8_MAX);
+                    }
+                }
             }
             Vector_destroy_Vector_char(&values);
         } break;
@@ -798,7 +830,20 @@ static void handle_option(const char opt, const int array_index, const char* val
             Vector_clear_UnstyledFontInfo(&settings.symbol_fonts);
             for (Vector_char* i = NULL; (i = Vector_iter_Vector_char(&values, i));) {
                 Vector_push_UnstyledFontInfo(&settings.symbol_fonts, (UnstyledFontInfo){ 0 });
-                Vector_last_UnstyledFontInfo(&settings.symbol_fonts)->family_name = strdup(i->buf);
+                UnstyledFontInfo* this_entry = Vector_last_UnstyledFontInfo(&settings.symbol_fonts);
+
+                char* str               = i->buf;
+                char* arg               = strsep(&str, ":");
+                this_entry->family_name = strdup(arg);
+
+                while ((arg = strsep(&str, ":"))) {
+                    if (strstr(arg, "..")) {
+                        Vector_push_Pair_char32_t(&this_entry->codepoint_ranges,
+                                                  parse_codepoint_range(arg));
+                    } else {
+                        this_entry->size_offset = CLAMP(atoi(arg), INT8_MIN, INT8_MAX);
+                    }
+                }
             }
             Vector_destroy_Vector_char(&values);
         } break;
@@ -808,7 +853,20 @@ static void handle_option(const char opt, const int array_index, const char* val
             Vector_clear_UnstyledFontInfo(&settings.color_fonts);
             for (Vector_char* i = NULL; (i = Vector_iter_Vector_char(&values, i));) {
                 Vector_push_UnstyledFontInfo(&settings.color_fonts, (UnstyledFontInfo){ 0 });
-                Vector_last_UnstyledFontInfo(&settings.color_fonts)->family_name = strdup(i->buf);
+                UnstyledFontInfo* this_entry = Vector_last_UnstyledFontInfo(&settings.color_fonts);
+
+                char* str               = i->buf;
+                char* arg               = strsep(&str, ":");
+                this_entry->family_name = strdup(arg);
+
+                while ((arg = strsep(&str, ":"))) {
+                    if (strstr(arg, "..")) {
+                        Vector_push_Pair_char32_t(&this_entry->codepoint_ranges,
+                                                  parse_codepoint_range(arg));
+                    } else {
+                        this_entry->size_offset = CLAMP(atoi(arg), INT8_MIN, INT8_MAX);
+                    }
+                }
             }
             Vector_destroy_Vector_char(&values);
         } break;

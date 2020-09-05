@@ -4303,8 +4303,9 @@ static inline void Vt_scroll_out_all_content(Vt* self)
         Vector_push_VtLine(&self->lines, VtLine_new());
         Vt_empty_line_fill_bg(self, self->lines.size - 1);
     }
-
-    self->cursor.row += to_add;
+    if (to_add > 0) {
+        self->cursor.row += to_add;
+    }
 }
 
 static inline void Vt_scroll_out_above(Vt* self)

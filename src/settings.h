@@ -27,10 +27,14 @@
 #define MODIFIER_ALT     (1 << 1)
 #define MODIFIER_CONTROL (1 << 2)
 
+DEF_VECTOR(Pair_char32_t, NULL);
+
 typedef struct
 {
-    char* family_name;
-    char* file_name;
+    char*                family_name;
+    char*                file_name;
+    int8_t               size_offset;
+    Vector_Pair_char32_t codepoint_ranges;
 } UnstyledFontInfo;
 
 static void UnstyledFontInfo_destroy(UnstyledFontInfo* self)
@@ -39,15 +43,18 @@ static void UnstyledFontInfo_destroy(UnstyledFontInfo* self)
     self->family_name = NULL;
     free(self->file_name);
     self->file_name = NULL;
+    Vector_destroy_Pair_char32_t(&self->codepoint_ranges);
 }
 
 typedef struct
 {
-    char* family_name;
-    char* regular_file_name;
-    char* bold_file_name;
-    char* italic_file_name;
-    char* bold_italic_file_name;
+    char*                family_name;
+    char*                regular_file_name;
+    char*                bold_file_name;
+    char*                italic_file_name;
+    char*                bold_italic_file_name;
+    int8_t               size_offset;
+    Vector_Pair_char32_t codepoint_ranges;
 } StyledFontInfo;
 
 static void StyledFontInfo_destroy(StyledFontInfo* self)
@@ -62,6 +69,7 @@ static void StyledFontInfo_destroy(StyledFontInfo* self)
     self->italic_file_name = NULL;
     free(self->bold_italic_file_name);
     self->bold_italic_file_name = NULL;
+    Vector_destroy_Pair_char32_t(&self->codepoint_ranges);
 }
 
 DEF_VECTOR(StyledFontInfo, StyledFontInfo_destroy);

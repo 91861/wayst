@@ -71,6 +71,8 @@ typedef struct
     bool                           rgb_flip;
     FT_Render_Mode                 render_mode;
     FT_Int32                       load_flags;
+    Vector_Pair_char32_t*          codepoint_ranges;
+    int16_t                        size_offset;
 } FreetypeFace;
 
 static void FreetypeFace_destroy(FreetypeFace* self)
@@ -86,7 +88,7 @@ typedef struct
 {
     Vector_FreetypeFace            faces;
     FreetypeFace *                 regular, *bold, *italic, *bold_italic;
-    char32_t                       codepoint_range_begin, codepoint_range_end;
+    Vector_Pair_char32_t*          codepoint_ranges;
     enum FreetypeOutputTextureType output_type;
 } FreetypeStyledFamily;
 
@@ -118,19 +120,19 @@ typedef struct
 
 void FreetypeFace_load(Freetype*                      freetype,
                        FreetypeFace*                  self,
-                       uint32_t                       size,
+                       int32_t                        size,
                        uint32_t                       dpi,
                        enum FreetypeOutputTextureType output_type,
                        bool                           warn_not_fixed);
 
 void FreetypeFace_unload(FreetypeFace* self);
 
-FreetypeStyledFamily FreetypeStyledFamily_new(const char* regular_file,
-                                              const char* opt_bold_file,
-                                              const char* opt_italic_file,
-                                              const char* opt_bold_italic_file,
-                                              char32_t    opt_codepoint_range_begin,
-                                              char32_t    opt_codepoint_range_end,
+FreetypeStyledFamily FreetypeStyledFamily_new(const char*           regular_file,
+                                              const char*           opt_bold_file,
+                                              const char*           opt_italic_file,
+                                              const char*           opt_bold_italic_file,
+                                              Vector_Pair_char32_t* opt_codepoint_range_begin,
+                                              int16_t               size_offset,
                                               enum FreetypeOutputTextureType output_type);
 
 void FreetypeStyledFamily_load(Freetype*             freetype,
