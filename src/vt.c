@@ -5424,7 +5424,7 @@ void Vt_handle_button(void*    _self,
             }
             if (self->modes.extended_report) {
                 Vt_output_formated(self,
-                                   "\e[<%u;%lu;%lu%c",
+                                   "\e[<%u;%d;%d%c",
                                    button - 1,
                                    self->last_click_x + 1,
                                    self->last_click_y + 1,

@@ -75,7 +75,7 @@ struct IGfx
     void (*flash)(Gfx* self);
     Pair_uint32_t (*pixels)(Gfx* self, uint32_t rows, uint32_t columns);
     void (*destroy)(Gfx* self);
-    void (*destroy_proxy)(Gfx* self, int32_t proxy[static 4]);
+    void (*destroy_proxy)(Gfx* self, uint32_t proxy[static 4]);
 };
 
 static void Gfx_draw(Gfx* self, const Vt* vt, Ui* ui)
@@ -144,7 +144,7 @@ static void Gfx_destroy(Gfx* self)
 
 /**
  * Destroy the generated line 'proxy' object */
-static void Gfx_destroy_proxy(Gfx* self, int32_t proxy[static 4])
+static void Gfx_destroy_proxy(Gfx* self, uint32_t proxy[static 4])
 {
     self->interface->destroy_proxy(self, proxy);
 }

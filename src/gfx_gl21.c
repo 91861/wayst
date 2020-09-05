@@ -234,7 +234,7 @@ typedef struct
 {
     GLuint  color_tex;
     GLuint  depth_rb;
-    int32_t width;
+    uint32_t width;
 } LineTexture;
 
 static void LineTexture_destroy(LineTexture* self)
@@ -354,7 +354,7 @@ void          GfxOpenGL21_notify_action(Gfx* self);
 bool          GfxOpenGL21_set_focus(Gfx* self, bool focus);
 void          GfxOpenGL21_flash(Gfx* self);
 Pair_uint32_t GfxOpenGL21_pixels(Gfx* self, uint32_t c, uint32_t r);
-void          GfxOpenGL21_destroy_proxy(Gfx* self, int32_t* proxy);
+void          GfxOpenGL21_destroy_proxy(Gfx* self, uint32_t* proxy);
 void          GfxOpenGL21_reload_font(Gfx* self);
 
 static struct IGfx gfx_interface_opengl21 = {
@@ -1307,7 +1307,7 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_underline_ra
 
         /* text column where this should be drawn */
         size_t   column = each_rune - vt_line->data.buf;
-        ColorRGB nc     = {0};
+        ColorRGB nc     = { 0 };
         if (each_rune != vt_line->data.buf + range.second) {
             nc = Vt_rune_ln_clr(vt, each_rune);
         }
@@ -1514,7 +1514,7 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
 
 #define L_CALC_DIM_BLEND_COLOR                                                                     \
     (unlikely(each_rune_same_bg->dim)                                                              \
-       ? ColorRGB_new_from_blend(Vt_rune_fg(vt, each_rune_same_bg),                               \
+       ? ColorRGB_new_from_blend(Vt_rune_fg(vt, each_rune_same_bg),                                \
                                  ColorRGB_from_RGBA(active_bg_color),                              \
                                  DIM_COLOR_BLEND_FACTOR)                                           \
        : Vt_rune_fg(vt, each_rune_same_bg))
@@ -1970,7 +1970,7 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
     GLuint       final_texture        = 0;
     GLuint       final_depthbuffer    = 0;
 
-    int32_t* proxy_data = vt_line->proxy.data;
+    uint32_t* proxy_data = vt_line->proxy.data;
 
     size_t proxy_tex_idx = is_for_blinking ? PROXY_INDEX_TEXTURE_BLINK : PROXY_INDEX_TEXTURE;
     size_t proxy_depth_idx =
@@ -2313,10 +2313,11 @@ static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const
         }
 
         ColorRGB clr, clr_bg;
-        VtRune*         cursor_char = NULL;
+        VtRune*  cursor_char = NULL;
         if (vt->lines.size > ui->cursor->row && vt->lines.buf[ui->cursor->row].data.size > col) {
-            clr         = Vt_rune_fg(vt, &vt->lines.buf[ui->cursor->row].data.buf[col]);
-            clr_bg      = ColorRGB_from_RGBA( Vt_rune_bg(vt, &vt->lines.buf[ui->cursor->row].data.buf[col]));
+            clr = Vt_rune_fg(vt, &vt->lines.buf[ui->cursor->row].data.buf[col]);
+            clr_bg =
+              ColorRGB_from_RGBA(Vt_rune_bg(vt, &vt->lines.buf[ui->cursor->row].data.buf[col]));
             cursor_char = &vt->lines.buf[ui->cursor->row].data.buf[col];
         } else {
             clr = vt->colors.fg;
@@ -2676,7 +2677,7 @@ void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
     glDisable(GL_SCISSOR_TEST);
     glEnable(GL_BLEND);
     GfxOpenGL21_draw_overlays(gfx, vt, ui);
-    if (gfx->flash_fraction != 1.0) {
+    if (gfx->flash_fraction < 1.0f && gfx->flash_fraction > 0.0f) {
         GfxOpenGL21_draw_flash(gfx, gfx->flash_fraction);
     }
 
@@ -2714,7 +2715,7 @@ void GfxOpenGL21_destroy_recycled(GfxOpenGL21* self)
     }
 }
 
-void GfxOpenGL21_push_recycled(GfxOpenGL21* self, GLuint tex_id, GLuint rb_id, int32_t width)
+void GfxOpenGL21_push_recycled(GfxOpenGL21* self, GLuint tex_id, GLuint rb_id, uint32_t width)
 {
     uint_fast8_t insert_point;
     for (insert_point = 0; insert_point < N_RECYCLED_TEXTURES; ++insert_point) {
@@ -2754,7 +2755,7 @@ Pair_GLuint GfxOpenGL21_pop_recycled(GfxOpenGL21* self)
     return ret;
 }
 
-__attribute__((hot)) void GfxOpenGL21_destroy_proxy(Gfx* self, int32_t* proxy)
+__attribute__((hot)) void GfxOpenGL21_destroy_proxy(Gfx* self, uint32_t* proxy)
 {
     if (unlikely(proxy[PROXY_INDEX_TEXTURE] &&
                  ARRAY_LAST(gfxOpenGL21(self)->recycled_textures).width <
@@ -2782,11 +2783,23 @@ __attribute__((hot)) void GfxOpenGL21_destroy_proxy(Gfx* self, int32_t* proxy)
                    "deleted proxy texture has a renderbuffer");
         }
 
+        LOG("gl21::del_proxy_reg{n:%d, t:%u,%u r: %u,%u}\n",
+            del_num,
+            proxy[PROXY_INDEX_TEXTURE],
+            proxy[PROXY_INDEX_TEXTURE_BLINK],
+            proxy[PROXY_INDEX_DEPTHBUFFER],
+            proxy[PROXY_INDEX_DEPTHBUFFER_BLINK]);
+
         glDeleteTextures(del_num, (GLuint*)&proxy[PROXY_INDEX_TEXTURE]);
         glDeleteRenderbuffers(del_num, (GLuint*)&proxy[PROXY_INDEX_DEPTHBUFFER]);
 
     } else if (unlikely(proxy[PROXY_INDEX_TEXTURE_BLINK])) {
         ASSERT_UNREACHABLE;
+        LOG("gl21::del_proxy_blink_only{t:%u,%u r: %u,%u}\n",
+            proxy[PROXY_INDEX_TEXTURE],
+            proxy[PROXY_INDEX_TEXTURE_BLINK],
+            proxy[PROXY_INDEX_DEPTHBUFFER],
+            proxy[PROXY_INDEX_DEPTHBUFFER_BLINK]);
         glDeleteTextures(1, (GLuint*)&proxy[PROXY_INDEX_TEXTURE_BLINK]);
         glDeleteRenderbuffers(1, (GLuint*)&proxy[PROXY_INDEX_DEPTHBUFFER_BLINK]);
     }

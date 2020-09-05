@@ -147,7 +147,7 @@ DEF_VECTOR(VtUriRange, VtUriRange_destroy)
 
 typedef struct
 {
-    int32_t data[6];
+    uint32_t data[6];
 } VtLineProxy;
 
 typedef struct
@@ -242,8 +242,8 @@ typedef struct _Vt
         void (*destroy_proxy)(void*, VtLineProxy*);
     } callbacks;
 
-    size_t last_click_x;
-    size_t last_click_y;
+    uint32_t last_click_x;
+    uint32_t last_click_y;
     double pixels_per_cell_x, pixels_per_cell_y;
 
     bool   scrolling_visual;
