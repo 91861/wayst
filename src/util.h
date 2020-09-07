@@ -72,7 +72,7 @@
 #define ARRAY_SIZE(_array) (sizeof((_array)) / sizeof((_array[0])))
 #define ARRAY_LAST(_array) (_array[(sizeof((_array)) / sizeof((_array[0]))) - 1])
 
-#define BOOL_FMT "%s"
+#define BOOL_FMT    "%s"
 #define BOOL_AP(_b) ((_b) ? ("true") : ("false"))
 
 #define STATIC_ASSERT(cond, msg) typedef char static_assertion_##msg[(cond) ? 1 : -1]
@@ -267,7 +267,6 @@ DEF_PAIR(wchar_t);
 DEF_PAIR(size_t);
 DEF_PAIR(ssize_t);
 
-
 /** check string equality case insensitive */
 static inline bool strneqci(const char* restrict s1, const char* restrict s2, const size_t n)
 {
@@ -319,11 +318,11 @@ static inline bool strtob(const char* restrict str)
 static inline bool unicode_is_combining(char32_t codepoint)
 {
     switch (codepoint) {
-        case 0xFE20 ... 0xFE2F:
-        case 0x1AB0 ... 0x1AFF:
-        case 0x1DC0 ... 0x1DFF:
-        case 0x20D0 ... 0x20FF:
-        case 0x0300 ... 0x036F:
+        case 0xFE20 ... 0xFE2F: /* Combining Half Marks */
+        case 0x0300 ... 0x036F: /* Combining Diacritical Marks */
+        case 0x1AB0 ... 0x1AFF: /* Combining Diacritical Marks Extended */
+        case 0x1DC0 ... 0x1DFF: /* Combining Diacritical Marks Supplement */
+        case 0x20D0 ... 0x20FF: /* Combining Diacritical Marks for Symbols */
             return true;
         default:
             return false;

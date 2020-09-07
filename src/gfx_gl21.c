@@ -161,7 +161,8 @@ enum GlyphColor
 
 typedef struct
 {
-    uint32_t        code;
+    char32_t        code;
+    char32_t        combining[VT_RUNE_MAX_COMBINE];
     float           left, top;
     enum GlyphColor color;
     Texture         tex;
@@ -180,15 +181,22 @@ static inline size_t Rune_hash(const Rune* self)
 
 static inline size_t Rune_eq(const Rune* self, const Rune* other)
 {
-    return !memcmp(self, other, sizeof(Rune));
+    bool combinable_eq = true;
+    for (int i = 0; i < VT_RUNE_MAX_COMBINE; ++i) {
+        if (self->combine[i] == other->combine[i]) {
+            if (!self->combine[i]) {
+                break;
+            }
+            continue;
+        } else {
+            combinable_eq = false;
+            break;
+        }
+    }
+    return self->code == other->code && self->style == other->style && combinable_eq;
 }
 
 DEF_MAP(Rune, GlyphMapEntry, Rune_hash, Rune_eq, GlyphMapEntry_destroy)
-
-typedef struct
-{
-    Vector_GlyphMapEntry buckets[NUM_BUCKETS];
-} GlyphMap;
 
 struct AtlasCharInfo
 {
@@ -232,8 +240,8 @@ DEF_VECTOR(vertex_t, NULL);
 
 typedef struct
 {
-    GLuint  color_tex;
-    GLuint  depth_rb;
+    GLuint   color_tex;
+    GLuint   depth_rb;
     uint32_t width;
 } LineTexture;
 
@@ -631,6 +639,7 @@ __attribute__((hot)) static GlyphMapEntry* GfxOpenGL21_get_cached_glyph(GfxOpenG
         float scalex = 2.0 / tex.w;
         float scaley = 2.0 / tex.h;
 
+        glDisable(GL_SCISSOR_TEST);
         glGenTextures(1, &tex.id);
         glBindTexture(GL_TEXTURE_2D, tex.id);
         glTexParameteri(GL_TEXTURE_2D,
@@ -651,11 +660,13 @@ __attribute__((hot)) static GlyphMapEntry* GfxOpenGL21_get_cached_glyph(GfxOpenG
         GLint     old_fb;
         GLint     old_shader;
         GLboolean old_depth_test;
-        glGetBooleanv(GL_DEPTH_TEST, &old_depth_test);
-        GLint old_viewport[4];
-        glGetIntegerv(GL_VIEWPORT, old_viewport);
-        glGetIntegerv(GL_CURRENT_PROGRAM, &old_shader);
+        GLboolean old_scissor_test;
+        GLint     old_viewport[4];
         glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &old_fb);
+        glGetIntegerv(GL_CURRENT_PROGRAM, &old_shader);
+        glGetBooleanv(GL_DEPTH_TEST, &old_depth_test);
+        glGetBooleanv(GL_SCISSOR_TEST, &old_scissor_test);
+        glGetIntegerv(GL_VIEWPORT, old_viewport);
 
         GLuint tmp_rb;
         glGenRenderbuffers(1, &tmp_rb);
@@ -749,6 +760,9 @@ __attribute__((hot)) static GlyphMapEntry* GfxOpenGL21_get_cached_glyph(GfxOpenG
         if (!old_depth_test) {
             glDisable(GL_DEPTH_TEST);
         }
+        if (old_scissor_test) {
+            glEnable(GL_SCISSOR_TEST);
+        }
 
         /* delete temps */
         glDeleteFramebuffers(1, &tmp_fb);
@@ -762,6 +776,8 @@ __attribute__((hot)) static GlyphMapEntry* GfxOpenGL21_get_cached_glyph(GfxOpenG
             .top   = tex.h,
             .tex   = tex,
         };
+        memcpy(new_entry.combining, rune->combine, sizeof(rune->combine));
+
         glBindTexture(GL_TEXTURE_2D, tex.id);
     } else {
         Texture tex = {
@@ -2369,10 +2385,17 @@ static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const
                         source_atlas = gfx->atlas_bold_italic;
                     default:;
                 }
+
+                bool is_atlas_char = cursor_char->rune.code >= ATLAS_RENDERABLE_START &&
+                                     cursor_char->rune.code <= ATLAS_RENDERABLE_END &&
+                                     !cursor_char->rune.combine[0];
+
                 enum GlyphColor color;
                 float           h, w, t, l, gsx = 0.0, gsy = 0.0;
-                float           tc[4]        = { 0.0f, 0.0f, 1.0f, 1.0f };
-                int32_t         atlas_offset = Atlas_select(source_atlas, cursor_char->rune.code);
+                float           tc[4] = { 0.0f, 0.0f, 1.0f, 1.0f };
+                int32_t         atlas_offset =
+                  is_atlas_char ? Atlas_select(source_atlas, cursor_char->rune.code) : -1;
+
                 if (atlas_offset >= 0) {
                     struct AtlasCharInfo* g = &source_atlas->char_info[atlas_offset];
 

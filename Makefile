@@ -30,7 +30,7 @@ else
 endif
 
 ifeq ($(shell ldconfig -p | grep libutf8proc.so > /dev/null || echo fail),fail)
-$(info libutf8proc not found, unicode normalization will be disabled)
+$(info libutf8proc not found. Support for language-specific combining characters and unicode normalization will be disabled.)
 	CFLAGS += -DNOUTF8PROC
 else
 	LDLIBS += -lutf8proc

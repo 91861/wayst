@@ -20,11 +20,11 @@
 
 #ifndef NOUTF8PROC
 #include <utf8proc.h>
+#else
+#include "wcwidth/wcwidth.h"
 #endif
 
 #include <xkbcommon/xkbcommon.h>
-
-#include "wcwidth/wcwidth.h"
 
 static inline size_t Vt_top_line(const Vt* const self);
 void                 Vt_visual_scroll_to(Vt* self, size_t line);
@@ -135,6 +135,15 @@ static void Vt_bell(Vt* self)
     if (self->modes.urgency_on_bell) {
         // TODO: CALL_FP(self->callbacks.on_set_urgent, self->callbacks.user_data);
     }
+}
+
+static void Vt_grapheme_break(Vt* self)
+{
+#ifndef NOUTF8PROC
+    self->utf8proc_state = 0;
+#endif
+    self->last_codepoint = 0;
+    self->last_interted  = NULL;
 }
 
 static void Vt_set_fg_color_custom(Vt* self, ColorRGB color)
@@ -4401,7 +4410,14 @@ __attribute__((hot)) static void Vt_insert_char_at_cursor(Vt* self, VtRune c)
     ++self->cursor.col;
 
     int width;
-    if (unlikely((width = wcwidth(c.rune.code)) > 1)) {
+
+#ifndef NOUTF8PROC
+    width = utf8proc_charwidth(c.rune.code);
+#else
+    width = wcwidth(c.rune.code);
+#endif
+
+    if (unlikely(width > 1)) {
         VtRune tmp    = c;
         tmp.rune.code = VT_RUNE_CODE_WIDE_TAIL;
 
@@ -4485,8 +4501,6 @@ static inline void Vt_move_cursor_to_column(Vt* self, uint32_t columns)
  * Add a character as a combining character for that rune */
 static void VtRune_push_combining(VtRune* self, char32_t codepoint)
 {
-    ASSERT(unicode_is_combining(codepoint), "is a combining character");
-
     for (uint_fast8_t i = 0; i < ARRAY_SIZE(self->rune.combine); ++i) {
         if (!self->rune.combine[i]) {
             self->rune.combine[i] = codepoint;
@@ -4546,13 +4560,21 @@ static void Vt_handle_combinable(Vt* self, char32_t c)
             size_t   old_len                          = strlen(buff);
             char*    res     = (char*)utf8proc_NFC((const utf8proc_uint8_t*)buff);
             char32_t conv[2] = { 0, 0 };
-            if (old_len == strlen(res)) {
+
+            if (old_len == strnlen(res, old_len + 1)) {
                 VtRune_push_combining(self->last_interted, c);
             } else if (mbrtoc32(conv, res, ARRAY_SIZE(buff) - 1, &mbs) < 1) {
                 /* conversion failed */
                 WRN("Unicode normalization failed %s", strerror(errno));
+                Vt_grapheme_break(self);
             } else {
+                LOG("Vt::unicode{ u+%x + u+%x -> u+%x }\n",
+                    self->last_interted->rune.code,
+                    c,
+                    conv[0]);
+
                 self->last_interted->rune.code = conv[0];
+                self->last_codepoint           = conv[0];
             }
             free(res);
         }
@@ -4564,7 +4586,7 @@ static void Vt_handle_combinable(Vt* self, char32_t c)
 
 __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_literal(Vt* self, char c)
 {
-    if (unlikely(self->parser.in_mb_seq)) {
+    if (self->parser.in_mb_seq) {
         char32_t res;
         size_t   rd = mbrtoc32(&res, &c, 1, &self->parser.input_mbstate);
 
@@ -4578,49 +4600,74 @@ __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_litera
         } else if (rd != (size_t)-2) {
             /* sequence is complete */
             self->parser.in_mb_seq = false;
-            if (unlikely(unicode_is_combining(res))) {
-                Vt_handle_combinable(self, res);
-                return;
+
+            bool is_combining = false;
+#ifndef NOUTF8PROC
+            if (self->last_codepoint) {
+                is_combining = !utf8proc_grapheme_break_stateful(self->last_codepoint,
+                                                                 res,
+                                                                 &self->utf8proc_state) &&
+                               utf8proc_charwidth(res) == 0;
+            } else {
+                is_combining = unicode_is_combining(res);
             }
-            VtRune new_rune    = self->parser.char_state;
-            new_rune.rune.code = res;
-            Vt_insert_char_at_cursor(self, new_rune);
+#else
+            is_combining = unicode_is_combining(res);
+#endif
+
+            if (unlikely(is_combining)) {
+                Vt_handle_combinable(self, res);
+                self->last_codepoint = res;
+            } else {
+                VtRune new_rune      = self->parser.char_state;
+                self->last_codepoint = res;
+                new_rune.rune.code   = res;
+                Vt_insert_char_at_cursor(self, new_rune);
+            }
         }
     } else {
         switch (c) {
             case '\a':
+                Vt_grapheme_break(self);
                 Vt_bell(self);
                 break;
 
             case '\b':
+                Vt_grapheme_break(self);
                 Vt_handle_backspace(self);
                 break;
 
             case '\r':
+                Vt_grapheme_break(self);
                 Vt_carriage_return(self);
                 break;
 
             case '\f':
             case '\v':
             case '\n':
+                Vt_grapheme_break(self);
                 Vt_insert_new_line(self);
                 break;
 
             case '\e':
+                Vt_grapheme_break(self);
                 self->parser.state = PARSER_STATE_ESCAPED;
                 break;
 
             /* Invoke the G1 character set as GL */
             case 14 /* SO */:
+                Vt_grapheme_break(self);
                 self->charset_gl = &self->charset_g1;
                 break;
 
             /* Invoke the G0 character set (the default) as GL */
             case 15 /* SI */:
+                Vt_grapheme_break(self);
                 self->charset_gl = &self->charset_g0;
                 break;
 
             case '\t': {
+                Vt_grapheme_break(self);
                 while (self->cursor.col < Vt_col(self)) {
                     Vt_cursor_right(self);
                     if (self->tab_ruler[self->cursor.col]) {
@@ -4636,6 +4683,7 @@ __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_litera
                     self->parser.in_mb_seq = true;
                     break;
                 }
+
                 VtRune new_char    = self->parser.char_state;
                 new_char.rune.code = c;
 
@@ -4645,6 +4693,8 @@ __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_litera
                 } else if (unlikely(self->charset_gl && (*self->charset_gl))) {
                     new_char.rune.code = (*(self->charset_gl))(c);
                 }
+
+                self->last_codepoint = new_char.rune.code;
                 Vt_insert_char_at_cursor(self, new_char);
             }
         }

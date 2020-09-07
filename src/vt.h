@@ -244,7 +244,7 @@ typedef struct _Vt
 
     uint32_t last_click_x;
     uint32_t last_click_y;
-    double pixels_per_cell_x, pixels_per_cell_y;
+    double   pixels_per_cell_x, pixels_per_cell_y;
 
     bool   scrolling_visual;
     size_t visual_scroll_top;
@@ -371,7 +371,11 @@ typedef struct _Vt
 
     Vector_VtLine lines, alt_lines;
 
-    VtRune* last_interted;
+    VtRune*  last_interted;
+    char32_t last_codepoint;
+#ifndef NOUTF8PROC
+    int32_t utf8proc_state;
+#endif
 
     VtRune blank_space;
 
