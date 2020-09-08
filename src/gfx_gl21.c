@@ -2277,16 +2277,22 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
 
 static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const Ui* ui)
 {
-    if ((!vt->cursor.hidden &&
-         (((ui->cursor->blinking && gfx->in_focus) ? gfx->draw_blinking
-                                                   : true || gfx->recent_action) ||
-          !settings.enable_cursor_blink))) {
+    bool show_blink =
+      !settings.enable_cursor_blink ||
+      ((ui->cursor->blinking && gfx->in_focus) ? gfx->draw_blinking : true || gfx->recent_action);
+
+    if (show_blink && !ui->cursor->hidden) {
+        bool filled_block = false;
+
         size_t row = ui->cursor->row - Vt_visual_top_line(vt), col = ui->cursor->col;
-        bool   filled_block = false;
+        if (row >= Vt_row(vt)) {
+            return;
+        }
+
         Vector_clear_GlyphBufferData(gfx->vec_glyph_buffer);
         Vector_clear_vertex_t(&gfx->vec_vertex_buffer);
 
-        switch (vt->cursor.type) {
+        switch (ui->cursor->type) {
             case CURSOR_BEAM:
                 Vector_pushv_vertex_t(
                   &gfx->vec_vertex_buffer,
@@ -2621,7 +2627,7 @@ static void GfxOpenGL21_draw_overlays(GfxOpenGL21* self, const Vt* vt, const Ui*
 {
     if (vt->unicode_input.active) {
         GfxOpenGL21_draw_unicode_input(self, vt);
-    } else if (!vt->scrolling_visual) {
+    } else {
         GfxOpenGL21_draw_cursor(self, vt, ui);
     }
     if (ui->scrollbar.visible) {

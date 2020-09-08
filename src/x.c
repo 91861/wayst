@@ -550,7 +550,7 @@ static void WindowX11_events(struct WindowBase* self)
                 XRefreshKeyboardMapping(&e->xmapping);
                 break;
 
-            case KeyPress:;
+            case KeyPress: {
                 Status    stat = 0;
                 KeySym    ret;
                 char      buf[5] = { 0 };
@@ -559,6 +559,7 @@ static void WindowX11_events(struct WindowBase* self)
                 uint32_t  code;
                 int       no_consume = (stat == 4);
                 mbrtoc32(&code, buf, bytes, &mb);
+
                 switch (ret) {
                     case XK_Home:
                     case XK_End:
@@ -566,16 +567,26 @@ static void WindowX11_events(struct WindowBase* self)
                     case XK_Left:
                     case XK_Up:
                     case XK_Down:
+                    case XK_Insert:
+                    case XK_Delete:
                     case XK_Return:
                     case XK_KP_Enter:
+                    case XK_Page_Down:
+                    case XK_Page_Up:
+                    case XK_KP_Page_Down:
+                    case XK_KP_Page_Up:
+                    case XK_F1 ... XK_F35:
+                    case XK_KP_F1 ... XK_KP_F4:
                         no_consume = 1;
                         break;
-
-                    default:
-                        if (ret >= XK_F1 && ret <= XK_F24) {
-                            no_consume = 1;
-                        }
                 }
+
+                LOG("X::KeyPress{ status:%d, ret:%lu, bytes:%d, code:%u, no_consume:%d }\n",
+                    stat,
+                    ret,
+                    bytes,
+                    code,
+                    no_consume);
 
                 if (no_consume) {
                     int32_t lower = XkbKeycodeToKeysym(globalX11->display, e->xkey.keycode, 0, 0);
@@ -585,7 +596,7 @@ static void WindowX11_events(struct WindowBase* self)
                             lower,
                             convert_modifier_mask(e->xkey.state));
                 }
-                break;
+            } break;
 
             case ButtonRelease:
                 if (e->xbutton.button != 4 && e->xbutton.button != 5 && e->xbutton.button) {

@@ -24,12 +24,10 @@
 #include "wcwidth/wcwidth.h"
 #endif
 
-#include <xkbcommon/xkbcommon.h>
+#include "key.h"
 
 static inline size_t Vt_top_line(const Vt* const self);
 void                 Vt_visual_scroll_to(Vt* self, size_t line);
-void                 Vt_visual_scroll_up(Vt* self);
-void                 Vt_visual_scroll_down(Vt* self);
 void                 Vt_visual_scroll_reset(Vt* self);
 static inline size_t Vt_get_scroll_region_top(Vt* self);
 static inline size_t Vt_get_scroll_region_bottom(Vt* self);
@@ -103,26 +101,6 @@ static void Vt_output(Vt* self, const char* buf, size_t len)
     char _tmp[64];                                                                                 \
     int  _len = snprintf(_tmp, sizeof(_tmp), fmt, __VA_ARGS__);                                    \
     Vt_output((vt), _tmp, _len);
-
-static inline uint16_t Vt_col(const Vt* const self)
-{
-    return self->ws.ws_col;
-}
-
-static inline uint16_t Vt_row(const Vt* const self)
-{
-    return self->ws.ws_row;
-}
-
-static inline VtLine* Vt_cursor_line(Vt* self)
-{
-    return &self->lines.buf[self->cursor.row];
-}
-
-static inline VtRune* Vt_cursor_cell(Vt* self)
-{
-    return &self->lines.buf[self->cursor.row].data.buf[self->cursor.col];
-}
 
 static void Vt_bell(Vt* self)
 {
@@ -1326,11 +1304,6 @@ static inline size_t Vt_top_line_alt(const Vt* const self)
     return self->alt_lines.size <= Vt_row(self) ? 0 : self->alt_lines.size - Vt_row(self);
 }
 
-static inline size_t Vt_bottom_line(const Vt* self)
-{
-    return Vt_top_line(self) + Vt_row(self) - 1;
-}
-
 static inline size_t Vt_bottom_line_alt(Vt* self)
 {
     return Vt_top_line_alt(self) + Vt_row(self) - 1;
@@ -1357,25 +1330,31 @@ static inline bool Vt_scroll_region_not_default(Vt* self)
            Vt_get_scroll_region_bottom(self) != Vt_bottom_line(self);
 }
 
-void Vt_visual_scroll_up(Vt* self)
+bool Vt_visual_scroll_up(Vt* self)
 {
     if (self->scrolling_visual) {
-        if (self->visual_scroll_top)
+        if (self->visual_scroll_top) {
             --self->visual_scroll_top;
+        } else {
+            return true;
+        }
     } else if (Vt_top_line(self)) {
         self->scrolling_visual  = true;
         self->visual_scroll_top = Vt_top_line(self) - 1;
     }
+    return false;
 }
 
-void Vt_visual_scroll_down(Vt* self)
+bool Vt_visual_scroll_down(Vt* self)
 {
     if (self->scrolling_visual && Vt_top_line(self) > self->visual_scroll_top) {
         ++self->visual_scroll_top;
         if (self->visual_scroll_top == Vt_top_line(self)) {
             self->scrolling_visual = false;
+            return true;
         }
     }
+    return false;
 }
 
 void Vt_visual_scroll_to(Vt* self, size_t line)
@@ -4339,6 +4318,7 @@ static inline void Vt_clear_above(Vt* self)
 
 static inline void Vt_clear_display_and_scrollback(Vt* self)
 {
+    Vt_visual_scroll_reset(self);
     Vt_mark_proxy_fully_damaged(self, self->cursor.row);
     Vector_destroy_VtLine(&self->lines);
     self->lines = Vector_new_VtLine(self);
@@ -4565,7 +4545,7 @@ static void Vt_handle_combinable(Vt* self, char32_t c)
                 VtRune_push_combining(self->last_interted, c);
             } else if (mbrtoc32(conv, res, ARRAY_SIZE(buff) - 1, &mbs) < 1) {
                 /* conversion failed */
-                WRN("Unicode normalization failed %s", strerror(errno));
+                WRN("Unicode normalization failed %s\n", strerror(errno));
                 Vt_grapheme_break(self);
             } else {
                 LOG("Vt::unicode{ u+%x + u+%x -> u+%x }\n",
@@ -5075,6 +5055,7 @@ static void Vt_shrink_scrollback(Vt* self)
         int64_t to_remove = ln_cnt - settings.scrollback - Vt_row(self);
         Vector_remove_at_VtLine(&self->lines, 0, to_remove);
         self->cursor.row -= to_remove;
+        self->visual_scroll_top -= to_remove;
     }
 }
 
@@ -5118,17 +5099,17 @@ void Vt_get_visible_lines(const Vt* self, VtLine** out_begin, VtLine** out_end)
 static const char* application_cursor_key_response(const uint32_t key)
 {
     switch (key) {
-        case XKB_KEY_Up:
+        case KEY(Up):
             return "\eOA";
-        case XKB_KEY_Down:
+        case KEY(Down):
             return "\eOB";
-        case XKB_KEY_Right:
+        case KEY(Right):
             return "\eOC";
-        case XKB_KEY_Left:
+        case KEY(Left):
             return "\eOD";
-        case XKB_KEY_End:
+        case KEY(End):
             return "\eOF";
-        case XKB_KEY_Home:
+        case KEY(Home):
             return "\eOH";
         case 127:
             return "\e[3~";
@@ -5144,17 +5125,17 @@ static const char* Vt_get_normal_cursor_key_response(Vt* self, const uint32_t ke
     }
 
     switch (key) {
-        case XKB_KEY_Up:
+        case KEY(Up):
             return "\e[A";
-        case XKB_KEY_Down:
+        case KEY(Down):
             return "\e[B";
-        case XKB_KEY_Right:
+        case KEY(Right):
             return "\e[C";
-        case XKB_KEY_Left:
+        case KEY(Left):
             return "\e[D";
-        case XKB_KEY_End:
+        case KEY(End):
             return "\e[F";
-        case XKB_KEY_Home:
+        case KEY(Home):
             return "\e[H";
         case 127:
             return "\e[3~";
@@ -5168,17 +5149,17 @@ static const char* Vt_get_normal_cursor_key_response(Vt* self, const uint32_t ke
 static const char* mod_cursor_key_response(const uint32_t key)
 {
     switch (key) {
-        case XKB_KEY_Up:
+        case KEY(Up):
             return "\e[1;%dA";
-        case XKB_KEY_Down:
+        case KEY(Down):
             return "\e[1;%dB";
-        case XKB_KEY_Right:
+        case KEY(Right):
             return "\e[1;%dC";
-        case XKB_KEY_Left:
+        case KEY(Left):
             return "\e[1;%dD";
-        case XKB_KEY_End:
+        case KEY(End):
             return "\e[1;%dF";
-        case XKB_KEY_Home:
+        case KEY(Home):
             return "\e[1;%dH";
         case 127:
             return "\e[3;%d~";
@@ -5279,8 +5260,8 @@ static bool Vt_maybe_handle_keypad_key(Vt* self, uint32_t key, uint32_t mods)
  * @return keypress was consumed */
 static bool Vt_maybe_handle_function_key(Vt* self, uint32_t key, uint32_t mods)
 {
-    if (key >= XKB_KEY_F1 && key <= XKB_KEY_F35) {
-        int f_num = (key + 1) - XKB_KEY_F1;
+    if (key >= KEY(F1) && key <= KEY(F35)) {
+        int f_num = (key + 1) - KEY(F1);
         if (mods) {
             if (f_num < 5) {
                 Vt_output_formated(self, "\e[1;%u%c", mods + 1, f_num + 'O');
@@ -5305,37 +5286,37 @@ static bool Vt_maybe_handle_function_key(Vt* self, uint32_t key, uint32_t mods)
         return true;
     } else /* not f-key */ {
         if (mods) {
-            if (key == XKB_KEY_Insert) {
+            if (key == KEY(Insert)) {
                 Vt_output_formated(self, "\e[2;%u~", mods + 1);
                 return true;
-            } else if (key == XKB_KEY_Delete) {
+            } else if (key == KEY(Delete)) {
                 Vt_output_formated(self, "\e[3;%u~", mods + 1);
                 return true;
-            } else if (key == XKB_KEY_Home) {
+            } else if (key == KEY(Home)) {
                 Vt_output_formated(self, "\e[1;%u~", mods + 1);
                 return true;
-            } else if (key == XKB_KEY_End) {
+            } else if (key == KEY(End)) {
                 Vt_output_formated(self, "\e[4;%u~", mods + 1);
                 return true;
-            } else if (key == XKB_KEY_Page_Up) {
+            } else if (key == KEY(Page_Up)) {
                 Vt_output_formated(self, "\e[5;%u~", mods + 1);
                 return true;
-            } else if (key == XKB_KEY_Page_Down) {
+            } else if (key == KEY(Page_Down)) {
                 Vt_output_formated(self, "\e[6;%u~", mods + 1);
                 return true;
             }
 
         } else /* no mods */ {
-            if (key == XKB_KEY_Insert) {
+            if (key == KEY(Insert)) {
                 Vt_output(self, "\e[2~", 4);
                 return true;
-            } else if (key == XKB_KEY_Delete) {
+            } else if (key == KEY(Delete)) {
                 Vt_output(self, "\e[3~", 4);
                 return true;
-            } else if (key == XKB_KEY_Page_Up) {
+            } else if (key == KEY(Page_Up)) {
                 Vt_output(self, "\e[5~", 4);
                 return true;
-            } else if (key == XKB_KEY_Page_Down) {
+            } else if (key == KEY(Page_Down)) {
                 Vt_output(self, "\e[6~", 4);
                 return true;
             }
@@ -5350,63 +5331,63 @@ static bool Vt_maybe_handle_function_key(Vt* self, uint32_t key, uint32_t mods)
 static uint32_t numpad_key_convert(uint32_t key)
 {
     switch (key) {
-        case XKB_KEY_KP_Add:
+        case KEY(KP_Add):
             return '+';
-        case XKB_KEY_KP_Subtract:
+        case KEY(KP_Subtract):
             return '-';
-        case XKB_KEY_KP_Multiply:
+        case KEY(KP_Multiply):
             return '*';
-        case XKB_KEY_KP_Divide:
+        case KEY(KP_Divide):
             return '/';
-        case XKB_KEY_KP_Equal:
+        case KEY(KP_Equal):
             return '=';
-        case XKB_KEY_KP_Decimal:
+        case KEY(KP_Decimal):
             return '.';
-        case XKB_KEY_KP_Separator:
+        case KEY(KP_Separator):
             return '.';
-        case XKB_KEY_KP_Space:
+        case KEY(KP_Space):
             return ' ';
 
-        case XKB_KEY_KP_Up:
-            return XKB_KEY_Up;
-        case XKB_KEY_KP_Down:
-            return XKB_KEY_Down;
-        case XKB_KEY_KP_Left:
-            return XKB_KEY_Left;
-        case XKB_KEY_KP_Right:
-            return XKB_KEY_Right;
+        case KEY(KP_Up):
+            return KEY(Up);
+        case KEY(KP_Down):
+            return KEY(Down);
+        case KEY(KP_Left):
+            return KEY(Left);
+        case KEY(KP_Right):
+            return KEY(Right);
 
-        case XKB_KEY_KP_Page_Up:
-            return XKB_KEY_Page_Up;
-        case XKB_KEY_KP_Page_Down:
-            return XKB_KEY_Page_Down;
+        case KEY(KP_Page_Up):
+            return KEY(Page_Up);
+        case KEY(KP_Page_Down):
+            return KEY(Page_Down);
 
-        case XKB_KEY_KP_Insert:
-            return XKB_KEY_Insert;
-        case XKB_KEY_KP_Delete:
-            return XKB_KEY_Delete;
-        case XKB_KEY_KP_Home:
-            return XKB_KEY_Home;
-        case XKB_KEY_KP_End:
-            return XKB_KEY_End;
-        case XKB_KEY_KP_Begin:
-            return XKB_KEY_Begin;
-        case XKB_KEY_KP_Tab:
-            return XKB_KEY_Tab;
-        case XKB_KEY_KP_Enter:
-            return XKB_KEY_Return;
+        case KEY(KP_Insert):
+            return KEY(Insert);
+        case KEY(KP_Delete):
+            return KEY(Delete);
+        case KEY(KP_Home):
+            return KEY(Home);
+        case KEY(KP_End):
+            return KEY(End);
+        case KEY(KP_Begin):
+            return KEY(Begin);
+        case KEY(KP_Tab):
+            return KEY(Tab);
+        case KEY(KP_Enter):
+            return KEY(Return);
 
-        case XKB_KEY_KP_F1:
-            return XKB_KEY_F1;
-        case XKB_KEY_KP_F2:
-            return XKB_KEY_F2;
-        case XKB_KEY_KP_F3:
-            return XKB_KEY_F3;
-        case XKB_KEY_KP_F4:
-            return XKB_KEY_F4;
+        case KEY(KP_F1):
+            return KEY(F1);
+        case KEY(KP_F2):
+            return KEY(F2);
+        case KEY(KP_F3):
+            return KEY(F3);
+        case KEY(KP_F4):
+            return KEY(F4);
 
-        case XKB_KEY_KP_0 ... XKB_KEY_KP_9:
-            return '0' + key - XKB_KEY_KP_0;
+        case KEY(KP_0)... KEY(KP_9):
+            return '0' + key - KEY(KP_0);
         default:
             return key;
     }

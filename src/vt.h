@@ -486,6 +486,66 @@ static inline void VtLine_destroy(void* vt_, VtLine* self)
 }
 
 /**
+ * Get index of the last line */
+static inline size_t Vt_max_line(const Vt* const self)
+{
+    return self->lines.size - 1;
+}
+
+/**
+ * Get number of terminal columns */
+static inline uint16_t Vt_col(const Vt* const self)
+{
+    return self->ws.ws_col;
+}
+
+/**
+ * Get number of terminal rows */
+static inline uint16_t Vt_row(const Vt* const self)
+{
+    return self->ws.ws_row;
+}
+
+/**
+ * Get line at global index if it exists */
+static inline VtLine* Vt_line_at(Vt* self, size_t row)
+{
+    if (row > Vt_max_line(self)) {
+        return NULL;
+    }
+    return &self->lines.buf[row];
+}
+
+/**
+ * Get cell at global position if it exists */
+static inline VtRune* Vt_at(Vt* self, size_t column, size_t row)
+{
+    VtLine* line = Vt_line_at(self, row);
+    if (!line || column >= line->data.size) {
+        return NULL;
+    }
+    return &line->data.buf[column];
+}
+
+/**
+ * Get line under terminal cursor */
+static inline VtLine* Vt_cursor_line(Vt* self)
+{
+    return &self->lines.buf[self->cursor.row];
+}
+
+/**
+ * Get cell under terminal cursor */
+static inline VtRune* Vt_cursor_cell(Vt* self)
+{
+    VtLine* cursor_line = Vt_cursor_line(self);
+    if (self->cursor.col >= cursor_line->data.size) {
+        return NULL;
+    }
+    return &cursor_line->data.buf[self->cursor.col];
+}
+
+/**
  * Make a new interpreter with a given size */
 void Vt_init(Vt* self, uint32_t cols, uint32_t rows);
 
@@ -544,24 +604,74 @@ void Vt_handle_button(void*    self,
  * @param button - button being held down */
 void Vt_handle_motion(void* self, uint32_t button, int32_t x, int32_t y);
 
+/**
+ * Get line index at the top of the real viewport */
 static inline size_t Vt_top_line(const Vt* const self)
 {
     return self->lines.size <= self->ws.ws_row ? 0 : self->lines.size - self->ws.ws_row;
 }
 
+/**
+ * Get line index at the bottom of the real viewport */
+static inline size_t Vt_bottom_line(const Vt* self)
+{
+    return Vt_top_line(self) + Vt_row(self) - 1;
+}
+
+/**
+ * Terminal is displaying the scrollback buffer */
+static inline bool Vt_is_scrolling_visual(const Vt* self)
+{
+    return self->scrolling_visual;
+}
+
+/**
+ * Get line index at the top of the viewport (takes visual scroling into account) */
 static inline size_t Vt_visual_top_line(const Vt* const self)
 {
     return self->scrolling_visual ? self->visual_scroll_top : Vt_top_line(self);
 }
 
+/**
+ * Get line index at the bottom of the viewport (takes visual scroling into account) */
 static inline size_t Vt_visual_bottom_line(const Vt* const self)
 {
     return self->ws.ws_row + Vt_visual_top_line(self) - 1;
 }
 
+/**
+ * Move the first visible line of the visual viewport to global line index (out of range values are
+ * clamped) starts/stops scrolling */
 void Vt_visual_scroll_to(Vt* self, size_t line);
-void Vt_visual_scroll_up(Vt* self);
-void Vt_visual_scroll_down(Vt* self);
+
+/**
+ * Move visual viewport one line up and start visual scrolling
+ * @return can scroll more */
+bool Vt_visual_scroll_up(Vt* self);
+
+/**
+ * Move visual viewport one page up and start visual scrolling */
+static inline void Vt_visual_scroll_page_up(Vt* self)
+{
+    size_t tgt_pos =
+      (Vt_visual_top_line(self) > Vt_row(self)) ? Vt_visual_top_line(self) - Vt_row(self) : 0;
+    Vt_visual_scroll_to(self, tgt_pos);
+}
+
+/**
+ * Move visual viewport one line down and stop scrolling if lowest position
+ * @return can scroll more  */
+bool Vt_visual_scroll_down(Vt* self);
+
+/**
+ * Move visual viewport one page down and stop scrolling if lowest position */
+static inline void Vt_visual_scroll_page_down(Vt* self)
+{
+    Vt_visual_scroll_to(self, self->visual_scroll_top + Vt_row(self));
+}
+
+/**
+ * Reset the visual viewport and stop scrolling if lowest position */
 void Vt_visual_scroll_reset(Vt* self);
 
 /**

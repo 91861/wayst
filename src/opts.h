@@ -194,34 +194,46 @@ static struct option long_options[] = {
 #define OPT_BIND_KEY_UNI_IDX 56
     [OPT_BIND_KEY_UNI_IDX] = { "bind-key-unicode", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_KSM_IDX 57
+#define OPT_BIND_KEY_PG_UP_IDX 57
+    [OPT_BIND_KEY_PG_UP_IDX] = { "bind-key-pg-up", required_argument, 0, 0 },
+
+#define OPT_BIND_KEY_PG_DN_IDX 58
+    [OPT_BIND_KEY_PG_DN_IDX] = { "bind-key-pg-down", required_argument, 0, 0 },
+
+#define OPT_BIND_KEY_LN_UP_IDX 59
+    [OPT_BIND_KEY_LN_UP_IDX] = { "bind-key-ln-up", required_argument, 0, 0 },
+
+#define OPT_BIND_KEY_LN_DN_IDX 60
+    [OPT_BIND_KEY_LN_DN_IDX] = { "bind-key-ln-down", required_argument, 0, 0 },
+
+#define OPT_BIND_KEY_KSM_IDX 61
     [OPT_BIND_KEY_KSM_IDX] = { "bind-key-kbd-select", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_DUP_IDX 58
+#define OPT_BIND_KEY_DUP_IDX 62
     [OPT_BIND_KEY_DUP_IDX] = { "bind-key-duplicate", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_DEBUG_IDX 59
+#define OPT_BIND_KEY_DEBUG_IDX 63
     [OPT_BIND_KEY_DEBUG_IDX] = { "bind-key-debug", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_QUIT_IDX 60
+#define OPT_BIND_KEY_QUIT_IDX 64
     [OPT_BIND_KEY_QUIT_IDX] = { "bind-key-quit", required_argument, 0, 0 },
 
-#define OPT_DEBUG_PTY_IDX 61
+#define OPT_DEBUG_PTY_IDX 65
     [OPT_DEBUG_PTY_IDX] = { "debug-pty", no_argument, 0, 'D' },
 
-#define OPT_DEBUG_GFX_IDX 62
+#define OPT_DEBUG_GFX_IDX 66
     [OPT_DEBUG_GFX_IDX] = { "debug-gfx", no_argument, 0, 'G' },
 
-#define OPT_DEBUG_FONT_IDX 63
+#define OPT_DEBUG_FONT_IDX 67
     [OPT_DEBUG_FONT_IDX] = { "debug-font", no_argument, 0, 'F' },
 
-#define OPT_VERSION_IDX 64
+#define OPT_VERSION_IDX 68
     [OPT_VERSION_IDX] = { "version", no_argument, 0, 'v' },
 
-#define OPT_HELP_IDX 65
+#define OPT_HELP_IDX 69
     [OPT_HELP_IDX] = { "help", no_argument, 0, 'h' },
 
-#define OPT_SENTINEL_IDX 66
+#define OPT_SENTINEL_IDX 70
     [OPT_SENTINEL_IDX] = { 0 }
 };
 
@@ -267,7 +279,8 @@ static const char* long_options_descriptions[][2] = {
     [OPT_H_FG_COLOR_IDX]  = { arg_color, "Highlighted text foreground color" },
     [OPT_NO_FLASH_IDX]    = { NULL, "Disable visual bell" },
     [OPT_COLORSCHEME_IDX] = { "name/int",
-                              "Colorscheme name/index: wayst, linux, xterm, rxvt, yaru, tango, orchis, "
+                              "Colorscheme name/index: wayst, linux, xterm, rxvt, yaru, tango, "
+                              "orchis, "
                               "solarized" },
 
     [OPT_FONT_IDX]               = { "[font, ...]", "Primary fonts (default: Monospace)" },
@@ -305,6 +318,13 @@ static const char* long_options_descriptions[][2] = {
     [OPT_BIND_KEY_SHRINK_IDX]  = { arg_key, "Shrink font key command (default: C+S+minus)" },
     [OPT_BIND_KEY_UNI_IDX]     = { arg_key,
                                "Unicode entry mode activation key command (default: C+S+u)" },
+
+    [OPT_BIND_KEY_LN_UP_IDX] = { arg_key, "Scroll up by line key command (default: C+S+Up)" },
+    [OPT_BIND_KEY_LN_DN_IDX] = { arg_key, "Scroll down by line key command (default: C+S+Down)" },
+    [OPT_BIND_KEY_PG_UP_IDX] = { arg_key, "Scroll up by page key command (default: C+S+Page_Up)" },
+    [OPT_BIND_KEY_PG_DN_IDX] = { arg_key,
+                                 "Scroll down by page key command (default: C+S+Page_Down)" },
+
     [OPT_BIND_KEY_KSM_IDX] = { arg_key, "Enter keyboard select mode key command (default: C+S+k)" },
     [OPT_BIND_KEY_DUP_IDX] = { arg_key,
                                "Duplicate key command (start new instance in work directory set by "

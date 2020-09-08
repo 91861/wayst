@@ -1403,20 +1403,18 @@ void WindowWl_resize(struct WindowBase* self, uint32_t w, uint32_t h)
 
 TimePoint* WindowWl_process_timers(struct WindowBase* self)
 {
-    /* WindowWl* win = windowWl(self); */
     if (globalWl->keycode_to_repeat && TimePoint_passed(globalWl->repeat_point)) {
-        /* uint32_t ft = 16; */
-        /* if (win->active_output && win->active_output->target_frame_time_ms) { */
-        /*     ft = win->active_output->target_frame_time_ms; */
-        /* } */
         int32_t time_offset    = (1000 / globalWl->kbd_repeat_rate);
         globalWl->repeat_point = TimePoint_ms_from_now(time_offset);
+
+        puts("proc timess call handle");
         keyboard_handle_key(self,
                             NULL,
                             0,
                             0,
                             globalWl->keycode_to_repeat,
                             WL_KEYBOARD_KEY_STATE_PRESSED);
+        puts("proc timess returned from handle");
 
         return &globalWl->repeat_point;
     } else if (globalWl->keycode_to_repeat) {

@@ -25,10 +25,10 @@
 #endif
 
 #include "freetype.h"
+#include "key.h"
 #include "settings.h"
 #include "ui.h"
 #include "vt.h"
-
 
 #ifndef DOUBLE_CLICK_DELAY_MS
 #define DOUBLE_CLICK_DELAY_MS 300
@@ -166,13 +166,17 @@ static void App_init(App* self)
 static void App_run(App* self)
 {
     while (!(self->exit || Window_is_closed(self->win))) {
-        int timeout_ms = self->swap_performed
-                           ? 0
-                           : self->closest_pending_wakeup
-                               ? TimePoint_is_ms_ahead(*(self->closest_pending_wakeup))
-                               : -1;
+        int timeout_ms = 0;
+        if (!self->swap_performed) {
+            if (self->closest_pending_wakeup) {
+                timeout_ms = MAX(0, TimePoint_is_ms_ahead(*(self->closest_pending_wakeup)));
+            } else {
+                timeout_ms = -1;
+            }
+        }
 
         Monitor_wait(&self->monitor, timeout_ms);
+
         self->closest_pending_wakeup = NULL;
         if (Monitor_are_window_system_events_pending(&self->monitor)) {
             Window_events(self->win);
@@ -363,77 +367,81 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
                                                 uint32_t rawkey,
                                                 uint32_t mods)
 {
+    Vt* vt = &self->vt;
+
+#define L_UPDATE_SELECT_END                                                                        \
+    if (self->vt.selection.mode) {                                                                 \
+        size_t col = self->ksm_cursor.col;                                                         \
+        size_t row = self->ksm_cursor.row - Vt_visual_top_line(vt);                                \
+        Vt_select_set_end_cell(vt, col, row);                                                      \
+    }
+
     switch (key) {
         case 27: // Escape
-            Vt_select_end(&self->vt);
+            Vt_select_end(vt);
             App_notify_content_change(self);
             self->keyboard_select_mode = false;
-            Vt_visual_scroll_reset(&self->vt);
+            Vt_visual_scroll_reset(vt);
             Gfx_notify_action(self->gfx);
             return true;
 
-        case 65361: // left
-        case 104:   // h
+        case KEY(Left):
+        case KEY(h):
             App_notify_content_change(self);
             if (self->ksm_cursor.col) {
                 self->ksm_cursor.col--;
             }
-            if (self->vt.selection.mode) {
-                Vt_select_set_end_cell(&self->vt, self->ksm_cursor.col, self->ksm_cursor.row);
-            }
+            L_UPDATE_SELECT_END
             break;
 
-        case 65364: // down
-        case 106:   // j
+        case KEY(Down):
+        case KEY(j):
             App_notify_content_change(self);
-            if (self->ksm_cursor.row < self->vt.lines.size - 1) {
+            if (self->ksm_cursor.row < Vt_max_line(vt)) {
                 self->ksm_cursor.row++;
             }
-            if (Vt_visual_bottom_line(&self->vt) == self->vt.lines.size - 1) {
-                Vt_visual_scroll_reset(&self->vt);
+            if (Vt_visual_bottom_line(vt) == Vt_max_line(vt)) {
+                Vt_visual_scroll_reset(vt);
             } else {
-                while (Vt_visual_bottom_line(&self->vt) < self->ksm_cursor.row) {
-                    Vt_visual_scroll_down(&self->vt);
+                while (Vt_visual_bottom_line(vt) < self->ksm_cursor.row) {
+                    if (Vt_visual_scroll_down(vt)) {
+                        break;
+                    }
                 }
             }
-            if (self->vt.selection.mode) {
-                Vt_select_set_end_cell(&self->vt, self->ksm_cursor.col, self->ksm_cursor.row);
-            }
+            L_UPDATE_SELECT_END
             break;
 
-        case 65362: // up
-        case 107:   // k
+        case KEY(Up):
+        case KEY(k):
             App_notify_content_change(self);
             if (self->ksm_cursor.row) {
                 self->ksm_cursor.row--;
             }
-            while (Vt_visual_top_line(&self->vt) > self->ksm_cursor.row) {
-                Vt_visual_scroll_up(&self->vt);
+            while (Vt_visual_top_line(vt) > self->ksm_cursor.row) {
+                if (Vt_visual_scroll_up(vt)) {
+                    break;
+                }
             }
-            if (self->vt.selection.mode) {
-                Vt_select_set_end_cell(&self->vt, self->ksm_cursor.col, self->ksm_cursor.row);
-            }
+            L_UPDATE_SELECT_END
             break;
 
-        case 65363: // right
-        case 108:   // l
+        case KEY(Right):
+        case KEY(l):
             App_notify_content_change(self);
-            if (self->ksm_cursor.col + 1 < self->vt.ws.ws_col) {
+            if (self->ksm_cursor.col + 1 < Vt_col(vt)) {
                 self->ksm_cursor.col++;
             }
-            if (self->vt.selection.mode) {
-                Vt_select_set_end_cell(&self->vt, self->ksm_cursor.col, self->ksm_cursor.row);
-            }
+            L_UPDATE_SELECT_END
             break;
 
-        case 121: // y
-        case 99:  // c
-        {
+        case KEY(y):
+        case KEY(c): {
             if (self->vt.selection.mode) {
-                Vector_char txt = Vt_select_region_to_string(&self->vt);
+                Vector_char txt = Vt_select_region_to_string(vt);
                 if (txt.size) {
                     App_clipboard_send(self, txt.buf);
-                    Vt_select_end(&self->vt);
+                    Vt_select_end(vt);
                 } else {
                     Vector_destroy_char(&txt);
                 }
@@ -442,78 +450,80 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
 
         case 13: // Return
             if (self->vt.selection.mode) {
-                Vt_select_end(&self->vt);
+                Vt_select_end(vt);
                 break;
             }
-            Vt_select_init_cell(&self->vt,
-                                FLAG_IS_SET(mods, MODIFIER_CONTROL) ? SELECT_MODE_BOX
-                                                                    : SELECT_MODE_NORMAL,
-                                self->ksm_cursor.col,
-                                self->ksm_cursor.row);
-            Vt_select_commit(&self->vt);
+            size_t          col = self->ksm_cursor.col;
+            size_t          row = (self->ksm_cursor.row) - Vt_visual_top_line(vt);
+            enum SelectMode mode =
+              FLAG_IS_SET(mods, MODIFIER_CONTROL) ? SELECT_MODE_BOX : SELECT_MODE_NORMAL;
+            Vt_select_init_cell(vt, mode, col, row);
+            Vt_select_commit(vt);
             break;
 
-        case 98: { // b
+        case KEY(b): {
             // jump back by word
             for (bool initial = true;; initial = false) {
                 if (!self->ksm_cursor.col) {
                     break;
                 }
-                char32_t code =
-                  self->vt.lines.buf[self->ksm_cursor.row].data.buf[self->ksm_cursor.col].rune.code;
-                char32_t prev_code = self->vt.lines.buf[self->ksm_cursor.row]
-                                       .data.buf[self->ksm_cursor.col - 1]
-                                       .rune.code;
+                VtRune* rune      = Vt_at(vt, self->ksm_cursor.col, self->ksm_cursor.row);
+                VtRune* prev_rune = Vt_at(vt, self->ksm_cursor.col - 1, self->ksm_cursor.row);
+                if (!rune || !prev_rune) {
+                    break;
+                }
+                char32_t code = rune->rune.code, prev_code = prev_rune->rune.code;
+
                 if (isblank(prev_code) && !isblank(code) && !initial) {
                     break;
                 }
                 --self->ksm_cursor.col;
                 App_notify_content_change(self);
             }
-            Vt_select_set_end_cell(&self->vt, self->ksm_cursor.col, self->ksm_cursor.row);
+            L_UPDATE_SELECT_END
         } break;
 
-        case 119: { // w
+        case KEY(w): {
             // jump forward to next word
             for (bool initial = true;; initial = false) {
-                if (self->ksm_cursor.col + 1 >= self->vt.ws.ws_col ||
-                    self->ksm_cursor.col + 1 >=
-                      self->vt.lines.buf[self->ksm_cursor.row].data.size) {
+                VtLine* row_line = Vt_line_at(vt, self->ksm_cursor.row);
+                if (self->ksm_cursor.col + 1 >= Vt_col(vt) || !row_line ||
+                    self->ksm_cursor.col + 1 >= row_line->data.size) {
                     break;
                 }
-                char32_t code =
-                  self->vt.lines.buf[self->ksm_cursor.row].data.buf[self->ksm_cursor.col].rune.code;
-                char32_t next_code = self->vt.lines.buf[self->ksm_cursor.row]
-                                       .data.buf[self->ksm_cursor.col + 1]
-                                       .rune.code;
+                VtRune* rune      = Vt_at(vt, self->ksm_cursor.col, self->ksm_cursor.row);
+                VtRune* next_rune = Vt_at(vt, self->ksm_cursor.col + 1, self->ksm_cursor.row);
+                if (!rune || !next_rune) {
+                    break;
+                }
+                char32_t code = rune->rune.code, next_code = next_rune->rune.code;
                 ++self->ksm_cursor.col;
                 App_notify_content_change(self);
-                if ((isblank(code) && !isblank(next_code)) && !initial)
+                if ((isblank(code) && !isblank(next_code)) && !initial) {
                     break;
+                }
             }
-            Vt_select_set_end_cell(&self->vt, self->ksm_cursor.col, self->ksm_cursor.row);
+            L_UPDATE_SELECT_END
         } break;
 
-        case 101: { // e
+        case KEY(e): {
             // jump to end of word
             for (bool initial = true;; initial = false) {
-                if (self->ksm_cursor.col + 1 >= self->vt.ws.ws_col ||
-                    self->ksm_cursor.col + 1 >=
-                      self->vt.lines.buf[self->ksm_cursor.row].data.size) {
+                VtLine* row_line = Vt_line_at(vt, self->ksm_cursor.row);
+                if (self->ksm_cursor.col + 1 >= Vt_col(vt) || !row_line ||
+                    self->ksm_cursor.col + 1 >= row_line->data.size) {
                     break;
                 }
-                char32_t code = self->vt.lines.buf[self->ksm_cursor.row]
-                                  .data.buf[self->ksm_cursor.col]
-                                  .rune.code,
-                         next_code = self->vt.lines.buf[self->ksm_cursor.row]
-                                       .data.buf[self->ksm_cursor.col + 1]
-                                       .rune.code;
-                if ((isblank(next_code) && !isblank(code)) && !initial)
+                VtRune*  rune      = Vt_at(vt, self->ksm_cursor.col, self->ksm_cursor.row);
+                VtRune*  next_rune = Vt_at(vt, self->ksm_cursor.col + 1, self->ksm_cursor.row);
+                char32_t code = rune->rune.code, next_code = next_rune->rune.code;
+                if ((isblank(next_code) && !isblank(code)) && !initial) {
                     break;
+                }
                 ++self->ksm_cursor.col;
                 App_notify_content_change(self);
             }
-            Vt_select_set_end_cell(&self->vt, self->ksm_cursor.col, self->ksm_cursor.row);
+            L_UPDATE_SELECT_END
         } break;
 
         default:
@@ -530,12 +540,18 @@ static bool App_maybe_handle_application_key(App*     self,
                                              uint32_t rawkey,
                                              uint32_t mods)
 {
-    Vt* vt = &self->vt;
+    Vt*         vt  = &self->vt;
+    KeyCommand* cmd = settings.key_commands;
+
     if (self->keyboard_select_mode) {
-        self->keyboard_select_mode = !App_handle_keyboard_select_mode_key(self, key, rawkey, mods);
+        if (!(self->keyboard_select_mode =
+                !App_handle_keyboard_select_mode_key(self, key, rawkey, mods))) {
+            App_notify_content_change(self);
+        }
         return true;
     }
-    if (KeyCommand_is_active(&settings.key_commands[KCMD_COPY], key, rawkey, mods)) {
+
+    if (KeyCommand_is_active(&cmd[KCMD_COPY], key, rawkey, mods)) {
         if (vt->selection.mode) {
             Vector_char txt = Vt_select_region_to_string(vt);
             if (txt.size)
@@ -544,10 +560,10 @@ static bool App_maybe_handle_application_key(App*     self,
                 Vector_destroy_char(&txt);
         }
         return true;
-    } else if (KeyCommand_is_active(&settings.key_commands[KCMD_PASTE], key, rawkey, mods)) {
+    } else if (KeyCommand_is_active(&cmd[KCMD_PASTE], key, rawkey, mods)) {
         App_clipboard_get(self);
         return true;
-    } else if (KeyCommand_is_active(&settings.key_commands[KCMD_FONT_SHRINK], key, rawkey, mods)) {
+    } else if (KeyCommand_is_active(&cmd[KCMD_FONT_SHRINK], key, rawkey, mods)) {
         if (settings.font_size > 1) {
             --settings.font_size;
             Vt_clear_all_proxies(vt);
@@ -559,7 +575,7 @@ static bool App_maybe_handle_application_key(App*     self,
             App_flash(self);
         }
         return true;
-    } else if (KeyCommand_is_active(&settings.key_commands[KCMD_FONT_ENLARGE], key, rawkey, mods)) {
+    } else if (KeyCommand_is_active(&cmd[KCMD_FONT_ENLARGE], key, rawkey, mods)) {
         ++settings.font_size;
         Vt_clear_all_proxies(vt);
         App_reload_font(self);
@@ -567,25 +583,42 @@ static bool App_maybe_handle_application_key(App*     self,
         Vt_resize(vt, cells.first, cells.second);
         App_notify_content_change(self);
         return true;
-    } else if (KeyCommand_is_active(&settings.key_commands[KCMD_DEBUG], key, rawkey, mods)) {
+    } else if (KeyCommand_is_active(&cmd[KCMD_DEBUG], key, rawkey, mods)) {
         Vt_dump_info(vt);
         return true;
-    } else if (KeyCommand_is_active(&settings.key_commands[KCMD_UNICODE_ENTRY],
-                                    key,
-                                    rawkey,
-                                    mods)) {
+    } else if (KeyCommand_is_active(&cmd[KCMD_UNICODE_ENTRY], key, rawkey, mods)) {
         Vt_start_unicode_input(vt);
         return true;
-    } else if (KeyCommand_is_active(&settings.key_commands[KCMD_KEYBOARD_SELECT],
-                                    key,
-                                    rawkey,
-                                    mods)) {
+    } else if (KeyCommand_is_active(&cmd[KCMD_KEYBOARD_SELECT], key, rawkey, mods)) {
         self->ksm_cursor           = self->vt.cursor;
         self->ksm_cursor.blinking  = false;
         self->ui.cursor            = &self->ksm_cursor;
         self->keyboard_select_mode = true;
+        self->ksm_cursor.row =
+          CLAMP(self->ksm_cursor.row, Vt_visual_top_line(vt), Vt_visual_bottom_line(vt));
+        App_notify_content_change(self);
         return true;
-    } else if (KeyCommand_is_active(&settings.key_commands[KCMD_DUPLICATE], key, rawkey, mods)) {
+    } else if (KeyCommand_is_active(&cmd[KCMD_LINE_SCROLL_UP], key, rawkey, mods)) {
+        Vt_visual_scroll_up(vt);
+        self->ui.scrollbar.visible = true;
+        App_notify_content_change(self);
+        return true;
+    } else if (KeyCommand_is_active(&cmd[KCMD_LINE_SCROLL_DN], key, rawkey, mods)) {
+        Vt_visual_scroll_down(vt);
+        self->ui.scrollbar.visible = true;
+        App_notify_content_change(self);
+        return true;
+    } else if (KeyCommand_is_active(&cmd[KCMD_PAGE_SCROLL_UP], key, rawkey, mods)) {
+        Vt_visual_scroll_page_up(vt);
+        self->ui.scrollbar.visible = true;
+        App_notify_content_change(self);
+        return true;
+    } else if (KeyCommand_is_active(&cmd[KCMD_PAGE_SCROLL_DN], key, rawkey, mods)) {
+        Vt_visual_scroll_page_down(vt);
+        self->ui.scrollbar.visible = true;
+        App_notify_content_change(self);
+        return true;
+    } else if (KeyCommand_is_active(&cmd[KCMD_DUPLICATE], key, rawkey, mods)) {
         /* use the full path to the running file (it may have been started with a relative path) */
         char* this_file  = get_running_binary_path();
         char* old_argv_0 = settings.argv[0];
@@ -710,12 +743,9 @@ static bool App_scrollbar_consume_click(App*     self,
             } else if (state && button == MOUSE_BTN_MIDDLE) {
                 /* jump one screen in that direction */
                 if (dp > self->ui.scrollbar.top + self->ui.scrollbar.length / 2) {
-                    Vt_visual_scroll_to(vt, vt->visual_scroll_top + vt->ws.ws_row);
+                    Vt_visual_scroll_page_down(vt);
                 } else {
-                    size_t to = vt->visual_scroll_top > vt->ws.ws_row
-                                  ? vt->visual_scroll_top - vt->ws.ws_row
-                                  : 0;
-                    Vt_visual_scroll_to(vt, to);
+                    Vt_visual_scroll_page_up(vt);
                 }
             }
         }
@@ -913,11 +943,14 @@ static void App_button_handler(void*    self,
     x                    = CLAMP(x - app->ui.pixel_offset_x, 0, (int32_t)app->resolution.first);
     y                    = CLAMP(y - app->ui.pixel_offset_y, 0, (int32_t)app->resolution.second);
     bool vt_wants_scroll = Vt_reports_mouse(&app->vt);
+
     if (!vt_wants_scroll && (button == MOUSE_BTN_WHEEL_DOWN && state)) {
         uint8_t lines             = ammount ? ammount : settings.scroll_discrete_lines;
         app->ui.scrollbar.visible = true;
         for (uint8_t i = 0; i < lines; ++i) {
-            Vt_visual_scroll_down(vt);
+            if (Vt_visual_scroll_down(vt)) {
+                break;
+            }
         }
         App_update_scrollbar_dims(self);
         App_notify_content_change(self);
@@ -925,7 +958,9 @@ static void App_button_handler(void*    self,
         uint8_t lines             = ammount ? ammount : settings.scroll_discrete_lines;
         app->ui.scrollbar.visible = true;
         for (uint8_t i = 0; i < lines; ++i) {
-            Vt_visual_scroll_up(vt);
+            if (Vt_visual_scroll_up(vt)) {
+                break;
+            }
         }
         App_update_scrollbar_vis(self);
         App_update_scrollbar_dims(self);

@@ -13,6 +13,7 @@
 #include <fontconfig/fontconfig.h>
 
 #include "fontconfig.h"
+#include "key.h"
 #include "opts.h"
 #include "settings.h"
 #include "util.h"
@@ -402,43 +403,75 @@ static void settings_make_default()
                 .is_name = false,
                 .mods = 0,
             },
+
             [KCMD_UNICODE_ENTRY] = (KeyCommand) {
-                .key.code = 117, // u
+                .key.code = KEY(u),
                 .is_name = false,
                 .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
             },
+
             [KCMD_COPY] = (KeyCommand) {
-                .key.code = 99, // c
+                .key.code = KEY(c),
                 .is_name = false,
                 .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
             },
+
             [KCMD_PASTE] = (KeyCommand) {
-                .key.code = 118, // v
+                .key.code = KEY(v),
                 .is_name = false,
                 .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
             },
+
             [KCMD_FONT_ENLARGE] = (KeyCommand) {
-                .key.code = 61, // equal
+                .key.code = KEY(equal),
                 .is_name = false,
                 .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
             },
+
             [KCMD_FONT_SHRINK] = (KeyCommand) {
-                .key.code = 45, // minus
+                .key.code = KEY(minus),
                 .is_name = false,
                 .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
             },
+
+            [KCMD_LINE_SCROLL_UP] = (KeyCommand) {
+                .key.code = KEY(Up),
+                .is_name = false,
+                .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
+            },
+
+            [KCMD_LINE_SCROLL_DN] = (KeyCommand) {
+                .key.code = KEY(Down),
+                .is_name = false,
+                .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
+            },
+
+            [KCMD_PAGE_SCROLL_UP] = (KeyCommand) {
+                .key.code = KEY(Page_Up),
+                .is_name = false,
+                .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
+            },
+
+            [KCMD_PAGE_SCROLL_DN] = (KeyCommand) {
+                .key.code = KEY(Page_Down),
+                .is_name = false,
+                .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
+            },
+
             [KCMD_KEYBOARD_SELECT] = (KeyCommand) {
-                .key.code = 107, // k
+                .key.code = KEY(k),
                 .is_name = false,
                 .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
             },
+
             [KCMD_DUPLICATE] = (KeyCommand) {
-                .key.code = 100, // d
+                .key.code = KEY(d),
                 .is_name = false,
                 .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
             },
+
             [KCMD_DEBUG] = (KeyCommand) {
-                .key.code = 47, // ?
+                .key.code = KEY(slash),
                 .is_name = false,
                 .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
             },
@@ -1078,14 +1111,7 @@ static void handle_option(const char opt, const int array_index, const char* val
             }
         } break;
 
-        case OPT_BIND_KEY_COPY_IDX:
-        case OPT_BIND_KEY_PASTE_IDX:
-        case OPT_BIND_KEY_ENLARGE_IDX:
-        case OPT_BIND_KEY_SHRINK_IDX:
-        case OPT_BIND_KEY_UNI_IDX:
-        case OPT_BIND_KEY_KSM_IDX:
-        case OPT_BIND_KEY_DEBUG_IDX:
-        case OPT_BIND_KEY_QUIT_IDX: {
+        case OPT_BIND_KEY_COPY_IDX ... OPT_BIND_KEY_QUIT_IDX: {
             // point 'name_start' to after the last '+'
             const char* name_start = value;
             while (*name_start)
@@ -1138,8 +1164,23 @@ static void handle_option(const char opt, const int array_index, const char* val
                 case OPT_BIND_KEY_UNI_IDX:
                     command = &settings.key_commands[KCMD_UNICODE_ENTRY];
                     break;
+                case OPT_BIND_KEY_LN_UP_IDX:
+                    command = &settings.key_commands[KCMD_LINE_SCROLL_UP];
+                    break;
+                case OPT_BIND_KEY_LN_DN_IDX:
+                    command = &settings.key_commands[KCMD_LINE_SCROLL_DN];
+                    break;
+                case OPT_BIND_KEY_PG_UP_IDX:
+                    command = &settings.key_commands[KCMD_PAGE_SCROLL_UP];
+                    break;
+                case OPT_BIND_KEY_PG_DN_IDX:
+                    command = &settings.key_commands[KCMD_PAGE_SCROLL_DN];
+                    break;
                 case OPT_BIND_KEY_KSM_IDX:
                     command = &settings.key_commands[KCMD_KEYBOARD_SELECT];
+                    break;
+                case OPT_BIND_KEY_DUP_IDX:
+                    command = &settings.key_commands[KCMD_DUPLICATE];
                     break;
                 case OPT_BIND_KEY_DEBUG_IDX:
                     command = &settings.key_commands[KCMD_DEBUG];
