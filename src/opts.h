@@ -221,19 +221,22 @@ static struct option long_options[] = {
 #define OPT_DEBUG_PTY_IDX 65
     [OPT_DEBUG_PTY_IDX] = { "debug-pty", no_argument, 0, 'D' },
 
-#define OPT_DEBUG_GFX_IDX 66
+#define OPT_DEBUG_VT_IDX 66
+    [OPT_DEBUG_VT_IDX] = { "debug-vt", no_argument, 0, 0 },
+
+#define OPT_DEBUG_GFX_IDX 67
     [OPT_DEBUG_GFX_IDX] = { "debug-gfx", no_argument, 0, 'G' },
 
-#define OPT_DEBUG_FONT_IDX 67
+#define OPT_DEBUG_FONT_IDX 68
     [OPT_DEBUG_FONT_IDX] = { "debug-font", no_argument, 0, 'F' },
 
-#define OPT_VERSION_IDX 68
+#define OPT_VERSION_IDX 69
     [OPT_VERSION_IDX] = { "version", no_argument, 0, 'v' },
 
-#define OPT_HELP_IDX 69
+#define OPT_HELP_IDX 70
     [OPT_HELP_IDX] = { "help", no_argument, 0, 'h' },
 
-#define OPT_SENTINEL_IDX 70
+#define OPT_SENTINEL_IDX 71
     [OPT_SENTINEL_IDX] = { 0 }
 };
 
@@ -333,6 +336,7 @@ static const char* long_options_descriptions[][2] = {
     [OPT_BIND_KEY_QUIT_IDX]  = { arg_key, "Quit key command" },
 
     [OPT_DEBUG_PTY_IDX]  = { NULL, "Output pty communication to stderr" },
+    [OPT_DEBUG_VT_IDX]   = { NULL, "Slow down the interpreter" },
     [OPT_DEBUG_GFX_IDX]  = { NULL, "Run renderer in debug mode" },
     [OPT_DEBUG_FONT_IDX] = { NULL, "Show font information" },
     [OPT_VERSION_IDX]    = { NULL, "Show version" },

@@ -149,7 +149,8 @@ ssize_t Monitor_read(Monitor* self)
     }
 
     if (self->pollfds[CHILD_FD_IDX].revents & POLLIN) {
-        ssize_t rd = read(self->child_fd, self->input_buffer, sizeof(self->input_buffer));
+        size_t  to_read = unlikely(settings.debug_slow) ? 1 : sizeof(self->input_buffer);
+        ssize_t rd      = read(self->child_fd, self->input_buffer, to_read);
         if (rd < 0) {
             return -1;
         }

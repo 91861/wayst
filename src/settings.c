@@ -747,6 +747,10 @@ static void handle_option(const char opt, const int array_index, const char* val
             settings.debug_pty = true;
             break;
 
+        case OPT_DEBUG_VT_IDX:
+            settings.debug_slow = true;
+            break;
+
         case OPT_DEBUG_GFX_IDX:
             settings.debug_gfx = true;
             break;

@@ -34,8 +34,8 @@ static inline size_t Vt_get_scroll_region_bottom(Vt* self);
 static inline bool   Vt_scroll_region_not_default(Vt* self);
 static void          Vt_alt_buffer_on(Vt* self, bool save_mouse);
 static void          Vt_alt_buffer_off(Vt* self, bool save_mouse);
-static void          Vt_handle_multi_argument_SGR(Vt* self, Vector_char seq);
-static void          Vt_reset_text_attribs(Vt* self);
+static void          Vt_handle_multi_argument_SGR(Vt* self, Vector_char seq, VtRune* opt_target);
+static void          Vt_reset_text_attribs(Vt* self, VtRune* opt_target);
 static void          Vt_carriage_return(Vt* self);
 static void          Vt_clear_right(Vt* self);
 static void          Vt_clear_left(Vt* self);
@@ -124,61 +124,70 @@ static void Vt_grapheme_break(Vt* self)
     self->last_interted  = NULL;
 }
 
-static void Vt_set_fg_color_custom(Vt* self, ColorRGB color)
+static void Vt_set_fg_color_custom(Vt* self, ColorRGB color, VtRune* opt_target)
 {
-    self->parser.char_state.fg_is_palette_entry = false;
-    self->parser.char_state.fg_data.rgb         = color;
+    VtRune* r              = OR(opt_target, &self->parser.char_state);
+    r->fg_is_palette_entry = false;
+    r->fg_data.rgb         = color;
 }
 
-static void Vt_set_fg_color_palette(Vt* self, int16_t index)
+static void Vt_set_fg_color_palette(Vt* self, int16_t index, VtRune* opt_target)
 {
     ASSERT(index >= 0 && index <= 256, "in palette range");
-    self->parser.char_state.fg_is_palette_entry = true;
-    self->parser.char_state.fg_data.index       = index;
+    VtRune* r              = OR(opt_target, &self->parser.char_state);
+    r->fg_is_palette_entry = true;
+    r->fg_data.index       = index;
 }
 
-static void Vt_set_fg_color_default(Vt* self)
+static void Vt_set_fg_color_default(Vt* self, VtRune* opt_target)
 {
-    self->parser.char_state.fg_is_palette_entry = true;
-    self->parser.char_state.fg_data.index       = VT_RUNE_PALETTE_INDEX_TERM_DEFAULT;
+    VtRune* r              = OR(opt_target, &self->parser.char_state);
+    r->fg_is_palette_entry = true;
+    r->fg_data.index       = VT_RUNE_PALETTE_INDEX_TERM_DEFAULT;
 }
 
-static void Vt_set_bg_color_custom(Vt* self, ColorRGBA color)
+static void Vt_set_bg_color_custom(Vt* self, ColorRGBA color, VtRune* opt_target)
 {
-    self->parser.char_state.bg_is_palette_entry = false;
-    self->parser.char_state.bg_data.rgba        = color;
+    VtRune* r              = OR(opt_target, &self->parser.char_state);
+    r->bg_is_palette_entry = false;
+    r->bg_data.rgba        = color;
 }
 
-static void Vt_set_bg_color_palette(Vt* self, int16_t index)
-{
-    ASSERT(index >= 0 && index <= 256, "in palette range");
-    self->parser.char_state.bg_is_palette_entry = true;
-    self->parser.char_state.bg_data.index       = index;
-}
-
-static void Vt_set_bg_color_default(Vt* self)
-{
-    self->parser.char_state.bg_is_palette_entry = true;
-    self->parser.char_state.bg_data.index       = VT_RUNE_PALETTE_INDEX_TERM_DEFAULT;
-}
-
-static void Vt_set_line_color_custom(Vt* self, ColorRGB color)
-{
-    self->parser.char_state.line_color_not_default  = true;
-    self->parser.char_state.ln_clr_is_palette_entry = false;
-    self->parser.char_state.ln_clr_data.rgb         = color;
-}
-
-static void Vt_set_line_color_palette(Vt* self, int16_t index)
+static void Vt_set_bg_color_palette(Vt* self, int16_t index, VtRune* opt_target)
 {
     ASSERT(index >= 0 && index <= 256, "in palette range");
-    self->parser.char_state.ln_clr_is_palette_entry = true;
-    self->parser.char_state.ln_clr_data.index       = index;
+    VtRune* r              = OR(opt_target, &self->parser.char_state);
+    r->bg_is_palette_entry = true;
+    r->bg_data.index       = index;
 }
 
-static void Vt_set_line_color_default(Vt* self)
+static void Vt_set_bg_color_default(Vt* self, VtRune* opt_target)
 {
-    self->parser.char_state.line_color_not_default = false;
+    VtRune* r              = OR(opt_target, &self->parser.char_state);
+    r->bg_is_palette_entry = true;
+    r->bg_data.index       = VT_RUNE_PALETTE_INDEX_TERM_DEFAULT;
+}
+
+static void Vt_set_line_color_custom(Vt* self, ColorRGB color, VtRune* opt_target)
+{
+    VtRune* r                  = OR(opt_target, &self->parser.char_state);
+    r->line_color_not_default  = true;
+    r->ln_clr_is_palette_entry = false;
+    r->ln_clr_data.rgb         = color;
+}
+
+static void Vt_set_line_color_palette(Vt* self, int16_t index, VtRune* opt_target)
+{
+    ASSERT(index >= 0 && index <= 256, "in palette range");
+    VtRune* r                  = OR(opt_target, &self->parser.char_state);
+    r->ln_clr_is_palette_entry = true;
+    r->ln_clr_data.index       = index;
+}
+
+static void Vt_set_line_color_default(Vt* self, VtRune* opt_target)
+{
+    VtRune* r                 = OR(opt_target, &self->parser.char_state);
+    r->line_color_not_default = false;
 }
 
 static ColorRGB Vt_active_fg_color(const Vt* self)
@@ -710,7 +719,8 @@ static Vector_char rune_vec_to_string(Vector_VtRune* line,
         return res;
     }
     res = Vector_new_with_capacity_char(end - begin);
-    char utfbuf[4];
+    char             utfbuf[4];
+    static mbstate_t mbstate;
 
     for (uint32_t i = begin; i < end; ++i) {
         Rune* rune = &line->buf[i].rune;
@@ -720,8 +730,7 @@ static Vector_char rune_vec_to_string(Vector_VtRune* line,
         }
 
         if (rune->code > CHAR_MAX) {
-            static mbstate_t mbstate;
-            size_t           bytes = c32rtomb(utfbuf, rune->code, &mbstate);
+            size_t bytes = c32rtomb(utfbuf, rune->code, &mbstate);
             if (bytes > 0) {
                 Vector_pushv_char(&res, utfbuf, bytes);
             }
@@ -730,7 +739,10 @@ static Vector_char rune_vec_to_string(Vector_VtRune* line,
         }
 
         for (int j = 0; j < VT_RUNE_MAX_COMBINE && rune->combine[j]; ++j) {
-            Vector_push_char(&res, rune->combine[j]);
+            size_t bytes = c32rtomb(utfbuf, rune->combine[j], &mbstate);
+            if (bytes > 0) {
+                Vector_pushv_char(&res, utfbuf, bytes);
+            }
         }
     }
     if (tail) {
@@ -1248,7 +1260,7 @@ void Vt_init(Vt* self, uint32_t cols, uint32_t rows)
     self->colors.highlight.bg = settings.bghl;
     self->colors.highlight.fg = settings.fghl;
 
-    Vt_reset_text_attribs(self);
+    Vt_reset_text_attribs(self, NULL);
 
     memcpy(&self->blank_space, &self->parser.char_state, sizeof(VtRune));
 
@@ -1283,7 +1295,7 @@ void Vt_init(Vt* self, uint32_t cols, uint32_t rows)
 static void Vt_init_tab_ruler(Vt* self)
 {
     free(self->tab_ruler);
-    self->tab_ruler = calloc(1, Vt_col(self));
+    self->tab_ruler = calloc(1, Vt_col(self) + 1);
     Vt_reset_tab_ruler(self);
 }
 
@@ -1772,10 +1784,73 @@ void Vt_resize(Vt* self, uint32_t x, uint32_t y)
     Vt_init_tab_ruler(self);
 }
 
-__attribute__((always_inline, flatten)) static inline int32_t short_sequence_get_int_argument(
-  const char* seq)
+static inline int32_t short_sequence_get_int_argument(const char* seq)
 {
     return *seq == 0 || seq[1] == 0 ? 1 : atoi(seq);
+}
+
+/*
+ * value:
+ * 0 => not recognized
+ * 1 => enabled
+ * 2 => disabled
+ * 3 => permanently enabled
+ * 4 => permanently disabled
+ */
+static inline void Vt_report_dec_mode(Vt* self, int code)
+{
+    bool value;
+    switch (code) {
+        case 1:
+            value = self->modes.application_keypad_cursor;
+            break;
+        case 7:
+            value = self->modes.no_auto_wrap;
+            break;
+        case 8:
+            value = self->modes.auto_repeat;
+            break;
+        case 25:
+            value = self->cursor.hidden;
+            break;
+        case 1000:
+            value = self->modes.mouse_btn_report;
+            break;
+        case 1002:
+            value = self->modes.mouse_motion_on_btn_report;
+            break;
+        case 1003:
+            value = self->modes.mouse_motion_report;
+            break;
+        case 1004:
+            value = self->modes.window_focus_events_report;
+            break;
+        case 1006:
+            value = self->modes.extended_report;
+            break;
+        case 1037:
+            value = self->modes.del_sends_del;
+            break;
+        case 1039:
+            value = self->modes.no_alt_sends_esc;
+            break;
+        case 1042:
+            value = self->modes.urgency_on_bell;
+            break;
+        case 1043:
+            value = self->modes.pop_on_bell;
+            break;
+        case 47:
+        case 1047:
+        case 1049:
+            value = Vt_alt_buffer_enabled(self);
+            break;
+        default: {
+            Vt_output_formated(self, "\e[%d;0$y", code);
+            return;
+        }
+    }
+    Vt_output_formated(self, "\e[%d;%c$y", code, value ? '1' : '2');
 }
 
 static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
@@ -1801,6 +1876,12 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
          * maximum of 132 columns on the screen.
          */
         case 3:
+            WRN("DECCOLM not implemented\n");
+            break;
+
+        /* Smooth (Slow) Scroll (DECSCLM), VT100. */
+        case 4:
+            WRN("DECSCLM not implemented\n");
             break;
 
         /* Reverse video (DECSCNM) */
@@ -1808,11 +1889,10 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
             // TODO:
             break;
 
-        /* DSR—Extended Cursor Position Report (DECXCPR) */
-        case 6:
-            // TODO:
-            WRN("DECXCPR not implemented\n");
-            break;
+        /* Origin mode (DECCOM) */
+        case 6: {
+            WRN("DECCOM not implemented\n");
+        } break;
 
         /* DECAWM */
         case 7:
@@ -1844,7 +1924,19 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
 
         /* hide/show cursor (DECTCEM) */
         case 25:
-            self->cursor.hidden = !on;
+            if (likely(!settings.debug_slow)) {
+                self->cursor.hidden = !on;
+            }
+            break;
+
+        /* Allow 80 => 132 Mode, xterm */
+        case 40:
+            self->modes.allow_column_size_switching = on;
+            break;
+
+        /* Reverse-wraparound Mode, xterm. */
+        case 45:
+            self->modes.reverse_wraparound = on;
             break;
 
         /* Page cursor-coupling mode (DECPCCM) */
@@ -2067,14 +2159,41 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                 /* <ESC>[? Ps n Device Status Report (DSR, DEC-specific) */
                             case 'n': {
                                 int arg = short_sequence_get_int_argument(seq);
-                                /* 6 - report cursor position */
-                                if (arg == 6) {
-                                    Vt_output_formated(self,
-                                                       "\e[%zu;%zuR",
-                                                       Vt_get_cursor_row_screen(self) + 1,
-                                                       self->cursor.col + 1);
-                                } else {
-                                    WRN("Unimplemented DSR(DEC) code: %d\n", arg);
+                                switch (arg) {
+                                    case 6: { /* report cursor position */
+                                        Vt_output_formated(self,
+                                                           "\e[?%zu;%zuR",
+                                                           Vt_get_cursor_row_screen(self) + 1,
+                                                           self->cursor.col + 1);
+                                    } break;
+
+                                    case 15: /* Report Printer status */
+                                             /* not ready */
+                                        Vt_output(self, "\e[?11n", 6);
+                                        break;
+
+                                    case 26: /* Report keyboard status */
+                                             /* always report US */
+                                        Vt_output(self, "\e[?27;1;0;0n", 12);
+                                        break;
+
+                                    case 53: /* Report locator status */
+                                             /* No locator (xterm not compiled-in) */
+                                        Vt_output(self, "\e[?50n", 6);
+                                        break;
+
+                                    case 56: /* Report locator type */
+                                             /* Cannot identify (xterm not compiled-in) */
+                                        Vt_output(self, "\e[?57;0n", 8);
+                                        break;
+
+                                    case 85: /* Report multi-session configuration */
+                                        /* Device not configured for multi-session operation */
+                                        Vt_output(self, "\e[?83n", 6);
+                                        break;
+
+                                    default:
+                                        WRN("Unimplemented DSR sequence: %d\n", arg);
                                 }
                             } break;
 
@@ -2518,11 +2637,20 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                     case '$':
                         switch (last_char) {
 
-                            /* <ESC>[ Ps $p - Request ANSI mode (DECRQM). VT300 and up */
+                            /* <ESC>[ Ps $p - Request ANSI mode (DECRQM). VT300 and up
+                             *
+                             * reply: CSI ? <DECSET/DECRT code>; <value> $ y
+                             *
+                             * value:
+                             * 0 => not recognized
+                             * 1 => enabled
+                             * 2 => disabled
+                             * 3 => permanently enabled
+                             * 4 => permanently disabled
+                             */
                             case 'p': {
-                                // TODO:
-                                /* Not recognized */
-                                Vt_output(self, "\e[0$p", 5);
+                                int arg = short_sequence_get_int_argument(seq);
+                                Vt_report_dec_mode(self, arg);
                             } break;
 
                             /* <ESC>[ Pt ; Pl ; Pb ; Pr ; Ps $r - Change Attributes in Rectangular
@@ -2532,6 +2660,12 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                              * Ps denotes the SGR attributes to change: 0, 1, 4, 5, 7
                              */
                             case 'r': {
+                                Vector_pop_n_char(&self->parser.active_sequence, 2); // 'm', '\0'
+                                Vector_push_char(&self->parser.active_sequence, '\0');
+
+                                char*    seq_start = self->parser.active_sequence.buf;
+                                uint16_t top, left, bottom, right;
+
                                 WRN("DECCARA not implemented\n");
                             } break;
 
@@ -2602,7 +2736,9 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                             case 'm': {
                                 Vector_pop_n_char(&self->parser.active_sequence, 2); // 'm', '\0'
                                 Vector_push_char(&self->parser.active_sequence, '\0');
-                                Vt_handle_multi_argument_SGR(self, self->parser.active_sequence);
+                                Vt_handle_multi_argument_SGR(self,
+                                                             self->parser.active_sequence,
+                                                             NULL);
                             } break;
 
                             /* <ESC>[ Ps K - clear(erase) line right of cursor (EL)
@@ -2614,12 +2750,12 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                     case 0:
                                         Vt_clear_right(self);
                                         break;
-
-                                    case 2:
-                                        Vt_clear_right(self);
-                                        /* fallthrough */
                                     case 1:
                                         Vt_clear_left(self);
+                                        break;
+                                    case 2:
+                                        Vt_clear_left(self);
+                                        Vt_clear_right(self);
                                         break;
 
                                     default:
@@ -2642,6 +2778,8 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                             case 'C': {
                                 MULTI_ARG_IS_ERROR
                                 int arg = short_sequence_get_int_argument(seq);
+                                if (arg <= 0)
+                                    arg = 1;
                                 for (int i = 0; i < arg; ++i)
                                     Vt_cursor_right(self);
                             } break;
@@ -2650,6 +2788,8 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                             case 'L': {
                                 MULTI_ARG_IS_ERROR
                                 int arg = short_sequence_get_int_argument(seq);
+                                if (arg <= 0)
+                                    arg = 1;
                                 for (int i = 0; i < arg; ++i)
                                     Vt_insert_line(self);
                             } break;
@@ -2658,6 +2798,8 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                             case 'D': {
                                 MULTI_ARG_IS_ERROR
                                 int arg = short_sequence_get_int_argument(seq);
+                                if (arg <= 0)
+                                    arg = 1;
                                 for (int i = 0; i < arg; ++i)
                                     Vt_cursor_left(self);
                             } break;
@@ -2666,6 +2808,8 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                             case 'A': {
                                 MULTI_ARG_IS_ERROR
                                 int arg = short_sequence_get_int_argument(seq);
+                                if (arg <= 0)
+                                    arg = 1;
                                 for (int i = 0; i < arg; ++i)
                                     Vt_cursor_up(self);
                             } break;
@@ -2676,6 +2820,8 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                             case 'B': {
                                 MULTI_ARG_IS_ERROR
                                 int arg = short_sequence_get_int_argument(seq);
+                                if (arg <= 0)
+                                    arg = 1;
                                 for (int i = 0; i < arg; ++i)
                                     Vt_cursor_down(self);
                             } break;
@@ -2685,8 +2831,10 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                             /* <ESC>[ Ps G - move cursor to column Ps (CHA)*/
                             case 'G': {
                                 MULTI_ARG_IS_ERROR
-                                Vt_move_cursor_to_column(self,
-                                                         short_sequence_get_int_argument(seq) - 1);
+                                int arg = short_sequence_get_int_argument(seq);
+                                if (arg <= 0)
+                                    arg = 1;
+                                Vt_move_cursor_to_column(self, arg - 1);
                             } break;
 
                             /* <ESC>[ Ps J - Erase display (ED) - clear... */
@@ -2697,11 +2845,17 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                 else {
                                     int arg = short_sequence_get_int_argument(seq);
                                     switch (arg) {
+                                        case 0:
+                                            Vt_erase_to_end(self);
+                                            break;
+
                                         case 1: /* ...from start to cursor */
-                                            if (Vt_scroll_region_not_default(self)) {
+                                            if (Vt_scroll_region_not_default(self) ||
+                                                Vt_alt_buffer_enabled(self)) {
                                                 Vt_clear_above(self);
                                             } else {
-                                                Vt_scroll_out_above(self);
+                                                Vt_clear_above(self);
+                                                // Vt_scroll_out_above(self);
                                             }
                                             break;
 
@@ -2709,7 +2863,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                             /* if (settings.allow_scrollback_clear) { */
                                             /*     Vt_clear_display_and_scrollback(self); */
                                             /* } */
-                                            break;
+                                            /* break; */
 
                                         case 2: /* ...whole display. Contents should not
                                                  * actually be removed, but saved to scroll
@@ -2733,21 +2887,26 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                             case 'd': {
                                 MULTI_ARG_IS_ERROR
                                 /* origin is 1:1 */
-                                Vt_move_cursor(self,
-                                               self->cursor.col,
-                                               short_sequence_get_int_argument(seq) - 1);
+                                int arg = short_sequence_get_int_argument(seq);
+                                if (arg <= 0)
+                                    arg = 1;
+                                Vt_move_cursor(self, self->cursor.col, arg - 1);
                             } break;
 
                             /* <ESC>[ Ps ; Ps r - Set scroll region (top;bottom) (DECSTBM)
                              * default: full window */
                             case 'r': {
-                                uint32_t top, bottom;
+                                int32_t top, bottom;
 
                                 if (*seq != 'r') {
-                                    if (sscanf(seq, "%u;%u", &top, &bottom) == EOF) {
+                                    if (sscanf(seq, "%d;%d", &top, &bottom) == EOF) {
                                         WRN("invalid CSI(DECSTBM) sequence %s\n", seq);
                                         break;
                                     }
+                                    if (top <= 0)
+                                        top = 1;
+                                    if (bottom <= 0)
+                                        bottom = 1;
                                     --top;
                                     --bottom;
                                 } else {
@@ -2766,6 +2925,8 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                             case 'I': {
                                 MULTI_ARG_IS_ERROR
                                 int arg = short_sequence_get_int_argument(seq);
+                                if (arg <= 0)
+                                    arg = 1;
                                 while (self->cursor.col < Vt_col(self) && arg) {
                                     if (self->tab_ruler[self->cursor.col]) {
                                         --arg;
@@ -2808,11 +2969,15 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                             case 'f':
                             /* <ESC>[ Py ; Px H - move cursor to Px-Py (CUP) */
                             case 'H': {
-                                uint32_t x = 1, y = 1;
-                                if (*seq != 'H' && sscanf(seq, "%u;%u", &y, &x) == EOF) {
+                                int32_t x = 1, y = 1;
+                                if (*seq != 'H' && sscanf(seq, "%d;%d", &y, &x) == EOF) {
                                     WRN("invalid CUP/HVP sequence %s\n", seq);
                                     break;
                                 }
+                                if (x <= 0)
+                                    x = 1;
+                                if (y <= 0)
+                                    y = 1;
                                 --x;
                                 --y;
                                 Vt_move_cursor(self, x, y);
@@ -2847,6 +3012,8 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                             case 'M': {
                                 MULTI_ARG_IS_ERROR
                                 int arg = short_sequence_get_int_argument(seq);
+                                if (arg <= 0)
+                                    arg = 1;
                                 for (int i = 0; i < arg; ++i)
                                     Vt_delete_line(self);
                             } break;
@@ -2855,6 +3022,8 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                             case 'S': {
                                 MULTI_ARG_IS_ERROR
                                 int arg = short_sequence_get_int_argument(seq);
+                                if (arg <= 0)
+                                    arg = 1;
                                 for (int i = 0; i < arg; ++i)
                                     Vt_scroll_up(self);
                             } break;
@@ -2863,21 +3032,29 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                             case 'T': {
                                 MULTI_ARG_IS_ERROR
                                 int arg = short_sequence_get_int_argument(seq);
+                                if (arg <= 0)
+                                    arg = 1;
                                 for (int i = 0; i < arg; ++i)
                                     Vt_scroll_down(self);
                             } break;
 
-                            /* <ESC>[ Ps X - Erase Ps Character(s) (default = 1) (ECH) */
-                            case 'X':
+                                /* <ESC>[ Ps X - Erase Ps Character(s) (default = 1) (ECH) */
+                            case 'X': {
                                 MULTI_ARG_IS_ERROR
-                                Vt_erase_chars(self, short_sequence_get_int_argument(seq));
-                                break;
+                                int arg = short_sequence_get_int_argument(seq);
+                                if (arg <= 0)
+                                    arg = 1;
+                                Vt_erase_chars(self, arg);
+                            } break;
 
-                            /* <ESC>[ Ps P - Delete Ps Character(s) (default = 1) (DCH) */
-                            case 'P':
+                                /* <ESC>[ Ps P - Delete Ps Character(s) (default = 1) (DCH) */
+                            case 'P': {
                                 MULTI_ARG_IS_ERROR
-                                Vt_delete_chars(self, short_sequence_get_int_argument(seq));
-                                break;
+                                int arg = short_sequence_get_int_argument(seq);
+                                if (arg <= 0)
+                                    arg = 1;
+                                Vt_delete_chars(self, arg);
+                            } break;
 
                             /* <ESC>[ Ps b -  Repeat the preceding graphic character Ps times (REP)
                              * in xterm any cursor movement or SGR sequences after inserting the
@@ -2886,6 +3063,8 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                 MULTI_ARG_IS_ERROR
                                 if (likely(self->last_interted)) {
                                     int arg = short_sequence_get_int_argument(seq);
+                                    if (arg <= 0)
+                                        arg = 1;
                                     for (int i = 0; i < arg; ++i) {
                                         Vt_insert_char_at_cursor(self, *self->last_interted);
                                     }
@@ -3256,9 +3435,8 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
             }
         } // end switch (first_char)
 
-        Vector_destroy_char(&self->parser.active_sequence);
-        self->parser.active_sequence = Vector_new_char();
-        self->parser.state           = PARSER_STATE_LITERAL;
+        Vector_clear_char(&self->parser.active_sequence);
+        self->parser.state = PARSER_STATE_LITERAL;
     }
 }
 
@@ -3309,15 +3487,19 @@ static bool Vt_alt_buffer_enabled(Vt* self)
 
 /**
  * Interpret a single argument SGR command */
-__attribute__((hot)) static void Vt_handle_single_argument_SGR(Vt* self, char* command)
+__attribute__((hot)) static void Vt_handle_single_argument_SGR(Vt*     self,
+                                                               char*   command,
+                                                               VtRune* opt_target)
 {
     int cmd = *command ? atoi(command) : 0;
 
+    VtRune* r = OR(opt_target, &self->parser.char_state);
+
 #define MAYBE_DISABLE_ALL_UNDERLINES                                                               \
     if (!settings.allow_multiple_underlines) {                                                     \
-        self->parser.char_state.underlined      = false;                                           \
-        self->parser.char_state.doubleunderline = false;                                           \
-        self->parser.char_state.curlyunderline  = false;                                           \
+        r->underlined      = false;                                                                \
+        r->doubleunderline = false;                                                                \
+        r->curlyunderline  = false;                                                                \
     }
 
     switch (cmd) {
@@ -3325,60 +3507,60 @@ __attribute__((hot)) static void Vt_handle_single_argument_SGR(Vt* self, char* c
 
         /* Normal (default) */
         case 0:
-            Vt_reset_text_attribs(self);
+            Vt_reset_text_attribs(self, opt_target);
             break;
 
         /* Bold, VT100 */
         case 1:
-            if (self->parser.char_state.rune.style == VT_RUNE_ITALIC) {
-                self->parser.char_state.rune.style = VT_RUNE_BOLD_ITALIC;
+            if (r->rune.style == VT_RUNE_ITALIC) {
+                r->rune.style = VT_RUNE_BOLD_ITALIC;
             } else {
-                self->parser.char_state.rune.style = VT_RUNE_BOLD;
+                r->rune.style = VT_RUNE_BOLD;
             }
             break;
 
         /* Faint/dim/decreased intensity, ECMA-48 2nd */
         case 2:
-            self->parser.char_state.dim = true;
+            r->dim = true;
             break;
 
         /* Italicized, ECMA-48 2nd */
         case 3:
-            if (self->parser.char_state.rune.style == VT_RUNE_BOLD) {
-                self->parser.char_state.rune.style = VT_RUNE_BOLD_ITALIC;
+            if (r->rune.style == VT_RUNE_BOLD) {
+                r->rune.style = VT_RUNE_BOLD_ITALIC;
             } else {
-                self->parser.char_state.rune.style = VT_RUNE_ITALIC;
+                r->rune.style = VT_RUNE_ITALIC;
             }
             break;
 
         /* Underlined */
         case 4:
             MAYBE_DISABLE_ALL_UNDERLINES
-            self->parser.char_state.underlined = true;
+            r->underlined = true;
             break;
 
         /* Slow (less than 150 per minute) blink */
         case 5:
         /* Fast blink (MS-DOS) (most terminals that implement this use the same speed) */
         case 6:
-            self->parser.char_state.blinkng = true;
+            r->blinkng = true;
             break;
 
         /* Inverse
          * There is no clear definition of what this should actually do, but reversing all colors,
          * after bg and fg were determined, seems to be the widely accepted behavior. */
         case 7:
-            self->parser.char_state.invert = true;
+            r->invert = true;
             break;
 
         /* Invisible, i.e., hidden, ECMA-48 2nd, VT300 */
         case 8:
-            self->parser.char_state.hidden = true;
+            r->hidden = true;
             break;
 
         /* Crossed-out characters, ECMA-48 3rd */
         case 9:
-            self->parser.char_state.strikethrough = true;
+            r->strikethrough = true;
             break;
 
         /* Fraktur (not widely supported) */
@@ -3388,7 +3570,7 @@ __attribute__((hot)) static void Vt_handle_single_argument_SGR(Vt* self, char* c
         /* Doubly-underlined, ECMA-48 3rd */
         case 21:
             MAYBE_DISABLE_ALL_UNDERLINES
-            self->parser.char_state.doubleunderline = true;
+            r->doubleunderline = true;
             break;
 
         /* Framed (not widely supported) */
@@ -3401,7 +3583,7 @@ __attribute__((hot)) static void Vt_handle_single_argument_SGR(Vt* self, char* c
 
         /* Overlined (widely supported extension) */
         case 53:
-            self->parser.char_state.overline = true;
+            r->overline = true;
             break;
 
             /* Superscript (non-standard extension) */
@@ -3425,62 +3607,61 @@ __attribute__((hot)) static void Vt_handle_single_argument_SGR(Vt* self, char* c
          * terminals started representing 'bright' characters as bold instead of changing the color.
          */
         case 22:
-            if (self->parser.char_state.rune.style == VT_RUNE_BOLD_ITALIC) {
-                self->parser.char_state.rune.style = VT_RUNE_ITALIC;
-            } else if (self->parser.char_state.rune.style == VT_RUNE_BOLD) {
-                self->parser.char_state.rune.style = VT_RUNE_NORMAL;
+            if (r->rune.style == VT_RUNE_BOLD_ITALIC) {
+                r->rune.style = VT_RUNE_ITALIC;
+            } else if (r->rune.style == VT_RUNE_BOLD) {
+                r->rune.style = VT_RUNE_NORMAL;
             }
-
-            self->parser.char_state.dim = false;
+            r->dim = false;
             break;
 
         /* Not italicized, ECMA-48 3rd */
         case 23:
-            if (self->parser.char_state.rune.style == VT_RUNE_BOLD_ITALIC) {
-                self->parser.char_state.rune.style = VT_RUNE_BOLD;
-            } else if (self->parser.char_state.rune.style == VT_RUNE_ITALIC) {
-                self->parser.char_state.rune.style = VT_RUNE_NORMAL;
+            if (r->rune.style == VT_RUNE_BOLD_ITALIC) {
+                r->rune.style = VT_RUNE_BOLD;
+            } else if (r->rune.style == VT_RUNE_ITALIC) {
+                r->rune.style = VT_RUNE_NORMAL;
             }
             break;
 
         /*  Not underlined, ECMA-48 3rd */
         case 24:
-            self->parser.char_state.underlined = false;
+            r->underlined = false;
             break;
 
         /* Steady (not blinking), ECMA-48 3rd */
         case 25:
-            self->parser.char_state.blinkng = false;
+            r->blinkng = false;
             break;
 
         /* Positive (not inverse), ECMA-48 3rd */
         case 27:
-            self->parser.char_state.invert = false;
+            r->invert = false;
             break;
 
         /* Visible (not hidden), ECMA-48 3rd, VT300 */
         case 28:
-            self->parser.char_state.hidden = false;
+            r->hidden = false;
             break;
 
         /* Not crossed-out, ECMA-48 3rd */
         case 29:
-            self->parser.char_state.strikethrough = false;
+            r->strikethrough = false;
             break;
 
         /* Set foreground color to default, ECMA-48 3rd */
         case 39:
-            Vt_set_fg_color_default(self);
+            Vt_set_fg_color_default(self, opt_target);
             break;
 
         /* Set background color to default, ECMA-48 3rd */
         case 49:
-            Vt_set_bg_color_default(self);
+            Vt_set_bg_color_default(self, opt_target);
             break;
 
         /* Set underline color to default (widely supported extension) */
         case 59:
-            self->parser.char_state.line_color_not_default = false;
+            r->line_color_not_default = false;
             break;
 
             /* Disable all ideogram attributes */
@@ -3488,19 +3669,19 @@ __attribute__((hot)) static void Vt_handle_single_argument_SGR(Vt* self, char* c
             /*     break; */
 
         case 30 ... 37:
-            Vt_set_fg_color_palette(self, cmd - 30);
+            Vt_set_fg_color_palette(self, cmd - 30, opt_target);
             break;
 
         case 40 ... 47:
-            Vt_set_bg_color_palette(self, cmd - 40);
+            Vt_set_bg_color_palette(self, cmd - 40, opt_target);
             break;
 
         case 90 ... 97:
-            Vt_set_fg_color_palette(self, cmd - 82);
+            Vt_set_fg_color_palette(self, cmd - 82, opt_target);
             break;
 
         case 100 ... 107:
-            Vt_set_bg_color_palette(self, cmd - 92);
+            Vt_set_bg_color_palette(self, cmd - 92, opt_target);
             break;
 
         default:
@@ -3515,7 +3696,7 @@ __attribute__((hot)) static void Vt_handle_single_argument_SGR(Vt* self, char* c
  * 'arguments'. 'Commands' may be combined into a single sequence. A ';' without any text should be
  * interpreted as a 0 (CSI ; 3 m == CSI 0 ; 3 m), but ':' should not
  * (CSI 58:2::130:110:255 m == CSI 58:2:130:110:255 m)" */
-static void Vt_handle_multi_argument_SGR(Vt* self, Vector_char seq)
+static void Vt_handle_multi_argument_SGR(Vt* self, Vector_char seq, VtRune* opt_target)
 {
     Vector_Vector_char tokens = string_split_on(seq.buf, ";", ":", NULL);
     for (Vector_char* token = NULL; (token = Vector_iter_Vector_char(&tokens, token));) {
@@ -3533,11 +3714,11 @@ static void Vt_handle_multi_argument_SGR(Vt* self, Vector_char seq)
                     /* from 256 palette (one argument) */
                     uint32_t idx = MIN(atoi(args[2]->buf + 1), 255);
                     if (args[0]->buf[1] == '3') {
-                        Vt_set_fg_color_palette(self, idx);
+                        Vt_set_fg_color_palette(self, idx, opt_target);
                     } else if (args[0]->buf[1] == '4') {
-                        Vt_set_bg_color_palette(self, idx);
+                        Vt_set_bg_color_palette(self, idx, opt_target);
                     } else if (args[0]->buf[1] == '5') {
-                        Vt_set_line_color_palette(self, idx);
+                        Vt_set_line_color_palette(self, idx, opt_target);
                     }
                 } else if (!strcmp(args[1]->buf + 1, "2")) {
                     /* sent as 24-bit rgb (three arguments) */
@@ -3549,13 +3730,13 @@ static void Vt_handle_multi_argument_SGR(Vt* self, Vector_char seq)
 
                         if (args[0]->buf[1] == '3') {
                             ColorRGB clr = { .r = c[0], .g = c[1], .b = c[2] };
-                            Vt_set_fg_color_custom(self, clr);
+                            Vt_set_fg_color_custom(self, clr, opt_target);
                         } else if (args[0]->buf[1] == '4') {
                             ColorRGBA clr = { .r = c[0], .g = c[1], .b = c[2], .a = 255 };
-                            Vt_set_bg_color_custom(self, clr);
+                            Vt_set_bg_color_custom(self, clr, opt_target);
                         } else if (args[0]->buf[1] == '5') {
                             ColorRGB clr = { .r = c[0], .g = c[1], .b = c[2] };
-                            Vt_set_line_color_custom(self, clr);
+                            Vt_set_line_color_custom(self, clr, opt_target);
                         }
                     }
                 }
@@ -3565,21 +3746,22 @@ static void Vt_handle_multi_argument_SGR(Vt* self, Vector_char seq)
             if ((args[1] = (token = Vector_iter_Vector_char(&tokens, token)))) {
                 /* enable this only on "4:3" not "4;3" */
                 if (!strcmp(args[1]->buf, ":3")) {
+                    VtRune* r = OR(opt_target, &self->parser.char_state);
                     if (!settings.allow_multiple_underlines) {
-                        self->parser.char_state.underlined      = false;
-                        self->parser.char_state.doubleunderline = false;
+                        r->underlined      = false;
+                        r->doubleunderline = false;
                     }
-                    self->parser.char_state.curlyunderline = true;
+                    r->curlyunderline = true;
                 } else {
-                    Vt_handle_single_argument_SGR(self, args[0]->buf + 1);
+                    Vt_handle_single_argument_SGR(self, args[0]->buf + 1, opt_target);
                     token = Vector_iter_back_Vector_char(&tokens, token);
                 }
             } else {
-                Vt_handle_single_argument_SGR(self, args[0]->buf + 1);
+                Vt_handle_single_argument_SGR(self, args[0]->buf + 1, opt_target);
                 break; // end of sequence
             }
         } else {
-            Vt_handle_single_argument_SGR(self, token->buf + 1);
+            Vt_handle_single_argument_SGR(self, token->buf + 1, opt_target);
         }
     }
     Vector_destroy_Vector_char(&tokens);
@@ -3837,7 +4019,7 @@ static void Vt_handle_OSC(Vt* self, char c)
                         /* VT100 text foreground color */
                         case 10: {
                             Vt_output_formated(self,
-                                               "\e]%d;rgb:%3d/%3d/%3d\a",
+                                               "\e]%u;rgb:%3u/%3u/%3u\a",
                                                arg,
                                                self->colors.fg.r,
                                                self->colors.fg.g,
@@ -3847,7 +4029,7 @@ static void Vt_handle_OSC(Vt* self, char c)
                         /* VT100 text background color */
                         case 11: {
                             Vt_output_formated(self,
-                                               "\e]%d;rgb:%3d/%3d/%3d\a",
+                                               "\e]%u;rgb:%3u/%3u/%3u\a",
                                                arg,
                                                self->colors.bg.r,
                                                self->colors.bg.g,
@@ -3857,7 +4039,7 @@ static void Vt_handle_OSC(Vt* self, char c)
                         /* highlight background color */
                         case 17: {
                             Vt_output_formated(self,
-                                               "\e]%d;rgb:%3d/%3d/%3d\a",
+                                               "\e]%u;rgb:%3u/%3u/%3u\a",
                                                arg,
                                                self->colors.highlight.bg.r,
                                                self->colors.highlight.bg.g,
@@ -3867,7 +4049,7 @@ static void Vt_handle_OSC(Vt* self, char c)
                         /* highlight foreground color */
                         case 19: {
                             Vt_output_formated(self,
-                                               "\e]%d;rgb:%3d/%3d/%3d\a",
+                                               "\e]%u;rgb:%3u/%3u/%3u\a",
                                                arg,
                                                self->colors.highlight.fg.r,
                                                self->colors.highlight.fg.g,
@@ -4062,13 +4244,16 @@ static void Vt_pop_title(Vt* self)
     }
 }
 
-static void Vt_reset_text_attribs(Vt* self)
+static void Vt_reset_text_attribs(Vt* self, VtRune* opt_target)
 {
-    memset(&self->parser.char_state, 0, sizeof(self->parser.char_state));
-    self->parser.char_state.rune.code = ' ';
-    Vt_set_bg_color_default(self);
-    Vt_set_fg_color_default(self);
-    Vt_set_line_color_default(self);
+    VtRune* r       = OR(opt_target, &self->parser.char_state);
+    Rune    oldrune = r->rune;
+    memset(r, 0, sizeof(self->parser.char_state));
+    r->rune       = oldrune;
+    r->rune.style = VT_RUNE_NORMAL;
+    Vt_set_bg_color_default(self, opt_target);
+    Vt_set_fg_color_default(self, opt_target);
+    Vt_set_line_color_default(self, opt_target);
 }
 
 /**
@@ -4175,6 +4360,9 @@ static inline void Vt_cursor_left(Vt* self)
     self->last_interted = NULL;
     if (self->cursor.col) {
         --self->cursor.col;
+    } else if (self->modes.reverse_wraparound) {
+        Vt_cursor_up(self);
+        self->cursor.col = Vt_col(self);
     }
     CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
 }
@@ -4184,7 +4372,8 @@ static inline void Vt_cursor_left(Vt* self)
 static inline void Vt_cursor_right(Vt* self)
 {
     self->last_interted = NULL;
-    if (self->cursor.col < Vt_col(self)) {
+    /* The cursor should be able to move one past last column */
+    if (self->cursor.col + 1 < Vt_col(self)) {
         ++self->cursor.col;
     }
     CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
@@ -4239,7 +4428,7 @@ static void Vt_delete_chars(Vt* self, size_t n)
      * before scolling so we get the expected result, when we... */
     VtRune tmp = self->parser.char_state;
 
-    Vt_reset_text_attribs(self);
+    Vt_reset_text_attribs(self, NULL);
 
     if (Vt_cursor_line(self)->data.size >= 2) {
         self->parser.char_state.bg_data =
@@ -4248,7 +4437,7 @@ static void Vt_delete_chars(Vt* self, size_t n)
         self->parser.char_state.bg_is_palette_entry =
           Vt_cursor_line(self)->data.buf[Vt_cursor_line(self)->data.size - 2].bg_is_palette_entry;
     } else {
-        Vt_set_bg_color_default(self);
+        Vt_set_bg_color_default(self, NULL);
     }
 
     for (uint16_t i = Vt_cursor_line(self)->data.size - 1; i < Vt_col(self); ++i) {
@@ -4299,12 +4488,12 @@ static inline void Vt_scroll_out_all_content(Vt* self)
 static inline void Vt_scroll_out_above(Vt* self)
 {
     size_t to_add = Vt_get_cursor_row_screen(self);
-    for (size_t i = 0; i < to_add; ++i) {
-        Vector_push_VtLine(&self->lines, VtLine_new());
-        Vt_empty_line_fill_bg(self, self->lines.size - 1);
+    for (size_t i = 0; i <= to_add; ++i) {
+        size_t insert_point = self->cursor.row;
+        Vector_insert_at_VtLine(&self->lines, insert_point, VtLine_new());
+        Vt_empty_line_fill_bg(self, insert_point);
+        ++self->cursor.row;
     }
-
-    self->cursor.row += to_add;
 }
 
 static inline void Vt_clear_above(Vt* self)
@@ -4335,12 +4524,15 @@ static inline void Vt_clear_display_and_scrollback(Vt* self)
  * attributes are set */
 static inline void Vt_clear_left(Vt* self)
 {
+    size_t to_add = 0;
+    if (self->cursor.col >= Vt_cursor_line(self)->data.size) {
+        to_add = self->cursor.col - Vt_cursor_line(self)->data.size;
+    }
+    for (size_t i = 0; i < to_add; ++i) {
+        Vector_push_VtRune(&Vt_cursor_line(self)->data, self->parser.char_state);
+    }
     for (size_t i = 0; i <= self->cursor.col; ++i) {
-        if (i < Vt_cursor_line(self)->data.size) {
-            Vt_cursor_line(self)->data.buf[i] = self->parser.char_state;
-        } else {
-            Vector_push_VtRune(&Vt_cursor_line(self)->data, self->parser.char_state);
-        }
+        Vt_cursor_line(self)->data.buf[i] = self->parser.char_state;
     }
     Vt_mark_proxy_fully_damaged(self, self->cursor.row);
 }
@@ -4358,6 +4550,15 @@ static inline void Vt_clear_right(Vt* self)
         }
     }
     Vt_mark_proxy_fully_damaged(self, self->cursor.row);
+}
+
+static void Vt_overwrite_char_at(Vt* self, size_t column, size_t row, VtRune c)
+{
+    VtLine* line = Vt_line_at(self, row);
+    while (line->data.size <= column) {
+        Vector_push_VtRune(&line->data, self->blank_space);
+    }
+    line->data.buf[column] = c;
 }
 
 /**
@@ -4648,7 +4849,7 @@ __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_litera
 
             case '\t': {
                 Vt_grapheme_break(self);
-                while (self->cursor.col < Vt_col(self)) {
+                while (self->cursor.col + 1 < Vt_col(self)) {
                     Vt_cursor_right(self);
                     if (self->tab_ruler[self->cursor.col]) {
                         break;
@@ -4731,6 +4932,10 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
                 case 'D':
                     Vt_insert_new_line(self);
                     self->parser.state = PARSER_STATE_LITERAL;
+                    return;
+
+                case '#':
+                    self->parser.state = PARSER_STATE_DEC_SPECIAL;
                     return;
 
                 /* Set tab stop at current column (HTS) */
@@ -5024,6 +5229,25 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
 
         case PARSER_STATE_APC:
             Vt_handle_APC(self, c);
+            break;
+
+        case PARSER_STATE_DEC_SPECIAL:
+            switch (c) {
+                /* DEC Screen Alignment Test (DECALN), VT100. */
+                case '8': {
+                    VtRune blank_E    = self->blank_space;
+                    blank_E.rune.code = 'E';
+                    for (size_t cl = 0; cl < Vt_col(self); ++cl) {
+                        for (size_t r = Vt_top_line(self); r <= Vt_bottom_line(self); ++r) {
+                            Vt_overwrite_char_at(self, cl, r, blank_E);
+                        }
+                    }
+                } break;
+
+                default:
+                    WRN("Unknown DEC escape\n");
+            }
+            self->parser.state = PARSER_STATE_LITERAL;
             break;
 
         case PARSER_STATE_TITLE: {

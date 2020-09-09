@@ -305,6 +305,7 @@ typedef struct _Vt
             PARSER_STATE_CHARSET_G2,
             PARSER_STATE_CHARSET_G3,
             PARSER_STATE_TITLE,
+            PARSER_STATE_DEC_SPECIAL,
         } state;
 
         bool      in_mb_seq;
@@ -391,6 +392,9 @@ typedef struct _Vt
     /* 'reverse' some modes so default is 0  */
     struct VtModes
     {
+        uint8_t wraparound : 1;
+        uint8_t reverse_wraparound : 1;
+        uint8_t allow_column_size_switching : 1;
         uint8_t bracketed_paste : 1;
         uint8_t del_sends_del : 1;
         uint8_t no_alt_sends_esc : 1;

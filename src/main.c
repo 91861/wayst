@@ -206,6 +206,10 @@ static void App_run(App* self)
         }
         ssize_t bytes = 0;
         do {
+            if (unlikely(settings.debug_slow)) {
+                usleep(10000);
+                App_notify_content_change(self);
+            }
             bytes = Monitor_read(&self->monitor);
             if (bytes > 0) {
                 Vt_interpret(&self->vt, self->monitor.input_buffer, bytes);
@@ -213,7 +217,7 @@ static void App_run(App* self)
             } else if (bytes < 0) {
                 break;
             }
-        } while (bytes);
+        } while (bytes && likely(!settings.debug_slow));
 
         Vt_get_output(&self->vt, &buf, &len);
         if (len) {
