@@ -63,9 +63,10 @@ typedef struct Cursor
         CURSOR_UNDERLINE,
     } type : 2;
 
-    uint8_t blinking : 1;
-    uint8_t hidden : 1;
-    size_t  col, row;
+    uint8_t  blinking : 1;
+    uint8_t  hidden : 1;
+    size_t   row;
+    uint16_t col;
 } Cursor;
 
 #define VT_RUNE_CODE_WIDE_TAIL 27
@@ -288,12 +289,15 @@ typedef struct _Vt
     int            master_fd;
     Vector_char    output;
 
+    bool wrap_next;
+
     struct Parser
     {
         enum VtParserState
         {
             PARSER_STATE_LITERAL = 0,
             PARSER_STATE_ESCAPED,
+            PARSER_STATE_ESCAPED_CSI,
             PARSER_STATE_CSI,
             PARSER_STATE_DCS,
             PARSER_STATE_APC,
@@ -392,8 +396,9 @@ typedef struct _Vt
     /* 'reverse' some modes so default is 0  */
     struct VtModes
     {
-        uint8_t wraparound : 1;
+        uint8_t no_wraparound : 1;
         uint8_t reverse_wraparound : 1;
+        uint8_t origin : 1;
         uint8_t allow_column_size_switching : 1;
         uint8_t bracketed_paste : 1;
         uint8_t del_sends_del : 1;
@@ -405,7 +410,6 @@ typedef struct _Vt
         uint8_t window_focus_events_report : 1;
         uint8_t extended_report : 1;
         uint8_t video_reverse : 1;
-        uint8_t no_auto_wrap : 1;
         uint8_t auto_repeat : 1;
         uint8_t application_keypad : 1;
         uint8_t application_keypad_cursor : 1;

@@ -207,7 +207,7 @@ static void App_run(App* self)
         ssize_t bytes = 0;
         do {
             if (unlikely(settings.debug_slow)) {
-                usleep(10000);
+                usleep(100);
                 App_notify_content_change(self);
             }
             bytes = Monitor_read(&self->monitor);
@@ -563,7 +563,7 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
                 for (bool initial = true;; initial = false) {
                     VtLine* row_line = Vt_line_at(vt, self->ksm_cursor.row);
                     if (self->ksm_cursor.col + 1 >= Vt_col(vt) || !row_line ||
-                        self->ksm_cursor.col + 1 >= row_line->data.size) {
+                        self->ksm_cursor.col + 1 >= (uint16_t)row_line->data.size) {
                         break;
                     }
                     VtRune* rune      = Vt_at(vt, self->ksm_cursor.col, self->ksm_cursor.row);
@@ -590,7 +590,7 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
                 for (bool initial = true;; initial = false) {
                     VtLine* row_line = Vt_line_at(vt, self->ksm_cursor.row);
                     if (self->ksm_cursor.col + 1 >= Vt_col(vt) || !row_line ||
-                        self->ksm_cursor.col + 1 >= row_line->data.size) {
+                        self->ksm_cursor.col + 1 >= (uint16_t)row_line->data.size) {
                         break;
                     }
                     VtRune*  rune      = Vt_at(vt, self->ksm_cursor.col, self->ksm_cursor.row);

@@ -41,10 +41,6 @@ static void          Vt_clear_right(Vt* self);
 static void          Vt_clear_left(Vt* self);
 static inline void   Vt_scroll_out_all_content(Vt* self);
 static void          Vt_empty_line_fill_bg(Vt* self, size_t idx);
-static void          Vt_cursor_down(Vt* self);
-static void          Vt_cursor_up(Vt* self);
-static void          Vt_cursor_left(Vt* self);
-static void          Vt_cursor_right(Vt* self);
 static void          Vt_insert_new_line(Vt* self);
 static void          Vt_scroll_up(Vt* self);
 static void          Vt_scroll_down(Vt* self);
@@ -57,8 +53,7 @@ static inline void   Vt_scroll_out_above(Vt* self);
 static void          Vt_insert_line(Vt* self);
 static void          Vt_clear_display_and_scrollback(Vt* self);
 static void          Vt_erase_to_end(Vt* self);
-static void          Vt_move_cursor(Vt* self, uint32_t c, uint32_t r);
-static void          Vt_move_cursor_to_column(Vt* self, uint32_t c);
+static void          Vt_move_cursor(Vt* self, uint16_t c, uint16_t r);
 static void          Vt_set_title(Vt* self, const char* title);
 static void          Vt_push_title(Vt* self);
 static void          Vt_pop_title(Vt* self);
@@ -708,7 +703,7 @@ static Vector_char rune_vec_to_string(Vector_VtRune* line,
                                       const char*    tail)
 {
     Vector_char res;
-    end   = MIN(end ? end : line->size, line->size);
+    end   = MIN((end ? end : line->size), line->size);
     begin = MIN(begin, line->size - 1);
 
     if (begin >= end) {
@@ -734,6 +729,8 @@ static Vector_char rune_vec_to_string(Vector_VtRune* line,
             if (bytes > 0) {
                 Vector_pushv_char(&res, utfbuf, bytes);
             }
+        } else if (!rune->code) {
+            Vector_push_char(&res, ' ');
         } else {
             Vector_push_char(&res, rune->code);
         }
@@ -1191,6 +1188,7 @@ static void set_rgba_color_from_xterm_string(ColorRGBA* color, const char* strin
 
 static void Vt_hard_reset(Vt* self)
 {
+    memset(&self->modes, 0, sizeof(self->modes));
     Vt_alt_buffer_off(self, false);
     Vt_select_end(self);
     Vt_clear_display_and_scrollback(self);
@@ -1321,7 +1319,7 @@ static inline size_t Vt_bottom_line_alt(Vt* self)
     return Vt_top_line_alt(self) + Vt_row(self) - 1;
 }
 
-static inline size_t Vt_get_cursor_row_screen(Vt* self)
+static inline uint16_t Vt_cursor_row(Vt* self)
 {
     return self->cursor.row - Vt_top_line(self);
 }
@@ -1433,7 +1431,9 @@ __attribute__((cold)) void Vt_dump_info(Vt* self)
            BOOL_AP(self->modes.mouse_motion_report));
     printf("  x10 compat mouse reporting:       " BOOL_FMT "\n",
            BOOL_AP(self->modes.x10_mouse_compat));
-    printf("  no auto wrap:                     " BOOL_FMT "\n", BOOL_AP(self->modes.no_auto_wrap));
+    printf("  no auto wrap:                     " BOOL_FMT "\n", BOOL_AP(self->modes.no_wraparound));
+    printf("  reverse auto wrap:                " BOOL_FMT "\n",
+           BOOL_AP(self->modes.reverse_wraparound));
     printf("  reverse video:                    " BOOL_FMT "\n",
            BOOL_AP(self->modes.video_reverse));
 
@@ -1447,10 +1447,10 @@ __attribute__((cold)) void Vt_dump_info(Vt* self)
            Vt_visual_top_line(self),
            Vt_visual_bottom_line(self));
     printf("E L   | \n");
-    printf("W L V | Active line:  real: %zu (visible: %zu)\n",
+    printf("W L V | Active line:  real: %zu (visible: %u)\n",
            self->cursor.row,
-           Vt_get_cursor_row_screen(self));
-    printf("P   I | Cursor position: %zu type: %d blink: %d hidden: %d\n",
+           Vt_cursor_row(self));
+    printf("P   I | Cursor position: %u type: %d blink: %d hidden: %d\n",
            self->cursor.col,
            self->cursor.type,
            self->cursor.blinking,
@@ -1465,7 +1465,7 @@ __attribute__((cold)) void Vt_dump_info(Vt* self)
     for (size_t i = 0; i < self->lines.size; ++i) {
         Vector_char str = rune_vec_to_string(&self->lines.buf[i].data, 0, 0, "");
         printf(
-          "%c %c %c %4zu%c s:%3zu dmg:%d proxy{%3d,%3d,%3d,%3d} reflow{%d,%d,%d} data{%.50s%s}\n",
+          "%c %c %c %4zu%c s:%3zu dmg:%d proxy{%3d,%3d,%3d,%3d} reflow{%d,%d,%d} data{%.90s%s}\n",
           i == Vt_top_line(self) ? 'v' : i == Vt_bottom_line(self) ? '^' : ' ',
           i == Vt_get_scroll_region_top(self) || i == Vt_get_scroll_region_bottom(self) ? '-' : ' ',
           i == Vt_visual_top_line(self) || i == Vt_visual_bottom_line(self) ? '*' : ' ',
@@ -1481,7 +1481,7 @@ __attribute__((cold)) void Vt_dump_info(Vt* self)
           self->lines.buf[i].rejoinable,
           self->lines.buf[i].was_reflown,
           str.buf,
-          (str.size > 50 ? "…" : ""));
+          (str.size > 90 ? "…" : ""));
         Vector_destroy_char(&str);
     }
 }
@@ -1805,7 +1805,7 @@ static inline void Vt_report_dec_mode(Vt* self, int code)
             value = self->modes.application_keypad_cursor;
             break;
         case 7:
-            value = self->modes.no_auto_wrap;
+            value = self->modes.no_wraparound;
             break;
         case 8:
             value = self->modes.auto_repeat;
@@ -1870,14 +1870,36 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
             self->modes.application_keypad_cursor = on;
             break;
 
-        /* Column mode 132/80 (DECCOLM)
-         *
-         * The reset state causes a maximum of 80 columns on the screen. The set state causes a
-         * maximum of 132 columns on the screen.
-         */
-        case 3:
-            WRN("DECCOLM not implemented\n");
-            break;
+            /* Column mode 132/80 (DECCOLM)
+             *
+             * The reset state causes a maximum of 80 columns on the screen. The set state causes a
+             * maximum of 132 columns on the screen.
+             */
+        case 3: {
+            if (self->modes.allow_column_size_switching && settings.windowops_manip) {
+                Pair_uint32_t target_text_area_dims;
+                if (on) {
+                    target_text_area_dims =
+                      CALL_FP(self->callbacks.on_window_size_from_cells_requested,
+                              self->callbacks.user_data,
+                              132,
+                              26);
+
+                } else {
+                    target_text_area_dims =
+                      CALL_FP(self->callbacks.on_window_size_from_cells_requested,
+                              self->callbacks.user_data,
+                              80,
+                              24);
+                }
+                CALL_FP(self->callbacks.on_text_area_dimensions_set,
+                        self->callbacks.user_data,
+                        target_text_area_dims.first,
+                        target_text_area_dims.second);
+            }
+            Vt_move_cursor(self, 0, 0);
+            Vt_clear_display_and_scrollback(self);
+        } break;
 
         /* Smooth (Slow) Scroll (DECSCLM), VT100. */
         case 4:
@@ -1889,14 +1911,16 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
             // TODO:
             break;
 
-        /* Origin mode (DECCOM) */
-        case 6: {
-            WRN("DECCOM not implemented\n");
-        } break;
+        /* Origin mode (DECCOM)
+         * makes cursor movement relative to the scroll region */
+        case 6:
+            self->modes.origin = on;
+            Vt_move_cursor(self, 0, 0);
+            break;
 
         /* DECAWM */
         case 7:
-            self->modes.no_auto_wrap = !on;
+            self->modes.no_wraparound = !on;
             break;
 
         /* DECARM */
@@ -2162,8 +2186,8 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                 switch (arg) {
                                     case 6: { /* report cursor position */
                                         Vt_output_formated(self,
-                                                           "\e[?%zu;%zuR",
-                                                           Vt_get_cursor_row_screen(self) + 1,
+                                                           "\e[?%u;%uR",
+                                                           Vt_cursor_row(self) + 1,
                                                            self->cursor.col + 1);
                                     } break;
 
@@ -2660,12 +2684,6 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                              * Ps denotes the SGR attributes to change: 0, 1, 4, 5, 7
                              */
                             case 'r': {
-                                Vector_pop_n_char(&self->parser.active_sequence, 2); // 'm', '\0'
-                                Vector_push_char(&self->parser.active_sequence, '\0');
-
-                                char*    seq_start = self->parser.active_sequence.buf;
-                                uint16_t top, left, bottom, right;
-
                                 WRN("DECCARA not implemented\n");
                             } break;
 
@@ -2780,8 +2798,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                 int arg = short_sequence_get_int_argument(seq);
                                 if (arg <= 0)
                                     arg = 1;
-                                for (int i = 0; i < arg; ++i)
-                                    Vt_cursor_right(self);
+                                Vt_move_cursor(self, self->cursor.col + arg, Vt_cursor_row(self));
                             } break;
 
                             /* <ESC>[ Ps L - Insert line at cursor shift rest down (IL) */
@@ -2800,8 +2817,9 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                 int arg = short_sequence_get_int_argument(seq);
                                 if (arg <= 0)
                                     arg = 1;
-                                for (int i = 0; i < arg; ++i)
-                                    Vt_cursor_left(self);
+                                uint16_t new_col =
+                                  arg >= self->cursor.col ? 0 : (self->cursor.col - arg);
+                                Vt_move_cursor(self, new_col, Vt_cursor_row(self));
                             } break;
 
                             /* <ESC>[ Ps A - move cursor up Ps lines (CUU) */
@@ -2810,8 +2828,10 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                 int arg = short_sequence_get_int_argument(seq);
                                 if (arg <= 0)
                                     arg = 1;
-                                for (int i = 0; i < arg; ++i)
-                                    Vt_cursor_up(self);
+                                int32_t new_row = Vt_cursor_row(self) <= (uint16_t)arg
+                                                    ? 0
+                                                    : (Vt_cursor_row(self) - arg);
+                                Vt_move_cursor(self, self->cursor.col, new_row);
                             } break;
 
                             /* <ESC>[ Ps e - move cursor down Ps lines (VPR) */
@@ -2822,8 +2842,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                 int arg = short_sequence_get_int_argument(seq);
                                 if (arg <= 0)
                                     arg = 1;
-                                for (int i = 0; i < arg; ++i)
-                                    Vt_cursor_down(self);
+                                Vt_move_cursor(self, self->cursor.col, Vt_cursor_row(self) + arg);
                             } break;
 
                             /* <ESC>[ Ps ` - move cursor to column Ps (CBT)*/
@@ -2834,7 +2853,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                 int arg = short_sequence_get_int_argument(seq);
                                 if (arg <= 0)
                                     arg = 1;
-                                Vt_move_cursor_to_column(self, arg - 1);
+                                Vt_move_cursor(self, arg - 1, Vt_cursor_row(self));
                             } break;
 
                             /* <ESC>[ Ps J - Erase display (ED) - clear... */
@@ -2927,24 +2946,26 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                 int arg = short_sequence_get_int_argument(seq);
                                 if (arg <= 0)
                                     arg = 1;
-                                while (self->cursor.col < Vt_col(self) && arg) {
-                                    if (self->tab_ruler[self->cursor.col]) {
+                                uint16_t rt;
+                                for (rt = 0; self->cursor.col + rt < Vt_col(self) && arg; ++rt) {
+                                    if (self->tab_ruler[self->cursor.col + rt])
                                         --arg;
-                                    }
-                                    Vt_cursor_right(self);
                                 }
+                                Vt_move_cursor(self, self->cursor.col + rt, Vt_cursor_row(self));
                             } break;
 
                             /* <ESC>[ Ps Z - cursor backward ps tabulations (CBT) */
                             case 'Z': {
                                 MULTI_ARG_IS_ERROR
                                 int arg = short_sequence_get_int_argument(seq);
-                                while (self->cursor.col && arg) {
-                                    if (self->tab_ruler[self->cursor.col]) {
+                                if (arg <= 0)
+                                    arg = 1;
+                                uint16_t lt;
+                                for (lt = 0; self->cursor.col - lt && arg; ++lt) {
+                                    if (self->tab_ruler[self->cursor.col - lt])
                                         --arg;
-                                    }
-                                    Vt_cursor_left(self);
                                 }
+                                Vt_move_cursor(self, self->cursor.col - lt, Vt_cursor_row(self));
                             } break;
 
                             /* <ESC>[ Pn g - tabulation clear (TBC) */
@@ -3000,8 +3021,8 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                 } else if (arg == 6) {
                                     /* 6 - report cursor position */
                                     Vt_output_formated(self,
-                                                       "\e[%zu;%zuR",
-                                                       Vt_get_cursor_row_screen(self) + 1,
+                                                       "\e[%u;%uR",
+                                                       Vt_cursor_row(self) + 1,
                                                        self->cursor.col + 1);
                                 } else {
                                     WRN("Unimplemented DSR code: %d\n", arg);
@@ -4261,7 +4282,7 @@ static void Vt_reset_text_attribs(Vt* self, VtRune* opt_target)
 static void Vt_carriage_return(Vt* self)
 {
     self->last_interted = NULL;
-    Vt_move_cursor_to_column(self, 0);
+    Vt_move_cursor(self, 0, Vt_cursor_row(self));
 }
 
 /**
@@ -4287,8 +4308,8 @@ static void Vt_reverse_line_feed(Vt* self)
         Vector_remove_at_VtLine(&self->lines, Vt_get_scroll_region_bottom(self), 1);
         Vector_insert_at_VtLine(&self->lines, self->cursor.row, VtLine_new());
         Vt_empty_line_fill_bg(self, self->cursor.row);
-    } else {
-        Vt_cursor_up(self);
+    } else if (Vt_cursor_row(self)) {
+        Vt_move_cursor(self, self->cursor.col, Vt_cursor_row(self) - 1);
     }
     Vt_mark_proxy_fully_damaged(self, self->cursor.row);
 }
@@ -4331,54 +4352,6 @@ static void Vt_scroll_down(Vt* self)
     Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
 }
 
-/**
- * Move cursor one cell down if possible */
-static void Vt_cursor_down(Vt* self)
-{
-    self->last_interted = NULL;
-    if (self->cursor.row < Vt_bottom_line(self)) {
-        ++self->cursor.row;
-    }
-    CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
-}
-
-/**
- * Move cursor one cell up if possible */
-static void Vt_cursor_up(Vt* self)
-{
-    self->last_interted = NULL;
-    if (self->cursor.row > Vt_top_line(self)) {
-        --self->cursor.row;
-    }
-    CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
-}
-
-/**
- * Move cursor one cell to the left if possible */
-static inline void Vt_cursor_left(Vt* self)
-{
-    self->last_interted = NULL;
-    if (self->cursor.col) {
-        --self->cursor.col;
-    } else if (self->modes.reverse_wraparound) {
-        Vt_cursor_up(self);
-        self->cursor.col = Vt_col(self);
-    }
-    CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
-}
-
-/**
- * Move cursor one cell to the right if possible */
-static inline void Vt_cursor_right(Vt* self)
-{
-    self->last_interted = NULL;
-    /* The cursor should be able to move one past last column */
-    if (self->cursor.col + 1 < Vt_col(self)) {
-        ++self->cursor.col;
-    }
-    CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
-}
-
 static inline void Vt_erase_to_end(Vt* self)
 {
     for (size_t i = self->cursor.row + 1; i <= Vt_bottom_line(self); ++i) {
@@ -4390,8 +4363,12 @@ static inline void Vt_erase_to_end(Vt* self)
 
 static inline void Vt_handle_backspace(Vt* self)
 {
-    CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
-    Vt_cursor_left(self);
+    if (self->cursor.col)
+        Vt_move_cursor(self, self->cursor.col - 1, Vt_cursor_row(self));
+    else if (self->modes.reverse_wraparound) {
+        uint16_t r = Vt_cursor_row(self);
+        Vt_move_cursor(self, Vt_col(self) - 1, r ? (r - 1) : 0);
+    }
 }
 
 /**
@@ -4487,7 +4464,7 @@ static inline void Vt_scroll_out_all_content(Vt* self)
 
 static inline void Vt_scroll_out_above(Vt* self)
 {
-    size_t to_add = Vt_get_cursor_row_screen(self);
+    size_t to_add = Vt_cursor_row(self);
     for (size_t i = 0; i <= to_add; ++i) {
         size_t insert_point = self->cursor.row;
         Vector_insert_at_VtLine(&self->lines, insert_point, VtLine_new());
@@ -4567,14 +4544,10 @@ __attribute__((hot)) static void Vt_insert_char_at_cursor(Vt* self, VtRune c)
 {
     CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
 
-    if (unlikely(self->cursor.col >= (size_t)Vt_col(self))) {
-        if (unlikely(self->modes.no_auto_wrap)) {
-            --self->cursor.col;
-        } else {
-            self->cursor.col = 0;
-            Vt_insert_new_line(self);
-            Vt_cursor_line(self)->rejoinable = true;
-        }
+    if (self->wrap_next && !self->modes.no_wraparound) {
+        self->cursor.col = 0;
+        Vt_insert_new_line(self);
+        Vt_cursor_line(self)->rejoinable = true;
     }
 
     while (Vt_cursor_line(self)->data.size <= self->cursor.col) {
@@ -4591,32 +4564,31 @@ __attribute__((hot)) static void Vt_insert_char_at_cursor(Vt* self, VtRune c)
     ++self->cursor.col;
 
     int width;
-
 #ifndef NOUTF8PROC
     width = utf8proc_charwidth(c.rune.code);
 #else
     width = wcwidth(c.rune.code);
 #endif
-
     if (unlikely(width > 1)) {
         VtRune tmp    = c;
         tmp.rune.code = VT_RUNE_CODE_WIDE_TAIL;
-
         for (int i = 0; i < (width - 1); ++i) {
-            if (Vt_cursor_line(self)->data.size <= self->cursor.col) {
+            if (Vt_cursor_line(self)->data.size <= self->cursor.col)
                 Vector_push_VtRune(&Vt_cursor_line(self)->data, tmp);
-            } else {
+            else
                 *Vt_cursor_cell(self) = tmp;
-            }
             ++self->cursor.col;
         }
     }
+
+    self->wrap_next  = self->cursor.col >= (size_t)Vt_col(self);
+    self->cursor.col = MIN(self->cursor.col, (Vt_col(self) - 1));
 }
 
 static void Vt_insert_char_at_cursor_with_shift(Vt* self, VtRune c)
 {
     if (unlikely(self->cursor.col >= (size_t)Vt_col(self))) {
-        if (unlikely(self->modes.no_auto_wrap)) {
+        if (unlikely(self->modes.no_wraparound)) {
             --self->cursor.col;
         } else {
             self->cursor.col = 0;
@@ -4649,32 +4621,31 @@ static inline void Vt_insert_new_line(Vt* self)
         Vector_remove_at_VtLine(&self->lines, Vt_get_scroll_region_top(self), 1);
         Vector_insert_at_VtLine(&self->lines, self->cursor.row, VtLine_new());
         Vt_empty_line_fill_bg(self, self->cursor.row);
-    } else {
-        if (Vt_bottom_line(self) == self->cursor.row) {
-            Vector_push_VtLine(&self->lines, VtLine_new());
-            Vt_empty_line_fill_bg(self, self->lines.size - 1);
-        }
-        Vt_cursor_down(self);
+    } else if (Vt_bottom_line(self) == self->cursor.row) {
+        Vector_push_VtLine(&self->lines, VtLine_new());
+        Vt_empty_line_fill_bg(self, self->lines.size - 1);
     }
+    Vt_move_cursor(self, self->cursor.col, Vt_cursor_row(self) + 1);
     Vt_mark_proxy_fully_damaged(self, self->cursor.row);
 }
 
 /**
  * Move cursor to given location (@param rows is relative to the screen!) */
-static inline void Vt_move_cursor(Vt* self, uint32_t columns, uint32_t rows)
+static inline void Vt_move_cursor(Vt* self, uint16_t column, uint16_t rows)
 {
+    self->wrap_next = false;
+    size_t max_row, min_row;
+    if (self->modes.origin) {
+        rows += (Vt_get_scroll_region_top(self) - Vt_top_line(self));
+        min_row = Vt_get_scroll_region_top(self);
+        max_row = Vt_get_scroll_region_bottom(self);
+    } else {
+        max_row = Vt_bottom_line(self);
+        min_row = Vt_top_line(self);
+    }
     self->last_interted = NULL;
-    self->cursor.row    = MIN(rows, (uint32_t)Vt_row(self) - 1) + Vt_top_line(self);
-    self->cursor.col    = MIN(columns, (uint32_t)Vt_col(self));
-    CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
-}
-
-/**
- * Move cursor to given column */
-static inline void Vt_move_cursor_to_column(Vt* self, uint32_t columns)
-{
-    self->last_interted = NULL;
-    self->cursor.col    = MIN(columns, (uint32_t)Vt_col(self));
+    self->cursor.row    = CLAMP(rows + Vt_top_line(self), min_row, max_row);
+    self->cursor.col    = MIN(column, (uint32_t)Vt_col(self) - 1);
     CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
 }
 
@@ -4849,12 +4820,12 @@ __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_litera
 
             case '\t': {
                 Vt_grapheme_break(self);
-                while (self->cursor.col + 1 < Vt_col(self)) {
-                    Vt_cursor_right(self);
-                    if (self->tab_ruler[self->cursor.col]) {
+                uint16_t rt;
+                for (rt = 0; self->cursor.col + rt + 1 < Vt_col(self);) {
+                    if (self->tab_ruler[self->cursor.col + ++rt])
                         break;
-                    }
                 }
+                Vt_move_cursor(self, self->cursor.col + rt, Vt_cursor_row(self));
             } break;
 
             default: {
@@ -4891,7 +4862,24 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
             break;
 
         case PARSER_STATE_CSI:
-            Vt_handle_CSI(self, c);
+            switch (c) {
+                case '\a':
+                    Vt_bell(self);
+                    break;
+                case '\b':
+                    Vt_handle_backspace(self);
+                    break;
+                case '\r':
+                    Vt_carriage_return(self);
+                    break;
+                case '\f':
+                case '\v':
+                case '\n':
+                    Vt_insert_new_line(self);
+                    break;
+                default:
+                    Vt_handle_CSI(self, c);
+            }
             break;
 
         case PARSER_STATE_ESCAPED:
