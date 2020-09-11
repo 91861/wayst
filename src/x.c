@@ -227,7 +227,8 @@ static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
 
     XVisualInfo* visual_info = NULL;
 
-    int framebuffer_config_selected_idx = -1;
+    int framebuffer_config_selected_idx          = -1;
+    int framebuffer_config_selected_no_alpha_idx = -1;
 
     for (int i = 0; i < framebuffer_config_count; ++i) {
         visual_info = glXGetVisualFromFBConfig(globalX11->display, framebuffer_configs[i]);
@@ -256,14 +257,24 @@ static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
             visual_pict_format->type,
             visual_pict_format->id);
 
-        if (visual_pict_format->direct.alphaMask > 0 && visual_pict_format->direct.redMask > 0 &&
-            visual_pict_format->direct.greenMask > 0 && visual_pict_format->direct.blueMask > 0 &&
-            visual_pict_format->depth >= 32) {
-            LOG("X::Visual picture format selected\n");
-            framebuffer_config_selected_idx = i;
-            break;
+        if (visual_pict_format->direct.redMask > 0 && visual_pict_format->direct.greenMask > 0 &&
+            visual_pict_format->direct.blueMask > 0 && visual_pict_format->depth >= 24) {
+
+            if (visual_pict_format->direct.alphaMask > 0 && visual_pict_format->depth >= 32) {
+                framebuffer_config_selected_idx = i;
+                break;
+            } else {
+                framebuffer_config_selected_no_alpha_idx = i;
+            }
         }
+
         XFree(visual_info);
+        visual_info = NULL;
+    }
+
+    if (framebuffer_config_selected_idx < 0) {
+        WRN("No transparent framebuffer found\n");
+        framebuffer_config_selected_idx = framebuffer_config_selected_no_alpha_idx;
     }
 
     if (framebuffer_config_selected_idx < 0) {
@@ -271,21 +282,29 @@ static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
     }
 
     if (!visual_info) {
-        ERR("Failed to get visual info");
+        visual_info =
+          glXGetVisualFromFBConfig(globalX11->display,
+                                   framebuffer_configs[framebuffer_config_selected_idx]);
+        if (!visual_info) {
+            ERR("Failed to get visual info");
+        }
     }
 
-    windowX11(win)->set_win_attribs = (XSetWindowAttributes){
-        .colormap = windowX11(win)->colormap =
-          XCreateColormap(globalX11->display,
-                          RootWindow(globalX11->display, visual_info->screen),
-                          visual_info->visual,
-                          AllocNone),
-        .border_pixel      = 0,
-        .background_pixmap = None,
-        .override_redirect = True,
-        .event_mask        = KeyPressMask | ButtonPressMask | ButtonReleaseMask |
+    Colormap colormap = XCreateColormap(globalX11->display,
+                                        RootWindow(globalX11->display, visual_info->screen),
+                                        visual_info->visual,
+                                        AllocNone);
+
+    long event_mask = KeyPressMask | ButtonPressMask | ButtonReleaseMask |
                       SubstructureRedirectMask | StructureNotifyMask | PointerMotionMask |
-                      ExposureMask | FocusChangeMask | KeymapStateMask | VisibilityChangeMask,
+                      ExposureMask | FocusChangeMask | KeymapStateMask | VisibilityChangeMask;
+
+    windowX11(win)->set_win_attribs = (XSetWindowAttributes){
+        .colormap = windowX11(win)->colormap = colormap,
+        .border_pixel                        = 0,
+        .background_pixmap                   = None,
+        .override_redirect                   = True,
+        .event_mask                          = event_mask,
     };
 
     windowX11(win)->glx_context = NULL;
