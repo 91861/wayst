@@ -25,6 +25,7 @@
 #endif
 
 #include "freetype.h"
+#include "html.h"
 #include "key.h"
 #include "settings.h"
 #include "ui.h"
@@ -142,6 +143,12 @@ static void App_init(App* self)
     self->monitor = Monitor_new();
 
     App_set_monitor_callbacks(self);
+
+    if (settings.directory.str) {
+        if (chdir(settings.directory.str)) {
+            WRN("Failed to change directory: %s\n", strerror(errno));
+        }
+    }
 
     Monitor_fork_new_pty(&self->monitor, settings.cols, settings.rows);
 
@@ -758,6 +765,24 @@ static bool App_maybe_handle_application_key(App*     self,
         Pair_uint32_t cells = App_get_char_size(self);
         Vt_resize(vt, cells.first, cells.second);
         App_notify_content_change(self);
+        return true;
+    } else if (KeyCommand_is_active(&cmd[KCMD_HTML_DUMP], key, rawkey, mods)) {
+        time_t     current_time;
+        struct tm* calendar_time;
+        char *     path = NULL, *prefix = NULL, time_string[128];
+        FILE*      file;
+        if ((time(&current_time) == -1) || (!(calendar_time = localtime(&current_time))) ||
+            (!strftime(time_string, sizeof(time_string), "%Y.%m.%d.%H.%M.%S", calendar_time)) ||
+            (!(prefix = getcwd(NULL, 0))) ||
+            (!(path = asprintf("%s/" APPLICATION_NAME ".%s.html", prefix, time_string))) ||
+            (!(file = fopen(path, "w+x")))) {
+            WRN("Failed to create screen dump: %s\n", strerror(errno));
+        } else {
+            write_html_screen_dump(vt, file);
+            fclose(file);
+        }
+        free(prefix);
+        free(path);
         return true;
     } else if (KeyCommand_is_active(&cmd[KCMD_DEBUG], key, rawkey, mods)) {
         Vt_dump_info(vt);

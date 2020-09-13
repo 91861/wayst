@@ -21,6 +21,9 @@
 
 #define TERMCOLOR_RESET "\e[m"
 
+#define TERMCOLOR_BOLD "\e[1m"
+#define TERMCOLOR_ITALIC "\e[3m"
+
 #define TERMCOLOR_DEFAULT       "\e[39m"
 #define TERMCOLOR_BLACK         "\e[30m"
 #define TERMCOLOR_RED           "\e[31m"

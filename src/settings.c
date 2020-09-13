@@ -458,6 +458,12 @@ static void settings_make_default()
                 .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
             },
 
+            [KCMD_HTML_DUMP] = (KeyCommand) {
+                .key.code = KEY(F12),
+                .is_name = false,
+                .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
+            },
+
             [KCMD_KEYBOARD_SELECT] = (KeyCommand) {
                 .key.code = KEY(k),
                 .is_name = false,
@@ -483,6 +489,7 @@ static void settings_make_default()
 
         .shell          = AString_new_uninitialized(), 
         .title_format   = AString_new_static(DFT_TITLE_FMT),
+        .directory      = AString_new_uninitialized(),
 
         .styled_fonts = Vector_new_with_capacity_StyledFontInfo(1),
         .symbol_fonts = Vector_new_with_capacity_UnstyledFontInfo(1),
@@ -587,27 +594,31 @@ static void print_help_and_exit()
 {
 #define MAX_OPT_PADDING 28
 
-    printf("Usage: %s [options...] [-e/x command args...]\n\nOPTIONS:\n", EXECUTABLE_FILE_NAME);
+    printf("Usage:\n      " TERMCOLOR_BOLD "%s" TERMCOLOR_RESET
+           " [options...] [-e/x command args...]\n\nOptions:\n",
+           EXECUTABLE_FILE_NAME);
+
     for (uint32_t i = 0; i < OPT_SENTINEL_IDX; ++i) {
         if (long_options[i].has_arg == no_argument && long_options[i].val) {
-            printf(" -%c, ", long_options[i].val);
+            printf(" " TERMCOLOR_BOLD "-%c" TERMCOLOR_RESET ", ", long_options[i].val);
         } else {
             printf("     ");
         }
         if (long_options[i].has_arg == required_argument) {
-            printf(" --%-s <%s>%-*s",
+            printf(" " TERMCOLOR_BOLD "--%-s " TERMCOLOR_RESET "<%s>"
+                   "%-*s",
                    long_options[i].name,
                    long_options_descriptions[i][0],
                    (int)(MAX_OPT_PADDING - strlen(long_options[i].name) -
                          strlen(long_options_descriptions[i][0])),
                    "");
         } else {
-            printf(" --%s %*s",
+            printf(" " TERMCOLOR_BOLD "--%s" TERMCOLOR_RESET " %*s",
                    long_options[i].name,
                    (int)((MAX_OPT_PADDING + 2) - strlen(long_options[i].name)),
                    "");
         }
-        puts(long_options_descriptions[i][1]);
+        printf("%s\n", long_options_descriptions[i][1]);
     }
     exit(EXIT_SUCCESS);
 }
@@ -793,6 +804,12 @@ static void handle_option(const char opt, const int array_index, const char* val
                 settings.padding = CLAMP(strtol(buf.buf, NULL, 10), 0, UINT8_MAX);
                 break;
                 L_PROCESS_MULTI_ARG_PACK_END
+        } break;
+
+        case OPT_DIRECTORY_IDX: {
+            Vector_Vector_char values = expand_list_value(value);
+            AString_replace_with_dynamic(&settings.directory, strdup(values.buf[0].buf));
+            Vector_destroy_Vector_char(&values);
         } break;
 
         case OPT_WINDOWOPS_IDX: {
@@ -1183,6 +1200,9 @@ static void handle_option(const char opt, const int array_index, const char* val
                 case OPT_BIND_KEY_KSM_IDX:
                     command = &settings.key_commands[KCMD_KEYBOARD_SELECT];
                     break;
+                case OPT_BIND_KEY_HTML_DUMP_IDX:
+                    command = &settings.key_commands[KCMD_HTML_DUMP];
+                    break;
                 case OPT_BIND_KEY_DUP_IDX:
                     command = &settings.key_commands[KCMD_DUPLICATE];
                     break;
@@ -1572,6 +1592,7 @@ void settings_cleanup()
     AString_destroy(&settings.term);
     AString_destroy(&settings.locale);
     AString_destroy(&settings.title);
+    AString_destroy(&settings.directory);
     AString_destroy(&settings.font_style_regular);
     AString_destroy(&settings.font_style_bold);
     AString_destroy(&settings.font_style_italic);

@@ -431,7 +431,18 @@ typedef struct _Vt
 
 } Vt;
 
+static bool VtRune_fg_is_default(const VtRune* rune)
+{
+    return rune->fg_is_palette_entry && rune->fg_data.index == VT_RUNE_PALETTE_INDEX_TERM_DEFAULT;
+}
+
+static bool VtRune_bg_is_default(const VtRune* rune)
+{
+    return rune->bg_is_palette_entry && rune->bg_data.index == VT_RUNE_PALETTE_INDEX_TERM_DEFAULT;
+}
+
 static ColorRGB Vt_rune_fg_no_invert(const Vt* self, const VtRune* rune);
+
 
 static ColorRGBA Vt_rune_bg_no_invert(const Vt* self, const VtRune* rune)
 {

@@ -107,6 +107,7 @@ enum KeyCommands
     KCMD_PAGE_SCROLL_UP,
     KCMD_PAGE_SCROLL_DN,
     KCMD_KEYBOARD_SELECT,
+    KCMD_HTML_DUMP,
     KCMD_DUPLICATE,
     KCMD_DEBUG,
     KCMD_QUIT,
@@ -160,7 +161,7 @@ typedef struct
 
     bool has_bold_fonts, has_italic_fonts, has_bold_italic_fonts, has_symbol_fonts, has_color_fonts;
 
-    AString term, vte_version, locale, title;
+    AString term, vte_version, locale, title, directory;
 
     char* user_app_id;
     char* user_app_id_2;
