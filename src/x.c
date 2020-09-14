@@ -66,6 +66,7 @@ static void     WindowX11_clipboard_send(struct WindowBase* self, const char* te
 static void     WindowX11_set_pointer_style(struct WindowBase* self, enum MousePointerStyle style);
 static void*    WindowX11_get_gl_ext_proc_adress(struct WindowBase* self, const char* name);
 static uint32_t WindowX11_get_keycode_from_name(struct WindowBase* self, char* name);
+static void     WindowX11_set_current_context(struct WindowBase* self, bool this);
 static TimePoint* WindowX11_process_timers(struct WindowBase* self)
 {
     return NULL;
@@ -87,6 +88,7 @@ static struct IWindow window_interface_x11 = {
     .get_gl_ext_proc_adress = WindowX11_get_gl_ext_proc_adress,
     .get_keycode_from_name  = WindowX11_get_keycode_from_name,
     .set_pointer_style      = WindowX11_set_pointer_style,
+    .set_current_context    = WindowX11_set_current_context,
 };
 
 typedef struct
@@ -766,9 +768,13 @@ static void WindowX11_events(struct WindowBase* self)
     }
 }
 
-static void WindowX11_set_current_context(struct WindowBase* self)
+static void WindowX11_set_current_context(struct WindowBase* self, bool this)
 {
-    glXMakeCurrent(globalX11->display, windowX11(self)->window, windowX11(self)->glx_context);
+    if (this) {
+        glXMakeCurrent(globalX11->display, windowX11(self)->window, windowX11(self)->glx_context);
+    } else {
+        glXMakeCurrent(globalX11->display, None, NULL);
+    }
 }
 
 static void WindowX11_set_swap_interval(struct WindowBase* self, int32_t ival)

@@ -105,6 +105,8 @@ typedef struct
         int16_t   index;
     } bg_data;
 
+    int16_t hyperlink_idx;
+
     bool bg_is_palette_entry : 1;
     bool fg_is_palette_entry : 1;
     bool ln_clr_is_palette_entry : 1;
@@ -135,16 +137,16 @@ DEF_VECTOR(Vector_char, Vector_destroy_char)
  * represents a clickable range of text linked to a URL */
 typedef struct
 {
-    size_t begin, end;
-    char*  uri_string;
-} VtUriRange;
+    char* uri_string;
+} VtUri;
 
-static void VtUriRange_destroy(VtUriRange* self)
+static void VtUri_destroy(VtUri* self)
 {
     free(self->uri_string);
+    self->uri_string = NULL;
 }
 
-DEF_VECTOR(VtUriRange, VtUriRange_destroy)
+DEF_VECTOR(VtUri, VtUri_destroy)
 
 typedef struct
 {
@@ -159,8 +161,8 @@ typedef struct
     /* Arbitrary data used by the renderer */
     VtLineProxy proxy;
 
-    /* Clickable link ranges */
-    // Vector_VtUriRange uris;
+    /* Clickable link adresses */
+    Vector_VtUri* links;
 
     struct VtLineDamage
     {
@@ -171,7 +173,7 @@ typedef struct
         /* Number of cells the existing contents should be moved right */
         int8_t shift;
 
-        enum __attribute__((packed)) VtLineDamageType
+        enum VtLineDamageType
         {
             /* Proxy objects are up to date */
             VT_LINE_DAMAGE_NONE = 0,
@@ -376,6 +378,8 @@ typedef struct _Vt
 
     Vector_VtLine lines, alt_lines;
 
+    char* active_hyperlink;
+
     VtRune*  last_interted;
     char32_t last_codepoint;
 #ifndef NOUTF8PROC
@@ -443,7 +447,6 @@ static bool VtRune_bg_is_default(const VtRune* rune)
 
 static ColorRGB Vt_rune_fg_no_invert(const Vt* self, const VtRune* rune);
 
-
 static ColorRGBA Vt_rune_bg_no_invert(const Vt* self, const VtRune* rune)
 {
     if (!rune->bg_is_palette_entry) {
@@ -500,8 +503,32 @@ static ColorRGB Vt_rune_ln_clr(const Vt* self, const VtRune* rune)
 static inline void VtLine_destroy(void* vt_, VtLine* self)
 {
     Vt* vt = vt_;
+    if (self->links) {
+        Vector_destroy_VtUri(self->links);
+        free(self->links);
+        self->links = NULL;
+    }
     CALL_FP(vt->callbacks.destroy_proxy, vt->callbacks.user_data, &self->proxy);
     Vector_destroy_VtRune(&self->data);
+}
+
+static uint16_t VtLine_add_link(VtLine* self, const char* link)
+{
+    if (!self->links) {
+        self->links  = malloc(sizeof(*self->links));
+        *self->links = Vector_new_with_capacity_VtUri(1);
+        Vector_push_VtUri(self->links, (VtUri){ .uri_string = strdup(link) });
+        return 0;
+    }
+
+    for (VtUri* i = NULL; (i = Vector_iter_VtUri(self->links, i));) {
+        if (!strcmp(i->uri_string, link)) {
+            return Vector_index_VtUri(self->links, i);
+        }
+    }
+
+    Vector_push_VtUri(self->links, (VtUri){ .uri_string = strdup(link) });
+    return self->links->size - 1;
 }
 
 /**
@@ -537,13 +564,40 @@ static inline VtLine* Vt_line_at(Vt* self, size_t row)
 
 /**
  * Get cell at global position if it exists */
-static inline VtRune* Vt_at(Vt* self, size_t column, size_t row)
+static inline VtRune* Vt_at(Vt* self, uint16_t column, size_t row)
 {
     VtLine* line = Vt_line_at(self, row);
     if (!line || column >= line->data.size) {
         return NULL;
     }
     return &line->data.buf[column];
+}
+
+static inline Pair_uint16_t Vt_pixels_to_cells(Vt* self, int32_t x, int32_t y)
+{
+    x = CLAMP(x, 0, self->ws.ws_xpixel);
+    y = CLAMP(y, 0, self->ws.ws_ypixel);
+    return (Pair_uint16_t){
+        .first  = (double)x / self->pixels_per_cell_x,
+        .second = (double)y / self->pixels_per_cell_y,
+    };
+}
+
+static inline const char* Vt_uri_at(Vt* self, uint16_t column, size_t row)
+{
+    VtLine* line = Vt_line_at(self, row);
+
+    if (!line || !line->links || column >= line->data.size) {
+        return NULL;
+    }
+
+    VtRune* rune = &line->data.buf[column];
+
+    if (!rune->hyperlink_idx || rune->hyperlink_idx > (int16_t)line->links->size) {
+        return NULL;
+    }
+
+    return Vector_at_VtUri(line->links, rune->hyperlink_idx -1)->uri_string;
 }
 
 /**

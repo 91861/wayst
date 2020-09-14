@@ -256,23 +256,26 @@ static void find_font()
     bool              is_bitmap  = false;
 
     char* default_file =
-      FontconfigContext_get_file(&fc_context, NULL, NULL, settings.font_size, NULL);
+      FontconfigContext_get_file(&fc_context, NULL, NULL, settings.font_size, NULL, NULL);
     char* default_file_bold = FontconfigContext_get_file(&fc_context,
                                                          NULL,
                                                          OR(settings.font_style_bold.str, "Bold"),
                                                          settings.font_size,
+                                                         NULL,
                                                          NULL);
     char* default_file_italic =
       FontconfigContext_get_file(&fc_context,
                                  NULL,
                                  OR(settings.font_style_italic.str, "Italic"),
                                  settings.font_size,
+                                 NULL,
                                  NULL);
     char* default_file_bold_italic =
       FontconfigContext_get_file(&fc_context,
                                  NULL,
                                  OR(settings.font_style_italic.str, "Bold:Italic"),
                                  settings.font_size,
+                                 NULL,
                                  NULL);
 
     if (!settings.styled_fonts.size) {
@@ -283,19 +286,26 @@ static void find_font()
     int loaded_fonts = 0;
 
     for (StyledFontInfo* i = NULL; (i = Vector_iter_StyledFontInfo(&settings.styled_fonts, i));) {
-        char* main_family  = i->family_name;
+        char* main_family = i->family_name;
+        bool  exact_match;
         char* regular_file = FontconfigContext_get_file(&fc_context,
                                                         main_family,
                                                         settings.font_style_regular.str,
                                                         settings.font_size + i->size_offset,
-                                                        &is_bitmap);
-        L_DROP_IF_SAME(regular_file, default_file);
+                                                        &is_bitmap,
+                                                        &exact_match);
+        if (!exact_match) {
+            L_DROP_IF_SAME(regular_file, default_file);
+        }
         char* bold_file = FontconfigContext_get_file(&fc_context,
                                                      main_family,
                                                      OR(settings.font_style_bold.str, "Bold"),
                                                      settings.font_size + i->size_offset,
-                                                     NULL);
-        L_DROP_IF_SAME(bold_file, default_file);
+                                                     NULL,
+                                                     &exact_match);
+        if (!exact_match) {
+            L_DROP_IF_SAME(bold_file, default_file);
+        }
         L_DROP_IF_SAME(bold_file, default_file_bold);
         L_DROP_IF_SAME(bold_file, regular_file);
         L_DROP_IF_SAME(bold_file, default_file);
@@ -303,8 +313,11 @@ static void find_font()
                                                        main_family,
                                                        OR(settings.font_style_italic.str, "Italic"),
                                                        settings.font_size + i->size_offset,
-                                                       NULL);
-        L_DROP_IF_SAME(italic_file, default_file);
+                                                       NULL,
+                                                       &exact_match);
+        if (!exact_match) {
+            L_DROP_IF_SAME(italic_file, default_file);
+        }
         L_DROP_IF_SAME(italic_file, default_file_italic);
         L_DROP_IF_SAME(italic_file, regular_file);
         L_DROP_IF_SAME(italic_file, default_file);
@@ -313,8 +326,11 @@ static void find_font()
                                      main_family,
                                      OR(settings.font_style_italic.str, "Bold:Italic"),
                                      settings.font_size + i->size_offset,
-                                     NULL);
-        L_DROP_IF_SAME(bold_italic_file, default_file);
+                                     NULL,
+                                     &exact_match);
+        if (!exact_match) {
+            L_DROP_IF_SAME(bold_italic_file, default_file);
+        }
         L_DROP_IF_SAME(bold_italic_file, default_file_bold_italic);
         L_DROP_IF_SAME(bold_italic_file, default_file_bold);
         L_DROP_IF_SAME(bold_italic_file, default_file_italic);
@@ -358,9 +374,16 @@ static void find_font()
 
     for (UnstyledFontInfo* i = NULL;
          (i = Vector_iter_UnstyledFontInfo(&settings.symbol_fonts, i));) {
-        char* file =
-          FontconfigContext_get_file(&fc_context, i->family_name, NULL, settings.font_size, NULL);
-        L_DROP_IF_SAME(file, default_file);
+        bool  exact_match;
+        char* file = FontconfigContext_get_file(&fc_context,
+                                                i->family_name,
+                                                NULL,
+                                                settings.font_size,
+                                                NULL,
+                                                &exact_match);
+        if (!exact_match) {
+            L_DROP_IF_SAME(file, default_file);
+        }
         if ((i->file_name = file)) {
             settings.has_symbol_fonts = true;
         } else {
@@ -373,9 +396,16 @@ static void find_font()
 
     for (UnstyledFontInfo* i = NULL;
          (i = Vector_iter_UnstyledFontInfo(&settings.color_fonts, i));) {
-        char* file =
-          FontconfigContext_get_file(&fc_context, i->family_name, NULL, settings.font_size, NULL);
-        L_DROP_IF_SAME(file, default_file);
+        bool  exact_match;
+        char* file = FontconfigContext_get_file(&fc_context,
+                                                i->family_name,
+                                                NULL,
+                                                settings.font_size,
+                                                NULL,
+                                                &exact_match);
+        if (!exact_match) {
+            L_DROP_IF_SAME(file, default_file);
+        }
         if ((i->file_name = file)) {
             settings.has_color_fonts = true;
         } else {
@@ -501,6 +531,8 @@ static void settings_make_default()
         .locale      = AString_new_uninitialized(),
         .title       = AString_new_static(APPLICATION_NAME),
         .user_app_id = NULL,
+
+        .uri_handler = AString_new_static("xdg-open"),
 
         .font_style_regular     = AString_new_uninitialized(),
         .font_style_bold        = AString_new_uninitialized(),
@@ -1028,6 +1060,14 @@ static void handle_option(const char opt, const int array_index, const char* val
             Vector_destroy_Vector_char(&values);
         } break;
 
+        case OPT_URI_HANDLER_IDX: {
+            Vector_Vector_char values = expand_list_value(value);
+            if (values.buf[0].buf[0]) {
+                AString_replace_with_dynamic(&settings.uri_handler, strdup(value));
+            }
+            Vector_destroy_Vector_char(&values);
+        } break;
+
         case OPT_VTE_VERSION_IDX: {
             Vector_Vector_char values = expand_list_value(value);
             if (values.buf[0].buf[0]) {
@@ -1312,14 +1352,29 @@ static Vector_Vector_char expand_list_value(const char* const list)
         return values;
     }
 
-    Vector_char whitespace = Vector_new_char();
-
     bool in_string    = false;
     bool in_list      = false;
     bool escaped      = false;
     bool has_brackets = false;
+    bool not_a_list   = true;
 
-    const char* arr = list;
+    for (const char* i = list; *i; ++i) {
+        if (*i == '[' && !escaped) {
+            not_a_list = false;
+            break;
+        } else if (!(escaped = (*i == '\\' && !escaped))) {
+            Vector_push_char(Vector_last_Vector_char(&values), *i);
+        }
+    }
+    escaped = false;
+
+    if (not_a_list) {
+        Vector_push_char(Vector_last_Vector_char(&values), '\0');
+        return values;
+    }
+
+    Vector_char whitespace = Vector_new_char();
+    const char* arr        = list;
     for (char c = *arr; c; c = *(++arr)) {
         if (!escaped && !in_string && c == '[') {
             has_brackets = true;
@@ -1444,7 +1499,7 @@ static void settings_file_parse(FILE* f)
                         Vector_push_char(&value, c);
                     }
                     continue;
-                } else if (c == '[' && !in_string && !escaped) {
+                } else if (c == '[' && !escaped && ! in_string) {
                     if (in_list) {
                         WRN("Error in config on lines %u-%u: Defines nested list. Did you mean "
                             "\'\\[\' ?\n",
@@ -1475,6 +1530,12 @@ static void settings_file_parse(FILE* f)
                 } else if (escaped && !in_list) {
                     if (c == 'n') {
                         Vector_push_char(&value, '\n');
+                    } else if (c == '\"' && in_string) {
+                        Vector_push_char(&value, '\"');
+                    } else {
+                        WRN("Error in config on line %u: Escape character \'%c\' invalid in this context\n",
+                            line - 1,
+                            c);
                     }
                 } else if (!iscntrl(c)) {
                     switch (c) {
@@ -1592,6 +1653,7 @@ void settings_cleanup()
     AString_destroy(&settings.term);
     AString_destroy(&settings.locale);
     AString_destroy(&settings.title);
+    AString_destroy(&settings.uri_handler);
     AString_destroy(&settings.directory);
     AString_destroy(&settings.font_style_regular);
     AString_destroy(&settings.font_style_bold);

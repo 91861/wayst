@@ -161,7 +161,7 @@ typedef struct
 
     bool has_bold_fonts, has_italic_fonts, has_bold_italic_fonts, has_symbol_fonts, has_color_fonts;
 
-    AString term, vte_version, locale, title, directory;
+    AString term, vte_version, locale, title, directory, uri_handler;
 
     char* user_app_id;
     char* user_app_id_2;

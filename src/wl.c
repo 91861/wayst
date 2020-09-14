@@ -88,7 +88,6 @@ static void       WindowWl_set_fullscreen(struct WindowBase* self, bool fullscre
 static void       WindowWl_resize(struct WindowBase* self, uint32_t w, uint32_t h);
 static void       WindowWl_events(struct WindowBase* self);
 static TimePoint* WindowWl_process_timers(struct WindowBase* self);
-static void       WindowWl_set_current_context(struct WindowBase* self);
 static void       WindowWl_set_swap_interval(struct WindowBase* self, int32_t ival);
 static void       WindowWl_set_wm_name(struct WindowBase* self, const char* title);
 static void       WindowWl_set_title(struct WindowBase* self, const char* title);
@@ -100,6 +99,7 @@ static void       WindowWl_clipboard_get(struct WindowBase* self);
 static void*      WindowWl_get_gl_ext_proc_adress(struct WindowBase* self, const char* name);
 static uint32_t   WindowWl_get_keycode_from_name(struct WindowBase* self, char* name);
 static void       WindowWl_set_pointer_style(struct WindowBase* self, enum MousePointerStyle style);
+static void       WindowWl_set_current_context(struct WindowBase* self, bool this);
 
 static struct IWindow window_interface_wayland = {
     .set_fullscreen         = WindowWl_set_fullscreen,
@@ -117,6 +117,7 @@ static struct IWindow window_interface_wayland = {
     .get_gl_ext_proc_adress = WindowWl_get_gl_ext_proc_adress,
     .get_keycode_from_name  = WindowWl_get_keycode_from_name,
     .set_pointer_style      = WindowWl_set_pointer_style,
+    .set_current_context    = WindowWl_set_current_context,
 };
 
 typedef struct
@@ -1346,9 +1347,9 @@ static void WindowWl_set_no_context()
     eglMakeCurrent(globalWl->egl_display, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 }
 
-void WindowWl_set_current_context(struct WindowBase* self)
+void WindowWl_set_current_context(struct WindowBase* self, bool this)
 {
-    if (self) {
+    if (self && this) {
         eglMakeCurrent(globalWl->egl_display,
                        windowWl(self)->egl_surface,
                        windowWl(self)->egl_surface,

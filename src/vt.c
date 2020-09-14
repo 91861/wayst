@@ -1431,7 +1431,8 @@ __attribute__((cold)) void Vt_dump_info(Vt* self)
            BOOL_AP(self->modes.mouse_motion_report));
     printf("  x10 compat mouse reporting:       " BOOL_FMT "\n",
            BOOL_AP(self->modes.x10_mouse_compat));
-    printf("  no auto wrap:                     " BOOL_FMT "\n", BOOL_AP(self->modes.no_wraparound));
+    printf("  no auto wrap:                     " BOOL_FMT "\n",
+           BOOL_AP(self->modes.no_wraparound));
     printf("  reverse auto wrap:                " BOOL_FMT "\n",
            BOOL_AP(self->modes.reverse_wraparound));
     printf("  reverse video:                    " BOOL_FMT "\n",
@@ -1462,6 +1463,7 @@ __attribute__((cold)) void Vt_dump_info(Vt* self)
     printf("T G . +----------------------------------------------------\n");
     printf("| | |  BUFFER: %s\n", (self->alt_lines.buf ? "ALTERNATE" : "MAIN"));
     printf("V V V  \n");
+
     for (size_t i = 0; i < self->lines.size; ++i) {
         Vector_char str = rune_vec_to_string(&self->lines.buf[i].data, 0, 0, "");
         printf(
@@ -1482,6 +1484,15 @@ __attribute__((cold)) void Vt_dump_info(Vt* self)
           self->lines.buf[i].was_reflown,
           str.buf,
           (str.size > 90 ? "…" : ""));
+
+        if (self->lines.buf[i].links) {
+            for (uint16_t j = 0; j < self->lines.buf[i].links->size; ++j) {
+                printf("              URI[%u]: %s\n",
+                       j,
+                       self->lines.buf[i].links->buf[j].uri_string);
+            }
+        }
+
         Vector_destroy_char(&str);
     }
 }
@@ -1497,25 +1508,38 @@ static void Vt_reflow_expand(Vt* self, uint32_t x)
     }
 
     for (size_t i = 0; i < bottom_bound; ++i) {
+        VtLine* srcline = &self->lines.buf[i + 1];
+        VtLine* tgtline = &self->lines.buf[i];
 
-        if (self->lines.buf[i].data.size < x && self->lines.buf[i].reflowable) {
-            int32_t chars_to_move = x - self->lines.buf[i].data.size;
+        if (tgtline->data.size < x && tgtline->reflowable) {
+            int32_t chars_to_move = x - tgtline->data.size;
+            if (i + 1 < bottom_bound && srcline->rejoinable) {
+                chars_to_move = MIN(chars_to_move, (int32_t)srcline->data.size);
 
-            if (i + 1 < bottom_bound && self->lines.buf[i + 1].rejoinable) {
-                chars_to_move = MIN(chars_to_move, (int32_t)self->lines.buf[i + 1].data.size);
+                /* Copy uri strings to target line and convert uri idx-es to the new line */
+                if (srcline->links) {
+                    for (int32_t j = 0; j < chars_to_move; ++j) {
+                        VtRune*  r      = &srcline->data.buf[j];
+                        uint16_t srcidx = r->hyperlink_idx;
+                        if (srcidx && srcidx <= srcline->links->size) {
+                            const char* uri =
+                              Vector_at_VtUri(srcline->links, srcidx - 1)->uri_string;
+                            int16_t newidx   = VtLine_add_link(tgtline, uri) + 1;
+                            r->hyperlink_idx = newidx;
+                        }
+                    }
+                }
 
-                Vector_pushv_VtRune(&self->lines.buf[i].data,
-                                    self->lines.buf[i + 1].data.buf,
-                                    chars_to_move);
-
-                Vector_remove_at_VtRune(&self->lines.buf[i + 1].data, 0, chars_to_move);
+                /* Move the actual data */
+                Vector_pushv_VtRune(&tgtline->data, srcline->data.buf, chars_to_move);
+                Vector_remove_at_VtRune(&srcline->data, 0, chars_to_move);
 
                 if (self->selection.mode == SELECT_MODE_NORMAL) {
                     if (self->selection.begin_line == i + 1) {
                         if (self->selection.begin_char_idx <= chars_to_move) {
                             --self->selection.begin_line;
                             self->selection.begin_char_idx =
-                              self->selection.begin_char_idx + self->lines.buf[i].data.size - 1;
+                              self->selection.begin_char_idx + tgtline->data.size - 1;
                         } else {
                             self->selection.begin_char_idx -= chars_to_move;
                         }
@@ -1524,7 +1548,7 @@ static void Vt_reflow_expand(Vt* self, uint32_t x)
                         if (self->selection.end_char_idx < chars_to_move) {
                             --self->selection.end_line;
                             self->selection.end_char_idx =
-                              self->selection.end_char_idx + self->lines.buf[i].data.size - 1;
+                              self->selection.end_char_idx + tgtline->data.size - 1;
                         } else {
                             self->selection.end_char_idx -= chars_to_move;
                         }
@@ -1534,9 +1558,9 @@ static void Vt_reflow_expand(Vt* self, uint32_t x)
                 Vt_mark_proxy_fully_damaged(self, i);
                 Vt_mark_proxy_fully_damaged(self, i + 1);
 
-                if (!self->lines.buf[i + 1].data.size) {
-                    self->lines.buf[i].was_reflown = false;
-                    size_t remove_index            = i + 1;
+                if (!srcline->data.size) {
+                    tgtline->was_reflown = false;
+                    size_t remove_index  = i + 1;
                     Vector_remove_at_VtLine(&self->lines, remove_index, 1);
                     --self->cursor.row;
                     --bottom_bound;
@@ -1558,7 +1582,7 @@ static void Vt_reflow_expand(Vt* self, uint32_t x)
                     }
                 }
             }
-        }
+        } // end should reflow
     }
 
     int underflow = -((int64_t)self->lines.size - Vt_row(self));
@@ -1586,8 +1610,11 @@ static void Vt_reflow_shrink(Vt* self, uint32_t x)
     }
 
     for (size_t i = 0; i < bottom_bound; ++i) {
-        if (self->lines.buf[i].data.size > x && self->lines.buf[i].reflowable) {
-            size_t chars_to_move = self->lines.buf[i].data.size - x;
+        VtLine* srcline = &self->lines.buf[i];
+        VtLine* tgtline = &self->lines.buf[i + 1];
+
+        if (srcline->data.size > x && srcline->reflowable) {
+            size_t chars_to_move = srcline->data.size - x;
 
             /* move select to next line */
             bool end_just_moved = false;
@@ -1604,7 +1631,7 @@ static void Vt_reflow_shrink(Vt* self, uint32_t x)
             }
 
             /* line below is a reflow already */
-            if (i + 1 < bottom_bound && self->lines.buf[i + 1].rejoinable) {
+            if (i + 1 < bottom_bound && tgtline->rejoinable) {
                 for (size_t ii = 0; ii < chars_to_move; ++ii) {
 
                     /* shift selection points right */
@@ -1617,10 +1644,17 @@ static void Vt_reflow_shrink(Vt* self, uint32_t x)
                         }
                     }
 
-                    Vector_insert_VtRune(
-                      &self->lines.buf[i + 1].data,
-                      self->lines.buf[i + 1].data.buf,
-                      *(self->lines.buf[i].data.buf + x + chars_to_move - ii - 1));
+                    VtRune* r = srcline->data.buf + x + chars_to_move - ii - 1;
+
+                    /* update link idx-es */
+                    if (r->hyperlink_idx && srcline->links &&
+                        r->hyperlink_idx >= (uint16_t)srcline->links->size) {
+                        const char* uri = srcline->links->buf[r->hyperlink_idx - 1].uri_string;
+                        int16_t     new_uri_idx = VtLine_add_link(tgtline, uri) + 1;
+                        r->hyperlink_idx        = new_uri_idx;
+                    }
+
+                    Vector_insert_VtRune(&tgtline->data, tgtline->data.buf, *r);
                 }
                 Vt_mark_proxy_fully_damaged(self, i + 1);
             } else if (i < bottom_bound) {
@@ -1643,13 +1677,25 @@ static void Vt_reflow_shrink(Vt* self, uint32_t x)
                         ++self->selection.end_line;
                     }
                 }
+
                 ++self->cursor.row;
                 ++bottom_bound;
-                Vector_pushv_VtRune(&self->lines.buf[i + 1].data,
-                                    self->lines.buf[i].data.buf + x,
-                                    chars_to_move);
-                self->lines.buf[i].was_reflown    = true;
-                self->lines.buf[i + 1].rejoinable = true;
+
+                /* update link idx-es */
+                for (size_t j = 0; j < chars_to_move; ++j) {
+                    VtRune* r = srcline->data.buf + x + j;
+                    if (r->hyperlink_idx && srcline->links &&
+                        r->hyperlink_idx >= (uint16_t)srcline->links->size) {
+                        const char* uri = srcline->links->buf[r->hyperlink_idx - 1].uri_string;
+                        int16_t     new_uri_idx = VtLine_add_link(tgtline, uri) + 1;
+                        r->hyperlink_idx        = new_uri_idx;
+                    }
+                }
+
+                Vector_pushv_VtRune(&tgtline->data, srcline->data.buf + x, chars_to_move);
+
+                srcline->was_reflown = true;
+                tgtline->rejoinable  = true;
             }
         }
     }
@@ -1700,9 +1746,10 @@ static void Vt_trim_columns(Vt* self)
 
 void Vt_resize(Vt* self, uint32_t x, uint32_t y)
 {
-    if (!x || !y) {
+    if (x < 2 || y < 2) {
         return;
     }
+
     if (!self->alt_lines.buf) {
         Vt_trim_columns(self);
     }
@@ -4009,11 +4056,20 @@ static void Vt_handle_OSC(Vt* self, char c)
                 }
             } break;
 
-            /* mark text as hyperlink with URL */
-            case 8:
-                // TODO:
-                WRN("OSC 8 hyperlinks not implemented\n");
-                break;
+                /* mark text as hyperlink with URL */
+            case 8: {
+                strsep(&seq, ";");
+                strsep(&seq, ";");
+                char* link = strsep(&seq, ";");
+
+                if (strnlen(link, 1)) {
+                    free(self->active_hyperlink);
+                    self->active_hyperlink = strdup(link);
+                } else {
+                    free(self->active_hyperlink);
+                    self->active_hyperlink = NULL;
+                }
+            } break;
 
             /* Send Growl(some kind of notification daemon for OSX) notification (iTerm2) */
             case 9:
@@ -4774,6 +4830,10 @@ __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_litera
                 VtRune new_rune      = self->parser.char_state;
                 self->last_codepoint = res;
                 new_rune.rune.code   = res;
+                if (self->active_hyperlink) {
+                    new_rune.hyperlink_idx =
+                      VtLine_add_link(Vt_cursor_line(self), self->active_hyperlink) + 1;
+                }
                 Vt_insert_char_at_cursor(self, new_rune);
             }
         }
@@ -4836,18 +4896,23 @@ __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_litera
                     break;
                 }
 
-                VtRune new_char    = self->parser.char_state;
-                new_char.rune.code = c;
+                VtRune new_rune    = self->parser.char_state;
+                new_rune.rune.code = c;
 
-                if (unlikely(self->charset_single_shift && *self->charset_single_shift)) {
-                    new_char.rune.code         = (*(self->charset_single_shift))(c);
-                    self->charset_single_shift = NULL;
-                } else if (unlikely(self->charset_gl && (*self->charset_gl))) {
-                    new_char.rune.code = (*(self->charset_gl))(c);
+                if (self->active_hyperlink) {
+                    new_rune.hyperlink_idx =
+                      VtLine_add_link(Vt_cursor_line(self), self->active_hyperlink) + 1;
                 }
 
-                self->last_codepoint = new_char.rune.code;
-                Vt_insert_char_at_cursor(self, new_char);
+                if (unlikely(self->charset_single_shift && *self->charset_single_shift)) {
+                    new_rune.rune.code         = (*(self->charset_single_shift))(c);
+                    self->charset_single_shift = NULL;
+                } else if (unlikely(self->charset_gl && (*self->charset_gl))) {
+                    new_rune.rune.code = (*(self->charset_gl))(c);
+                }
+
+                self->last_codepoint = new_rune.rune.code;
+                Vt_insert_char_at_cursor(self, new_rune);
             }
         }
     }
@@ -5757,6 +5822,7 @@ void Vt_destroy(Vt* self)
     Vector_destroy_char(&self->unicode_input.buffer);
     Vector_destroy_char(&self->output);
     free(self->title);
+    free(self->active_hyperlink);
     free(self->work_dir);
     free(self->tab_ruler);
 }

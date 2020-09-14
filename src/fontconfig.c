@@ -25,7 +25,8 @@ char* FontconfigContext_get_file(FontconfigContext*   self,
                                  const char* restrict opt_family,
                                  const char* restrict opt_style,
                                  uint32_t             opt_size,
-                                 bool*                out_is_bitmap)
+                                 bool*                opt_out_is_bitmap,
+                                 bool*                opt_out_is_exact)
 {
     ASSERT(self && self->cfg, "config loaded");
 
@@ -68,10 +69,14 @@ char* FontconfigContext_get_file(FontconfigContext*   self,
             free(retval);
             retval = strdup((char*)file);
 
+            if (opt_out_is_exact && opt_family) {
+                *opt_out_is_exact = !strcasecmp(retval, opt_family);
+            }
+
             FcBool is_scalable;
             FcPatternGetBool(filtered, FC_SCALABLE, 0, &is_scalable);
-            if (!is_scalable && out_is_bitmap) {
-                *out_is_bitmap = true;
+            if (opt_out_is_bitmap) {
+                *opt_out_is_bitmap = !is_scalable;
             }
 
             FcPatternDestroy(filtered); // frees file

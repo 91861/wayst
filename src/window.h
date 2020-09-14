@@ -55,6 +55,7 @@ struct IWindow
     void (*clipboard_send)(struct WindowBase* self, const char* text);
     void (*clipboard_get)(struct WindowBase* self);
     void (*set_swap_interval)(struct WindowBase* self, int val);
+    void (*set_current_context)(struct WindowBase* self, bool this);
     void (*set_pointer_style)(struct WindowBase* self, enum MousePointerStyle);
     void* (*get_gl_ext_proc_adress)(struct WindowBase* self, const char* name);
     uint32_t (*get_keycode_from_name)(struct WindowBase* self, char* name);
@@ -112,6 +113,11 @@ static void Window_update_title(struct WindowBase* self, const char* title)
 static inline void* Window_get_proc_adress(struct WindowBase* self, const char* procname)
 {
     return self->interface->get_gl_ext_proc_adress(self, procname);
+}
+
+static inline void Window_set_current_context(struct WindowBase* self, bool this)
+{
+    self->interface->set_current_context(self, this);
 }
 
 static inline void Window_set_maximized(struct WindowBase* self, bool maximized)

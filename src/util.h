@@ -21,7 +21,7 @@
 
 #define TERMCOLOR_RESET "\e[m"
 
-#define TERMCOLOR_BOLD "\e[1m"
+#define TERMCOLOR_BOLD   "\e[1m"
 #define TERMCOLOR_ITALIC "\e[3m"
 
 #define TERMCOLOR_DEFAULT       "\e[39m"
@@ -351,6 +351,7 @@ static int spawn_process(const char* opt_work_directory,
                          bool        open_pipe_to_stdin)
 {
     int pipefd[2] = { 0 };
+
     if (open_pipe_to_stdin) {
         pipe(pipefd);
     }
@@ -358,6 +359,8 @@ static int spawn_process(const char* opt_work_directory,
     pid_t pid = fork();
 
     if (pid == 0) {
+        signal(SIGCHLD, SIG_DFL);
+
         if (open_pipe_to_stdin) {
             dup2(pipefd[0], STDIN_FILENO);
             close(pipefd[0]);
@@ -370,29 +373,28 @@ static int spawn_process(const char* opt_work_directory,
             opt_argv    = calloc(2, sizeof(char*));
             opt_argv[0] = strdup(command);
         }
-        if (detach && setsid() < 0) {
-            exit(EXIT_FAILURE);
-        }
-
-        signal(SIGCHLD, SIG_DFL);
 
         if (detach) {
+            if (setsid() < 0) {
+                _exit(EXIT_FAILURE);
+            }
             pid = fork();
             if (pid > 0) {
-                exit(EXIT_SUCCESS);
+                _exit(EXIT_SUCCESS);
             } else if (pid < 0) {
-                exit(EXIT_FAILURE);
+                _exit(EXIT_FAILURE);
             }
-            if (opt_work_directory) {
-                chdir(opt_work_directory);
-            }
+        }
+
+        if (opt_work_directory) {
+            chdir(opt_work_directory);
         }
 
         umask(0);
 
         if (execvp(command, (char**)opt_argv)) {
             WRN("failed to execute \'%s\' %s\n", command, strerror(errno));
-            exit(EXIT_FAILURE);
+            _exit(EXIT_FAILURE);
         }
     } else if (pid < 0) {
         WRN("failed to fork\n");

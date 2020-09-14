@@ -424,6 +424,8 @@ static Atlas Atlas_new(GfxOpenGL21* gfx, enum FreetypeFontStyle style)
     uint32_t max_char_height = 0;
     for (int i = ATLAS_RENDERABLE_START + 1; i < ATLAS_RENDERABLE_END; i++) {
         FreetypeOutput* output      = Freetype_load_ascii_glyph(gfx->freetype, i, style);
+        if (!output)
+            continue;
         uint32_t        char_width  = output->width;
         uint32_t        char_height = output->height;
         max_char_height             = MAX(max_char_height, char_height);
@@ -475,7 +477,9 @@ static Atlas Atlas_new(GfxOpenGL21* gfx, enum FreetypeFontStyle style)
 
     for (int i = ATLAS_RENDERABLE_START + 1; i < ATLAS_RENDERABLE_END; i++) {
         FreetypeOutput* output = Freetype_load_and_render_ascii_glyph(gfx->freetype, i, style);
-        ASSERT(output, "has output");
+        if (!output)
+            continue;
+
         uint32_t width  = output->width;
         uint32_t height = output->height;
         if (offset_x + width > self.w) {
@@ -901,6 +905,11 @@ void GfxOpenGL21_resize(Gfx* self, uint32_t w, uint32_t h)
 
     FreetypeOutput* output =
       Freetype_load_ascii_glyph(gl21->freetype, settings.center_char, FT_STYLE_REGULAR);
+
+    if (!output) {
+        ERR("Failed to load character metrics, is font set up correctly?");
+    }
+    
     uint32_t hber = output->ft_slot->metrics.horiBearingY / 64 / 2 / 2 + 1;
 
     gl21->pen_begin_y = gl21->sy * (gl21->line_height_pixels / 2.0) + gl21->sy * hber;
@@ -2208,14 +2217,20 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
     if (unlikely(is_for_blinking)) {
         vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK]     = final_texture;
         vt_line->proxy.data[PROXY_INDEX_DEPTHBUFFER_BLINK] = final_depthbuffer;
+        vt_line->damage.type                               = VT_LINE_DAMAGE_NONE;
+        vt_line->damage.shift                              = 0;
+        vt_line->damage.front                              = 0;
+        vt_line->damage.end                                = 0;
     } else {
         vt_line->proxy.data[PROXY_INDEX_TEXTURE]     = final_texture;
         vt_line->proxy.data[PROXY_INDEX_DEPTHBUFFER] = final_depthbuffer;
         vt_line->proxy.data[PROXY_INDEX_SIZE]        = actual_texture_width;
-        vt_line->damage.type                         = VT_LINE_DAMAGE_NONE;
-        vt_line->damage.shift                        = 0;
-        vt_line->damage.front                        = 0;
-        vt_line->damage.end                          = 0;
+        if (!has_blinking_chars) {
+            vt_line->damage.type  = VT_LINE_DAMAGE_NONE;
+            vt_line->damage.shift = 0;
+            vt_line->damage.front = 0;
+            vt_line->damage.end   = 0;
+        }
     }
 
     static float debug_tint = 0.0f;

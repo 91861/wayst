@@ -103,6 +103,7 @@ static void App_clamp_cursor(App* self, Pair_uint32_t chars);
 static void App_set_monitor_callbacks(App* self);
 static void App_set_callbacks(App* self);
 static void App_maybe_resize(App* self, Pair_uint32_t newres);
+static void App_handle_uri(App* self, const char* uri);
 
 static void* App_load_extension_proc_address(void* self, const char* name)
 {
@@ -522,8 +523,17 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
             Vector_clear_char(&self->ksm_input_buf);
             break;
 
+        case KEY(Return): {
+            if (FLAG_IS_SET(mods, MODIFIER_CONTROL)) {
+                const char* uri = Vt_uri_at(vt, self->ksm_cursor.col, self->ksm_cursor.row);
+                if (uri) {
+                    App_handle_uri(self, uri);
+                    break;
+                }
+            }
+        }
+            /* fallthrough */
         case KEY(v):
-        case KEY(Return):
             if (self->vt.selection.mode) {
                 Vt_select_end(vt);
                 break;
@@ -1150,9 +1160,8 @@ static void App_button_handler(void*    self,
         uint8_t lines             = ammount ? ammount : settings.scroll_discrete_lines;
         app->ui.scrollbar.visible = true;
         for (uint8_t i = 0; i < lines; ++i) {
-            if (Vt_visual_scroll_down(vt)) {
+            if (Vt_visual_scroll_down(vt))
                 break;
-            }
         }
         App_update_scrollbar_dims(self);
         App_notify_content_change(self);
@@ -1160,15 +1169,24 @@ static void App_button_handler(void*    self,
         uint8_t lines             = ammount ? ammount : settings.scroll_discrete_lines;
         app->ui.scrollbar.visible = true;
         for (uint8_t i = 0; i < lines; ++i) {
-            if (Vt_visual_scroll_up(vt)) {
+            if (Vt_visual_scroll_up(vt))
                 break;
-            }
         }
         App_update_scrollbar_vis(self);
         App_update_scrollbar_dims(self);
         App_notify_content_change(self);
     } else if (!App_scrollbar_consume_click(self, button, state, x, y) &&
                !App_maybe_consume_click(self, button, state, x, y, mods)) {
+        /* Maybe theres a link there */
+        if (FLAG_IS_SET(mods, MODIFIER_CONTROL)) {
+            Pair_uint16_t cells = Vt_pixels_to_cells(vt, x, y);
+            cells.second += Vt_visual_top_line(vt);
+            const char* uri = Vt_uri_at(vt, cells.first, cells.second);
+            if (uri) {
+                App_handle_uri(self, uri);
+                return;
+            }
+        }
         Vt_handle_button(vt, button, state, x, y, ammount, mods);
     }
 }
@@ -1193,6 +1211,13 @@ static void App_set_monitor_callbacks(App* self)
 {
     self->monitor.callbacks.on_exit   = App_exit_handler;
     self->monitor.callbacks.user_data = self;
+}
+
+static void App_handle_uri(App* self, const char* uri)
+{
+    LOG("Opening URI: \'%s\'\n", uri);
+    const char* argv[] = { settings.uri_handler.str, uri, NULL };
+    spawn_process(self->vt.work_dir, argv[0], (char**)argv, true, false);
 }
 
 static void App_send_desktop_notification(void* self, const char* opt_title, const char* text)
