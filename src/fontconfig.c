@@ -56,10 +56,11 @@ char* FontconfigContext_get_file(FontconfigContext*   self,
     FcFontSet* font_set = FcFontSetCreate();
     FcResult   result;
     FcPattern* match = FcFontMatch(self->cfg, pattern, &result);
-    if (match) {
+    FcPatternDestroy(pattern);
+
+    if (match && result == FcResultMatch) {
         FcFontSetAdd(font_set, match);
     }
-    FcPatternDestroy(pattern);
 
     if (font_set) {
         for (int i = 0; i < font_set->nfont; ++i) {

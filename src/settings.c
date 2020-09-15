@@ -294,9 +294,9 @@ static void find_font()
                                                         settings.font_size + i->size_offset,
                                                         &is_bitmap,
                                                         &exact_match);
-        if (!exact_match) {
-            L_DROP_IF_SAME(regular_file, default_file);
-        }
+        /* if (!exact_match) { */
+        /*     L_DROP_IF_SAME(regular_file, default_file); */
+        /* } */
         char* bold_file = FontconfigContext_get_file(&fc_context,
                                                      main_family,
                                                      OR(settings.font_style_bold.str, "Bold"),

@@ -98,6 +98,7 @@ typedef struct
 
     Cursor cursor_hidden;
     Cursor cursor_beam;
+    Cursor cursor_hand;
 
     XIM im;
     XIC ic;
@@ -147,6 +148,7 @@ static void WindowX11_setup_pointer(struct WindowBase* self)
     Pixmap pmp = XCreateBitmapFromData(globalX11->display, windowX11(self)->window, data, 8, 8);
     globalX11->cursor_hidden = XCreatePixmapCursor(globalX11->display, pmp, pmp, &c, &c, 0, 0);
     globalX11->cursor_beam   = XCreateFontCursor(globalX11->display, XC_xterm);
+    globalX11->cursor_hand   = XCreateFontCursor(globalX11->display, XC_hand1);
 }
 
 static void* WindowX11_get_gl_ext_proc_adress(struct WindowBase* self, const char* name)
@@ -661,13 +663,11 @@ static void WindowX11_events(struct WindowBase* self)
                 if (Window_is_pointer_hidden(self)) {
                     WindowX11_set_pointer_style(self, MOUSE_POINTER_ARROW);
                 }
-                if (windowX11(self)->last_button_pressed) {
-                    CALL_FP(self->callbacks.motion_handler,
-                            self->callbacks.user_data,
-                            windowX11(self)->last_button_pressed,
-                            e->xmotion.x,
-                            e->xmotion.y);
-                }
+                CALL_FP(self->callbacks.motion_handler,
+                        self->callbacks.user_data,
+                        windowX11(self)->last_button_pressed,
+                        e->xmotion.x,
+                        e->xmotion.y);
                 break;
 
             case SelectionClear:
@@ -873,6 +873,11 @@ static void WindowX11_set_pointer_style(struct WindowBase* self, enum MousePoint
 
         case MOUSE_POINTER_I_BEAM:
             XDefineCursor(globalX11->display, windowX11(self)->window, globalX11->cursor_beam);
+            FLAG_UNSET(self->state_flags, WINDOW_IS_POINTER_HIDDEN);
+            break;
+
+        case MOUSE_POINTER_HAND:
+            XDefineCursor(globalX11->display, windowX11(self)->window, globalX11->cursor_hand);
             FLAG_UNSET(self->state_flags, WINDOW_IS_POINTER_HIDDEN);
             break;
     }

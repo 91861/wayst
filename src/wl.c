@@ -157,9 +157,8 @@ typedef struct
     struct wl_pointer*  pointer;
     struct wl_keyboard* keyboard;
 
+    struct wl_cursor *      cursor_arrow, *cursor_beam, *cursor_hand;
     struct wl_cursor_theme* cursor_theme;
-    struct wl_cursor*       cursor_arrow;
-    struct wl_cursor*       cursor_beam;
     struct wl_surface*      cursor_surface;
 
     int32_t   kbd_repeat_dealy, kbd_repeat_rate;
@@ -384,12 +383,11 @@ static void pointer_handle_motion(void*              data,
         cursor_set(globalWl->cursor_arrow, 0);
         FLAG_UNSET(win->state_flags, WINDOW_IS_POINTER_HIDDEN);
     }
-    if (globalWl->last_button_pressed) {
-        win->callbacks.motion_handler(win->callbacks.user_data,
-                                      globalWl->last_button_pressed,
-                                      win->pointer_x,
-                                      win->pointer_y);
-    }
+
+    win->callbacks.motion_handler(win->callbacks.user_data,
+                                  globalWl->last_button_pressed,
+                                  win->pointer_x,
+                                  win->pointer_y);
 }
 
 static void pointer_handle_button(void*              data,
@@ -1131,6 +1129,7 @@ static void setup_cursor(struct WindowBase* self)
 
     globalWl->cursor_arrow = wl_cursor_theme_get_cursor(globalWl->cursor_theme, "left_ptr");
     globalWl->cursor_beam  = wl_cursor_theme_get_cursor(globalWl->cursor_theme, "xterm");
+    globalWl->cursor_hand  = wl_cursor_theme_get_cursor(globalWl->cursor_theme, "hand1");
 
     if (!globalWl->cursor_arrow || !globalWl->cursor_beam) {
         WRN("Failed to load cursor image");
@@ -1624,6 +1623,11 @@ static void WindowWl_set_pointer_style(struct WindowBase* self, enum MousePointe
         case MOUSE_POINTER_I_BEAM:
             FLAG_UNSET(self->state_flags, WINDOW_IS_POINTER_HIDDEN);
             cursor_set(globalWl->cursor_beam, 0);
+            break;
+
+        case MOUSE_POINTER_HAND:
+            FLAG_UNSET(self->state_flags, WINDOW_IS_POINTER_HIDDEN);
+            cursor_set(globalWl->cursor_hand, 0);
             break;
     }
 }

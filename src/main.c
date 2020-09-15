@@ -104,6 +104,7 @@ static void App_set_monitor_callbacks(App* self);
 static void App_set_callbacks(App* self);
 static void App_maybe_resize(App* self, Pair_uint32_t newres);
 static void App_handle_uri(App* self, const char* uri);
+static void App_update_hover(App* self, int32_t x, int32_t y);
 
 static void* App_load_extension_proc_address(void* self, const char* name)
 {
@@ -364,7 +365,15 @@ static void App_flash(void* self)
 
 static void App_action(void* self)
 {
-    Gfx_notify_action(((App*)self)->gfx);
+    App* app = self;
+    Gfx_notify_action(app->gfx);
+
+    if (!Window_is_pointer_hidden(app->win)) {
+        App_update_hover(
+          app,
+          CLAMP(app->win->pointer_x - app->ui.pixel_offset_x, 0, (int32_t)app->resolution.first),
+          CLAMP(app->win->pointer_y - app->ui.pixel_offset_y, 0, (int32_t)app->resolution.second));
+    }
 }
 
 static void App_clamp_cursor(App* self, Pair_uint32_t chars)
@@ -1191,13 +1200,33 @@ static void App_button_handler(void*    self,
     }
 }
 
+static void App_update_hover(App* self, int32_t x, int32_t y)
+{
+    Pair_uint16_t cells = Vt_pixels_to_cells(&self->vt, x, y);
+    cells.second += Vt_visual_top_line(&self->vt);
+    if (Vt_uri_at(&self->vt, cells.first, cells.second)) {
+        if (self->win->current_pointer_style != MOUSE_POINTER_HAND) {
+            Window_set_pointer_style(self->win, MOUSE_POINTER_HAND);
+        }
+    } else {
+        if (self->win->current_pointer_style != MOUSE_POINTER_ARROW) {
+            Window_set_pointer_style(self->win, MOUSE_POINTER_ARROW);
+        }
+    }
+}
+
 static void App_motion_handler(void* self, uint32_t button, int32_t x, int32_t y)
 {
     App* app = self;
     x        = CLAMP(x - app->ui.pixel_offset_x, 0, (int32_t)app->resolution.first);
     y        = CLAMP(y - app->ui.pixel_offset_y, 0, (int32_t)app->resolution.second);
-    if (!App_scrollbar_consume_drag(self, button, x, y) && !App_consume_drag(self, button, x, y)) {
-        Vt_handle_motion(&app->vt, button, x, y);
+    if (button) {
+        if (!App_scrollbar_consume_drag(self, button, x, y) &&
+            !App_consume_drag(self, button, x, y)) {
+            Vt_handle_motion(&app->vt, button, x, y);
+        }
+    } else {
+        App_update_hover(app, x, y);
     }
 }
 

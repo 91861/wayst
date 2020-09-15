@@ -37,6 +37,7 @@ enum MousePointerStyle
     MOUSE_POINTER_HIDDEN,
     MOUSE_POINTER_ARROW,
     MOUSE_POINTER_I_BEAM,
+    MOUSE_POINTER_HAND,
 };
 
 struct WindowBase;
@@ -71,9 +72,10 @@ typedef struct WindowBase
      */
     int32_t previous_w, previous_h;
 
-    int32_t  pointer_x, pointer_y;
-    uint16_t state_flags;
-    bool     paint;
+    int32_t                pointer_x, pointer_y;
+    uint16_t               state_flags;
+    bool                   paint;
+    enum MousePointerStyle current_pointer_style;
 
     struct window_callbacks_t
     {
@@ -181,6 +183,7 @@ static inline void Window_set_pointer_style(struct WindowBase* self, enum MouseP
         return;
     }
     self->interface->set_pointer_style(self, style);
+    self->current_pointer_style = style;
 }
 
 static inline uint32_t Window_get_keysym_from_name(struct WindowBase* self, char* name)
