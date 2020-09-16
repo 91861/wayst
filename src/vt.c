@@ -1524,8 +1524,10 @@ static void Vt_reflow_expand(Vt* self, uint32_t x)
                         if (srcidx && srcidx <= srcline->links->size) {
                             const char* uri =
                               Vector_at_VtUri(srcline->links, srcidx - 1)->uri_string;
-                            int16_t newidx   = VtLine_add_link(tgtline, uri) + 1;
-                            r->hyperlink_idx = newidx;
+                            if (uri) {
+                                int16_t newidx   = VtLine_add_link(tgtline, uri) + 1;
+                                r->hyperlink_idx = newidx;
+                            }
                         }
                     }
                 }
@@ -1650,8 +1652,10 @@ static void Vt_reflow_shrink(Vt* self, uint32_t x)
                     if (r->hyperlink_idx && srcline->links &&
                         r->hyperlink_idx >= (uint16_t)srcline->links->size) {
                         const char* uri = srcline->links->buf[r->hyperlink_idx - 1].uri_string;
-                        int16_t     new_uri_idx = VtLine_add_link(tgtline, uri) + 1;
-                        r->hyperlink_idx        = new_uri_idx;
+                        if (uri) {
+                            int16_t new_uri_idx = VtLine_add_link(tgtline, uri) + 1;
+                            r->hyperlink_idx    = new_uri_idx;
+                        }
                     }
 
                     Vector_insert_VtRune(&tgtline->data, tgtline->data.buf, *r);

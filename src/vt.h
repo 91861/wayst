@@ -583,6 +583,8 @@ static inline Pair_uint16_t Vt_pixels_to_cells(Vt* self, int32_t x, int32_t y)
     };
 }
 
+/**
+ * Get URI at cell in global coordinates */
 static inline const char* Vt_uri_at(Vt* self, uint16_t column, size_t row)
 {
     VtLine* line = Vt_line_at(self, row);
@@ -597,7 +599,123 @@ static inline const char* Vt_uri_at(Vt* self, uint16_t column, size_t row)
         return NULL;
     }
 
-    return Vector_at_VtUri(line->links, rune->hyperlink_idx -1)->uri_string;
+    return Vector_at_VtUri(line->links, rune->hyperlink_idx - 1)->uri_string;
+}
+
+/**
+ * Get location of an entire link including wrapped lines at cell in global coordinates */
+static const char* Vt_uri_range_at(Vt*            self,
+                                   uint16_t       column,
+                                   size_t         row,
+                                   Pair_size_t*   out_rows,
+                                   Pair_uint16_t* out_columns)
+{
+    VtLine* base_line = Vt_line_at(self, row);
+    if (!base_line || !base_line->links || column >= base_line->data.size) {
+        return NULL;
+    }
+
+    uint16_t    base_link_idx = base_line->data.buf[column].hyperlink_idx;
+    const char* base_link_str = Vt_uri_at(self, column, row);
+
+    if (!base_link_idx || !base_link_str) {
+        return NULL;
+    }
+
+    uint16_t start_column = column, end_column = column;
+    size_t   min_row, max_row, tmp_row;
+    min_row = max_row = tmp_row = row;
+
+    /* Front */
+    VtLine*  ln;
+    uint16_t ln_base_idx = base_link_idx;
+    uint16_t line_start_column = start_column;
+    for (size_t r = row; r + 1; --r) {
+        ln = Vt_line_at(self, r);
+
+        if (!ln || !ln->links || line_start_column >= ln->data.size) {
+            min_row = r + 1;
+            break;
+        }
+
+        ln_base_idx = 0;
+        for (VtUri* i = NULL; (i = Vector_iter_VtUri(ln->links, i));) {
+            if (!strcmp(i->uri_string, base_link_str)) {
+                ln_base_idx = Vector_index_VtUri(ln->links, i) + 1;
+                break;
+            }
+        }
+
+        if (!ln_base_idx) {
+            min_row = r + 1;
+            break;
+        }
+
+        while (line_start_column) {
+            if (ln->data.buf[line_start_column - 1].hyperlink_idx != ln_base_idx)
+                break;
+            --line_start_column;
+        }
+
+        start_column = line_start_column;
+        if (line_start_column) {
+            min_row = r;
+            break;
+        } else {
+            line_start_column = Vt_col(self) - 1;
+        }
+    }
+
+
+    /* Back */
+    ln_base_idx = base_link_idx;
+    uint16_t line_end_column = end_column;
+    for (size_t r = row; r  < Vt_row(self); ++r) {
+        ln = Vt_line_at(self, r);
+
+        if (!ln || !ln->links || line_end_column >= ln->data.size) {
+            min_row = r - 1;
+            break;
+        }
+
+        ln_base_idx = 0;
+        for (VtUri* i = NULL; (i = Vector_iter_VtUri(ln->links, i));) {
+            if (!strcmp(i->uri_string, base_link_str)) {
+                ln_base_idx = Vector_index_VtUri(ln->links, i) + 1;
+                break;
+            }
+        }
+
+        if (!ln_base_idx) {
+            min_row = r - 1;
+            break;
+        }
+
+        while (line_end_column < Vt_col(self)) {
+            if (ln->data.buf[line_end_column + 1].hyperlink_idx != ln_base_idx)
+                break;
+            ++line_end_column;
+        }
+
+        end_column = line_end_column;
+        if (line_end_column < Vt_col(self) -1 ) {
+            max_row = r;
+            break;
+        } else {
+            line_end_column = 0;
+        }
+    }
+
+    if (out_rows) {
+        out_rows->first  = min_row;
+        out_rows->second = max_row;
+    }
+    if (out_columns) {
+        out_columns->first  = start_column;
+        out_columns->second = end_column;
+    }
+
+    return base_link_str;
 }
 
 /**

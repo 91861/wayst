@@ -423,12 +423,12 @@ static Atlas Atlas_new(GfxOpenGL21* gfx, enum FreetypeFontStyle style)
     uint32_t wline = 0, hline = 0, limit = MIN(gfx->max_tex_res, ATLAS_SIZE_LIMIT);
     uint32_t max_char_height = 0;
     for (int i = ATLAS_RENDERABLE_START + 1; i < ATLAS_RENDERABLE_END; i++) {
-        FreetypeOutput* output      = Freetype_load_ascii_glyph(gfx->freetype, i, style);
+        FreetypeOutput* output = Freetype_load_ascii_glyph(gfx->freetype, i, style);
         if (!output)
             continue;
-        uint32_t        char_width  = output->width;
-        uint32_t        char_height = output->height;
-        max_char_height             = MAX(max_char_height, char_height);
+        uint32_t char_width  = output->width;
+        uint32_t char_height = output->height;
+        max_char_height      = MAX(max_char_height, char_height);
         if (wline + char_width < limit) {
             wline += char_width;
             hline = char_height > hline ? char_height : hline;
@@ -909,7 +909,7 @@ void GfxOpenGL21_resize(Gfx* self, uint32_t w, uint32_t h)
     if (!output) {
         ERR("Failed to load character metrics, is font set up correctly?");
     }
-    
+
     uint32_t hber = output->ft_slot->metrics.horiBearingY / 64 / 2 / 2 + 1;
 
     gl21->pen_begin_y = gl21->sy * (gl21->line_height_pixels / 2.0) + gl21->sy * hber;
@@ -1310,13 +1310,14 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_underline_ra
     const double scaley = 2.0f / texture_dims.second;
 
     // draw lines
-    static float begin[5]   = { -1, -1, -1, -1, -1 };
-    static float end[5]     = { 1, 1, 1, 1, 1 };
-    static bool  drawing[5] = { 0 };
+    static float begin[6]   = { -1, -1, -1, -1, -1 };
+    static float end[6]     = { 1, 1, 1, 1, 1, 1 };
+    static bool  drawing[6] = { 0 };
 
     if (unlikely(range.first)) {
         const float init_coord =
           unlikely(range.second) ? -1.0f + gfx->glyph_width_pixels * scalex * range.first : 0.0f;
+
         for (uint_fast8_t i = 0; i < ARRAY_SIZE(begin); ++i) {
             begin[i] = init_coord;
         }
@@ -1340,9 +1341,11 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_underline_ra
         if (!ColorRGB_eq(line_color, nc) || each_rune == vt_line->data.buf + range.second ||
             each_rune->underlined != drawing[0] || each_rune->doubleunderline != drawing[1] ||
             each_rune->strikethrough != drawing[2] || each_rune->overline != drawing[3] ||
-            each_rune->curlyunderline != drawing[4]) {
+            each_rune->curlyunderline != drawing[4] ||
+            (each_rune->hyperlink_idx != 0) != drawing[5]) {
+
             if (each_rune == vt_line->data.buf + range.second) {
-                for (int_fast8_t tmp = 0; tmp < 5; tmp++) {
+                for (uint_fast8_t tmp = 0; tmp < ARRAY_SIZE(end); tmp++) {
                     end[tmp] = -1.0f + (float)column * scalex * (float)gfx->glyph_width_pixels;
                 }
             } else {
@@ -1355,9 +1358,12 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_underline_ra
                 L_SET_BOUNDS_END(z->strikethrough, 2);
                 L_SET_BOUNDS_END(z->overline, 3);
                 L_SET_BOUNDS_END(z->curlyunderline, 4);
+                L_SET_BOUNDS_END(z->hyperlink_idx, 5);
             }
+
             Vector_clear_vertex_t(&gfx->vec_vertex_buffer);
             Vector_clear_vertex_t(&gfx->vec_vertex_buffer2);
+
             if (drawing[0]) {
                 Vector_push_vertex_t(&gfx->vec_vertex_buffer,
                                      (vertex_t){ begin[0], 1.0f - scaley });
@@ -1397,6 +1403,15 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_underline_ra
                 Vector_push_vertex_t(&gfx->vec_vertex_buffer2, (vertex_t){ end[4], t_y });
                 Vector_push_vertex_t(&gfx->vec_vertex_buffer2, (vertex_t){ 1.0f * n_cells, 0.0f });
             }
+            if (drawing[5] && !drawing[0]) {
+                for (float i = begin[5]; i < (end[5] - scalex * 0.5f);
+                     i += (scalex * gfx->glyph_width_pixels)) {
+                    float j = i + scalex * gfx->glyph_width_pixels / 2.0;
+                    Vector_push_vertex_t(&gfx->vec_vertex_buffer, (vertex_t){ i, 1.0f - scaley });
+                    Vector_push_vertex_t(&gfx->vec_vertex_buffer, (vertex_t){ j, 1.0f - scaley });
+                }
+            }
+
             if (gfx->vec_vertex_buffer.size) {
                 if (*bound_resources != BOUND_RESOURCES_LINES) {
                     *bound_resources = BOUND_RESOURCES_LINES;
@@ -1448,6 +1463,7 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_underline_ra
                 L_SET_BOUNDS_BEGIN(each_rune->strikethrough, 2);
                 L_SET_BOUNDS_BEGIN(each_rune->overline, 3);
                 L_SET_BOUNDS_BEGIN(each_rune->curlyunderline, 4);
+                L_SET_BOUNDS_BEGIN(each_rune->hyperlink_idx, 5);
             }
             if (each_rune != vt_line->data.buf + range.second) {
                 drawing[0] = each_rune->underlined;
@@ -1455,12 +1471,9 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_underline_ra
                 drawing[2] = each_rune->strikethrough;
                 drawing[3] = each_rune->overline;
                 drawing[4] = each_rune->curlyunderline;
+                drawing[5] = each_rune->hyperlink_idx != 0;
             } else {
-                drawing[0] = false;
-                drawing[1] = false;
-                drawing[2] = false;
-                drawing[3] = false;
-                drawing[4] = false;
+                memset(drawing, false, sizeof(drawing));
             }
             line_color = nc;
         }
@@ -1502,7 +1515,7 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
             if (!*has_underlined_chars &&
                 unlikely(each_rune->underlined || each_rune->strikethrough ||
                          each_rune->doubleunderline || each_rune->curlyunderline ||
-                         each_rune->overline)) {
+                         each_rune->overline || each_rune->hyperlink_idx)) {
                 *has_underlined_chars = true;
             }
         }
@@ -2638,6 +2651,67 @@ static void GfxOpenGL21_draw_scrollbar(GfxOpenGL21* self, const Scrollbar* scrol
     glDrawArrays(GL_QUADS, 0, 4);
 }
 
+static void GfxOpenGL21_draw_hovered_link(GfxOpenGL21* self, const Vt* vt, const Ui* ui)
+{
+    Vector_clear_vertex_t(&self->vec_vertex_buffer);
+
+    if (ui->hovered_link.start_line_idx == ui->hovered_link.end_line_idx) {
+        size_t yidx = (ui->hovered_link.start_line_idx + 1) - Vt_visual_top_line(vt);
+
+        float x = -1.0f + (ui->pixel_offset_x +
+                           self->glyph_width_pixels * ui->hovered_link.start_cell_idx) *
+                            self->sx;
+        float y = 1.0f - (ui->pixel_offset_y + self->line_height_pixels * yidx - 1) * self->sy;
+
+        Vector_push_vertex_t(&self->vec_vertex_buffer, (vertex_t){ x, y });
+        x = -1.0f +
+            (ui->pixel_offset_x + self->glyph_width_pixels * (ui->hovered_link.end_cell_idx + 1)) *
+              self->sx;
+        Vector_push_vertex_t(&self->vec_vertex_buffer, (vertex_t){ x, y });
+    } else {
+        size_t yidx = (ui->hovered_link.start_line_idx + 1) - Vt_visual_top_line(vt);
+        float  x    = -1.0f + (ui->pixel_offset_x +
+                           self->glyph_width_pixels * ui->hovered_link.start_cell_idx) *
+                            self->sx;
+        float y = 1.0f - (ui->pixel_offset_y + self->line_height_pixels * yidx - 1) * self->sy;
+        Vector_push_vertex_t(&self->vec_vertex_buffer, (vertex_t){ x, y });
+        x = -1.0f + (ui->pixel_offset_x + self->glyph_width_pixels * Vt_col(vt)) * self->sx;
+        Vector_push_vertex_t(&self->vec_vertex_buffer, (vertex_t){ x, y });
+
+        for (size_t row = ui->hovered_link.start_line_idx + 1; row < ui->hovered_link.end_line_idx;
+             ++row) {
+            yidx = (row + 1) - Vt_visual_top_line(vt);
+            y    = 1.0f - (ui->pixel_offset_y + self->line_height_pixels * yidx - 1) * self->sy;
+            x    = -1.0f + ui->pixel_offset_x * self->sx;
+            Vector_push_vertex_t(&self->vec_vertex_buffer, (vertex_t){ x, y });
+            x =
+              -1.0f + (ui->pixel_offset_x + self->glyph_width_pixels * (Vt_col(vt) - 1)) * self->sx;
+            Vector_push_vertex_t(&self->vec_vertex_buffer, (vertex_t){ x, y });
+        }
+        yidx = (ui->hovered_link.end_line_idx + 1) - Vt_visual_top_line(vt);
+        y    = 1.0f - (ui->pixel_offset_y + self->line_height_pixels * yidx - 1) * self->sy;
+        x    = -1.0f + ui->pixel_offset_x * self->sx;
+        Vector_push_vertex_t(&self->vec_vertex_buffer, (vertex_t){ x, y });
+        x = -1.0f +
+            (ui->pixel_offset_x + self->glyph_width_pixels * (ui->hovered_link.end_cell_idx + 1)) *
+              self->sx;
+        Vector_push_vertex_t(&self->vec_vertex_buffer, (vertex_t){ x, y });
+    }
+
+    glViewport(0, 0, self->win_w, self->win_h);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    Shader_use(&self->line_shader);
+    glBindBuffer(GL_ARRAY_BUFFER, self->flex_vbo.vbo);
+    glVertexAttribPointer(self->line_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
+    glUniform3f(self->line_shader.uniforms[1].location,
+                ColorRGB_get_float(vt->colors.fg, 0),
+                ColorRGB_get_float(vt->colors.fg, 1),
+                ColorRGB_get_float(vt->colors.fg, 2));
+    size_t new_size = sizeof(vertex_t) * self->vec_vertex_buffer.size;
+    ARRAY_BUFFER_SUB_OR_SWAP(self->vec_vertex_buffer.buf, self->flex_vbo.size, new_size);
+    glDrawArrays(GL_LINES, 0, self->vec_vertex_buffer.size);
+}
+
 static void GfxOpenGL21_draw_overlays(GfxOpenGL21* self, const Vt* vt, const Ui* ui)
 {
     if (vt->unicode_input.active) {
@@ -2647,6 +2721,9 @@ static void GfxOpenGL21_draw_overlays(GfxOpenGL21* self, const Vt* vt, const Ui*
     }
     if (ui->scrollbar.visible) {
         GfxOpenGL21_draw_scrollbar(self, &ui->scrollbar);
+    }
+    if (ui->hovered_link.active) {
+        GfxOpenGL21_draw_hovered_link(self, vt, ui);
     }
 }
 

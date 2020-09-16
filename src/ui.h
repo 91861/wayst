@@ -11,7 +11,6 @@
 
 struct Cursor;
 
-
 typedef struct
 {
     bool    visible, dragging;
@@ -21,7 +20,15 @@ typedef struct
 
 typedef struct
 {
-    uint8_t pixel_offset_x, pixel_offset_y;
-    Scrollbar scrollbar;
+    bool     active;
+    size_t   start_line_idx, end_line_idx;
+    uint16_t start_cell_idx, end_cell_idx;
+} hovered_link_t;
+
+typedef struct
+{
+    uint8_t        pixel_offset_x, pixel_offset_y;
+    Scrollbar      scrollbar;
     struct Cursor* cursor;
+    hovered_link_t hovered_link;
 } Ui;

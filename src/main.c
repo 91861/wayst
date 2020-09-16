@@ -174,11 +174,13 @@ static void App_init(App* self)
 
     Monitor_watch_window_system_fd(&self->monitor, Window_get_connection_fd(self->win));
 
-    self->ui.scrollbar.width = settings.scrollbar_width_px;
-    self->ui.pixel_offset_x  = 0;
-    self->ui.pixel_offset_y  = 0;
-    self->swap_performed     = false;
-    self->resolution         = size;
+    self->ui.scrollbar.width     = settings.scrollbar_width_px;
+    self->ui.pixel_offset_x      = 0;
+    self->ui.pixel_offset_y      = 0;
+    self->ui.hovered_link.active = false;
+
+    self->swap_performed = false;
+    self->resolution     = size;
 
     Window_events(self->win);
 }
@@ -1208,7 +1210,36 @@ static void App_update_hover(App* self, int32_t x, int32_t y)
         if (self->win->current_pointer_style != MOUSE_POINTER_HAND) {
             Window_set_pointer_style(self->win, MOUSE_POINTER_HAND);
         }
+        Pair_size_t   rows;
+        Pair_uint16_t cols;
+        const char*   uri;
+        if ((uri = Vt_uri_range_at(&self->vt, cells.first, cells.second, &rows, &cols))) {
+
+            hovered_link_t new_hovered_link = {
+                .active         = true,
+                .start_line_idx = rows.first,
+                .end_line_idx   = rows.second,
+                .start_cell_idx = cols.first,
+                .end_cell_idx   = cols.second,
+            };
+
+            if (memcmp(&new_hovered_link, &self->ui.hovered_link, sizeof(new_hovered_link))) {
+                self->ui.hovered_link = new_hovered_link;
+                App_notify_content_change(self);
+
+                LOG("App::link hover{\'%s\': %ux%zu - %ux%zu}\n",
+                    uri,
+                    cols.first,
+                    rows.first,
+                    cols.second,
+                    rows.second);
+            }
+        }
     } else {
+        if (self->ui.hovered_link.active) {
+            self->ui.hovered_link.active = false;
+            App_notify_content_change(self);
+        }
         if (self->win->current_pointer_style != MOUSE_POINTER_ARROW) {
             Window_set_pointer_style(self->win, MOUSE_POINTER_ARROW);
         }
