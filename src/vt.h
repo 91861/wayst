@@ -322,6 +322,36 @@ typedef struct _Vt
         Vector_char active_sequence;
     } parser;
 
+    struct VtUriMatcher
+    {
+        Vector_char match;
+        uint16_t start_column;
+        size_t   start_row;
+
+        enum VtUriMatcherState
+        {
+            VT_URI_MATCHER_EMPTY,
+
+            /* in a valid scheme */
+            VT_URI_MATCHER_SCHEME,
+
+            /* scheme was ended with ':' */
+            VT_URI_MATCHER_SCHEME_COMPLETE,
+
+            /* scheme:/ */
+            VT_URI_MATCHER_FST_LEADING_SLASH,
+
+            /* scheme://aut */
+            VT_URI_MATCHER_AUTHORITY,
+
+            /* scheme://authority/path */
+            VT_URI_MATCHER_PATH,
+
+            /* www.stuffgoeshere */
+            VT_URI_MATCHER_SUFFIX_REFERENCE,
+        } state;
+    } uri_matcher;
+
     char*         title;
     char*         work_dir;
     Vector_DynStr title_stack;
@@ -628,7 +658,7 @@ static const char* Vt_uri_range_at(Vt*            self,
 
     /* Front */
     VtLine*  ln;
-    uint16_t ln_base_idx = base_link_idx;
+    uint16_t ln_base_idx       = base_link_idx;
     uint16_t line_start_column = start_column;
     for (size_t r = row; r + 1; --r) {
         ln = Vt_line_at(self, r);
@@ -666,11 +696,10 @@ static const char* Vt_uri_range_at(Vt*            self,
         }
     }
 
-
     /* Back */
-    ln_base_idx = base_link_idx;
+    ln_base_idx              = base_link_idx;
     uint16_t line_end_column = end_column;
-    for (size_t r = row; r  < Vt_row(self); ++r) {
+    for (size_t r = row; r < Vt_row(self); ++r) {
         ln = Vt_line_at(self, r);
 
         if (!ln || !ln->links || line_end_column >= ln->data.size) {
@@ -698,7 +727,7 @@ static const char* Vt_uri_range_at(Vt*            self,
         }
 
         end_column = line_end_column;
-        if (line_end_column < Vt_col(self) -1 ) {
+        if (line_end_column < Vt_col(self) - 1) {
             max_row = r;
             break;
         } else {

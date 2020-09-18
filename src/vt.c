@@ -110,6 +110,193 @@ static void Vt_bell(Vt* self)
     }
 }
 
+static void Vt_uri_complete(Vt* self)
+{
+    if (self->uri_matcher.start_row == self->cursor.row && self->cursor.col) {
+        for (uint16_t i = self->uri_matcher.start_column; i < self->cursor.col; ++i) {
+            VtRune* r = Vt_at(self, i, self->cursor.row);
+            if (r) {
+                r->hyperlink_idx =
+                  VtLine_add_link(Vt_cursor_line(self), self->uri_matcher.match.buf) + 1;
+            }
+        }
+    } else {
+        for (uint16_t i = self->uri_matcher.start_column; i < Vt_col(self); ++i) {
+            VtRune* r = Vt_at(self, i, self->uri_matcher.start_row);
+            if (r) {
+                r->hyperlink_idx = VtLine_add_link(Vt_line_at(self, self->uri_matcher.start_row),
+                                                   self->uri_matcher.match.buf) +
+                                   1;
+            }
+        }
+        for (size_t row = self->uri_matcher.start_row + 1; row < self->cursor.row; ++row) {
+            for (uint16_t i = 0; i < self->cursor.col; ++i) {
+                VtRune* r = Vt_at(self, i, row);
+                if (r) {
+                    r->hyperlink_idx =
+                      VtLine_add_link(Vt_line_at(self, row), self->uri_matcher.match.buf) + 1;
+                }
+            }
+        }
+        for (uint16_t i = 0; i < self->cursor.col; ++i) {
+            VtRune* r = Vt_at(self, i, self->cursor.row);
+            if (r) {
+                r->hyperlink_idx =
+                  VtLine_add_link(Vt_cursor_line(self), self->uri_matcher.match.buf) + 1;
+            }
+        }
+    }
+
+    LOG("Vt::uri_match: %s\n", self->uri_matcher.match.buf);
+}
+
+static bool isurl(char32_t c)
+{
+    if (c > 255)
+        return false;
+
+    switch (c) {
+        case '-':
+        case '.':
+        case '_':
+        case '~':
+        case ':':
+        case '/':
+        case '?':
+        case '#':
+        case '[':
+        case ']':
+        case '@':
+        case '!':
+        case '$':
+        case '&':
+        case '(':
+        case ')':
+        case '*':
+        case '+':
+        case ',':
+        case ';':
+        case '=':
+        case '%':
+        case '\'':
+            return true;
+    }
+
+    return isalnum(c);
+}
+
+static void Vt_uri_break_match(Vt* self)
+{
+    if (self->uri_matcher.state == VT_URI_MATCHER_PATH) {
+        Vector_push_char(&self->uri_matcher.match, '\0');
+        Vt_uri_complete(self);
+    } else if (self->uri_matcher.state == VT_URI_MATCHER_SUFFIX_REFERENCE) {
+        Vector_push_char(&self->uri_matcher.match, '\0');
+        if (streq_wildcard(self->uri_matcher.match.buf, "www.*.*")) {
+            Vt_uri_complete(self);
+        }
+    } else if (self->uri_matcher.state == VT_URI_MATCHER_AUTHORITY) {
+        Vector_push_char(&self->uri_matcher.match, '\0');
+        if (strstr(self->uri_matcher.match.buf, ".")) {
+            Vt_uri_complete(self);
+        }
+    }
+    self->uri_matcher.state = VT_URI_MATCHER_EMPTY;
+    Vector_clear_char(&self->uri_matcher.match);
+}
+
+static void Vt_uri_next_char(Vt* self, char32_t c)
+{
+    switch (self->uri_matcher.state) {
+        case VT_URI_MATCHER_EMPTY: {
+            if (isalpha(c)) {
+                Vector_push_char(&self->uri_matcher.match, c);
+                self->uri_matcher.state        = VT_URI_MATCHER_SCHEME;
+                self->uri_matcher.start_column = self->cursor.col;
+                self->uri_matcher.start_row    = self->cursor.row;
+            }
+        } break;
+
+        case VT_URI_MATCHER_SCHEME: {
+            /* We care if we should use it, not if it's valid. Drop '+' '-' '.' */
+            if (isalnum(c)) {
+                Vector_push_char(&self->uri_matcher.match, c);
+            } else if (c == ':') {
+                static const char* const SUPPORTED_SCHEMES[] = {
+                    "file", "http",   "https",  "shttp",  "irc",    "smb",     "udp",
+                    "xmpp", "xri",    "magnet", "mailto", "callto", "message", "mumble",
+                    "ssh",  "telnet", "imap",   "pop",    "ftp",    "sftp",    "tftp",
+                    "nfs",  "fish",   "git",    "svn",    "jar",    "mvn",     "vnc",
+                    "rdp",  "spice",  "nx",     "cvs",    "admin",  "app",
+                };
+
+                Vector_push_char(&self->uri_matcher.match, '\0');
+                bool is_supported = false;
+                for (uint_fast8_t i = 0; i < ARRAY_SIZE(SUPPORTED_SCHEMES); ++i) {
+                    if (!strcasecmp(SUPPORTED_SCHEMES[i], self->uri_matcher.match.buf)) {
+                        is_supported = true;
+                    }
+                }
+                if (is_supported) {
+                    Vector_pop_char(&self->uri_matcher.match);
+                    Vector_push_char(&self->uri_matcher.match, c);
+                    self->uri_matcher.state = VT_URI_MATCHER_SCHEME_COMPLETE;
+                } else {
+                    Vt_uri_break_match(self);
+                }
+
+            } else if (c == '.') {
+                Vector_push_char(&self->uri_matcher.match, '\0');
+                if (!strcmp("www", self->uri_matcher.match.buf)) {
+                    Vector_pop_char(&self->uri_matcher.match);
+                    Vector_push_char(&self->uri_matcher.match, c);
+                    self->uri_matcher.state = VT_URI_MATCHER_SUFFIX_REFERENCE;
+                } else {
+                    Vt_uri_break_match(self);
+                }
+            } else {
+                Vt_uri_break_match(self);
+            }
+        } break;
+
+        case VT_URI_MATCHER_SCHEME_COMPLETE: {
+            if (c == '/') {
+                Vector_push_char(&self->uri_matcher.match, c);
+                self->uri_matcher.state = VT_URI_MATCHER_FST_LEADING_SLASH;
+            } else {
+                Vt_uri_break_match(self);
+            }
+        } break;
+
+        case VT_URI_MATCHER_FST_LEADING_SLASH: {
+            if (c == '/') {
+                Vector_push_char(&self->uri_matcher.match, c);
+                self->uri_matcher.state = VT_URI_MATCHER_AUTHORITY;
+            } else {
+                Vt_uri_break_match(self);
+            }
+        } break;
+
+        case VT_URI_MATCHER_AUTHORITY: {
+            if (c == '/') {
+                Vector_push_char(&self->uri_matcher.match, c);
+                self->uri_matcher.state = VT_URI_MATCHER_PATH;
+            } else {
+                Vector_push_char(&self->uri_matcher.match, c);
+            }
+        } break;
+
+        case VT_URI_MATCHER_PATH:
+        case VT_URI_MATCHER_SUFFIX_REFERENCE: {
+            if (isurl(c)) {
+                Vector_push_char(&self->uri_matcher.match, c);
+            } else {
+                Vt_uri_break_match(self);
+            }
+        } break;
+    }
+}
+
 static void Vt_grapheme_break(Vt* self)
 {
 #ifndef NOUTF8PROC
@@ -1203,9 +1390,8 @@ static void Vt_hard_reset(Vt* self)
     self->charset_single_shift = NULL;
     self->last_interted        = NULL;
 
-    self->scroll_region_top = 0;
-    self->scroll_region_bottom =
-      CALL_FP(self->callbacks.on_number_of_cells_requested, self->callbacks.user_data).second - 1;
+    self->scroll_region_top    = 0;
+    self->scroll_region_bottom = Vt_row(self) - 1;
 
     Vector_clear_DynStr(&self->title_stack);
     free(self->title);
@@ -1221,6 +1407,8 @@ static void Vt_hard_reset(Vt* self)
 
     self->tabstop = 8;
     Vt_reset_tab_ruler(self);
+
+    Vt_uri_break_match(self);
 
     // TODO: Clear DECUDK
 }
@@ -1238,8 +1426,8 @@ static void Vt_soft_reset(Vt* self)
     self->charset_single_shift = NULL;
     self->last_interted        = NULL;
     self->scroll_region_top    = 0;
-    self->scroll_region_bottom =
-      CALL_FP(self->callbacks.on_number_of_cells_requested, self->callbacks.user_data).second - 1;
+    self->scroll_region_bottom = Vt_row(self) - 1;
+    Vt_uri_break_match(self);
     Vector_clear_DynStr(&self->title_stack);
 }
 
@@ -1279,6 +1467,9 @@ void Vt_init(Vt* self, uint32_t cols, uint32_t rows)
 
     self->title       = NULL;
     self->title_stack = Vector_new_DynStr();
+
+    self->uri_matcher.state = VT_URI_MATCHER_EMPTY;
+    self->uri_matcher.match = Vector_new_with_capacity_char(128);
 
     self->unicode_input.buffer = Vector_new_char();
 
@@ -4827,6 +5018,8 @@ __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_litera
             is_combining = unicode_is_combining(res);
 #endif
 
+            Vt_uri_next_char(self, res);
+
             if (unlikely(is_combining)) {
                 Vt_handle_combinable(self, res);
                 self->last_codepoint = res;
@@ -4850,11 +5043,13 @@ __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_litera
 
             case '\b':
                 Vt_grapheme_break(self);
+                Vt_uri_break_match(self);
                 Vt_handle_backspace(self);
                 break;
 
             case '\r':
                 Vt_grapheme_break(self);
+                Vt_uri_break_match(self);
                 Vt_carriage_return(self);
                 break;
 
@@ -4862,10 +5057,12 @@ __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_litera
             case '\v':
             case '\n':
                 Vt_grapheme_break(self);
+                Vt_uri_break_match(self);
                 Vt_insert_new_line(self);
                 break;
 
             case '\e':
+                Vt_uri_break_match(self);
                 Vt_grapheme_break(self);
                 self->parser.state = PARSER_STATE_ESCAPED;
                 break;
@@ -4884,6 +5081,7 @@ __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_litera
 
             case '\t': {
                 Vt_grapheme_break(self);
+                Vt_uri_break_match(self);
                 uint16_t rt;
                 for (rt = 0; self->cursor.col + rt + 1 < Vt_col(self);) {
                     if (self->tab_ruler[self->cursor.col + ++rt])
@@ -4916,6 +5114,8 @@ __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_litera
                 }
 
                 self->last_codepoint = new_rune.rune.code;
+                Vt_uri_next_char(self, new_rune.rune.code);
+
                 Vt_insert_char_at_cursor(self, new_rune);
             }
         }
