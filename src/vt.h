@@ -23,6 +23,7 @@
 
 #include "colors.h"
 #include "monitor.h"
+#include "rcptr.h"
 #include "settings.h"
 #include "timing.h"
 #include "util.h"
@@ -133,6 +134,31 @@ DEF_VECTOR(Vector_VtRune, Vector_destroy_VtRune)
 
 DEF_VECTOR(Vector_char, Vector_destroy_char)
 
+typedef struct
+{
+    char*       command;
+    size_t      command_start_row;
+    uint16_t    command_start_column;
+    Pair_size_t output_rows;
+    TimeSpan    execution_time;
+    int         exit_status;
+    enum VtCommandState
+    {
+        VT_COMMAND_STATE_TYPING,
+        VT_COMMAND_STATE_RUNNING,
+        VT_COMMAND_STATE_COMPLETED,
+    } state;
+} VtCommand;
+
+static void VtCommand_destroy(VtCommand* self)
+{
+    free(self->command);
+    self->command = NULL;
+}
+
+DEF_RC_PTR(VtCommand, VtCommand_destroy)
+DEF_VECTOR(RcPtr_VtCommand, RcPtr_destroy_VtCommand)
+
 /**
  * represents a clickable range of text linked to a URL */
 typedef struct
@@ -164,11 +190,14 @@ typedef struct
     /* Clickable link adresses */
     Vector_VtUri* links;
 
+    /* Ref to command info if this is output/invocation of a shell command */
+    RcPtr_VtCommand linked_command;
+
     struct VtLineDamage
     {
         /* Range of cells that should be repainted if type == RANGE or
          * not repainted if type == SHIFT */
-        uint32_t front, end;
+        uint16_t front, end;
 
         /* Number of cells the existing contents should be moved right */
         int8_t shift;
@@ -198,6 +227,18 @@ typedef struct
 
     /* Part of this line was moved to the next one */
     bool was_reflown : 1;
+
+    /* Jump-to mark was explicitly set by the shell */
+    bool mark_explicit : 1;
+
+    /* This is line was used to invoke a command, contains the prompt/command body or both */
+    bool mark_command_invoke : 1;
+
+    /* This is line starts a command output block */
+    bool mark_command_output_start : 1;
+
+    /* This is line ends a command output block */
+    bool mark_command_output_end : 1;
 } VtLine;
 
 static void VtLine_copy(VtLine* dest, VtLine* source)
@@ -216,7 +257,7 @@ static inline void VtLine_destroy(void* vt_, VtLine* self);
 
 DEF_VECTOR_DA(VtLine, VtLine_destroy, void)
 
-typedef struct _Vt
+typedef struct
 {
     struct vt_callbacks_t
     {
@@ -325,8 +366,8 @@ typedef struct _Vt
     struct VtUriMatcher
     {
         Vector_char match;
-        uint16_t start_column;
-        size_t   start_row;
+        uint16_t    start_column;
+        size_t      start_row;
 
         enum VtUriMatcherState
         {
@@ -351,6 +392,22 @@ typedef struct _Vt
             VT_URI_MATCHER_SUFFIX_REFERENCE,
         } state;
     } uri_matcher;
+
+    enum VtShellIntegrationState
+    {
+        VT_SHELL_INTEG_STATE_NONE,
+        VT_SHELL_INTEG_STATE_PROMPT,
+        VT_SHELL_INTEG_STATE_COMMAND,
+        VT_SHELL_INTEG_STATE_OUTPUT,
+    } shell_integration_state;
+
+    Vector_RcPtr_VtCommand shell_commands;
+
+    char* shell_integration_shell_id;
+    int   shell_integration_protocol_version;
+    char* shell_integration_shell_host;
+    // TODO: bool  shell_integration_shell_host_is_local;
+    char* shell_integration_current_dir;
 
     char*         title;
     char*         work_dir;
@@ -465,6 +522,23 @@ typedef struct _Vt
 
 } Vt;
 
+static const VtCommand* Vt_get_last_completed_command(Vt* self)
+{
+    for (RcPtr_VtCommand* ptr = NULL;
+         (ptr = Vector_iter_back_RcPtr_VtCommand(&self->shell_commands, ptr));) {
+        VtCommand* c = RcPtr_get_VtCommand(ptr);
+        if (c && c->state == VT_COMMAND_STATE_COMPLETED) {
+            return c;
+        }
+    }
+    return NULL;
+}
+
+static const VtCommand* Vt_get_last_command(const Vt* self)
+{
+    return RcPtr_get_const_VtCommand(Vector_last_const_RcPtr_VtCommand(&self->shell_commands));
+}
+
 static bool VtRune_fg_is_default(const VtRune* rune)
 {
     return rune->fg_is_palette_entry && rune->fg_data.index == VT_RUNE_PALETTE_INDEX_TERM_DEFAULT;
@@ -540,6 +614,7 @@ static inline void VtLine_destroy(void* vt_, VtLine* self)
     }
     CALL_FP(vt->callbacks.destroy_proxy, vt->callbacks.user_data, &self->proxy);
     Vector_destroy_VtRune(&self->data);
+    RcPtr_destroy_VtCommand(&self->linked_command);
 }
 
 static uint16_t VtLine_add_link(VtLine* self, const char* link)
@@ -552,7 +627,7 @@ static uint16_t VtLine_add_link(VtLine* self, const char* link)
     }
 
     for (VtUri* i = NULL; (i = Vector_iter_VtUri(self->links, i));) {
-        if (!strcmp(i->uri_string, link)) {
+        if (i->uri_string && !strcmp(i->uri_string, link)) {
             return Vector_index_VtUri(self->links, i);
         }
     }
@@ -634,118 +709,11 @@ static inline const char* Vt_uri_at(Vt* self, uint16_t column, size_t row)
 
 /**
  * Get location of an entire link including wrapped lines at cell in global coordinates */
-static const char* Vt_uri_range_at(Vt*            self,
-                                   uint16_t       column,
-                                   size_t         row,
-                                   Pair_size_t*   out_rows,
-                                   Pair_uint16_t* out_columns)
-{
-    VtLine* base_line = Vt_line_at(self, row);
-    if (!base_line || !base_line->links || column >= base_line->data.size) {
-        return NULL;
-    }
-
-    uint16_t    base_link_idx = base_line->data.buf[column].hyperlink_idx;
-    const char* base_link_str = Vt_uri_at(self, column, row);
-
-    if (!base_link_idx || !base_link_str) {
-        return NULL;
-    }
-
-    uint16_t start_column = column, end_column = column;
-    size_t   min_row, max_row, tmp_row;
-    min_row = max_row = tmp_row = row;
-
-    /* Front */
-    VtLine*  ln;
-    uint16_t ln_base_idx       = base_link_idx;
-    uint16_t line_start_column = start_column;
-    for (size_t r = row; r + 1; --r) {
-        ln = Vt_line_at(self, r);
-
-        if (!ln || !ln->links || line_start_column >= ln->data.size) {
-            min_row = r + 1;
-            break;
-        }
-
-        ln_base_idx = 0;
-        for (VtUri* i = NULL; (i = Vector_iter_VtUri(ln->links, i));) {
-            if (!strcmp(i->uri_string, base_link_str)) {
-                ln_base_idx = Vector_index_VtUri(ln->links, i) + 1;
-                break;
-            }
-        }
-
-        if (!ln_base_idx) {
-            min_row = r + 1;
-            break;
-        }
-
-        while (line_start_column) {
-            if (ln->data.buf[line_start_column - 1].hyperlink_idx != ln_base_idx)
-                break;
-            --line_start_column;
-        }
-
-        start_column = line_start_column;
-        if (line_start_column) {
-            min_row = r;
-            break;
-        } else {
-            line_start_column = Vt_col(self) - 1;
-        }
-    }
-
-    /* Back */
-    ln_base_idx              = base_link_idx;
-    uint16_t line_end_column = end_column;
-    for (size_t r = row; r < Vt_row(self); ++r) {
-        ln = Vt_line_at(self, r);
-
-        if (!ln || !ln->links || line_end_column >= ln->data.size) {
-            min_row = r - 1;
-            break;
-        }
-
-        ln_base_idx = 0;
-        for (VtUri* i = NULL; (i = Vector_iter_VtUri(ln->links, i));) {
-            if (!strcmp(i->uri_string, base_link_str)) {
-                ln_base_idx = Vector_index_VtUri(ln->links, i) + 1;
-                break;
-            }
-        }
-
-        if (!ln_base_idx) {
-            min_row = r - 1;
-            break;
-        }
-
-        while (line_end_column < Vt_col(self)) {
-            if (ln->data.buf[line_end_column + 1].hyperlink_idx != ln_base_idx)
-                break;
-            ++line_end_column;
-        }
-
-        end_column = line_end_column;
-        if (line_end_column < Vt_col(self) - 1) {
-            max_row = r;
-            break;
-        } else {
-            line_end_column = 0;
-        }
-    }
-
-    if (out_rows) {
-        out_rows->first  = min_row;
-        out_rows->second = max_row;
-    }
-    if (out_columns) {
-        out_columns->first  = start_column;
-        out_columns->second = end_column;
-    }
-
-    return base_link_str;
-}
+const char* Vt_uri_range_at(Vt*            self,
+                            uint16_t       column,
+                            size_t         row,
+                            Pair_size_t*   out_rows,
+                            Pair_uint16_t* out_columns);
 
 /**
  * Get line under terminal cursor */
@@ -825,6 +793,13 @@ void Vt_handle_button(void*    self,
 void Vt_handle_motion(void* self, uint32_t button, int32_t x, int32_t y);
 
 /**
+ * Is the alternate screen buffer beeing displayed */
+static bool Vt_alt_buffer_enabled(Vt* self)
+{
+    return self->alt_lines.buf;
+}
+
+/**
  * Get line index at the top of the real viewport */
 static inline size_t Vt_top_line(const Vt* const self)
 {
@@ -868,6 +843,54 @@ void Vt_visual_scroll_to(Vt* self, size_t line);
  * Move visual viewport one line up and start visual scrolling
  * @return can scroll more */
 bool Vt_visual_scroll_up(Vt* self);
+
+/**
+ * Move visual viewport to previous line mark and start visual scrolling */
+static inline bool Vt_visual_scroll_mark_up(Vt* self)
+{
+    if (!Vt_visual_top_line(self) || Vt_alt_buffer_enabled(self)) {
+        return false;
+    }
+
+    for (size_t i = Vt_visual_top_line(self); i + 1; --i) {
+        VtLine* ln = Vt_line_at(self, i);
+
+        if (ln && (ln->mark_explicit || ln->mark_command_output_start)) {
+            Vt_visual_scroll_to(self, i ? (i - 1) : i);
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Move visual viewport to next line mark and start visual scrolling */
+static inline bool Vt_visual_scroll_mark_down(Vt* self)
+{
+    if (Vt_alt_buffer_enabled(self)) {
+        return false;
+    }
+
+    bool found_first = false;
+    for (size_t i = Vt_visual_top_line(self) + 1; i < Vt_max_line(self); ++i) {
+        VtLine* ln = Vt_line_at(self, i);
+        if (ln && (ln->mark_explicit || ln->mark_command_output_start)) {
+            if (found_first) {
+                Vt_visual_scroll_to(self, i ? (i - 1) : i);
+                return true;
+            } else {
+                found_first = true;
+            }
+        }
+    }
+
+    if (Vt_visual_top_line(self) != Vt_top_line(self)) {
+        Vt_visual_scroll_to(self, Vt_top_line(self));
+        return true;
+    } else {
+        return false;
+    }
+}
 
 /**
  * Move visual viewport one page up and start visual scrolling */
@@ -955,47 +978,82 @@ static bool Vt_reports_mouse(Vt* self)
 void Vt_destroy(Vt* self);
 
 /**
+ * Generate color for given 256 palette index */
+void generate_color_palette_entry(ColorRGB* color, int16_t idx);
+
+/**
+ * Get xterm 256 palette index from X11 color name */
+int palette_color_index_from_xterm_name(const char* name);
+
+/**
+ * Get xterm 256 palette color by X11 color name */
+ColorRGB color_from_xterm_name(const char* name, bool* fail);
+
+/**
  * Should a cell (in screen coordinates) be visually highlighted as selected */
-__attribute__((always_inline, hot)) static inline bool Vt_is_cell_selected(const Vt* const self,
-                                                                           int32_t         x,
-                                                                           int32_t         y)
+bool Vt_is_cell_selected(const Vt* const self, int32_t x, int32_t y);
+
+/**
+ * Get cursor row in screen coordinates */
+static inline uint16_t Vt_cursor_row(Vt* self)
 {
-    switch (expect(self->selection.mode, SELECT_MODE_NONE)) {
-        case SELECT_MODE_NONE:
-            return false;
-
-        case SELECT_MODE_BOX:
-            return !(Vt_visual_top_line(self) + y <
-                       MIN(self->selection.end_line, self->selection.begin_line) ||
-                     (Vt_visual_top_line(self) + y >
-                      MAX(self->selection.end_line, self->selection.begin_line)) ||
-                     (MAX(self->selection.begin_char_idx, self->selection.end_char_idx) < x) ||
-                     (MIN(self->selection.begin_char_idx, self->selection.end_char_idx) > x));
-
-        case SELECT_MODE_NORMAL:
-            if (Vt_visual_top_line(self) + y >
-                  MIN(self->selection.begin_line, self->selection.end_line) &&
-                Vt_visual_top_line(self) + y <
-                  MAX(self->selection.begin_line, self->selection.end_line)) {
-                return true;
-            } else {
-                if (self->selection.begin_line == self->selection.end_line) {
-                    return (self->selection.begin_line == Vt_visual_top_line(self) + y) &&
-                           (x >=
-                              MIN(self->selection.begin_char_idx, self->selection.end_char_idx) &&
-                            x <= MAX(self->selection.begin_char_idx, self->selection.end_char_idx));
-                } else if (Vt_visual_top_line(self) + y == self->selection.begin_line) {
-                    return self->selection.begin_line < self->selection.end_line
-                             ? x >= self->selection.begin_char_idx
-                             : x <= self->selection.begin_char_idx;
-
-                } else if (Vt_visual_top_line(self) + y == self->selection.end_line) {
-                    return self->selection.begin_line > self->selection.end_line
-                             ? x >= self->selection.end_char_idx
-                             : x <= self->selection.end_char_idx;
-                }
-            }
-            return false;
-    }
-    return false;
+    return self->cursor.row - Vt_top_line(self);
 }
+
+/**
+ * Get scroll region top line in global coordinates */
+static inline size_t Vt_get_scroll_region_top(Vt* self)
+{
+    return Vt_top_line(self) + self->scroll_region_top;
+}
+
+/**
+ * Get scroll region bottom line in global coordinates */
+static inline size_t Vt_get_scroll_region_bottom(Vt* self)
+{
+    return Vt_top_line(self) + self->scroll_region_bottom;
+}
+
+/**
+ * Is terminal scroll region set to default */
+static inline bool Vt_scroll_region_not_default(Vt* self)
+{
+    return Vt_get_scroll_region_top(self) != Vt_top_line(self) ||
+           Vt_get_scroll_region_bottom(self) != Vt_bottom_line(self);
+}
+
+/**
+ * Get UTF-8 encoded string from Vector_VtRune in a given range
+ * @param tail - append string to the end */
+Vector_char rune_vec_to_string(Vector_VtRune* line, size_t begin, size_t end, const char* opt_tail);
+
+/**
+ * Get UTF-8 encoded string from VtLine in a given range
+ * @param tail - append string to the end */
+static Vector_char VtLine_to_string(VtLine* line, size_t begin, size_t end, const char* tail)
+{
+    return rune_vec_to_string(&line->data, begin, end, tail);
+}
+
+/**
+ * Get UTF-8 encoded string from a terminal line at global index in a given range
+ * @param tail - append string to the end */
+static Vector_char Vt_line_to_string(const Vt*   self,
+                                     size_t      idx,
+                                     size_t      begin,
+                                     size_t      end,
+                                     const char* tail)
+{
+    return VtLine_to_string(&self->lines.buf[idx], begin, end, tail);
+}
+
+/**
+ * Get current work directory */
+static const char* Vt_get_work_directory(const Vt* self)
+{
+    return OR(self->work_dir, self->shell_integration_current_dir);
+}
+
+void Vt_clear_scrollback(Vt* self);
+
+Vector_char Vt_command_to_string(const Vt* self, const VtCommand* command, size_t opt_limit_lines);

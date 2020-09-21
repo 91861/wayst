@@ -212,40 +212,49 @@ static struct option long_options[] = {
 #define OPT_BIND_KEY_LN_DN_IDX 62
     [OPT_BIND_KEY_LN_DN_IDX] = { "bind-key-ln-down", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_KSM_IDX 63
+#define OPT_BIND_KEY_MRK_UP_IDX 63
+    [OPT_BIND_KEY_MRK_UP_IDX] = { "bind-key-mark-up", required_argument, 0, 0 },
+
+#define OPT_BIND_KEY_MRK_DN_IDX 64
+    [OPT_BIND_KEY_MRK_DN_IDX] = { "bind-key-mark-down", required_argument, 0, 0 },
+
+#define OPT_BIND_KEY_COPY_CMD_IDX 65
+    [OPT_BIND_KEY_COPY_CMD_IDX] = { "bind-key-copy-output", required_argument, 0, 0 },
+
+#define OPT_BIND_KEY_KSM_IDX 66
     [OPT_BIND_KEY_KSM_IDX] = { "bind-key-kbd-select", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_HTML_DUMP_IDX 64
+#define OPT_BIND_KEY_HTML_DUMP_IDX 67
     [OPT_BIND_KEY_HTML_DUMP_IDX] = { "bind-key-html-dump", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_DUP_IDX 65
+#define OPT_BIND_KEY_DUP_IDX 68
     [OPT_BIND_KEY_DUP_IDX] = { "bind-key-duplicate", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_DEBUG_IDX 66
+#define OPT_BIND_KEY_DEBUG_IDX 69
     [OPT_BIND_KEY_DEBUG_IDX] = { "bind-key-debug", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_QUIT_IDX 67
+#define OPT_BIND_KEY_QUIT_IDX 70
     [OPT_BIND_KEY_QUIT_IDX] = { "bind-key-quit", required_argument, 0, 0 },
 
-#define OPT_DEBUG_PTY_IDX 68
+#define OPT_DEBUG_PTY_IDX 71
     [OPT_DEBUG_PTY_IDX] = { "debug-pty", no_argument, 0, 'D' },
 
-#define OPT_DEBUG_VT_IDX 69
+#define OPT_DEBUG_VT_IDX 72
     [OPT_DEBUG_VT_IDX] = { "debug-vt", no_argument, 0, 0 },
 
-#define OPT_DEBUG_GFX_IDX 70
+#define OPT_DEBUG_GFX_IDX 73
     [OPT_DEBUG_GFX_IDX] = { "debug-gfx", no_argument, 0, 'G' },
 
-#define OPT_DEBUG_FONT_IDX 71
+#define OPT_DEBUG_FONT_IDX 74
     [OPT_DEBUG_FONT_IDX] = { "debug-font", no_argument, 0, 'F' },
 
-#define OPT_VERSION_IDX 72
+#define OPT_VERSION_IDX 75
     [OPT_VERSION_IDX] = { "version", no_argument, 0, 'v' },
 
-#define OPT_HELP_IDX 73
+#define OPT_HELP_IDX 76
     [OPT_HELP_IDX] = { "help", no_argument, 0, 'h' },
 
-#define OPT_SENTINEL_IDX 74
+#define OPT_SENTINEL_IDX 77
     [OPT_SENTINEL_IDX] = { 0 }
 };
 
@@ -339,6 +348,19 @@ static const char* long_options_descriptions[][2] = {
     [OPT_BIND_KEY_PG_UP_IDX] = { arg_key, "Scroll up by page key command (default: C+S+Page_Up)" },
     [OPT_BIND_KEY_PG_DN_IDX] = { arg_key,
                                  "Scroll down by page key command (default: C+S+Page_Down)" },
+
+    [OPT_BIND_KEY_MRK_UP_IDX] = { arg_key,
+                                  "Scroll up to previous mark or command output key command "
+                                  "(default: "
+                                  "C+S+Left)" },
+    [OPT_BIND_KEY_MRK_DN_IDX] = { arg_key,
+                                  "Scroll down to next mark or command output key command "
+                                  "(default: "
+                                  "C+S+Right)" },
+
+    [OPT_BIND_KEY_COPY_CMD_IDX] = { arg_key,
+                                    "Copy last command output to clipboard key command (default: "
+                                    "C+S+x)" },
 
     [OPT_BIND_KEY_KSM_IDX] = { arg_key, "Enter keyboard select mode key command (default: C+S+k)" },
     [OPT_BIND_KEY_HTML_DUMP_IDX] = { arg_key, "HTML screen dump key command (default: C+S+F12)" },

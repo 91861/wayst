@@ -488,6 +488,24 @@ static void settings_make_default()
                 .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
             },
 
+            [KCMD_MARK_SCROLL_UP] = (KeyCommand) {
+                .key.code = KEY(Left),
+                .is_name = false,
+                .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
+            },
+
+            [KCMD_MARK_SCROLL_DN] = (KeyCommand) {
+                .key.code = KEY(Right),
+                .is_name = false,
+                .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
+            },
+
+            [KCMD_COPY_OUTPUT] = (KeyCommand) {
+                .key.code = KEY(x),
+                .is_name = false,
+                .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
+            },
+
             [KCMD_HTML_DUMP] = (KeyCommand) {
                 .key.code = KEY(F12),
                 .is_name = false,
@@ -1213,6 +1231,9 @@ static void handle_option(const char opt, const int array_index, const char* val
                 case OPT_BIND_KEY_COPY_IDX:
                     command = &settings.key_commands[KCMD_COPY];
                     break;
+                case OPT_BIND_KEY_COPY_CMD_IDX:
+                    command = &settings.key_commands[KCMD_COPY_OUTPUT];
+                    break;
                 case OPT_BIND_KEY_PASTE_IDX:
                     command = &settings.key_commands[KCMD_PASTE];
                     break;
@@ -1236,6 +1257,12 @@ static void handle_option(const char opt, const int array_index, const char* val
                     break;
                 case OPT_BIND_KEY_PG_DN_IDX:
                     command = &settings.key_commands[KCMD_PAGE_SCROLL_DN];
+                    break;
+                case OPT_BIND_KEY_MRK_UP_IDX:
+                    command = &settings.key_commands[KCMD_MARK_SCROLL_UP];
+                    break;
+                case OPT_BIND_KEY_MRK_DN_IDX:
+                    command = &settings.key_commands[KCMD_MARK_SCROLL_DN];
                     break;
                 case OPT_BIND_KEY_KSM_IDX:
                     command = &settings.key_commands[KCMD_KEYBOARD_SELECT];
@@ -1499,7 +1526,7 @@ static void settings_file_parse(FILE* f)
                         Vector_push_char(&value, c);
                     }
                     continue;
-                } else if (c == '[' && !escaped && ! in_string) {
+                } else if (c == '[' && !escaped && !in_string) {
                     if (in_list) {
                         WRN("Error in config on lines %u-%u: Defines nested list. Did you mean "
                             "\'\\[\' ?\n",
@@ -1533,7 +1560,8 @@ static void settings_file_parse(FILE* f)
                     } else if (c == '\"' && in_string) {
                         Vector_push_char(&value, '\"');
                     } else {
-                        WRN("Error in config on line %u: Escape character \'%c\' invalid in this context\n",
+                        WRN("Error in config on line %u: Escape character \'%c\' invalid in this "
+                            "context\n",
                             line - 1,
                             c);
                     }

@@ -340,7 +340,7 @@ typedef struct
     bool is_main_font_rgb;
 
     int   scrollbar_fade;
-    Timer flash_timer;
+    TimeSpan flash_timer;
     float flash_fraction;
 
     Freetype* freetype;
@@ -401,7 +401,7 @@ Gfx* Gfx_new_OpenGL21(Freetype* freetype)
 void GfxOpenGL21_flash(Gfx* self)
 {
     if (!settings.no_flash)
-        gfxOpenGL21(self)->flash_timer = Timer_from_now_to_ms_from_now(FLASH_DURATION_MS);
+        gfxOpenGL21(self)->flash_timer = TimeSpan_from_now_to_ms_from_now(FLASH_DURATION_MS);
 }
 
 /**
@@ -1208,7 +1208,7 @@ bool GfxOpenGL21_update_timers(Gfx* self, Vt* vt, Ui* ui, TimePoint** out_pendin
         return false;
     }
 
-    float fraction = Timer_get_fraction_clamped_now(&gl21->flash_timer);
+    float fraction = TimeSpan_get_fraction_clamped_now(&gl21->flash_timer);
     if (fraction != gl21->flash_fraction) {
         gl21->flash_fraction = fraction;
         repaint              = true;

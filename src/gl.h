@@ -298,12 +298,7 @@ static void on_gl_error(GLenum        source,
             id,
             message);
     } else {
-        LOG("OpenGL info\n"
-            "  severity: %s\n"
-            "  source:   %s\n"
-            "  type:     %s\n"
-            "  id:       %d\n"
-            "  message:\n%s\n",
+        LOG("GL::info{ severity: %s, source: %s, type: %s, id: %d, message: %s }\n",
             gl_severity_to_str(severity),
             gl_source_to_str(source),
             gl_type_to_str(type),

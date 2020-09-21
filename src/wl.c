@@ -240,8 +240,7 @@ static void WindowWl_clipboard_send(struct WindowBase* self, const char* text)
 
     LOG("making a data source\n");
 
-    if (w->data_source_text)
-        free((void*)w->data_source_text);
+    free((void*)w->data_source_text);
 
     windowWl(self)->data_source_text = text;
     windowWl(self)->data_source =
@@ -1582,9 +1581,8 @@ static void WindowWl_destroy(struct WindowBase* self)
     wl_registry_destroy(globalWl->registry);
     wl_display_disconnect(globalWl->display);
 
-    if (windowWl(self)->data_offer_mime) {
-        free((void*)windowWl(self)->data_offer_mime);
-    }
+    free((void*)windowWl(self)->data_offer_mime);
+    free((void*)windowWl(self)->data_source_text);
 
     Vector_destroy_WlOutputInfo(&windowWl(self)->outputs);
 

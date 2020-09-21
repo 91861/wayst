@@ -6,6 +6,8 @@
 #include <stdint.h>
 #include <time.h>
 
+#include "util.h"
+
 #define MS_IN_NSECS  1000000
 #define SEC_IN_MS    1000
 #define SEC_IN_NSECS 1000000000
@@ -31,7 +33,16 @@ static inline void TimePoint_add(TimePoint* self, TimePoint offset)
 
 static inline int64_t TimePoint_get_secs(TimePoint* self)
 {
-    return self->tv_nsec / SEC_IN_NSECS + self->tv_sec;
+    return (int64_t)self->tv_nsec / SEC_IN_NSECS + self->tv_sec;
+}
+
+static inline int64_t TimePoint_get_min(TimePoint* self)
+{
+    return TimePoint_get_secs(self) / 60;
+}
+static inline int64_t TimePoint_get_hour(TimePoint* self)
+{
+    return TimePoint_get_min(self) / 60;
 }
 
 static inline int64_t TimePoint_get_nsecs(TimePoint self)
@@ -107,27 +118,27 @@ static inline bool TimePoint_passed(TimePoint t)
 /**
  * A pair of 'TimePoints', allows you to check the position of a time
  * point in relation to them. */
-typedef struct _Timer
+typedef struct
 {
     TimePoint start, end;
-} Timer;
+} TimeSpan;
 
-static inline Timer Timer_new(TimePoint start, TimePoint end)
+static inline TimeSpan TimeSpan_new(TimePoint start, TimePoint end)
 {
-    return (Timer){ .start = start, .end = end };
+    return (TimeSpan){ .start = start, .end = end };
 }
 
-static inline Timer Timer_from_now_to(TimePoint end)
+static inline TimeSpan TimeSpan_from_now_to(TimePoint end)
 {
-    return (Timer){ .start = TimePoint_now(), .end = end };
+    return (TimeSpan){ .start = TimePoint_now(), .end = end };
 }
 
-static inline Timer Timer_from_now_to_ms_from_now(uint32_t ms_offset)
+static inline TimeSpan TimeSpan_from_now_to_ms_from_now(uint32_t ms_offset)
 {
-    return (Timer){ .start = TimePoint_now(), .end = TimePoint_ms_from_now(ms_offset) };
+    return (TimeSpan){ .start = TimePoint_now(), .end = TimePoint_ms_from_now(ms_offset) };
 }
 
-static inline float Timer_get_fraction_for(Timer* self, TimePoint point)
+static inline float TimeSpan_get_fraction_for(TimeSpan* self, TimePoint point)
 {
     TimePoint point_minus_start = point, end_minus_start = self->end;
     TimePoint_subtract(&point_minus_start, self->start);
@@ -135,18 +146,47 @@ static inline float Timer_get_fraction_for(Timer* self, TimePoint point)
     return (float)TimePoint_get_nsecs(point_minus_start) / TimePoint_get_nsecs(end_minus_start);
 }
 
-static inline float Timer_get_fraction_now(Timer* self)
+static inline float TimeSpan_get_fraction_now(TimeSpan* self)
 {
-    return Timer_get_fraction_for(self, TimePoint_now());
+    return TimeSpan_get_fraction_for(self, TimePoint_now());
 }
 
-static inline float Timer_get_fraction_clamped_for(Timer* self, TimePoint point)
+static inline float TimeSpan_get_fraction_clamped_for(TimeSpan* self, TimePoint point)
 {
-    float result = Timer_get_fraction_for(self, point);
+    float result = TimeSpan_get_fraction_for(self, point);
     return result < 0.0f ? 0.0f : result > 1.0f ? 1.0f : result;
 }
 
-static inline float Timer_get_fraction_clamped_now(Timer* self)
+static inline float TimeSpan_get_fraction_clamped_now(TimeSpan* self)
 {
-    return Timer_get_fraction_clamped_for(self, TimePoint_now());
+    return TimeSpan_get_fraction_clamped_for(self, TimePoint_now());
+}
+
+static inline TimePoint TimeSpan_get_duration(const TimeSpan* self)
+{
+    TimePoint tmp = self->end;
+    TimePoint_subtract(&tmp, self->start);
+    return tmp;
+}
+
+/**
+ * Caller should free() */
+static char* TimeSpan_duration_string_approx(const TimeSpan* self)
+{
+    TimePoint tmp = TimeSpan_get_duration(self);
+    int64_t   major, minor;
+    char*     retval;
+    if ((major = TimePoint_get_hour(&tmp)) > 1) {
+        minor  = TimePoint_get_min(&tmp) - 60 * major;
+        retval = asprintf("%luh %lumin", major, minor);
+    } else if ((major = TimePoint_get_min(&tmp)) > 1) {
+        minor  = TimePoint_get_secs(&tmp) - 60 * major;
+        retval = asprintf("%lum %lus", major, minor);
+    } else if ((major = TimePoint_get_secs(&tmp)) > 1) {
+        minor  = TimePoint_get_ms(tmp) - 1000 * major;
+        retval = asprintf("%lus %lums", major, minor);
+    } else {
+        retval = asprintf("%lums", TimePoint_get_ms(tmp));
+    }
+    return retval;
 }

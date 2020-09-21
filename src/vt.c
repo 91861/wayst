@@ -26,6 +26,7 @@
 
 #include "key.h"
 
+static void          Vt_shift_global_line_index_refs(Vt* self, size_t point, int64_t change);
 static inline size_t Vt_top_line(const Vt* const self);
 void                 Vt_visual_scroll_to(Vt* self, size_t line);
 void                 Vt_visual_scroll_reset(Vt* self);
@@ -60,16 +61,6 @@ static void          Vt_pop_title(Vt* self);
 static void          Vt_insert_char_at_cursor(Vt* self, VtRune c);
 static void          Vt_insert_char_at_cursor_with_shift(Vt* self, VtRune c);
 static bool          Vt_alt_buffer_enabled(Vt* self);
-static Vector_char   rune_vec_to_string(Vector_VtRune* line,
-                                        size_t         begin,
-                                        size_t         end,
-                                        const char*    tail);
-static Vector_char   VtLine_to_string(VtLine* line, size_t begin, size_t end, const char* tail);
-static Vector_char   Vt_line_to_string(Vt*         self,
-                                       size_t      idx,
-                                       size_t      begin,
-                                       size_t      end,
-                                       const char* tail);
 static inline void   Vt_mark_proxy_fully_damaged(Vt* self, size_t idx);
 static void          Vt_mark_proxy_damaged_cell(Vt* self, size_t line, size_t rune);
 static void          Vt_init_tab_ruler(Vt* self);
@@ -85,6 +76,21 @@ static inline VtLine VtLine_new()
     line.data        = Vector_new_VtRune();
 
     return line;
+}
+
+static inline void VtLine_strip_blanks(VtLine* self)
+{
+    for (VtRune* i = NULL; (i = Vector_last_VtRune(&self->data));) {
+        if ((i->rune.code == ' ' || i->rune.code == '\0') && !i->rune.combine[0] &&
+            !i->hyperlink_idx && !i->invert && !i->underlined && !i->blinkng &&
+            !i->doubleunderline && !i->strikethrough && i->bg_is_palette_entry &&
+            i->bg_data.index == VT_RUNE_PALETTE_INDEX_TERM_DEFAULT && i->fg_is_palette_entry &&
+            i->fg_data.index == VT_RUNE_PALETTE_INDEX_TERM_DEFAULT) {
+            Vector_pop_VtRune(&self->data);
+        } else {
+            break;
+        }
+    }
 }
 
 static void Vt_output(Vt* self, const char* buf, size_t len)
@@ -108,6 +114,21 @@ static void Vt_bell(Vt* self)
     if (self->modes.urgency_on_bell) {
         // TODO: CALL_FP(self->callbacks.on_set_urgent, self->callbacks.user_data);
     }
+}
+
+static inline size_t Vt_top_line_alt(const Vt* const self)
+{
+    return self->alt_lines.size <= Vt_row(self) ? 0 : self->alt_lines.size - Vt_row(self);
+}
+
+static inline size_t Vt_bottom_line_alt(Vt* self)
+{
+    return Vt_top_line_alt(self) + Vt_row(self) - 1;
+}
+
+static void Vt_command_output_interrupted(Vt* self)
+{
+    self->shell_integration_state = VT_SHELL_INTEG_STATE_NONE;
 }
 
 static void Vt_uri_complete(Vt* self)
@@ -219,7 +240,7 @@ static void Vt_uri_next_char(Vt* self, char32_t c)
 
         case VT_URI_MATCHER_SCHEME: {
             /* We care if we should use it, not if it's valid. Drop '+' '-' '.' */
-            if (isalnum(c)) {
+            if (isalnum(c) && self->uri_matcher.match.size < 10) {
                 Vector_push_char(&self->uri_matcher.match, c);
             } else if (c == ':') {
                 static const char* const SUPPORTED_SCHEMES[] = {
@@ -883,80 +904,12 @@ __attribute__((cold)) char* pty_string_prettyfy(const char* str, int32_t max)
 }
 
 /**
- * get utf-8 text from @param line in range from @param begin to @param end */
-static Vector_char rune_vec_to_string(Vector_VtRune* line,
-                                      size_t         begin,
-                                      size_t         end,
-                                      const char*    tail)
-{
-    Vector_char res;
-    end   = MIN((end ? end : line->size), line->size);
-    begin = MIN(begin, line->size - 1);
-
-    if (begin >= end) {
-        res = Vector_new_with_capacity_char(2);
-        if (tail) {
-            Vector_pushv_char(&res, tail, strlen(tail) + 1);
-        }
-        return res;
-    }
-    res = Vector_new_with_capacity_char(end - begin);
-    char             utfbuf[4];
-    static mbstate_t mbstate;
-
-    for (uint32_t i = begin; i < end; ++i) {
-        Rune* rune = &line->buf[i].rune;
-
-        if (rune->code == VT_RUNE_CODE_WIDE_TAIL) {
-            continue;
-        }
-
-        if (rune->code > CHAR_MAX) {
-            size_t bytes = c32rtomb(utfbuf, rune->code, &mbstate);
-            if (bytes > 0) {
-                Vector_pushv_char(&res, utfbuf, bytes);
-            }
-        } else if (!rune->code) {
-            Vector_push_char(&res, ' ');
-        } else {
-            Vector_push_char(&res, rune->code);
-        }
-
-        for (int j = 0; j < VT_RUNE_MAX_COMBINE && rune->combine[j]; ++j) {
-            size_t bytes = c32rtomb(utfbuf, rune->combine[j], &mbstate);
-            if (bytes > 0) {
-                Vector_pushv_char(&res, utfbuf, bytes);
-            }
-        }
-    }
-    if (tail) {
-        Vector_pushv_char(&res, tail, strlen(tail) + 1);
-    }
-
-    return res;
-}
-
-static Vector_char VtLine_to_string(VtLine* line, size_t begin, size_t end, const char* tail)
-{
-    return rune_vec_to_string(&line->data, begin, end, tail);
-}
-
-static Vector_char Vt_line_to_string(Vt*         self,
-                                     size_t      idx,
-                                     size_t      begin,
-                                     size_t      end,
-                                     const char* tail)
-{
-    return VtLine_to_string(&self->lines.buf[idx], begin, end, tail);
-}
-
-/**
  * Split string on any character in @param delimiters, filter out any character in @param filter.
  * first character of returned string is the immediately preceding delimiter, '\0' if none. Multiple
- * @param greedy_delimiters are treated as a single delimiter */
+ * @param collapsable_delimiters are treated as a single delimiter */
 static Vector_Vector_char string_split_on(const char* str,
                                           const char* delimiters,
-                                          const char* greedy_delimiters,
+                                          const char* collapsable_delimiters,
                                           const char* filter)
 {
     Vector_Vector_char ret = Vector_new_with_capacity_Vector_char(8);
@@ -980,8 +933,8 @@ static Vector_Vector_char string_split_on(const char* str,
                 }
             }
         }
-        if (greedy_delimiters) {
-            for (const char* i = greedy_delimiters; *i; ++i) {
+        if (collapsable_delimiters) {
+            for (const char* i = collapsable_delimiters; *i; ++i) {
                 if (*i == *str) {
                     any_symbol = *i;
                     break;
@@ -1028,32 +981,6 @@ static inline bool is_string_sequence_terminated(const char* seq, const size_t s
     return seq[size - 1] == '\a' || (size > 1 && seq[size - 2] == '\e' && seq[size - 1] == '\\');
 }
 
-static void generate_color_palette_entry(ColorRGB* color, int16_t idx)
-{
-    ASSERT(idx >= 0, "index not negative");
-    ASSERT(color, "got color*");
-
-    if (idx < 16) {
-        /* Primary - from colorscheme */
-        *color = settings.colorscheme.color[idx];
-    } else if (idx < 232) {
-        /* Extended */
-        int16_t tmp = idx - 16;
-        color->b    = (double)((tmp % 6) * 255) / 5.0;
-        color->g    = (double)(((tmp /= 6) % 6) * 255) / 5.0;
-        color->r    = (double)(((tmp / 6) % 6) * 255) / 5.0;
-    } else {
-        /* Grayscale */
-        double tmp = (double)((idx - 232) * 10 + 8) / 256.0 * 255.0;
-
-        *color = (ColorRGB){
-            .r = tmp,
-            .g = tmp,
-            .b = tmp,
-        };
-    }
-}
-
 static void Vt_reset_color_palette_entry(Vt* self, int16_t idx)
 {
     generate_color_palette_entry(&self->colors.palette_256[idx], idx);
@@ -1063,283 +990,6 @@ static void Vt_init_color_palette(Vt* self)
 {
     for (int16_t i = 0; i < 256; ++i) {
         Vt_reset_color_palette_entry(self, i);
-    }
-}
-
-static const char* const color_palette_names[] = {
-    "Grey0",
-    "NavyBlue",
-    "DarkBlue",
-    "Blue3",
-    "Blue3",
-    "Blue1",
-    "DarkGreen",
-    "DeepSkyBlue4",
-    "DeepSkyBlue4",
-    "DeepSkyBlue4",
-    "DodgerBlue3",
-    "DodgerBlue2",
-    "Green4",
-    "SpringGreen4",
-    "Turquoise4",
-    "DeepSkyBlue3",
-    "DeepSkyBlue3",
-    "DodgerBlue1",
-    "Green3",
-    "SpringGreen3",
-    "DarkCyan",
-    "LightSeaGreen",
-    "DeepSkyBlue2",
-    "DeepSkyBlue1",
-    "Green3",
-    "SpringGreen3",
-    "SpringGreen2",
-    "Cyan3",
-    "DarkTurquoise",
-    "Turquoise2",
-    "Green1",
-    "SpringGreen2",
-    "SpringGreen1",
-    "MediumSpringGreen",
-    "Cyan2",
-    "Cyan1",
-    "DarkRed",
-    "DeepPink4",
-    "Purple4",
-    "Purple4",
-    "Purple3",
-    "BlueViolet",
-    "Orange4",
-    "Grey37",
-    "MediumPurple4",
-    "SlateBlue3",
-    "SlateBlue3",
-    "RoyalBlue1",
-    "Chartreuse4",
-    "DarkSeaGreen4",
-    "PaleTurquoise4",
-    "SteelBlue",
-    "SteelBlue3",
-    "CornflowerBlue",
-    "Chartreuse3",
-    "DarkSeaGreen4",
-    "CadetBlue",
-    "CadetBlue",
-    "SkyBlue3",
-    "SteelBlue1",
-    "Chartreuse3",
-    "PaleGreen3",
-    "SeaGreen3",
-    "Aquamarine3",
-    "MediumTurquoise",
-    "SteelBlue1",
-    "Chartreuse2",
-    "SeaGreen2",
-    "SeaGreen1",
-    "SeaGreen1",
-    "Aquamarine1",
-    "DarkSlateGray2",
-    "DarkRed",
-    "DeepPink4",
-    "DarkMagenta",
-    "DarkMagenta",
-    "DarkViolet",
-    "Purple",
-    "Orange4",
-    "LightPink4",
-    "Plum4",
-    "MediumPurple3",
-    "MediumPurple3",
-    "SlateBlue1",
-    "Yellow4",
-    "Wheat4",
-    "Grey53",
-    "LightSlateGrey",
-    "MediumPurple",
-    "LightSlateBlue",
-    "Yellow4",
-    "DarkOliveGreen3",
-    "DarkSeaGreen",
-    "LightSkyBlue3",
-    "LightSkyBlue3",
-    "SkyBlue2",
-    "Chartreuse2",
-    "DarkOliveGreen3",
-    "PaleGreen3",
-    "DarkSeaGreen3",
-    "DarkSlateGray3",
-    "SkyBlue1",
-    "Chartreuse1",
-    "LightGreen",
-    "LightGreen",
-    "PaleGreen1",
-    "Aquamarine1",
-    "DarkSlateGray1",
-    "Red3",
-    "DeepPink4",
-    "MediumVioletRed",
-    "Magenta3",
-    "DarkViolet",
-    "Purple",
-    "DarkOrange3",
-    "IndianRed",
-    "HotPink3",
-    "MediumOrchid3",
-    "MediumOrchid",
-    "MediumPurple2",
-    "DarkGoldenrod",
-    "LightSalmon3",
-    "RosyBrown",
-    "Grey63",
-    "MediumPurple2",
-    "MediumPurple1",
-    "Gold3",
-    "DarkKhaki",
-    "NavajoWhite3",
-    "Grey69",
-    "LightSteelBlue3",
-    "LightSteelBlue",
-    "Yellow3",
-    "DarkOliveGreen3",
-    "DarkSeaGreen3",
-    "DarkSeaGreen2",
-    "LightCyan3",
-    "LightSkyBlue1",
-    "GreenYellow",
-    "DarkOliveGreen2",
-    "PaleGreen1",
-    "DarkSeaGreen2",
-    "DarkSeaGreen1",
-    "PaleTurquoise1",
-    "Red3",
-    "DeepPink3",
-    "DeepPink3",
-    "Magenta3",
-    "Magenta3",
-    "Magenta2",
-    "DarkOrange3",
-    "IndianRed",
-    "HotPink3",
-    "HotPink2",
-    "Orchid",
-    "MediumOrchid1",
-    "Orange3",
-    "LightSalmon3",
-    "LightPink3",
-    "Pink3",
-    "Plum3",
-    "Violet",
-    "Gold3",
-    "LightGoldenrod3",
-    "Tan",
-    "MistyRose3",
-    "Thistle3",
-    "Plum2",
-    "Yellow3",
-    "Khaki3",
-    "LightGoldenrod2",
-    "LightYellow3",
-    "Grey84",
-    "LightSteelBlue1",
-    "Yellow2",
-    "DarkOliveGreen1",
-    "DarkOliveGreen1",
-    "DarkSeaGreen1",
-    "Honeydew2",
-    "LightCyan1",
-    "Red1",
-    "DeepPink2",
-    "DeepPink1",
-    "DeepPink1",
-    "Magenta2",
-    "Magenta1",
-    "OrangeRed1",
-    "IndianRed1",
-    "IndianRed1",
-    "HotPink",
-    "HotPink",
-    "MediumOrchid1",
-    "DarkOrange",
-    "Salmon1",
-    "LightCoral",
-    "PaleVioletRed1",
-    "Orchid2",
-    "Orchid1",
-    "Orange1",
-    "SandyBrown",
-    "LightSalmon1",
-    "LightPink1",
-    "Pink1",
-    "Plum1",
-    "Gold1",
-    "LightGoldenrod2",
-    "LightGoldenrod2",
-    "NavajoWhite1",
-    "MistyRose1",
-    "Thistle1",
-    "Yellow1",
-    "LightGoldenrod1",
-    "Khaki1",
-    "Wheat1",
-    "Cornsilk1",
-    "Grey100",
-    "Grey3",
-    "Grey7",
-    "Grey11",
-    "Grey15",
-    "Grey19",
-    "Grey23",
-    "Grey27",
-    "Grey30",
-    "Grey35",
-    "Grey39",
-    "Grey42",
-    "Grey46",
-    "Grey50",
-    "Grey54",
-    "Grey58",
-    "Grey62",
-    "Grey66",
-    "Grey70",
-    "Grey74",
-    "Grey78",
-    "Grey82",
-    "Grey85",
-    "Grey89",
-    "Grey93",
-};
-
-static int palette_color_index_from_xterm_name(const char* name)
-{
-    for (uint16_t i = 0; i < ARRAY_SIZE(color_palette_names); ++i) {
-        if (strcasecmp(color_palette_names[i], name)) {
-            return i + 16;
-        }
-    }
-    return 0;
-}
-
-static ColorRGB color_from_xterm_name(const char* name, bool* fail)
-{
-    for (uint16_t i = 0; i < ARRAY_SIZE(color_palette_names); ++i) {
-        if (strcasecmp(color_palette_names[i], name)) {
-            ColorRGB color;
-            generate_color_palette_entry(&color, i + 16);
-            return color;
-        }
-    }
-    if (fail) {
-        *fail = true;
-    }
-    return (ColorRGB){ 0 };
-}
-
-const char* name_from_color_palette_index(uint16_t index)
-{
-    if (index < 16 || index > 255) {
-        return NULL;
-    } else {
-        return color_palette_names[index - 16];
     }
 }
 
@@ -1471,6 +1121,8 @@ void Vt_init(Vt* self, uint32_t cols, uint32_t rows)
     self->uri_matcher.state = VT_URI_MATCHER_EMPTY;
     self->uri_matcher.match = Vector_new_with_capacity_char(128);
 
+    self->shell_commands = Vector_new_RcPtr_VtCommand();
+
     self->unicode_input.buffer = Vector_new_char();
 
     self->xterm_modify_keyboard      = VT_XT_MODIFY_KEYBOARD_DFT;
@@ -1498,37 +1150,6 @@ static void Vt_reset_tab_ruler(Vt* self)
 static void Vt_clear_all_tabstops(Vt* self)
 {
     memset(self->tab_ruler, false, Vt_col(self));
-}
-
-static inline size_t Vt_top_line_alt(const Vt* const self)
-{
-    return self->alt_lines.size <= Vt_row(self) ? 0 : self->alt_lines.size - Vt_row(self);
-}
-
-static inline size_t Vt_bottom_line_alt(Vt* self)
-{
-    return Vt_top_line_alt(self) + Vt_row(self) - 1;
-}
-
-static inline uint16_t Vt_cursor_row(Vt* self)
-{
-    return self->cursor.row - Vt_top_line(self);
-}
-
-static inline size_t Vt_get_scroll_region_top(Vt* self)
-{
-    return Vt_top_line(self) + self->scroll_region_top;
-}
-
-static inline size_t Vt_get_scroll_region_bottom(Vt* self)
-{
-    return Vt_top_line(self) + self->scroll_region_bottom;
-}
-
-static inline bool Vt_scroll_region_not_default(Vt* self)
-{
-    return Vt_get_scroll_region_top(self) != Vt_top_line(self) ||
-           Vt_get_scroll_region_bottom(self) != Vt_bottom_line(self);
 }
 
 bool Vt_visual_scroll_up(Vt* self)
@@ -1570,124 +1191,6 @@ void Vt_visual_scroll_reset(Vt* self)
     self->scrolling_visual = false;
 }
 
-__attribute__((cold)) void Vt_dump_info(Vt* self)
-{
-    static int dump_index = 0;
-    printf("\n====================[ STATE DUMP %2d ]====================\n", dump_index++);
-    printf("Active character attributes:\n");
-    printf("  foreground color:   " COLOR_RGB_FMT "\n",
-           COLOR_RGB_AP((Vt_rune_fg(self, &self->parser.char_state))));
-    printf("  background color:   " COLOR_RGBA_FMT "\n",
-           COLOR_RGBA_AP((Vt_rune_bg(self, &self->parser.char_state))));
-    printf("  line color uses fg: " BOOL_FMT "\n",
-           BOOL_AP(!self->parser.char_state.line_color_not_default));
-    printf("  line color:         " COLOR_RGB_FMT "\n",
-           COLOR_RGB_AP((Vt_rune_ln_clr(self, &self->parser.char_state))));
-    printf("  dim:                " BOOL_FMT "\n", BOOL_AP(self->parser.char_state.dim));
-    printf("  hidden:             " BOOL_FMT "\n", BOOL_AP(self->parser.char_state.hidden));
-    printf("  blinking:           " BOOL_FMT "\n", BOOL_AP(self->parser.char_state.blinkng));
-    printf("  underlined:         " BOOL_FMT "\n", BOOL_AP(self->parser.char_state.underlined));
-    printf("  strikethrough:      " BOOL_FMT "\n", BOOL_AP(self->parser.char_state.strikethrough));
-    printf("  double underline:   " BOOL_FMT "\n",
-           BOOL_AP(self->parser.char_state.doubleunderline));
-    printf("  curly underline:    " BOOL_FMT "\n", BOOL_AP(self->parser.char_state.curlyunderline));
-    printf("  overline:           " BOOL_FMT "\n", BOOL_AP(self->parser.char_state.overline));
-    printf("  inverted:           " BOOL_FMT "\n", BOOL_AP(self->parser.char_state.invert));
-    printf("Tab ruler:\n");
-    printf("  tabstop: %d\n  ", self->tabstop);
-    for (int i = 0; i < Vt_col(self); ++i) {
-        printf("%c", self->tab_ruler[i] ? '|' : '_');
-    }
-    printf("\nModes:\n");
-    printf("  application keypad:               " BOOL_FMT "\n",
-           BOOL_AP(self->modes.application_keypad));
-    printf("  application keypad cursor:        " BOOL_FMT "\n",
-           BOOL_AP(self->modes.application_keypad_cursor));
-    printf("  auto repeat:                      " BOOL_FMT "\n", BOOL_AP(self->modes.auto_repeat));
-    printf("  bracketed paste:                  " BOOL_FMT "\n",
-           BOOL_AP(self->modes.bracketed_paste));
-    printf("  send DEL on delete:               " BOOL_FMT "\n",
-           BOOL_AP(self->modes.del_sends_del));
-    printf("  don't send esc on alt:            " BOOL_FMT "\n",
-           BOOL_AP(self->modes.no_alt_sends_esc));
-    printf("  extended reporting:               " BOOL_FMT "\n",
-           BOOL_AP(self->modes.extended_report));
-    printf("  window focus events reporting:    " BOOL_FMT "\n",
-           BOOL_AP(self->modes.window_focus_events_report));
-    printf("  mouse button reporting:           " BOOL_FMT "\n",
-           BOOL_AP(self->modes.mouse_btn_report));
-    printf("  motion on mouse button reporting: " BOOL_FMT "\n",
-           BOOL_AP(self->modes.mouse_motion_on_btn_report));
-    printf("  mouse motion reporting:           " BOOL_FMT "\n",
-           BOOL_AP(self->modes.mouse_motion_report));
-    printf("  x10 compat mouse reporting:       " BOOL_FMT "\n",
-           BOOL_AP(self->modes.x10_mouse_compat));
-    printf("  no auto wrap:                     " BOOL_FMT "\n",
-           BOOL_AP(self->modes.no_wraparound));
-    printf("  reverse auto wrap:                " BOOL_FMT "\n",
-           BOOL_AP(self->modes.reverse_wraparound));
-    printf("  reverse video:                    " BOOL_FMT "\n",
-           BOOL_AP(self->modes.video_reverse));
-
-    printf("\n");
-    printf("  S S | Number of lines %zu (last index: %zu)\n",
-           self->lines.size,
-           Vt_bottom_line(self));
-    printf("  C C | Terminal size %hu x %hu\n", self->ws.ws_col, self->ws.ws_row);
-    printf("V R R | \n");
-    printf("I O . | Visible region: %zu - %zu\n",
-           Vt_visual_top_line(self),
-           Vt_visual_bottom_line(self));
-    printf("E L   | \n");
-    printf("W L V | Active line:  real: %zu (visible: %u)\n",
-           self->cursor.row,
-           Vt_cursor_row(self));
-    printf("P   I | Cursor position: %u type: %d blink: %d hidden: %d\n",
-           self->cursor.col,
-           self->cursor.type,
-           self->cursor.blinking,
-           self->cursor.hidden);
-    printf("O R E | Scroll region: %zu - %zu\n",
-           Vt_get_scroll_region_top(self),
-           Vt_get_scroll_region_bottom(self));
-    printf("R E W | \n");
-    printf("T G . +----------------------------------------------------\n");
-    printf("| | |  BUFFER: %s\n", (self->alt_lines.buf ? "ALTERNATE" : "MAIN"));
-    printf("V V V  \n");
-
-    for (size_t i = 0; i < self->lines.size; ++i) {
-        Vector_char str = rune_vec_to_string(&self->lines.buf[i].data, 0, 0, "");
-        printf(
-          "%c %c %c %4zu%c s:%3zu dmg:%d proxy{%3d,%3d,%3d,%3d} reflow{%d,%d,%d} data{%.90s%s}\n",
-          i == Vt_top_line(self) ? 'v' : i == Vt_bottom_line(self) ? '^' : ' ',
-          i == Vt_get_scroll_region_top(self) || i == Vt_get_scroll_region_bottom(self) ? '-' : ' ',
-          i == Vt_visual_top_line(self) || i == Vt_visual_bottom_line(self) ? '*' : ' ',
-          i,
-          i == self->cursor.row ? '<' : ' ',
-          self->lines.buf[i].data.size,
-          self->lines.buf[i].damage.type != VT_LINE_DAMAGE_NONE,
-          self->lines.buf[i].proxy.data[0],
-          self->lines.buf[i].proxy.data[1],
-          self->lines.buf[i].proxy.data[2],
-          self->lines.buf[i].proxy.data[3],
-          self->lines.buf[i].reflowable,
-          self->lines.buf[i].rejoinable,
-          self->lines.buf[i].was_reflown,
-          str.buf,
-          (str.size > 90 ? "…" : ""));
-
-        if (self->lines.buf[i].links) {
-            for (uint16_t j = 0; j < self->lines.buf[i].links->size; ++j) {
-                printf("              URI[%u]: %s\n",
-                       j,
-                       self->lines.buf[i].links->buf[j].uri_string);
-            }
-        }
-
-        Vector_destroy_char(&str);
-    }
-}
-
 static void Vt_reflow_expand(Vt* self, uint32_t x)
 {
     size_t bottom_bound = self->cursor.row;
@@ -1716,8 +1219,7 @@ static void Vt_reflow_expand(Vt* self, uint32_t x)
                             const char* uri =
                               Vector_at_VtUri(srcline->links, srcidx - 1)->uri_string;
                             if (uri) {
-                                int16_t newidx   = VtLine_add_link(tgtline, uri) + 1;
-                                r->hyperlink_idx = newidx;
+                                r->hyperlink_idx = VtLine_add_link(tgtline, uri) + 1;
                             }
                         }
                     }
@@ -1732,7 +1234,7 @@ static void Vt_reflow_expand(Vt* self, uint32_t x)
                         if (self->selection.begin_char_idx <= chars_to_move) {
                             --self->selection.begin_line;
                             self->selection.begin_char_idx =
-                              self->selection.begin_char_idx + tgtline->data.size - 1;
+                              self->selection.begin_char_idx + tgtline->data.size - chars_to_move;
                         } else {
                             self->selection.begin_char_idx -= chars_to_move;
                         }
@@ -1741,7 +1243,7 @@ static void Vt_reflow_expand(Vt* self, uint32_t x)
                         if (self->selection.end_char_idx < chars_to_move) {
                             --self->selection.end_line;
                             self->selection.end_char_idx =
-                              self->selection.end_char_idx + tgtline->data.size - 1;
+                              self->selection.end_char_idx + tgtline->data.size - chars_to_move;
                         } else {
                             self->selection.end_char_idx -= chars_to_move;
                         }
@@ -1754,25 +1256,28 @@ static void Vt_reflow_expand(Vt* self, uint32_t x)
                 if (!srcline->data.size) {
                     tgtline->was_reflown = false;
                     size_t remove_index  = i + 1;
+
+                    if (srcline->mark_command_output_start)
+                        tgtline->mark_command_output_start = true;
+                    if (srcline->mark_command_output_end)
+                        tgtline->mark_command_output_end = true;
+                    if (srcline->mark_command_invoke)
+                        tgtline->mark_command_invoke = true;
+                    if (srcline->mark_explicit)
+                        tgtline->mark_explicit = true;
+
                     Vector_remove_at_VtLine(&self->lines, remove_index, 1);
-                    --self->cursor.row;
+                    srcline = &self->lines.buf[i + 1];
+                    tgtline = &self->lines.buf[i];
+
+                    Vt_shift_global_line_index_refs(self, remove_index + 1, -1);
+
+                    if (self->lines.size - 1 < Vt_row(self)) {
+                        Vector_push_VtLine(&self->lines, VtLine_new());
+                    }
+
                     --bottom_bound;
                     ++removals;
-
-                    /* correct scroll region */
-                    if (self->scrolling_visual && remove_index < Vt_visual_top_line(self)) {
-                        Vt_visual_scroll_up(self);
-                    }
-
-                    /* correct selection */
-                    if (self->selection.mode == SELECT_MODE_NORMAL) {
-                        if (self->selection.begin_line >= remove_index) {
-                            --self->selection.begin_line;
-                        }
-                        if (self->selection.end_line > remove_index) {
-                            --self->selection.end_line;
-                        }
-                    }
                 }
             }
         } // end should reflow
@@ -1806,19 +1311,24 @@ static void Vt_reflow_shrink(Vt* self, uint32_t x)
         VtLine* srcline = &self->lines.buf[i];
         VtLine* tgtline = &self->lines.buf[i + 1];
 
+        if (!srcline->was_reflown)
+            VtLine_strip_blanks(srcline);
+
         if (srcline->data.size > x && srcline->reflowable) {
             size_t chars_to_move = srcline->data.size - x;
 
             /* move select to next line */
-            bool end_just_moved = false;
+            bool end_just_moved = false, begin_just_moved = false;
             if (self->selection.mode == SELECT_MODE_NORMAL) {
-                if (self->selection.begin_char_idx > (int32_t)x && self->selection.begin_line) {
+                if (self->selection.begin_char_idx > (int32_t)x &&
+                    self->selection.begin_line == i) {
                     ++self->selection.begin_line;
-                    self->selection.begin_char_idx = self->selection.begin_char_idx - x - 1;
+                    self->selection.begin_char_idx = self->selection.begin_char_idx - x;
+                    begin_just_moved = true;
                 }
-                if (self->selection.end_char_idx >= (int32_t)x && self->selection.end_line) {
+                if (self->selection.end_char_idx > (int32_t)x && self->selection.end_line == i) {
                     ++self->selection.end_line;
-                    self->selection.end_char_idx = self->selection.end_char_idx - x - 1;
+                    self->selection.end_char_idx = self->selection.end_char_idx - x;
                     end_just_moved               = true;
                 }
             }
@@ -1829,23 +1339,20 @@ static void Vt_reflow_shrink(Vt* self, uint32_t x)
 
                     /* shift selection points right */
                     if (self->selection.mode == SELECT_MODE_NORMAL) {
-                        if (self->selection.begin_line == i + 1) {
+                        if (self->selection.begin_line == i + 1 && !begin_just_moved)
                             ++self->selection.begin_char_idx;
-                        }
-                        if (self->selection.end_line == i + 1 && !end_just_moved) {
+                        if (self->selection.end_line == i + 1 && !end_just_moved)
                             ++self->selection.end_char_idx;
-                        }
                     }
 
                     VtRune* r = srcline->data.buf + x + chars_to_move - ii - 1;
 
                     /* update link idx-es */
                     if (r->hyperlink_idx && srcline->links &&
-                        r->hyperlink_idx >= (uint16_t)srcline->links->size) {
+                        r->hyperlink_idx <= (uint16_t)srcline->links->size) {
                         const char* uri = srcline->links->buf[r->hyperlink_idx - 1].uri_string;
                         if (uri) {
-                            int16_t new_uri_idx = VtLine_add_link(tgtline, uri) + 1;
-                            r->hyperlink_idx    = new_uri_idx;
+                            r->hyperlink_idx = VtLine_add_link(tgtline, uri) + 1;
                         }
                     }
 
@@ -1856,38 +1363,31 @@ static void Vt_reflow_shrink(Vt* self, uint32_t x)
                 ++insertions_made;
                 size_t insert_index = i + 1;
                 Vector_insert_VtLine(&self->lines, self->lines.buf + insert_index, VtLine_new());
+                srcline = &self->lines.buf[i];
+                tgtline = &self->lines.buf[i + 1];
 
-                /* correct visual scroll region */
-                if (self->scrolling_visual && Vt_visual_top_line(self) >= insert_index &&
-                    Vt_visual_bottom_line(self) < self->lines.size - 1) {
-                    Vt_visual_scroll_down(self);
-                }
+                Vt_shift_global_line_index_refs(self, insert_index, 1);
 
-                /* correct selection region */
-                if (self->selection.mode == SELECT_MODE_NORMAL) {
-                    if (self->selection.begin_line >= insert_index) {
-                        ++self->selection.begin_line;
-                    }
-                    if (self->selection.end_line >= insert_index) {
-                        ++self->selection.end_line;
-                    }
-                }
-
-                ++self->cursor.row;
                 ++bottom_bound;
 
                 /* update link idx-es */
                 for (size_t j = 0; j < chars_to_move; ++j) {
-                    VtRune* r = srcline->data.buf + x + j;
-                    if (r->hyperlink_idx && srcline->links &&
-                        r->hyperlink_idx >= (uint16_t)srcline->links->size) {
+                    VtRune* r = Vt_at(self, x + j, i);
+                    if (r && r->hyperlink_idx && srcline->links &&
+                        r->hyperlink_idx <= (uint16_t)srcline->links->size) {
                         const char* uri = srcline->links->buf[r->hyperlink_idx - 1].uri_string;
-                        int16_t     new_uri_idx = VtLine_add_link(tgtline, uri) + 1;
-                        r->hyperlink_idx        = new_uri_idx;
+                        if (uri) {
+                            r->hyperlink_idx = VtLine_add_link(tgtline, uri) + 1;
+                        }
                     }
                 }
 
                 Vector_pushv_VtRune(&tgtline->data, srcline->data.buf + x, chars_to_move);
+
+                if (srcline->mark_command_output_end) {
+                    srcline->mark_command_output_end = false;
+                    tgtline->mark_command_output_end = true;
+                }
 
                 srcline->was_reflown = true;
                 tgtline->rejoinable  = true;
@@ -3722,6 +3222,7 @@ static inline void Vt_alt_buffer_on(Vt* self, bool save_mouse)
         self->alt_active_line = self->cursor.row;
     }
     self->cursor.row = 0;
+    Vt_command_output_interrupted(self);
 }
 
 static inline void Vt_alt_buffer_off(Vt* self, bool save_mouse)
@@ -3740,12 +3241,8 @@ static inline void Vt_alt_buffer_off(Vt* self, bool save_mouse)
         self->scroll_region_top    = 0;
         self->scroll_region_bottom = Vt_row(self) - 1;
         Vt_visual_scroll_reset(self);
+        Vt_command_output_interrupted(self);
     }
-}
-
-static bool Vt_alt_buffer_enabled(Vt* self)
-{
-    return self->alt_lines.buf;
 }
 
 /**
@@ -4244,7 +3741,7 @@ static void Vt_handle_OSC(Vt* self, char c)
                         ++uri;
                     }
                     self->work_dir = strdup(uri);
-                    LOG("Program changed work dir to \'%s\'\n", self->work_dir);
+                    LOG("Vt::work-dir{ %s }\n", self->work_dir);
                 } else {
                     self->work_dir = NULL;
                     WRN("Bad URI \'%s\', scheme is not \'file\'\n", uri);
@@ -4458,6 +3955,246 @@ static void Vt_handle_OSC(Vt* self, char c)
             case 52:
                 WRN("Selection manipulation not implemented\n");
                 break;
+
+            /* Shell integration mark (FinalTerm)
+             * https://iterm2.com/documentation-shell-integration.html
+             *
+             * [PROMPT]prompt% [COMMAND_START] ls -l
+             * [COMMAND_EXECUTED]
+             * -rw-r--r-- 1 user group 127 May 1 2016 filename
+             * [COMMAND_FINISHED]
+             */
+            case 133: {
+
+                if (Vt_alt_buffer_enabled(self)) {
+                    break;
+                }
+
+                switch (seq[4] /* 113;? */) {
+                    /* PROMPT */
+                    case 'A':
+                        self->shell_integration_state = VT_SHELL_INTEG_STATE_PROMPT;
+                        break;
+
+                        /* COMMAND_START */
+                    case 'B': {
+                        RcPtr_VtCommand new_command        = RcPtr_new_VtCommand();
+                        *RcPtr_get_VtCommand(&new_command) = (VtCommand){
+                            .command              = NULL,
+                            .command_start_row    = self->cursor.row,
+                            .command_start_column = self->cursor.col,
+                            .state                = VT_COMMAND_STATE_TYPING,
+                        };
+
+                        for (VtCommand* c; (c = RcPtr_get_VtCommand(Vector_last_RcPtr_VtCommand(
+                                              &self->shell_commands))) &&
+                                           c->state != VT_COMMAND_STATE_COMPLETED;) {
+                            Vector_pop_RcPtr_VtCommand(&self->shell_commands);
+                        }
+
+                        Vector_push_RcPtr_VtCommand(&self->shell_commands, new_command);
+
+                        self->shell_integration_state = VT_SHELL_INTEG_STATE_COMMAND;
+                    } break;
+
+                        /* COMMAND_EXECUTED */
+                    case 'C': {
+                        RcPtr_VtCommand* cmd_ptr =
+                          Vector_last_RcPtr_VtCommand(&self->shell_commands);
+                        VtCommand* cmd = NULL;
+
+                        if (!cmd_ptr || !(cmd = RcPtr_get_VtCommand(cmd_ptr))) {
+                            self->shell_integration_state = VT_SHELL_INTEG_STATE_NONE;
+                            break;
+                        }
+                        if (cmd->command_start_row > self->cursor.row ||
+                            (cmd->command_start_row == self->cursor.row &&
+                             cmd->command_start_column >= self->cursor.col)) {
+                            self->shell_integration_state = VT_SHELL_INTEG_STATE_NONE;
+                            break;
+                        }
+
+                        cmd->state = VT_COMMAND_STATE_RUNNING;
+
+                        for (size_t i = cmd->command_start_row; i < self->cursor.row; ++i) {
+                            Vt_line_at(self, i)->mark_command_invoke = true;
+                        }
+
+                        Vt_cursor_line(self)->mark_command_output_start = true;
+                        RcPtr_new_shared_in_place_of_VtCommand(
+                          &Vt_cursor_line(self)->linked_command,
+                          cmd_ptr);
+
+                        cmd->output_rows.first    = self->cursor.row;
+                        cmd->execution_time.start = TimePoint_now();
+
+                        Vector_char command_string_builder;
+                        if (cmd->command_start_row == self->cursor.row - 1) {
+                            VtLine* ln              = Vt_line_at(self, cmd->command_start_row);
+                            ln->mark_command_invoke = true;
+                            command_string_builder  = VtLine_to_string(ln,
+                                                                      cmd->command_start_column,
+                                                                      self->cursor.col,
+                                                                      NULL);
+
+                            for (char* r; command_string_builder.size &&
+                                          (r = Vector_last_char(&command_string_builder)) &&
+                                          *r == ' ';) {
+                                Vector_pop_char(&command_string_builder);
+                            }
+
+                        } else {
+                            VtLine* ln              = Vt_line_at(self, cmd->command_start_row);
+                            ln->mark_command_invoke = true;
+                            command_string_builder  = VtLine_to_string(ln,
+                                                                      cmd->command_start_column,
+                                                                      Vt_col(self) - 1,
+                                                                      NULL);
+
+                            for (char* r; command_string_builder.size &&
+                                          (r = Vector_last_char(&command_string_builder)) &&
+                                          *r == ' ';) {
+                                Vector_pop_char(&command_string_builder);
+                            }
+
+                            Vector_push_char(&command_string_builder, '\n');
+
+                            for (size_t row = cmd->command_start_row + 1; row < self->cursor.row;
+                                 ++row) {
+                                ln                      = Vt_line_at(self, row);
+                                ln->mark_command_invoke = true;
+                                Vector_char tmp = VtLine_to_string(ln, 0, Vt_col(self), NULL);
+
+                                for (char* r; command_string_builder.size &&
+                                              (r = Vector_last_char(&command_string_builder)) &&
+                                              *r == ' ';) {
+                                    Vector_pop_char(&command_string_builder);
+                                }
+
+                                if (row != self->cursor.row - 1) {
+                                    Vector_push_char(&command_string_builder, '\n');
+                                }
+
+                                Vector_pushv_char(&command_string_builder, tmp.buf, tmp.size - 1);
+                                Vector_destroy_char(&tmp);
+                            }
+                        }
+
+                        Vector_push_char(&command_string_builder, '\0');
+                        cmd->command = strdup(command_string_builder.buf);
+                        Vector_destroy_char(&command_string_builder);
+
+                        self->shell_integration_state = VT_SHELL_INTEG_STATE_OUTPUT;
+                    } break;
+
+                        /* COMMAND_FINISHED */
+                    case 'D': {
+                        RcPtr_VtCommand* cmd_ptr =
+                          Vector_last_RcPtr_VtCommand(&self->shell_commands);
+                        VtCommand* cmd = NULL;
+
+                        if (!cmd_ptr || !(cmd = RcPtr_get_VtCommand(cmd_ptr))) {
+                            self->shell_integration_state = VT_SHELL_INTEG_STATE_NONE;
+                            break;
+                        }
+
+                        cmd->state       = VT_COMMAND_STATE_COMPLETED;
+                        cmd->exit_status = strnlen(seq, 6) >= 6 ? atoi(seq + 6 /* 133;D; */) : 0;
+
+                        Vt_line_at(self, self->cursor.row - 1)->mark_command_output_end = true;
+
+                        cmd->execution_time.end = TimePoint_now();
+                        cmd->output_rows.second = self->cursor.row;
+
+                        bool minimized = CALL_FP(self->callbacks.on_minimized_state_requested,
+                                                 self->callbacks.user_data);
+
+                        LOG("Vt::command_finished{ command: \'%s\' [%u:%zu], status: %d, output: "
+                            "%zu..%zu }\n",
+                            cmd->command,
+                            cmd->command_start_column,
+                            cmd->command_start_row,
+                            cmd->exit_status,
+                            cmd->output_rows.first,
+                            cmd->output_rows.second);
+
+                        if (minimized) {
+                            char* tm_str = TimeSpan_duration_string_approx(&cmd->execution_time);
+                            char* notification_title =
+                              cmd->exit_status
+                                ? asprintf("\'%s\' failed(%d), took %s",
+                                           cmd->command,
+                                           cmd->exit_status,
+                                           tm_str)
+                                : asprintf("\'%s\' finished in %s", cmd->command, tm_str);
+
+                            Vector_char output = Vt_command_to_string(self, cmd, 1);
+
+                            if (output.size > 32) {
+                                for (uint32_t i = 0; i < (output.size - 32); ++i) {
+                                    Vector_pop_char(&output);
+                                }
+                                Vector_pushv_char(&output, "…", strlen("…") + 1);
+                            }
+
+                            CALL_FP(self->callbacks.on_desktop_notification_sent,
+                                    self->callbacks.user_data,
+                                    notification_title,
+                                    output.buf);
+
+                            Vector_destroy_char(&output);
+                            free(notification_title);
+                            free(tm_str);
+                        }
+
+                        self->shell_integration_state = VT_SHELL_INTEG_STATE_NONE;
+                    } break;
+
+                    default:
+                        WRN("Invalid shell integration command\n");
+                }
+            } break;
+
+            /* Shell integration command (iTerm2)*/
+            case 1337: {
+                for (char* a; (a = strsep(&seq, ";"));) {
+                    if (strstr(a, "ShellIntegrationVersion")) {
+                        char* tmp = strstr(a, "=") + 1;
+                        if (tmp) {
+                            self->shell_integration_protocol_version = atoi(tmp);
+                        }
+                    } else if (strstr(a, "RemoteHost")) {
+                        char* tmp = strstr(a, "=") + 1;
+                        if (tmp) {
+                            // TODO: is this localhost?
+                            free(self->shell_integration_shell_host);
+                            self->shell_integration_shell_host = strdup(tmp);
+                        }
+                    } else if (strstr(a, "shell")) {
+                        char* tmp = strstr(a, "=") + 1;
+                        if (tmp) {
+                            free(self->shell_integration_shell_id);
+                            self->shell_integration_shell_id = strdup(tmp);
+                        }
+                    } else if (strstr(a, "CurrentDir")) {
+                        char* tmp = strstr(a, "=") + 1;
+                        if (tmp) {
+                            free(self->shell_integration_current_dir);
+                            self->shell_integration_current_dir = strdup(tmp);
+                        }
+                    } else if (strstr(a, "ClearScrollback")) {
+                        Vt_clear_scrollback(self);
+                    } else if (strstr(a, "SetMark")) {
+                        Vt_cursor_line(self)->mark_explicit = true;
+                    }
+                    // TODO: ReportCellSize
+                    // TODO: Copy
+                    // TODO: RequestAttention
+                    // TODO: CopyToClipboard
+                    // TODO: EndCopy
+                    // TODO: StealFocus
+                }
+            } break;
 
             /* Send desktop notification (rxvt extension)
              * OSC 777;notify;title;body ST */
@@ -4897,6 +4634,21 @@ static inline void Vt_move_cursor(Vt* self, uint16_t column, uint16_t rows)
     self->last_interted = NULL;
     self->cursor.row    = CLAMP(rows + Vt_top_line(self), min_row, max_row);
     self->cursor.col    = MIN(column, (uint32_t)Vt_col(self) - 1);
+
+    VtCommand*       cmd;
+    RcPtr_VtCommand* cmd_ptr;
+    if (self->shell_integration_state >= VT_SHELL_INTEG_STATE_COMMAND &&
+        (cmd_ptr = Vector_last_RcPtr_VtCommand(&self->shell_commands)) &&
+        (cmd = RcPtr_get_VtCommand(cmd_ptr))) {
+
+        if (self->shell_integration_state == VT_SHELL_INTEG_STATE_OUTPUT &&
+            self->cursor.row < cmd->output_rows.first) {
+            Vt_command_output_interrupted(self);
+        } else if (self->cursor.row < cmd->command_start_row) {
+            Vt_command_output_interrupted(self);
+        }
+    }
+
     CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
 }
 
@@ -5526,6 +5278,71 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
     }
 }
 
+static void Vt_shift_global_line_index_refs(Vt* self, size_t point, int64_t change)
+{
+    LOG("Vt::shift_idx{ pt: %zu, delta: %ld }\n", point, change);
+
+    if (self->cursor.row >= point)
+        self->cursor.row += change;
+
+    if (self->visual_scroll_top >= point)
+        self->visual_scroll_top += change;
+
+    if (self->scroll_region_top >= point)
+        self->scroll_region_top += change;
+    if (self->scroll_region_bottom >= point)
+        self->scroll_region_bottom += change;
+
+    for (RcPtr_VtCommand* rp = NULL;
+         (rp = Vector_iter_RcPtr_VtCommand(&self->shell_commands, rp));) {
+        VtCommand* cmd = RcPtr_get_VtCommand(rp);
+        if (cmd->command_start_row >= point)
+            cmd->command_start_row += change;
+        if (cmd->output_rows.first >= point)
+            cmd->output_rows.first += change;
+        if (cmd->output_rows.second >= point)
+            cmd->output_rows.second += change;
+    }
+
+    if (self->selection.mode == SELECT_MODE_NORMAL) {
+        if (self->selection.begin_line >= point)
+            self->selection.begin_line += change;
+        if (self->selection.end_line >= point)
+            self->selection.end_line += change;
+    }
+}
+
+static void Vt_remove_scrollback(Vt* self, size_t lines)
+{
+    if (Vt_alt_buffer_enabled(self))
+        return;
+
+    lines = MIN(lines, (self->lines.size - Vt_row(self)));
+    Vector_remove_at_VtLine(&self->lines, 0, lines);
+    Vt_shift_global_line_index_refs(self, lines, -(int64_t)lines);
+
+    for (RcPtr_VtCommand* rpp = NULL;
+         (rpp = Vector_iter_RcPtr_VtCommand(&self->shell_commands, rpp));) {
+        VtCommand* cmd = RcPtr_get_VtCommand(rpp);
+
+        if (cmd->command_start_row < (size_t)lines)
+            RcPtr_destroy_VtCommand(rpp);
+    }
+
+    while (self->shell_commands.size && (!RcPtr_get_VtCommand(self->shell_commands.buf) ||
+                                         RcPtr_is_unique_VtCommand(self->shell_commands.buf))) {
+        Vector_remove_at_RcPtr_VtCommand(&self->shell_commands, 0, 1);
+    }
+}
+
+void Vt_clear_scrollback(Vt* self)
+{
+    if (Vt_alt_buffer_enabled(self)) {
+        return;
+    }
+    Vt_remove_scrollback(self, self->lines.size);
+}
+
 static void Vt_shrink_scrollback(Vt* self)
 {
     if (Vt_alt_buffer_enabled(self)) {
@@ -5534,9 +5351,7 @@ static void Vt_shrink_scrollback(Vt* self)
     int64_t ln_cnt = self->lines.size;
     if (unlikely(ln_cnt > MAX(settings.scrollback * 1.1, Vt_row(self)))) {
         int64_t to_remove = ln_cnt - settings.scrollback - Vt_row(self);
-        Vector_remove_at_VtLine(&self->lines, 0, to_remove);
-        self->cursor.row -= to_remove;
-        self->visual_scroll_top -= to_remove;
+        Vt_remove_scrollback(self, to_remove);
     }
 }
 
@@ -6015,22 +5830,6 @@ static void Vt_set_title(Vt* self, const char* title)
     CALL_FP(self->callbacks.on_title_changed, self->callbacks.user_data, self->title);
 }
 
-void Vt_destroy(Vt* self)
-{
-    Vector_destroy_VtLine(&self->lines);
-    if (Vt_alt_buffer_enabled(self)) {
-        Vector_destroy_VtLine(&self->alt_lines);
-    }
-    Vector_destroy_char(&self->parser.active_sequence);
-    Vector_destroy_DynStr(&self->title_stack);
-    Vector_destroy_char(&self->unicode_input.buffer);
-    Vector_destroy_char(&self->output);
-    free(self->title);
-    free(self->active_hyperlink);
-    free(self->work_dir);
-    free(self->tab_ruler);
-}
-
 void Vt_get_output(Vt* self, char** out_buf, size_t* out_bytes)
 {
     ASSERT(out_buf && out_bytes, "has outputs");
@@ -6044,4 +5843,25 @@ void Vt_get_output(Vt* self, char** out_buf, size_t* out_bytes)
     *out_buf   = self->output.buf;
     *out_bytes = self->output.size;
     Vector_clear_char(&self->output);
+}
+
+void Vt_destroy(Vt* self)
+{
+    Vector_destroy_VtLine(&self->lines);
+    if (Vt_alt_buffer_enabled(self)) {
+        Vector_destroy_VtLine(&self->alt_lines);
+    }
+    Vector_destroy_char(&self->parser.active_sequence);
+    Vector_destroy_DynStr(&self->title_stack);
+    Vector_destroy_char(&self->unicode_input.buffer);
+    Vector_destroy_char(&self->output);
+    Vector_destroy_char(&self->uri_matcher.match);
+    Vector_destroy_RcPtr_VtCommand(&self->shell_commands);
+    free(self->title);
+    free(self->active_hyperlink);
+    free(self->work_dir);
+    free(self->tab_ruler);
+    free(self->shell_integration_current_dir);
+    free(self->shell_integration_shell_host);
+    free(self->shell_integration_shell_id);
 }

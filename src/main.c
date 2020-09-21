@@ -841,14 +841,44 @@ static bool App_maybe_handle_application_key(App*     self,
         self->ui.scrollbar.visible = true;
         App_notify_content_change(self);
         return true;
+    } else if (KeyCommand_is_active(&cmd[KCMD_MARK_SCROLL_UP], key, rawkey, mods)) {
+        if (Vt_visual_scroll_mark_up(vt)) {
+            self->ui.scrollbar.visible = true;
+            App_notify_content_change(self);
+        } else {
+            App_flash(self);
+        }
+        return true;
+    } else if (KeyCommand_is_active(&cmd[KCMD_MARK_SCROLL_DN], key, rawkey, mods)) {
+        if (Vt_visual_scroll_mark_down(vt)) {
+            self->ui.scrollbar.visible = true;
+            App_notify_content_change(self);
+        } else {
+            App_flash(self);
+        }
+        return true;
     } else if (KeyCommand_is_active(&cmd[KCMD_DUPLICATE], key, rawkey, mods)) {
         /* use the full path to the running file (it may have been started with a relative path) */
         char* this_file  = get_running_binary_path();
         char* old_argv_0 = settings.argv[0];
         settings.argv[0] = this_file;
-        spawn_process(self->vt.work_dir, settings.argv[0], settings.argv, true, false);
+        spawn_process(Vt_get_work_directory(vt), settings.argv[0], settings.argv, true, false);
         settings.argv[0] = old_argv_0;
         free(this_file);
+        return true;
+    } else if (KeyCommand_is_active(&cmd[KCMD_COPY_OUTPUT], key, rawkey, mods)) {
+        const VtCommand* command = Vt_get_last_completed_command(vt);
+        if (command && command->output_rows.first != command->output_rows.second) {
+            Vector_char txt = Vt_command_to_string(vt, command, 0);
+            if (txt.size > 1) {
+                App_clipboard_send(self, txt.buf);
+            } else {
+                Vector_destroy_char(&txt);
+                App_flash(self);
+            }
+            return true;
+        }
+        App_flash(self);
         return true;
     }
 
@@ -1277,7 +1307,7 @@ static void App_handle_uri(App* self, const char* uri)
 {
     LOG("Opening URI: \'%s\'\n", uri);
     const char* argv[] = { settings.uri_handler.str, uri, NULL };
-    spawn_process(self->vt.work_dir, argv[0], (char**)argv, true, false);
+    spawn_process(Vt_get_work_directory(&self->vt), argv[0], (char**)argv, true, false);
 }
 
 static void App_send_desktop_notification(void* self, const char* opt_title, const char* text)

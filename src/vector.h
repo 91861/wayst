@@ -181,7 +181,15 @@
         Vector_insert_##t(self, self->buf, arg);                                                   \
     }                                                                                              \
                                                                                                    \
-    static inline t* Vector_last_##t(Vector_##t* self) { return self->buf + (self->size - 1); }    \
+    static inline t* Vector_last_##t(Vector_##t* self)                                             \
+    {                                                                                              \
+        return !self->size ? NULL : self->buf + (self->size - 1);                                  \
+    }                                                                                              \
+                                                                                                   \
+    static inline const t* Vector_last_const_##t(const Vector_##t* self)                           \
+    {                                                                                              \
+        return !self->size ? NULL : self->buf + (self->size - 1);                                  \
+    }                                                                                              \
                                                                                                    \
     static inline t* Vector_first_##t(Vector_##t* self) { return self->buf; }                      \
                                                                                                    \
@@ -357,7 +365,15 @@
         Vector_insert_##t(self, self->buf, arg);                                                   \
     }                                                                                              \
                                                                                                    \
-    static inline t* Vector_last_##t(Vector_##t* self) { return self->buf + (self->size - 1); }    \
+    static inline t* Vector_last_##t(Vector_##t* self)                                             \
+    {                                                                                              \
+        return !self->size ? NULL : self->buf + (self->size - 1);                                  \
+    }                                                                                              \
+                                                                                                   \
+    static inline const t* Vector_last_const_##t(const Vector_##t* self)                           \
+    {                                                                                              \
+        return !self->size ? NULL : self->buf + (self->size - 1);                                  \
+    }                                                                                              \
                                                                                                    \
     static inline t* Vector_first_##t(Vector_##t* self) { return self->buf; }                      \
                                                                                                    \
