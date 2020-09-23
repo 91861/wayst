@@ -1234,6 +1234,9 @@ static void App_button_handler(void*    self,
 
 static void App_update_hover(App* self, int32_t x, int32_t y)
 {
+    if (self->selection_dragging_left || self->selection_dragging_right)
+        return;
+    
     Pair_uint16_t cells = Vt_pixels_to_cells(&self->vt, x, y);
     cells.second += Vt_visual_top_line(&self->vt);
     if (Vt_uri_at(&self->vt, cells.first, cells.second)) {
