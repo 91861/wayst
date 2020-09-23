@@ -13,6 +13,7 @@ Simple terminal emulator for Wayland and X11 with OpenGL rendering and minimal d
 * Unicode support
 * Text reflow
 * 24-bit colors
+* Dynamic colors
 * All text properties (squiggly underline, blinking, overline etc.)
 * Resizable font
 * Subpixel font rendering
@@ -21,6 +22,8 @@ Simple terminal emulator for Wayland and X11 with OpenGL rendering and minimal d
 * Mouse text selection
 * Clipboard
 * Configurable keybindings
+* Clickable links
+* Command history and marks[*](https://iterm2.com/documentation-shell-integration.html)
 
 
 # To-Do
@@ -41,6 +44,7 @@ make install
 * fontconfig
 * xkbcommon [wayland]
 * utf8proc [optional]
+* notify-send [optional]
 
 To build without X11 or Wayland support set ```window_protocol=wayland``` or ```window_protocol=x11``` respectively. With both backends enabled wayst will default to wayland. You can force X11 mode with the ```xorg-only``` option.
 
@@ -117,6 +121,8 @@ title-format = "%2$s - %1$s"  #  <set by program> - Terminal
 # title-format = "%2$s"       #  <set by program>
 
 
+
+
 # xorg keysym names are case sensitive!
 bind-key-debug=Ctrl+Shift+Return
 bind-key-enlarge=Ctrl+Shift+equal
@@ -128,18 +134,22 @@ bind-key-paste=Ctrl+Shift+p
 #### Default Keybindings:
 Keys|Action|
  --- | ---
-```Ctrl```+```Shift```+```c```     | Copy to clipboard
-```Ctrl```+```Shift```+```v```     | Paste from clipboard
-```Ctrl```+```Shift```+```=```     | Increase font size
-```Ctrl```+```Shift```+```-```     | Decrease font size
-```Ctrl```+```Shift```+```u```     | Enter unicode character by hex code
-```Ctrl```+```Shift```+```k```     | Enter vi-like keyboard select mode
-```Ctrl```+```Shift```+```d```     | Start new instance in active work directory (set by OSC 7)
-```Ctrl```+```Shift```+```/```     | Output debug information to stdout
-```LMB```                          | Select text
-```RMB```                          | Change selected region
-```Shift```+```LMB```              | Select text in mouse reporting mode
-```Ctrl``` + ```LMB```             | Box select
+```Ctrl```+```Shift```+```c```            | Copy to clipboard
+```Ctrl```+```Shift```+```x```            | Copy output of last command to clipboard
+```Ctrl```+```Shift```+```v```            | Paste from clipboard
+```Ctrl```+```Shift```+```=```            | Increase font size
+```Ctrl```+```Shift```+```-```            | Decrease font size
+```Ctrl```+```Shift```+```Up/Down```      | Scroll
+```Ctrl```+```Shift```+```Page Up/Down``` | Scroll by page
+```Ctrl```+```Shift```+```Left/Right```   | Jump to previous/next command output or mark
+```Ctrl```+```Shift```+```u```            | Enter unicode character by hex code
+```Ctrl```+```Shift```+```k```            | Enter vi-like keyboard select mode
+```Ctrl```+```Shift```+```d```            | Start new instance in active work directory (set by OSC 7)
+```Ctrl```+```Shift```+```F12```          | HTML screen dump
+```LMB```                                 | Select text
+```RMB```                                 | Change selected region
+```Shift```+```LMB```                     | Select text in mouse reporting mode
+```Ctrl``` + ```LMB```                    | Open link/Box select
 
 
 # License
