@@ -12,6 +12,7 @@
 
 #include <fontconfig/fontconfig.h>
 
+#include "config_parser.h"
 #include "fontconfig.h"
 #include "key.h"
 #include "opts.h"
@@ -37,11 +38,6 @@
 
 /* point size in inches for converting font sizes */
 #define PT_AS_INCH 0.0138889
-
-DEF_VECTOR(char, NULL);
-DEF_VECTOR(Vector_char, Vector_destroy_char);
-
-static Vector_Vector_char expand_list_value(const char* const list);
 
 static const char* const colors_default[8][18] = {
     {
@@ -719,6 +715,13 @@ static Pair_char32_t parse_codepoint_range(char* arg)
     return range;
 }
 
+static void on_list_expand_syntax_error(const char* msg_fmt, va_list msg_arg)
+{
+    WRN("Error in config: ");
+    vfprintf(stderr, msg_fmt, msg_arg);
+    fputc('\n', stderr);
+}
+
 static void handle_option(const char opt, const int array_index, const char* value)
 {
     LOG("settings[%d] (%s) = %s\n", array_index, long_options[array_index].name, value);
@@ -857,7 +860,7 @@ static void handle_option(const char opt, const int array_index, const char* val
         } break;
 
         case OPT_DIRECTORY_IDX: {
-            Vector_Vector_char values = expand_list_value(value);
+            Vector_Vector_char values = expand_list_value(value, on_list_expand_syntax_error);
             AString_replace_with_dynamic(&settings.directory, strdup(values.buf[0].buf));
             Vector_destroy_Vector_char(&values);
         } break;
@@ -906,7 +909,7 @@ static void handle_option(const char opt, const int array_index, const char* val
             break;
 
         case OPT_FONT_IDX: {
-            Vector_Vector_char values = expand_list_value(value);
+            Vector_Vector_char values = expand_list_value(value, on_list_expand_syntax_error);
             Vector_clear_StyledFontInfo(&settings.styled_fonts);
             for (Vector_char* i = NULL; (i = Vector_iter_Vector_char(&values, i));) {
                 Vector_push_StyledFontInfo(&settings.styled_fonts, (StyledFontInfo){ 0 });
@@ -930,7 +933,7 @@ static void handle_option(const char opt, const int array_index, const char* val
         } break;
 
         case OPT_FONT_FALLBACK_IDX: {
-            Vector_Vector_char values = expand_list_value(value);
+            Vector_Vector_char values = expand_list_value(value, on_list_expand_syntax_error);
             Vector_clear_UnstyledFontInfo(&settings.symbol_fonts);
             for (Vector_char* i = NULL; (i = Vector_iter_Vector_char(&values, i));) {
                 Vector_push_UnstyledFontInfo(&settings.symbol_fonts, (UnstyledFontInfo){ 0 });
@@ -953,7 +956,7 @@ static void handle_option(const char opt, const int array_index, const char* val
         } break;
 
         case OPT_FONT_FALLBACK2_IDX: {
-            Vector_Vector_char values = expand_list_value(value);
+            Vector_Vector_char values = expand_list_value(value, on_list_expand_syntax_error);
             Vector_clear_UnstyledFontInfo(&settings.color_fonts);
             for (Vector_char* i = NULL; (i = Vector_iter_Vector_char(&values, i));) {
                 Vector_push_UnstyledFontInfo(&settings.color_fonts, (UnstyledFontInfo){ 0 });
@@ -976,19 +979,19 @@ static void handle_option(const char opt, const int array_index, const char* val
         } break;
 
         case OPT_FONT_STYLE_REGULAR_IDX: {
-            Vector_Vector_char values = expand_list_value(value);
+            Vector_Vector_char values = expand_list_value(value, on_list_expand_syntax_error);
             AString_replace_with_dynamic(&settings.font_style_regular, strdup(value));
             Vector_destroy_Vector_char(&values);
         } break;
 
         case OPT_FONT_STYLE_BOLD_IDX: {
-            Vector_Vector_char values = expand_list_value(value);
+            Vector_Vector_char values = expand_list_value(value, on_list_expand_syntax_error);
             AString_replace_with_dynamic(&settings.font_style_bold, strdup(value));
             Vector_destroy_Vector_char(&values);
         } break;
 
         case OPT_FONT_STYLE_ITALIC_IDX: {
-            Vector_Vector_char values = expand_list_value(value);
+            Vector_Vector_char values = expand_list_value(value, on_list_expand_syntax_error);
             AString_replace_with_dynamic(&settings.font_style_italic, strdup(value));
             Vector_destroy_Vector_char(&values);
         } break;
@@ -1048,13 +1051,13 @@ static void handle_option(const char opt, const int array_index, const char* val
             break;
 
         case OPT_TITLE_IDX: {
-            Vector_Vector_char values = expand_list_value(value);
+            Vector_Vector_char values = expand_list_value(value, on_list_expand_syntax_error);
             AString_replace_with_dynamic(&settings.title, strdup(value));
             Vector_destroy_Vector_char(&values);
         } break;
 
         case OPT_APP_ID_IDX: {
-            Vector_Vector_char values = expand_list_value(value);
+            Vector_Vector_char values = expand_list_value(value, on_list_expand_syntax_error);
             free(settings.user_app_id);
             settings.user_app_id = strdup(values.buf[0].buf);
             if (values.size > 1) {
@@ -1073,13 +1076,13 @@ static void handle_option(const char opt, const int array_index, const char* val
             break;
 
         case OPT_TERM_IDX: {
-            Vector_Vector_char values = expand_list_value(value);
+            Vector_Vector_char values = expand_list_value(value, on_list_expand_syntax_error);
             AString_replace_with_dynamic(&settings.term, strdup(value));
             Vector_destroy_Vector_char(&values);
         } break;
 
         case OPT_URI_HANDLER_IDX: {
-            Vector_Vector_char values = expand_list_value(value);
+            Vector_Vector_char values = expand_list_value(value, on_list_expand_syntax_error);
             if (values.buf[0].buf[0]) {
                 AString_replace_with_dynamic(&settings.uri_handler, strdup(value));
             }
@@ -1087,7 +1090,7 @@ static void handle_option(const char opt, const int array_index, const char* val
         } break;
 
         case OPT_VTE_VERSION_IDX: {
-            Vector_Vector_char values = expand_list_value(value);
+            Vector_Vector_char values = expand_list_value(value, on_list_expand_syntax_error);
             if (values.buf[0].buf[0]) {
                 AString_replace_with_dynamic(&settings.vte_version, strdup(values.buf[0].buf));
             } else {
@@ -1119,7 +1122,7 @@ static void handle_option(const char opt, const int array_index, const char* val
         } break;
 
         case OPT_LOCALE_IDX: {
-            Vector_Vector_char values = expand_list_value(value);
+            Vector_Vector_char values = expand_list_value(value, on_list_expand_syntax_error);
             AString_replace_with_dynamic(&settings.locale, strdup(value));
             Vector_destroy_Vector_char(&values);
         } break;
@@ -1129,7 +1132,7 @@ static void handle_option(const char opt, const int array_index, const char* val
             break;
 
         case OPT_TITLE_FORMAT_IDX: {
-            Vector_Vector_char values = expand_list_value(value);
+            Vector_Vector_char values = expand_list_value(value, on_list_expand_syntax_error);
             AString_replace_with_dynamic(&settings.title_format, strdup(value));
             Vector_destroy_Vector_char(&values);
         } break;
@@ -1342,7 +1345,7 @@ static void settings_get_opts(const int argc, char* const* argv, const bool cfg_
     }
 }
 
-static void handle_config_option(const char* key, const char* val, uint32_t line)
+static void handle_config_option(const char* restrict key, const char* restrict val, uint32_t line)
 {
     if (key) {
         for (int i = 0;; ++i) {
@@ -1362,262 +1365,6 @@ static void handle_config_option(const char* key, const char* val, uint32_t line
             key,
             EXECUTABLE_FILE_NAME);
     }
-}
-
-/**
- * Takes a settings value that may or may not be a list and expands it to a vector of strings.
- * Interprets list and array escape codes, so any arbitrary string values should be run through
- * this even if they are not lists.
- */
-static Vector_Vector_char expand_list_value(const char* const list)
-{
-    Vector_Vector_char values = Vector_new_with_capacity_Vector_char(1);
-    Vector_push_Vector_char(&values, Vector_new_with_capacity_char(10));
-
-    if (!list) {
-        Vector_push_char(Vector_last_Vector_char(&values), '\0');
-        return values;
-    }
-
-    bool in_string    = false;
-    bool in_list      = false;
-    bool escaped      = false;
-    bool has_brackets = false;
-    bool not_a_list   = true;
-
-    for (const char* i = list; *i; ++i) {
-        if (*i == '[' && !escaped) {
-            not_a_list = false;
-            break;
-        } else if (!(escaped = (*i == '\\' && !escaped))) {
-            Vector_push_char(Vector_last_Vector_char(&values), *i);
-        }
-    }
-    escaped = false;
-
-    if (not_a_list) {
-        Vector_push_char(Vector_last_Vector_char(&values), '\0');
-        return values;
-    }
-
-    Vector_char whitespace = Vector_new_char();
-    const char* arr        = list;
-    for (char c = *arr; c; c = *(++arr)) {
-        if (!escaped && !in_string && c == '[') {
-            has_brackets = true;
-            in_list      = true;
-            escaped      = false;
-            continue;
-        }
-        if (!escaped && !in_string && in_list && c == ']') {
-            in_list = false;
-            escaped = false;
-            continue;
-        }
-        if (!escaped && c == '\"') {
-            if (!in_string) {
-                Vector_clear_char(&whitespace);
-            }
-            in_string = !in_string;
-            continue;
-        }
-        if (!escaped && c == '\\') {
-            escaped = true;
-            continue;
-        }
-        if (!in_string && !escaped && c == ',') {
-            Vector_push_char(Vector_last_Vector_char(&values), '\0');
-            Vector_push_Vector_char(&values, Vector_new_with_capacity_char(10));
-            Vector_clear_char(&whitespace);
-            escaped = false;
-            continue;
-        }
-        escaped = false;
-        if (in_string || !isblank(c)) {
-            if (isblank(c) && Vector_last_Vector_char(&values)->size) {
-                /* May be whitespace inside the string, hold on to this and insert before the next
-                 * character if we get one */
-                Vector_push_char(&whitespace, c);
-            } else {
-                if (whitespace.size) {
-                    Vector_pushv_char(Vector_last_Vector_char(&values),
-                                      whitespace.buf,
-                                      whitespace.size);
-                }
-                Vector_clear_char(&whitespace);
-                Vector_push_char(Vector_last_Vector_char(&values), c);
-            }
-        }
-    }
-    Vector_push_char(Vector_last_Vector_char(&values), '\0');
-
-    if (in_list) {
-        WRN("List not terminated in \'%s\'\n", list);
-    } else if (values.size == 1 && has_brackets) {
-        WRN("\'%s\' is a single element list. Did you mean \'\\[%s\\]\'?\n",
-            list,
-            values.buf[0].buf);
-    }
-    if (in_string) {
-        WRN("String not terminated in \'%s\'\n", list);
-    }
-    Vector_destroy_char(&whitespace);
-
-    return values;
-}
-
-/**
- * read the open configuration file and call handle_config_option() with values formatted like
- * command line arguments (this way we can use handle_option() for dealing both config file and
- * args)
- */
-static void settings_file_parse(FILE* f)
-{
-    ASSERT(f, "valid FILE*");
-
-    char buf[1024 * 8] = { 0 };
-    int  rd;
-
-    Vector_char key        = Vector_new_with_capacity_char(10);
-    Vector_char value      = Vector_new_with_capacity_char(30);
-    Vector_char whitespace = Vector_new_char();
-
-    bool in_list = false, in_comment = false, in_value = false, in_string = false, escaped = false;
-
-    uint32_t key_line = 0, line = 1;
-
-    while ((rd = fread(buf, sizeof(char), sizeof buf - 1, f))) {
-        for (int i = 0; i < rd; ++i) {
-            char c = buf[i];
-
-            if (c == '\n') {
-                ++line;
-            } else if (c == '#' && !escaped && !in_string) {
-                in_comment = true;
-                continue;
-            }
-
-            if (in_comment) {
-                if (c == '\n') {
-                    in_comment = false;
-                }
-                continue;
-            } else if (in_value) {
-                if (c == '\\' && !escaped) {
-                    escaped = true;
-                    if (in_list) {
-                        Vector_push_char(&value, c);
-                    }
-                    continue;
-                } else if (c == '\"' && !escaped) {
-                    if (!in_string && value.size && !in_list) {
-                        Vector_push_char(&value, '\0');
-                        WRN("Error in config on line %u: Unexpected characters \'%s\' before "
-                            "\'\"\'. Did you mean \'\\\"\'?\n",
-                            line,
-                            value.buf);
-                        Vector_clear_char(&value);
-                    }
-                    if (!in_string) {
-                        Vector_clear_char(&whitespace);
-                    }
-                    in_string = !in_string;
-                    if (in_list) {
-                        Vector_push_char(&value, c);
-                    }
-                    continue;
-                } else if (c == '[' && !escaped && !in_string) {
-                    if (in_list) {
-                        WRN("Error in config on lines %u-%u: Defines nested list. Did you mean "
-                            "\'\\[\' ?\n",
-                            key_line,
-                            line);
-                    }
-                    in_list = true;
-                } else if (c == ']' && !in_string && !escaped) {
-                    if (!in_list) {
-                        WRN("Error in config on line %u: Expected \'[\' before \']\'\n", line);
-                    }
-                    in_list = false;
-                }
-
-                if (c == '\n' && !in_list) {
-                    Vector_push_char(&value, '\0');
-                    handle_config_option(key.buf, value.buf, key_line);
-                    Vector_clear_char(&whitespace);
-                    Vector_clear_char(&key);
-                    Vector_clear_char(&value);
-                    in_value = false;
-                    if (in_string) {
-                        WRN("Error in config on line %u: Expected \'\"\' before end of line\n",
-                            line - 1);
-                    }
-                    in_string = false;
-                    continue;
-                } else if (escaped && !in_list) {
-                    if (c == 'n') {
-                        Vector_push_char(&value, '\n');
-                    } else if (c == '\"' && in_string) {
-                        Vector_push_char(&value, '\"');
-                    } else {
-                        WRN("Error in config on line %u: Escape character \'%c\' invalid in this "
-                            "context\n",
-                            line - 1,
-                            c);
-                    }
-                } else if (!iscntrl(c)) {
-                    switch (c) {
-                        case ']':
-                        case '[':
-                            if (in_string) {
-                                Vector_push_char(&value, '\\');
-                            }
-                    }
-                    if (in_string || !isblank(c)) {
-                        if (whitespace.size) {
-                            Vector_pushv_char(&value, whitespace.buf, whitespace.size);
-                            Vector_clear_char(&whitespace);
-                        }
-                        Vector_push_char(&value, c);
-                    } else if (value.size) {
-                        Vector_push_char(&whitespace, c);
-                    }
-                }
-                escaped = false;
-            }
-
-            /* in key */
-            else if (c == '=') {
-                Vector_push_char(&key, '\0');
-                key_line = line;
-                in_value = true;
-            } else if (c == '\n' && key.size) {
-                Vector_push_char(&key, '\0');
-                handle_config_option(key.buf, NULL, key_line);
-                Vector_clear_char(&key);
-            } else {
-                if (!iscntrl(c) && !isblank(c)) {
-                    Vector_push_char(&key, c);
-                }
-            }
-        }
-    }
-
-    if (key.size) {
-        Vector_push_char(&key, '\0');
-        Vector_push_char(&value, '\0');
-        handle_config_option(key.buf, value.size > 1 ? value.buf : NULL, line);
-    }
-
-    if (in_string) {
-        WRN("Error in config on line %u: Expected \'\"\' before end of file\n", line);
-    }
-    if (in_list) {
-        WRN("Error in config on line %u: Expected \']\' before end of file\n", line);
-    }
-    Vector_destroy_char(&key);
-    Vector_destroy_char(&value);
-    Vector_destroy_char(&whitespace);
 }
 
 static void find_config_path()
@@ -1652,6 +1399,14 @@ static FILE* open_config(const char* path)
     return NULL;
 }
 
+bool on_settings_file_parse_syntax_error(uint32_t line, const char* msg_format, va_list msg_args)
+{
+    WRN("Error in config on line %u: ", line);
+    vfprintf(stderr, msg_format, msg_args);
+    fputc('\n', stderr);
+    return false;
+}
+
 void settings_init(int argc, char** argv)
 {
     settings_make_default();
@@ -1662,7 +1417,7 @@ void settings_init(int argc, char** argv)
     if (!settings.skip_config && settings.config_path.str) {
         FILE* cfg = open_config(settings.config_path.str);
         if (cfg) {
-            settings_file_parse(cfg);
+            settings_file_parse(cfg, handle_config_option, on_settings_file_parse_syntax_error);
             fclose(cfg);
         }
     }
