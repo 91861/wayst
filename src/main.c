@@ -191,7 +191,7 @@ static void App_run(App* self)
         int timeout_ms = 0;
         if (!self->swap_performed) {
             if (self->closest_pending_wakeup) {
-                timeout_ms = MAX(0, TimePoint_is_ms_ahead(*(self->closest_pending_wakeup)));
+                timeout_ms = TimePoint_is_ms_ahead(*(self->closest_pending_wakeup));
             } else {
                 timeout_ms = -1;
             }
