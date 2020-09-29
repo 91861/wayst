@@ -683,7 +683,7 @@ static void print_version_and_exit()
            "enabled"
 #endif
            "\n X11: "
-#ifdef NOWL
+#ifdef NOX
            "disabled"
 #else
            "enabled"

@@ -118,15 +118,18 @@ static void* App_load_extension_proc_address(void* self, const char* name)
 
 static void App_create_window(App* self, Pair_uint32_t res)
 {
+#if !defined(NOX) && !defined(NOWL)
     if (!settings.x11_is_default)
-#ifndef NOWL
         self->win = Window_new_wayland(res);
-#endif
     if (!self->win) {
-#ifndef NOX
         self->win = Window_new_x11(res);
-#endif
     }
+#elif !defined(NOWL)
+    self->win = Window_new_wayland(res);
+#else
+    self->win = Window_new_x11(res);
+#endif
+
     if (!self->win) {
         ERR("Failed to create window"
 #ifdef NOX
