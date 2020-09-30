@@ -218,6 +218,16 @@ typedef struct
     int32_t cursor_blink_interval_ms;
     int32_t cursor_blink_suspend_ms;
     int32_t cursor_blink_end_s;
+
+    bool initial_cursor_blinking;
+
+    enum initial_cursor_style_e
+    {
+        CURSOR_STYLE_BLOCK,
+        CURSOR_STYLE_BEAM,
+        CURSOR_STYLE_UNDERLINE,
+    } initial_cursor_style;
+
 } Settings;
 
 extern Settings settings;

@@ -607,6 +607,9 @@ static void settings_make_default()
         .cursor_blink_interval_ms = 750,
         .cursor_blink_suspend_ms  = 500,
         .cursor_blink_end_s       = 15,
+
+        .initial_cursor_blinking = true,
+        .initial_cursor_style    = CURSOR_STYLE_BLOCK,
     };
 }
 
@@ -855,6 +858,23 @@ static void handle_option(const char opt, const int array_index, const char* val
                 break;
             case 1:
                 settings.padding = CLAMP(strtol(buf.buf, NULL, 10), 0, UINT8_MAX);
+                break;
+                L_PROCESS_MULTI_ARG_PACK_END
+        } break;
+
+        case OPT_CURSOR_STYLE_IDX: {
+            L_PROCESS_MULTI_ARG_PACK_BEGIN(value)
+            case 0:
+                if (!strcasecmp(buf.buf, "block")) {
+                    settings.initial_cursor_style = CURSOR_STYLE_BLOCK;
+                } else if (!strcasecmp(buf.buf, "beam")) {
+                    settings.initial_cursor_style = CURSOR_STYLE_BEAM;
+                } else if (!strcasecmp(buf.buf, "underline")) {
+                    settings.initial_cursor_style = CURSOR_STYLE_UNDERLINE;
+                }
+                break;
+            case 1:
+                settings.initial_cursor_blinking = strtob(buf.buf);
                 break;
                 L_PROCESS_MULTI_ARG_PACK_END
         } break;

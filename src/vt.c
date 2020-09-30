@@ -1159,8 +1159,20 @@ void Vt_init(Vt* self, uint32_t cols, uint32_t rows)
         Vector_push_VtLine(&self->lines, VtLine_new());
     }
 
-    self->cursor.type     = CURSOR_BLOCK;
-    self->cursor.blinking = true;
+    switch (settings.initial_cursor_style) {
+        case CURSOR_STYLE_BEAM:
+            self->cursor.type = CURSOR_BEAM;
+            break;
+        case CURSOR_STYLE_UNDERLINE:
+            self->cursor.type = CURSOR_UNDERLINE;
+            break;
+        default:
+        case CURSOR_STYLE_BLOCK:
+            self->cursor.type = CURSOR_BLOCK;
+            break;
+    }
+
+    self->cursor.blinking = settings.initial_cursor_blinking;
     self->cursor.col      = 0;
 
     self->tabstop = 8;
