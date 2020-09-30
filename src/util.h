@@ -337,6 +337,11 @@ static inline bool unicode_is_private_use_area(char32_t codepoint)
     return codepoint >= 0xE000 && codepoint <= 0xF8FF;
 }
 
+static bool is_in_tmp_dir(const char* path)
+{
+    return (path == strstr(path, "/tmp/") ||(path = strstr(path, getenv("PATH"))));
+}
+
 /**
  * Get full path to this binary file. Caller should free() */
 static char* get_running_binary_path()

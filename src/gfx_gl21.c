@@ -45,9 +45,13 @@ DEF_PAIR(GLuint);
 
 #define PROXY_INDEX_TEXTURE           0
 #define PROXY_INDEX_TEXTURE_BLINK     1
+#define PROXY_INDEX_SIZE              2
 #define PROXY_INDEX_DEPTHBUFFER       3
 #define PROXY_INDEX_DEPTHBUFFER_BLINK 4
-#define PROXY_INDEX_SIZE              2
+
+#define IMG_PROXY_INDEX_TEXTURE_ID 0
+
+#define IMG_VIEW_PROXY_INDEX_VBO_ID 0
 
 #include "gl_exts/glext.h"
 
@@ -90,6 +94,8 @@ static PFNGLGENRENDERBUFFERSPROC        glGenRenderbuffers;
 static PFNGLDELETERENDERBUFFERSPROC     glDeleteRenderbuffers;
 static PFNGLGENFRAMEBUFFERSPROC         glGenFramebuffers;
 static PFNGLGENERATEMIPMAPPROC          glGenerateMipmap;
+static PFNGLBLENDFUNCSEPARATEPROC       glBlendFuncSeparate;
+
 #ifdef DEBUG
 static PFNGLDEBUGMESSAGECALLBACKPROC   glDebugMessageCallback;
 static PFNGLCHECKFRAMEBUFFERSTATUSPROC glCheckFramebufferStatus;
@@ -142,6 +148,7 @@ static void maybe_load_gl_exts(void* loader,
     glGenRenderbuffers        = loader_func(loader, "glGenRenderbuffers");
     glGenFramebuffers         = loader_func(loader, "glGenFramebuffers");
     glGenerateMipmap          = loader_func(loader, "glGenerateMipmap");
+    glBlendFuncSeparate       = loader_func(loader, "glBlendFuncSeparate");
 #ifdef DEBUG
     glDebugMessageCallback   = loader_func(loader, "glDebugMessageCallback");
     glCheckFramebufferStatus = loader_func(loader, "glCheckFramebufferStatus");
@@ -339,9 +346,9 @@ typedef struct
     bool is_inactive;
     bool is_main_font_rgb;
 
-    int   scrollbar_fade;
+    int      scrollbar_fade;
     TimeSpan flash_timer;
-    float flash_fraction;
+    float    flash_fraction;
 
     Freetype* freetype;
 } GfxOpenGL21;
@@ -362,8 +369,10 @@ void          GfxOpenGL21_notify_action(Gfx* self);
 bool          GfxOpenGL21_set_focus(Gfx* self, bool focus);
 void          GfxOpenGL21_flash(Gfx* self);
 Pair_uint32_t GfxOpenGL21_pixels(Gfx* self, uint32_t c, uint32_t r);
-void          GfxOpenGL21_destroy_proxy(Gfx* self, uint32_t* proxy);
 void          GfxOpenGL21_reload_font(Gfx* self);
+void          GfxOpenGL21_destroy_proxy(Gfx* self, uint32_t* proxy);
+void          GfxOpenGL21_destroy_image_proxy(Gfx* self, uint32_t* proxy);
+void          GfxOpenGL21_destroy_image_view_proxy(Gfx* self, uint32_t* proxy);
 
 static struct IGfx gfx_interface_opengl21 = {
     .draw                        = GfxOpenGL21_draw,
@@ -378,6 +387,8 @@ static struct IGfx gfx_interface_opengl21 = {
     .pixels                      = GfxOpenGL21_pixels,
     .destroy                     = GfxOpenGL21_destroy,
     .destroy_proxy               = GfxOpenGL21_destroy_proxy,
+    .destroy_image_proxy         = GfxOpenGL21_destroy_image_proxy,
+    .destroy_image_view_proxy    = GfxOpenGL21_destroy_image_view_proxy,
 };
 
 Gfx* Gfx_new_OpenGL21(Freetype* freetype)
@@ -1002,10 +1013,10 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
     gl21->line_shader = Shader_new(line_vs_src, line_fs_src, "pos", "clr", NULL);
 
     gfxOpenGL21(self)->image_shader =
-      Shader_new(image_rgb_vs_src, image_rgb_fs_src, "coord", "tex", NULL);
+      Shader_new(image_rgb_vs_src, image_rgb_fs_src, "coord", "tex", "offset", NULL);
 
     gl21->image_tint_shader =
-      Shader_new(image_rgb_vs_src, image_tint_rgb_fs_src, "coord", "tex", "tint", NULL);
+      Shader_new(image_rgb_vs_src, image_tint_rgb_fs_src, "coord", "tex", "tint", "offset", NULL);
 
     gl21->font_vbo = VBO_new(4, 1, gl21->font_shader.attribs);
     glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 4 * 4, NULL, GL_STREAM_DRAW);
@@ -1483,7 +1494,10 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_underline_ra
 /**
  * Draw a range of characters of a given VtLine
  *
- * Should only be called by GfxOpenGL21_rasterize_line() */
+ * Should only be called by GfxOpenGL21_rasterize_line()
+ *
+ * TODO: This is terrible. Maybe introduce 'render pass', 'render subpass' structs for this?
+ */
 __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
   GfxOpenGL21*    gfx,
   const Vt* const vt,
@@ -1878,6 +1892,9 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                                         if (gfx->_vec_glyph_buffer_bold.size) {
                                             if (likely(*bound_resources != BOUND_RESOURCES_IMAGE)) {
                                                 glUseProgram(gfx->image_shader.id);
+                                                glUniform2f(gfx->image_shader.uniforms[1].location,
+                                                            0,
+                                                            0);
                                                 *bound_resources = BOUND_RESOURCES_IMAGE;
                                             }
                                             glBindBuffer(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
@@ -2499,6 +2516,7 @@ static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const
                                 1.0f);
                 } else {
                     glUseProgram(gfx->image_shader.id);
+                    glUniform2f(gfx->image_shader.uniforms[1].location, 0, 0);
                 }
                 glDrawArrays(GL_QUADS, 0, 4);
             }
@@ -2742,6 +2760,117 @@ static void GfxOpenGL21_draw_flash(GfxOpenGL21* self, float fraction)
     glDrawArrays(GL_QUADS, 0, 4);
 }
 
+static void GfxOpenGL21_load_image(GfxOpenGL21* self, VtImageSurface* surface)
+{
+    if (surface->state != VT_IMAGE_SURFACE_READY || surface->proxy.data[IMG_PROXY_INDEX_TEXTURE_ID])
+        return;
+
+    GLuint tex = 0;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D,
+                 0,
+                 surface->bytes_per_pixel == 3 ? GL_RGB : GL_RGBA,
+                 surface->width,
+                 surface->height,
+                 0,
+                 surface->bytes_per_pixel == 3 ? GL_RGB : GL_RGBA,
+                 GL_UNSIGNED_BYTE,
+                 surface->fragments.buf);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    surface->proxy.data[IMG_PROXY_INDEX_TEXTURE_ID] = tex;
+}
+
+static void GfxOpenGL21_load_image_view(GfxOpenGL21* self, VtImageSurfaceView* view)
+{
+    if (view->proxy.data[IMG_VIEW_PROXY_INDEX_VBO_ID])
+        return;
+
+    VtImageSurface* surf = RcPtr_get_VtImageSurface(&view->source_image_surface);
+
+    float w = self->sx * (view->cell_scale_rect.first
+                            ? (view->cell_scale_rect.first * self->glyph_width_pixels)
+                            : OR(view->sample_dims_px.first, surf->width));
+    float h = self->sy * (view->cell_scale_rect.second
+                            ? (view->cell_scale_rect.second * self->line_height_pixels)
+                            : OR(view->sample_dims_px.second, surf->height));
+
+    float sample_x = (float)view->anchor_offset_px.first / surf->width;
+    float sample_y = (float)view->anchor_offset_px.second / surf->height;
+    float sample_w =
+      view->sample_dims_px.first ? ((float)view->sample_dims_px.first / surf->width) : 1.0f;
+    float sample_h =
+      view->sample_dims_px.second ? ((float)view->sample_dims_px.second / surf->height) : 1.0f;
+
+    // set the origin points to the top left corner of framebuffer and image
+    float vertex_data[][4] = {
+        { -1.0f, 1.0f - h, sample_x, sample_y + sample_h },
+        { -1.0f + w, 1.0f - h, sample_x + sample_w, sample_y + sample_h },
+        { -1.0f + w, 1, sample_x + sample_w, sample_y },
+        { -1.0f, 1, sample_x, sample_y },
+    };
+
+    GLuint vbo;
+    glGenBuffers(1, &vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_data), vertex_data, GL_STATIC_DRAW);
+    view->proxy.data[IMG_VIEW_PROXY_INDEX_VBO_ID] = vbo;
+}
+
+static void GfxOpenGL21_draw_image_view(GfxOpenGL21* self, const Vt* vt, VtImageSurfaceView* view)
+{
+    if (!Vt_ImageSurfaceView_is_visual_visible(vt, view))
+        return;
+
+    VtImageSurface* surf = RcPtr_get_VtImageSurface(&view->source_image_surface);
+    GfxOpenGL21_load_image(self, surf);
+    GfxOpenGL21_load_image_view(self, view);
+
+    GLuint vbo = view->proxy.data[IMG_VIEW_PROXY_INDEX_VBO_ID];
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+
+    glEnable(GL_BLEND);
+    glDisable(GL_SCISSOR_TEST);
+    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
+
+    Shader_use(&self->image_shader);
+    glBindTexture(GL_TEXTURE_2D, surf->proxy.data[IMG_PROXY_INDEX_TEXTURE_ID]);
+
+    int64_t y_index = view->anchor_global_index - Vt_visual_top_line(vt);
+
+    float offset_x =
+      self->sx * (view->anchor_cell_idx * self->glyph_width_pixels + view->anchor_offset_px.first);
+    float offset_y =
+      -self->sy * (y_index * self->line_height_pixels + view->anchor_offset_px.second);
+
+    glVertexAttribPointer(self->image_shader.attribs->location, 4, GL_FLOAT, GL_FALSE, 0, 0);
+    glUniform2f(self->image_shader.uniforms[1].location, offset_x, offset_y);
+    glDrawArrays(GL_QUADS, 0, 4);
+}
+
+void GfxOpenGL21_draw_images(GfxOpenGL21* self, const Vt* vt, bool up_to_zero_z)
+{
+    for (VtLine* l = NULL; (l = Vector_iter_VtLine((Vector_VtLine*)&vt->lines, l));) {
+        if (l->images) {
+            for (RcPtr_VtImageSurfaceView* i = NULL;
+                 (i = Vector_iter_RcPtr_VtImageSurfaceView(l->images, i));) {
+                VtImageSurfaceView* view = RcPtr_get_VtImageSurfaceView(i);
+                VtImageSurface*     surf = RcPtr_get_VtImageSurface(&view->source_image_surface);
+                if (surf->state == VT_IMAGE_SURFACE_READY &&
+                    ((view->z_layer >= 0 && !up_to_zero_z) ||
+                     (view->z_layer < 0 && up_to_zero_z))) {
+                    GfxOpenGL21_draw_image_view(self, vt, view);
+                }
+            }
+        }
+    }
+}
+
 void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
 {
     GfxOpenGL21* gfx    = gfxOpenGL21(self);
@@ -2776,6 +2905,8 @@ void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
                   chars.second * gfx->line_height_pixels);
     }
 
+    GfxOpenGL21_draw_images(gfx, vt, true);
+
     Vector_clear_GlyphBufferData(gfxOpenGL21(self)->vec_glyph_buffer);
     gfxOpenGL21(self)->has_blinking_text = false;
     for (VtLine* i = begin; i < end; ++i) {
@@ -2788,12 +2919,16 @@ void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
         size_t newsize = gfx->vec_glyph_buffer->size * sizeof(GlyphBufferData);
         ARRAY_BUFFER_SUB_OR_SWAP(gfx->vec_glyph_buffer->buf, gfx->flex_vbo.size, newsize);
         Shader_use(&gfx->image_shader);
+        glUniform2f(gfx->image_shader.uniforms[1].location, 0, 0);
         glVertexAttribPointer(gfx->image_shader.attribs->location, 4, GL_FLOAT, GL_FALSE, 0, 0);
         uint_fast32_t quad_index = 0;
         for (VtLine* i = begin; i < end; ++i) {
             quad_index = GfxOpenGL21_draw_line_quads(gfx, i, quad_index);
         }
     }
+
+    GfxOpenGL21_draw_images(gfx, vt, false);
+
     glBindTexture(GL_TEXTURE_2D, 0);
     glDisable(GL_SCISSOR_TEST);
     glEnable(GL_BLEND);
@@ -2874,6 +3009,22 @@ Pair_GLuint GfxOpenGL21_pop_recycled(GfxOpenGL21* self)
     ARRAY_LAST(self->recycled_textures).width     = 0;
 
     return ret;
+}
+
+void GfxOpenGL21_destroy_image_proxy(Gfx* self, uint32_t* proxy)
+{
+    if (proxy[IMG_PROXY_INDEX_TEXTURE_ID]) {
+        glDeleteTextures(1, proxy);
+        proxy[IMG_PROXY_INDEX_TEXTURE_ID] = 0;
+    }
+}
+
+void GfxOpenGL21_destroy_image_view_proxy(Gfx* self, uint32_t* proxy)
+{
+    if (proxy[IMG_VIEW_PROXY_INDEX_VBO_ID]) {
+        glDeleteBuffers(1, proxy);
+        proxy[IMG_VIEW_PROXY_INDEX_VBO_ID] = 0;
+    }
 }
 
 __attribute__((hot)) void GfxOpenGL21_destroy_proxy(Gfx* self, uint32_t* proxy)

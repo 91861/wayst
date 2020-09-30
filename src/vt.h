@@ -22,12 +22,60 @@
 #include <unistd.h>
 
 #include "colors.h"
+#include "map.h"
 #include "monitor.h"
 #include "rcptr.h"
 #include "settings.h"
 #include "timing.h"
 #include "util.h"
 #include "vector.h"
+
+typedef struct
+{
+    int32_t  z_layer;
+    uint32_t cell_width;
+    uint32_t cell_height;
+    uint32_t anchor_offset_x;
+    uint32_t anchor_offset_y;
+    uint32_t sample_offset_x;
+    uint32_t sample_offset_y;
+    uint32_t sample_width;
+    uint32_t sample_height;
+} vt_image_proto_display_args_t;
+
+typedef enum
+{
+    VT_IMAGE_PROTO_ACTION_TRANSMIT,
+    /* The terminal emulator will try to load the image and respond with either
+       OK or an error, but it will not replace an existing image with the
+       same id, nor will it store the image. */
+    VT_IMAGE_PROTO_ACTION_QUERY,
+    VT_IMAGE_PROTO_ACTION_DISPLAY,
+    VT_IMAGE_PROTO_ACTION_TRANSMIT_AND_DISPLAY,
+    VT_IMAGE_PROTO_ACTION_DELETE,
+} vt_image_proto_action_t;
+
+typedef enum
+{
+    VT_IMAGE_PROTO_TRANSMISSION_DIRECT,
+    VT_IMAGE_PROTO_TRANSMISSION_FILE,
+    VT_IMAGE_PROTO_TRANSMISSION_TEMP_FILE,
+    VT_IMAGE_PROTO_TRANSMISSION_SHARED_MEM,
+} vt_image_proto_transmission_t;
+
+typedef enum
+{
+    VT_IMAGE_PROTO_COMPRESSION_NONE,
+    VT_IMAGE_PROTO_COMPRESSION_ZLIB,
+} vt_image_proto_compression_t;
+
+typedef enum
+{
+    VT_IMAGE_SURFACE_INCOMPLETE,
+    VT_IMAGE_SURFACE_READY,
+    VT_IMAGE_SURFACE_FAIL,
+    VT_IMAGE_SURFACE_DESTROYED,
+} vt_image_surface_state_t;
 
 #ifndef VT_RUNE_MAX_COMBINE
 #define VT_RUNE_MAX_COMBINE 2
@@ -44,7 +92,7 @@ static void DynStr_destroy(DynStr* self)
     self->s = NULL;
 }
 
-DEF_VECTOR(DynStr, DynStr_destroy)
+DEF_VECTOR(DynStr, DynStr_destroy);
 
 enum MouseButton
 {
@@ -121,33 +169,34 @@ typedef struct
     bool doubleunderline : 1;
     bool curlyunderline : 1;
     bool overline : 1;
-
 } VtRune;
 
-DEF_VECTOR(VtRune, NULL)
+DEF_VECTOR(VtRune, NULL);
 
-DEF_VECTOR(char, NULL)
+DEF_VECTOR(char, NULL);
 
-DEF_VECTOR(size_t, NULL)
+DEF_VECTOR(size_t, NULL);
 
-DEF_VECTOR(Vector_VtRune, Vector_destroy_VtRune)
+DEF_VECTOR(Vector_VtRune, Vector_destroy_VtRune);
 
-DEF_VECTOR(Vector_char, Vector_destroy_char)
+DEF_VECTOR(Vector_char, Vector_destroy_char);
+
+typedef enum
+{
+    VT_COMMAND_STATE_TYPING,
+    VT_COMMAND_STATE_RUNNING,
+    VT_COMMAND_STATE_COMPLETED,
+} vt_command_state_t;
 
 typedef struct
 {
-    char*       command;
-    size_t      command_start_row;
-    uint16_t    command_start_column;
-    Pair_size_t output_rows;
-    TimeSpan    execution_time;
-    int         exit_status;
-    enum VtCommandState
-    {
-        VT_COMMAND_STATE_TYPING,
-        VT_COMMAND_STATE_RUNNING,
-        VT_COMMAND_STATE_COMPLETED,
-    } state;
+    char*              command;
+    size_t             command_start_row;
+    uint16_t           command_start_column;
+    Pair_size_t        output_rows;
+    TimeSpan           execution_time;
+    int                exit_status;
+    vt_command_state_t state;
 } VtCommand;
 
 static void VtCommand_destroy(VtCommand* self)
@@ -156,8 +205,72 @@ static void VtCommand_destroy(VtCommand* self)
     self->command = NULL;
 }
 
-DEF_RC_PTR(VtCommand, VtCommand_destroy)
-DEF_VECTOR(RcPtr_VtCommand, RcPtr_destroy_VtCommand)
+DEF_RC_PTR(VtCommand, VtCommand_destroy);
+DEF_VECTOR(RcPtr_VtCommand, RcPtr_destroy_VtCommand);
+
+typedef struct
+{
+    uint32_t data[6];
+} VtImageSurfaceProxy;
+
+DEF_VECTOR(uint8_t, NULL);
+
+typedef struct
+{
+    vt_image_surface_state_t      state;
+    bool                          png_data_transmission;
+    bool                          display_on_transmission_completed;
+    vt_image_proto_display_args_t display_args;
+    uint32_t                      id; /* 0 if not specified by client */
+    Vector_uint8_t                fragments;
+    uint8_t                       bytes_per_pixel;
+    uint32_t                      width, height;
+    VtImageSurfaceProxy           proxy;
+} VtImageSurface;
+
+static inline void VtImageSurface_destroy(void* vt_, VtImageSurface* self);
+
+DEF_RC_PTR_DA(VtImageSurface, VtImageSurface_destroy, void);
+
+DEF_VECTOR(RcPtr_VtImageSurface, RcPtr_destroy_VtImageSurface);
+
+typedef struct
+{
+    uint32_t data[4];
+} VtImageSurfaceViewProxy;
+
+typedef struct
+{
+    RcPtr_VtImageSurface source_image_surface;
+
+    size_t        anchor_global_index;
+    uint16_t      anchor_cell_idx;
+    Pair_uint32_t anchor_offset_px;
+
+    Pair_uint32_t sample_offset_px;
+    Pair_uint32_t sample_dims_px;
+
+    Pair_uint16_t cell_scale_rect;
+    Pair_uint16_t cell_size;
+
+    int32_t z_layer;
+
+    VtImageSurfaceViewProxy proxy;
+} VtImageSurfaceView;
+
+typedef struct
+{
+    size_t              line;
+    VtImageSurfaceView* view;
+} vt_image_surface_view_delete_action_t;
+
+DEF_VECTOR(vt_image_surface_view_delete_action_t, NULL);
+
+static inline void VtImageSurfaceView_destroy(void* vt_, VtImageSurfaceView* self);
+
+DEF_RC_PTR_DA(VtImageSurfaceView, VtImageSurfaceView_destroy, void);
+
+DEF_VECTOR(RcPtr_VtImageSurfaceView, RcPtr_destroy_VtImageSurfaceView);
 
 /**
  * represents a clickable range of text linked to a URL */
@@ -172,7 +285,7 @@ static void VtUri_destroy(VtUri* self)
     self->uri_string = NULL;
 }
 
-DEF_VECTOR(VtUri, VtUri_destroy)
+DEF_VECTOR(VtUri, VtUri_destroy);
 
 typedef struct
 {
@@ -190,7 +303,9 @@ typedef struct
     /* Clickable link adresses */
     Vector_VtUri* links;
 
-    /* Ref to command info if this is output/invocation of a shell command */
+    Vector_RcPtr_VtImageSurfaceView* images;
+
+    /* Ref to command info if this is an output/invocation of a shell command */
     RcPtr_VtCommand linked_command;
 
     struct VtLineDamage
@@ -255,7 +370,7 @@ static void VtLine_copy(VtLine* dest, VtLine* source)
 
 static inline void VtLine_destroy(void* vt_, VtLine* self);
 
-DEF_VECTOR_DA(VtLine, VtLine_destroy, void)
+DEF_VECTOR_DA(VtLine, VtLine_destroy, void);
 
 typedef struct
 {
@@ -283,7 +398,10 @@ typedef struct
         void (*on_clipboard_requested)(void*);
         void (*on_font_reload_requseted)(void*);
         void (*on_clipboard_sent)(void*, const char*);
+
         void (*destroy_proxy)(void*, VtLineProxy*);
+        void (*destroy_image_proxy)(void*, VtImageSurfaceProxy*);
+        void (*destroy_image_view_proxy)(void*, VtImageSurfaceViewProxy*);
     } callbacks;
 
     uint32_t last_click_x;
@@ -400,6 +518,10 @@ typedef struct
         VT_SHELL_INTEG_STATE_COMMAND,
         VT_SHELL_INTEG_STATE_OUTPUT,
     } shell_integration_state;
+
+    RcPtr_VtImageSurface            manipulated_image;
+    Vector_RcPtr_VtImageSurface     images;
+    Vector_RcPtr_VtImageSurfaceView image_views;
 
     Vector_RcPtr_VtCommand shell_commands;
 
@@ -612,9 +734,30 @@ static inline void VtLine_destroy(void* vt_, VtLine* self)
         free(self->links);
         self->links = NULL;
     }
+    if (self->images) {
+        Vector_destroy_RcPtr_VtImageSurfaceView(self->images);
+        free(self->images);
+        self->images = NULL;
+    }
     CALL_FP(vt->callbacks.destroy_proxy, vt->callbacks.user_data, &self->proxy);
     Vector_destroy_VtRune(&self->data);
     RcPtr_destroy_VtCommand(&self->linked_command);
+}
+
+static void VtImageSurface_destroy(void* vt_, VtImageSurface* self)
+{
+    Vt* vt = vt_;
+    Vector_destroy_uint8_t(&self->fragments);
+    self->id    = 0;
+    self->state = VT_IMAGE_SURFACE_DESTROYED;
+    CALL_FP(vt->callbacks.destroy_image_proxy, vt->callbacks.user_data, &self->proxy);
+}
+
+static void VtImageSurfaceView_destroy(void* vt_, VtImageSurfaceView* self)
+{
+    Vt* vt = vt_;
+    RcPtr_destroy_VtImageSurface(&self->source_image_surface);
+    CALL_FP(vt->callbacks.destroy_image_view_proxy, vt->callbacks.user_data, &self->proxy);
 }
 
 static uint16_t VtLine_add_link(VtLine* self, const char* link)
@@ -1057,3 +1200,9 @@ static const char* Vt_get_work_directory(const Vt* self)
 void Vt_clear_scrollback(Vt* self);
 
 Vector_char Vt_command_to_string(const Vt* self, const VtCommand* command, size_t opt_limit_lines);
+
+static bool Vt_ImageSurfaceView_is_visual_visible(const Vt* self, VtImageSurfaceView* view)
+{
+    return Vt_visual_top_line(self) <= view->anchor_global_index + view->cell_size.second &&
+           Vt_visual_bottom_line(self) >= view->anchor_global_index;
+}

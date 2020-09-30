@@ -1239,7 +1239,7 @@ static void App_update_hover(App* self, int32_t x, int32_t y)
 {
     if (self->selection_dragging_left || self->selection_dragging_right)
         return;
-    
+
     Pair_uint16_t cells = Vt_pixels_to_cells(&self->vt, x, y);
     cells.second += Vt_visual_top_line(&self->vt);
     if (Vt_uri_at(&self->vt, cells.first, cells.second)) {
@@ -1301,6 +1301,18 @@ static void App_destroy_proxy_handler(void* self, VtLineProxy* proxy)
 {
     App* app = self;
     Gfx_destroy_proxy(app->gfx, proxy->data);
+}
+
+static void App_destroy_image_proxy_handler(void* self, VtImageSurfaceProxy* proxy)
+{
+    App* app = self;
+    Gfx_destroy_image_proxy(app->gfx, proxy->data);
+}
+
+static void App_destroy_image_view_proxy_handler(void* self, VtImageSurfaceViewProxy* proxy)
+{
+    App* app = self;
+    Gfx_destroy_image_view_proxy(app->gfx, proxy->data);
 }
 
 static void App_set_monitor_callbacks(App* self)
@@ -1392,6 +1404,8 @@ static void App_set_callbacks(App* self)
     self->vt.callbacks.on_font_reload_requseted            = App_reload_font;
     self->vt.callbacks.on_desktop_notification_sent        = App_send_desktop_notification;
     self->vt.callbacks.destroy_proxy                       = App_destroy_proxy_handler;
+    self->vt.callbacks.destroy_image_proxy                 = App_destroy_image_proxy_handler;
+    self->vt.callbacks.destroy_image_view_proxy            = App_destroy_image_view_proxy_handler;
 
     self->win->callbacks.user_data               = self;
     self->win->callbacks.key_handler             = App_key_handler;

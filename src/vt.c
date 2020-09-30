@@ -24,9 +24,11 @@
 #include "wcwidth/wcwidth.h"
 #endif
 
+#include "vt_img_proto.h"
+
 #include "key.h"
 
-static void          Vt_shift_global_line_index_refs(Vt* self, size_t point, int64_t change);
+static void Vt_shift_global_line_index_refs(Vt* self, size_t point, int64_t change, bool refs_only);
 static inline size_t Vt_top_line(const Vt* const self);
 void                 Vt_visual_scroll_to(Vt* self, size_t line);
 void                 Vt_visual_scroll_reset(Vt* self);
@@ -318,6 +320,46 @@ static void Vt_uri_next_char(Vt* self, char32_t c)
     }
 }
 
+static void Vt_about_to_delete_line_by_scroll_up(Vt* self, size_t idx)
+{
+    VtLine* src = &self->lines.buf[idx];
+    VtLine* tgt = &self->lines.buf[idx + 1];
+    if (src->images) {
+        for (RcPtr_VtImageSurfaceView* i = NULL;
+             (i = Vector_iter_RcPtr_VtImageSurfaceView(src->images, i));) {
+            VtImageSurfaceView* view = RcPtr_get_VtImageSurfaceView(i);
+            if (view && view->cell_size.second > 1) {
+                VtImageSurfaceView new_view  = Vt_crop_VtImageSurfaceView_top_by_line(self, view);
+                new_view.anchor_global_index = idx + 1;
+                RcPtr_VtImageSurfaceView new_ptr        = RcPtr_new_VtImageSurfaceView(self);
+                *RcPtr_get_VtImageSurfaceView(&new_ptr) = new_view;
+                RcPtr_VtImageSurfaceView new_ptr2 = RcPtr_new_shared_VtImageSurfaceView(&new_ptr);
+
+                if (!tgt->images) {
+                    tgt->images  = malloc(sizeof(Vector_RcPtr_VtImageSurfaceView));
+                    *tgt->images = Vector_new_RcPtr_VtImageSurfaceView();
+                }
+
+                Vector_push_RcPtr_VtImageSurfaceView(tgt->images, new_ptr);
+                Vector_push_RcPtr_VtImageSurfaceView(&self->image_views, new_ptr2);
+            }
+        }
+    }
+}
+
+static void Vt_about_to_delete_line_by_scroll_down(Vt* self, size_t idx)
+{
+    for (RcPtr_VtImageSurfaceView* i = NULL;
+         (i = Vector_iter_RcPtr_VtImageSurfaceView(&self->image_views, i));) {
+        VtImageSurfaceView* view = RcPtr_get_VtImageSurfaceView(i);
+        if (view) {
+            while (view->cell_size.second > 1 && VtImageSurfaceView_spans_line(view, idx)) {
+                Vt_crop_VtImageSurfaceView_bottom_by_line(self, view);
+            }
+        }
+    }
+}
+
 static void Vt_grapheme_break(Vt* self)
 {
 #ifndef NOUTF8PROC
@@ -605,6 +647,15 @@ void Vt_clear_all_proxies(Vt* self)
         for (size_t i = 0; i < self->alt_lines.size - 1; ++i) {
             Vt_clear_line_proxy(self, &self->alt_lines.buf[i]);
         }
+    }
+}
+
+static void Vt_clear_all_image_proxies(Vt* self)
+{
+    for (RcPtr_VtImageSurfaceView* i = NULL;
+         (i = Vector_iter_RcPtr_VtImageSurfaceView(&self->image_views, i));) {
+        VtImageSurfaceView* srf = RcPtr_get_VtImageSurfaceView(i);
+        CALL_FP(self->callbacks.destroy_image_view_proxy, self->callbacks.user_data, &srf->proxy);
     }
 }
 
@@ -1121,6 +1172,9 @@ void Vt_init(Vt* self, uint32_t cols, uint32_t rows)
     self->uri_matcher.state = VT_URI_MATCHER_EMPTY;
     self->uri_matcher.match = Vector_new_with_capacity_char(128);
 
+    self->images      = Vector_new_RcPtr_VtImageSurface();
+    self->image_views = Vector_new_RcPtr_VtImageSurfaceView();
+
     self->shell_commands = Vector_new_RcPtr_VtCommand();
 
     self->unicode_input.buffer = Vector_new_char();
@@ -1270,7 +1324,7 @@ static void Vt_reflow_expand(Vt* self, uint32_t x)
                     srcline = &self->lines.buf[i + 1];
                     tgtline = &self->lines.buf[i];
 
-                    Vt_shift_global_line_index_refs(self, remove_index + 1, -1);
+                    Vt_shift_global_line_index_refs(self, remove_index + 1, -1, false);
 
                     if (self->lines.size - 1 < Vt_row(self)) {
                         Vector_push_VtLine(&self->lines, VtLine_new());
@@ -1324,7 +1378,7 @@ static void Vt_reflow_shrink(Vt* self, uint32_t x)
                     self->selection.begin_line == i) {
                     ++self->selection.begin_line;
                     self->selection.begin_char_idx = self->selection.begin_char_idx - x;
-                    begin_just_moved = true;
+                    begin_just_moved               = true;
                 }
                 if (self->selection.end_char_idx > (int32_t)x && self->selection.end_line == i) {
                     ++self->selection.end_line;
@@ -1366,7 +1420,7 @@ static void Vt_reflow_shrink(Vt* self, uint32_t x)
                 srcline = &self->lines.buf[i];
                 tgtline = &self->lines.buf[i + 1];
 
-                Vt_shift_global_line_index_refs(self, insert_index, 1);
+                Vt_shift_global_line_index_refs(self, insert_index, 1, false);
 
                 ++bottom_bound;
 
@@ -1495,6 +1549,8 @@ void Vt_resize(Vt* self, uint32_t x, uint32_t y)
 
     Pair_uint32_t px =
       CALL_FP(self->callbacks.on_window_size_from_cells_requested, self->callbacks.user_data, x, y);
+
+    Vt_clear_all_image_proxies(self);
 
     self->ws =
       (struct winsize){ .ws_col = x, .ws_row = y, .ws_xpixel = px.first, .ws_ypixel = px.second };
@@ -3532,11 +3588,285 @@ static void Vt_handle_APC(Vt* self, char c)
     Vector_push_char(&self->parser.active_sequence, c);
     if (is_string_sequence_terminated(self->parser.active_sequence.buf,
                                       self->parser.active_sequence.size)) {
+
+        if (*Vector_last_char(&self->parser.active_sequence) == '\\') {
+            Vector_pop_char(&self->parser.active_sequence);
+        }
+        if (*Vector_last_char(&self->parser.active_sequence) == '\e') {
+            Vector_pop_char(&self->parser.active_sequence);
+        }
+        if (*Vector_last_char(&self->parser.active_sequence) == '\a') {
+            Vector_pop_char(&self->parser.active_sequence);
+        }
         Vector_push_char(&self->parser.active_sequence, '\0');
         const char* seq = self->parser.active_sequence.buf;
-        char*       str = pty_string_prettyfy(seq, strlen(seq));
-        WRN("Unknown APC: %s\n", str);
-        free(str);
+
+        switch (seq[0]) {
+            /* Terminal image protocol */
+            case 'G': {
+                // WRN("Terminal image protocol support is incomplete and unstable\n");
+
+                if (!seq[1])
+                    break;
+
+                char *s      = (char*)seq + 1, *control_data, *payload, *arg;
+                control_data = strsep(&s, ";");
+                payload      = strsep(&s, ";");
+
+                vt_image_proto_action_t       action       = VT_IMAGE_PROTO_ACTION_TRANSMIT;
+                vt_image_proto_compression_t  compression  = VT_IMAGE_PROTO_COMPRESSION_NONE;
+                vt_image_proto_transmission_t transmission = VT_IMAGE_PROTO_TRANSMISSION_DIRECT;
+                uint8_t                       format       = 24;
+                uint32_t                      id           = 0;
+                size_t                        size         = 0;
+                size_t                        offset       = 0;
+                uint32_t                      image_width  = 0;
+                uint32_t                      image_height = 0;
+                bool                          complete     = true;
+                char delete                                = 'a';
+                vt_image_proto_display_args_t display_args = {
+                    .z_layer         = 0,
+                    .cell_width      = 0,
+                    .cell_height     = 0,
+                    .anchor_offset_x = 0,
+                    .anchor_offset_y = 0,
+                    .sample_offset_x = 0,
+                    .sample_offset_y = 0,
+                    .sample_width    = 0,
+                    .sample_height   = 0,
+                };
+
+                for (char* cdata = control_data; (arg = strsep(&cdata, ","));) {
+
+                    if (strstr(arg, "a=")) {
+                        switch (arg[2]) {
+                            case 't':
+                                action = VT_IMAGE_PROTO_ACTION_TRANSMIT;
+                                break;
+                            case 'T':
+                                action = VT_IMAGE_PROTO_ACTION_TRANSMIT_AND_DISPLAY;
+                                break;
+                            case 'q':
+                                action = VT_IMAGE_PROTO_ACTION_QUERY;
+                                break;
+                            case 'p':
+                                action = VT_IMAGE_PROTO_ACTION_DISPLAY;
+                                break;
+                            case 'd':
+                                action = VT_IMAGE_PROTO_ACTION_DELETE;
+                                break;
+                        }
+                    } else if (strstr(arg, "m=")) {
+                        if (arg[2] == '1') {
+                            complete = false;
+                        }
+                    } else if (strstr(arg, "o=")) {
+                        switch (arg[2]) {
+                            case 'z':
+                                compression = VT_IMAGE_PROTO_COMPRESSION_ZLIB;
+                                break;
+                        }
+                        break;
+                    } else if (strstr(arg, "f=")) {
+                        format = atoi(arg + 2);
+                    } else if (strstr(arg, "i=")) {
+                        long tmp = atol(arg + 2);
+                        if (tmp > 0)
+                            id = MIN(tmp, UINT32_MAX);
+                    } else if (strstr(arg, "s=")) {
+                        image_width = atoi(arg + 2);
+                    } else if (strstr(arg, "v=")) {
+                        image_height = atoi(arg + 2);
+                    } else if (strstr(arg, "S=")) {
+                        size = atoi(arg + 2);
+                    } else if (strstr(arg, "t=")) {
+                        switch (arg[2]) {
+                            case 'd':
+                                transmission = VT_IMAGE_PROTO_TRANSMISSION_DIRECT;
+                                break;
+                            case 'f':
+                                transmission = VT_IMAGE_PROTO_TRANSMISSION_FILE;
+                                break;
+                            case 't':
+                                transmission = VT_IMAGE_PROTO_TRANSMISSION_TEMP_FILE;
+                                break;
+                            case 's':
+                                transmission = VT_IMAGE_PROTO_TRANSMISSION_SHARED_MEM;
+                                break;
+                        }
+                    } else if (strstr(arg, "X=")) {
+                        display_args.anchor_offset_x = atoi(arg + 2);
+                    } else if (strstr(arg, "Y=")) {
+                        display_args.anchor_offset_y = atoi(arg + 2);
+                    } else if (strstr(arg, "x=")) {
+                        display_args.sample_offset_x = atoi(arg + 2);
+                    } else if (strstr(arg, "y=")) {
+                        display_args.sample_offset_y = atoi(arg + 2);
+                    } else if (strstr(arg, "w=")) {
+                        display_args.sample_width = atoi(arg + 2);
+                    } else if (strstr(arg, "h=")) {
+                        display_args.sample_height = atoi(arg + 2);
+                    } else if (strstr(arg, "c=")) {
+                        display_args.cell_width = atoi(arg + 2);
+                    } else if (strstr(arg, "r=")) {
+                        display_args.cell_height = atoi(arg + 2);
+                    } else if (strstr(arg, "d=")) {
+                        delete = arg[2];
+                    } else if (strnlen(arg, 1)) {
+                        WRN("unknown image protocol argument\'%s\'\n", arg);
+                    }
+                }
+
+                const char* error_string = NULL;
+                switch (action) {
+                    case VT_IMAGE_PROTO_ACTION_TRANSMIT:
+                    case VT_IMAGE_PROTO_ACTION_TRANSMIT_AND_DISPLAY: {
+                        error_string = Vt_img_proto_transmit(
+                          self,
+                          transmission,
+                          compression,
+                          format,
+                          complete,
+                          offset,
+                          size,
+                          display_args,
+                          action == VT_IMAGE_PROTO_ACTION_TRANSMIT_AND_DISPLAY,
+                          id,
+                          image_width,
+                          image_height,
+                          payload);
+
+                        if (error_string) {
+                            Vt_output_formated(self, "\e_Gi=%u;%s\e\\", id, error_string);
+                        }
+                    } break;
+                    case VT_IMAGE_PROTO_ACTION_DISPLAY: {
+                        Vt_img_proto_display(self, id, display_args);
+                    } break;
+                    case VT_IMAGE_PROTO_ACTION_DELETE: {
+
+#define L_DELETE_IMG_VIEWS_FILTERED(expr)                                                          \
+    Vector_vt_image_surface_view_delete_action_t dels =                                            \
+      Vector_new_vt_image_surface_view_delete_action_t();                                          \
+                                                                                                   \
+    for (RcPtr_VtImageSurfaceView* i = NULL;                                                       \
+         (i = Vector_iter_RcPtr_VtImageSurfaceView(&self->image_views, i));) {                     \
+        VtImageSurfaceView* view = RcPtr_get_VtImageSurfaceView(i);                                \
+        if (view && expr) {                                                                        \
+            Vector_push_vt_image_surface_view_delete_action_t(                                     \
+              &dels,                                                                               \
+              (vt_image_surface_view_delete_action_t){ .line = view->anchor_global_index,          \
+                                                       .view = view });                            \
+        }                                                                                          \
+    }                                                                                              \
+    for (vt_image_surface_view_delete_action_t* i = NULL;                                          \
+         (i = Vector_iter_vt_image_surface_view_delete_action_t(&dels, i));) {                     \
+        VtLine* ln = &self->lines.buf[i->line];                                                    \
+        if (ln->images) {                                                                          \
+            for (RcPtr_VtImageSurfaceView* p = NULL;                                               \
+                 (p = Vector_iter_RcPtr_VtImageSurfaceView(ln->images, p));) {                     \
+                VtImageSurfaceView* v = RcPtr_get_VtImageSurfaceView(p);                           \
+                if (v == i->view) {                                                                \
+                    Vector_remove_at_RcPtr_VtImageSurfaceView(                                     \
+                      ln->images,                                                                  \
+                      Vector_index_RcPtr_VtImageSurfaceView(ln->images, p),                        \
+                      1);                                                                          \
+                }                                                                                  \
+            }                                                                                      \
+            if (!ln->images->size) {                                                               \
+                Vector_destroy_RcPtr_VtImageSurfaceView(ln->images);                               \
+                free(ln->images);                                                                  \
+                ln->images = NULL;                                                                 \
+            }                                                                                      \
+        }                                                                                          \
+    }                                                                                              \
+    Vector_destroy_vt_image_surface_view_delete_action_t(&dels);
+
+                        switch (delete) {
+                            /* Delete all images visible on screen */
+                            case 'A':
+                            case 'a': {
+                                L_DELETE_IMG_VIEWS_FILTERED(
+                                  Vt_ImageSurfaceView_is_visible(self, view))
+                            } break;
+
+                            /* Delete all images with the specified id */
+                            case 'i':
+                            case 'I': {
+                                L_DELETE_IMG_VIEWS_FILTERED(
+                                  view->source_image_surface.block &&
+                                  view->source_image_surface.block->payload.id == id)
+                            } break;
+
+                            /* Delete all images that intersect with the current cursor position */
+                            case 'c':
+                            case 'C': {
+                                L_DELETE_IMG_VIEWS_FILTERED(
+                                  VtImageSurfaceView_intersects(view,
+                                                                self->cursor.row,
+                                                                self->cursor.col))
+                            } break;
+
+                            /* Delete all images that intersect a specific cell (x=, y=) */
+                            case 'p':
+                            case 'P': {
+                                L_DELETE_IMG_VIEWS_FILTERED(VtImageSurfaceView_intersects(
+                                  view,
+                                  display_args.sample_offset_y + Vt_top_line(self) - 1,
+                                  display_args.sample_offset_x))
+                            } break;
+
+                            /* Delete all images that intersect a specific cell on given z-layer
+                             * (x=, y=, z=) */
+                            case 'q':
+                            case 'Q': {
+                                L_DELETE_IMG_VIEWS_FILTERED(
+                                  view->z_layer == display_args.z_layer &&
+                                  VtImageSurfaceView_intersects(view,
+                                                                display_args.sample_offset_y +
+                                                                  Vt_top_line(self) - 1,
+                                                                display_args.sample_offset_x))
+                            } break;
+
+                            /* Delete all images that intersect a specific column (x=) */
+                            case 'x':
+                            case 'X': {
+                                L_DELETE_IMG_VIEWS_FILTERED(
+                                  VtImageSurfaceView_spans_column(view,
+                                                                  display_args.anchor_offset_x - 1))
+                            } break;
+
+                            /* Delete all images that intersect a specific row (y=) */
+                            case 'y':
+                            case 'Y': {
+                                L_DELETE_IMG_VIEWS_FILTERED(VtImageSurfaceView_spans_line(
+                                  view,
+                                  display_args.anchor_offset_y + Vt_top_line(self) - 1))
+                            } break;
+
+                            /* Delete all  on given z-layer (z=) */
+                            case 'z':
+                            case 'Z': {
+                                L_DELETE_IMG_VIEWS_FILTERED(view->z_layer == display_args.z_layer)
+                            } break;
+                        }
+                    } break;
+                    case VT_IMAGE_PROTO_ACTION_QUERY: {
+                        error_string =
+                          Vt_img_proto_validate(self, transmission, compression, format);
+                        Vt_output_formated(self, "\e_Gi=%u;%s\e\\", id, OR(error_string, "OK"));
+                    } break;
+                }
+
+            } break;
+
+            default: {
+                char* str = pty_string_prettyfy(seq, strlen(seq));
+                WRN("Unknown APC: %s\n", str);
+                free(str);
+            }
+        }
+
         Vector_destroy_char(&self->parser.active_sequence);
         self->parser.active_sequence = Vector_new_char();
         self->parser.state           = PARSER_STATE_LITERAL;
@@ -3553,14 +3883,6 @@ static void Vt_handle_DCS(Vt* self, char c)
 
         const char* seq = self->parser.active_sequence.buf;
         switch (*seq) {
-            /* Terminal image protocol */
-            case 'G':
-                break;
-
-            /* sixel or ReGIS */
-            case '0':
-                break;
-
             /* Synchronized update */
             case '=':
                 if ((seq[1] == '1' || seq[1] == '2') && seq[2] == 's') {
@@ -4075,7 +4397,11 @@ static void Vt_handle_OSC(Vt* self, char c)
                                     Vector_push_char(&command_string_builder, '\n');
                                 }
 
-                                Vector_pushv_char(&command_string_builder, tmp.buf, tmp.size - 1);
+                                if (tmp.size) {
+                                    Vector_pushv_char(&command_string_builder,
+                                                      tmp.buf,
+                                                      tmp.size - 1);
+                                }
                                 Vector_destroy_char(&tmp);
                             }
                         }
@@ -4100,51 +4426,56 @@ static void Vt_handle_OSC(Vt* self, char c)
 
                         cmd->state       = VT_COMMAND_STATE_COMPLETED;
                         cmd->exit_status = strnlen(seq, 6) >= 6 ? atoi(seq + 6 /* 133;D; */) : 0;
-
-                        Vt_line_at(self, self->cursor.row - 1)->mark_command_output_end = true;
-
                         cmd->execution_time.end = TimePoint_now();
                         cmd->output_rows.second = self->cursor.row;
 
-                        bool minimized = CALL_FP(self->callbacks.on_minimized_state_requested,
-                                                 self->callbacks.user_data);
+                        VtLine* ln = Vt_line_at(self, self->cursor.row - 1);
 
-                        LOG("Vt::command_finished{ command: \'%s\' [%u:%zu], status: %d, output: "
-                            "%zu..%zu }\n",
-                            cmd->command,
-                            cmd->command_start_column,
-                            cmd->command_start_row,
-                            cmd->exit_status,
-                            cmd->output_rows.first,
-                            cmd->output_rows.second);
+                        if (ln) {
+                            ln->mark_command_output_end = true;
 
-                        if (minimized) {
-                            char* tm_str = TimeSpan_duration_string_approx(&cmd->execution_time);
-                            char* notification_title =
-                              cmd->exit_status
-                                ? asprintf("\'%s\' failed(%d), took %s",
-                                           cmd->command,
-                                           cmd->exit_status,
-                                           tm_str)
-                                : asprintf("\'%s\' finished in %s", cmd->command, tm_str);
+                            bool minimized = CALL_FP(self->callbacks.on_minimized_state_requested,
+                                                     self->callbacks.user_data);
 
-                            Vector_char output = Vt_command_to_string(self, cmd, 1);
+                            LOG(
+                              "Vt::command_finished{ command: \'%s\' [%u:%zu], status: %d, output: "
+                              "%zu..%zu }\n",
+                              cmd->command,
+                              cmd->command_start_column,
+                              cmd->command_start_row,
+                              cmd->exit_status,
+                              cmd->output_rows.first,
+                              cmd->output_rows.second);
 
-                            if (output.size > 32) {
-                                for (uint32_t i = 0; i < (output.size - 32); ++i) {
-                                    Vector_pop_char(&output);
+                            if (minimized) {
+                                char* tm_str =
+                                  TimeSpan_duration_string_approx(&cmd->execution_time);
+                                char* notification_title =
+                                  cmd->exit_status
+                                    ? asprintf("\'%s\' failed(%d), took %s",
+                                               cmd->command,
+                                               cmd->exit_status,
+                                               tm_str)
+                                    : asprintf("\'%s\' finished in %s", cmd->command, tm_str);
+
+                                Vector_char output = Vt_command_to_string(self, cmd, 1);
+
+                                if (output.size > 32) {
+                                    for (uint32_t i = 0; i < (output.size - 32); ++i) {
+                                        Vector_pop_char(&output);
+                                    }
+                                    Vector_pushv_char(&output, "…", strlen("…") + 1);
                                 }
-                                Vector_pushv_char(&output, "…", strlen("…") + 1);
+
+                                CALL_FP(self->callbacks.on_desktop_notification_sent,
+                                        self->callbacks.user_data,
+                                        notification_title,
+                                        output.buf);
+
+                                Vector_destroy_char(&output);
+                                free(notification_title);
+                                free(tm_str);
                             }
-
-                            CALL_FP(self->callbacks.on_desktop_notification_sent,
-                                    self->callbacks.user_data,
-                                    notification_title,
-                                    output.buf);
-
-                            Vector_destroy_char(&output);
-                            free(notification_title);
-                            free(tm_str);
                         }
 
                         self->shell_integration_state = VT_SHELL_INTEG_STATE_NONE;
@@ -4279,10 +4610,14 @@ static void Vt_insert_line(Vt* self)
 {
     self->last_interted = NULL;
     Vector_insert_at_VtLine(&self->lines, self->cursor.row, VtLine_new());
+    Vt_shift_global_line_index_refs(self, self->cursor.row, 1, true);
+
     Vt_empty_line_fill_bg(self, self->cursor.row);
 
     size_t rem_idx = MIN(Vt_get_scroll_region_bottom(self), Vt_bottom_line(self));
+    Vt_about_to_delete_line_by_scroll_down(self, rem_idx);
     Vector_remove_at_VtLine(&self->lines, rem_idx, 1);
+    Vt_shift_global_line_index_refs(self, rem_idx + 1, -1, true);
 
     Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
 }
@@ -4293,8 +4628,13 @@ static void Vt_reverse_line_feed(Vt* self)
 {
     self->last_interted = NULL;
     if (self->cursor.row == Vt_get_scroll_region_top(self)) {
+        Vt_about_to_delete_line_by_scroll_down(self, Vt_get_scroll_region_bottom(self));
         Vector_remove_at_VtLine(&self->lines, Vt_get_scroll_region_bottom(self), 1);
+        Vt_shift_global_line_index_refs(self, Vt_get_scroll_region_bottom(self) + 1, -1, true);
+
         Vector_insert_at_VtLine(&self->lines, self->cursor.row, VtLine_new());
+        Vt_shift_global_line_index_refs(self, self->cursor.row, 1, true);
+
         Vt_empty_line_fill_bg(self, self->cursor.row);
     } else if (Vt_cursor_row(self)) {
         Vt_move_cursor(self, self->cursor.col, Vt_cursor_row(self) - 1);
@@ -4308,10 +4648,13 @@ static void Vt_delete_line(Vt* self)
 {
     self->last_interted = NULL;
 
+    Vt_about_to_delete_line_by_scroll_up(self, self->cursor.row);
     Vector_remove_at_VtLine(&self->lines, self->cursor.row, 1);
+    Vt_shift_global_line_index_refs(self, self->cursor.row + 1, -1, true);
 
     size_t insert_idx = MIN(Vt_get_scroll_region_bottom(self), Vt_bottom_line(self));
     Vector_insert_at_VtLine(&self->lines, insert_idx, VtLine_new());
+    Vt_shift_global_line_index_refs(self, insert_idx, 1, true);
     Vt_empty_line_fill_bg(self, MIN(Vt_get_scroll_region_bottom(self), Vt_bottom_line(self)));
 
     Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
@@ -4319,15 +4662,17 @@ static void Vt_delete_line(Vt* self)
 
 static void Vt_scroll_up(Vt* self)
 {
-    self->last_interted  = NULL;
-    size_t  insert_idx   = MIN(Vt_bottom_line(self), Vt_get_scroll_region_bottom(self)) + 1;
-    VtLine* insert_point = Vector_at_VtLine(&self->lines, insert_idx);
-    Vector_insert_VtLine(&self->lines, insert_point, VtLine_new());
+    self->last_interted = NULL;
+    size_t insert_idx   = MIN(Vt_bottom_line(self), Vt_get_scroll_region_bottom(self)) + 1;
+    Vector_insert_at_VtLine(&self->lines, insert_idx, VtLine_new());
+    Vt_shift_global_line_index_refs(self, insert_idx, 1, true);
 
     size_t new_line_idx = MIN(Vt_bottom_line(self), Vt_get_scroll_region_bottom(self));
     Vt_empty_line_fill_bg(self, new_line_idx);
 
+    Vt_about_to_delete_line_by_scroll_up(self, Vt_get_scroll_region_top(self) - 1);
     Vector_remove_at_VtLine(&self->lines, Vt_get_scroll_region_top(self) - 1, 1);
+    Vt_shift_global_line_index_refs(self, Vt_get_scroll_region_top(self) - 1 + 1, -1, true);
     Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
 }
 
@@ -4335,8 +4680,13 @@ static void Vt_scroll_down(Vt* self)
 {
     self->last_interted = NULL;
     Vector_insert_at_VtLine(&self->lines, Vt_get_scroll_region_top(self), VtLine_new());
+    Vt_shift_global_line_index_refs(self, Vt_get_scroll_region_top(self), 1, true);
+
     size_t rm_idx = MAX(Vt_top_line(self), Vt_get_scroll_region_bottom(self));
+    Vt_about_to_delete_line_by_scroll_down(self, rm_idx);
     Vector_remove_at_VtLine(&self->lines, rm_idx, 1);
+    Vt_shift_global_line_index_refs(self, rm_idx + 1, -1, true);
+
     Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
 }
 
@@ -4606,8 +4956,13 @@ static inline void Vt_insert_new_line(Vt* self)
 {
     if (self->cursor.row == Vt_get_scroll_region_bottom(self) &&
         Vt_scroll_region_not_default(self)) {
+        Vt_about_to_delete_line_by_scroll_up(self, Vt_get_scroll_region_top(self));
         Vector_remove_at_VtLine(&self->lines, Vt_get_scroll_region_top(self), 1);
+        Vt_shift_global_line_index_refs(self, Vt_get_scroll_region_top(self) + 1, -1, true);
+
         Vector_insert_at_VtLine(&self->lines, self->cursor.row, VtLine_new());
+        Vt_shift_global_line_index_refs(self, self->cursor.row, 1, true);
+
         Vt_empty_line_fill_bg(self, self->cursor.row);
     } else if (Vt_bottom_line(self) == self->cursor.row) {
         Vector_push_VtLine(&self->lines, VtLine_new());
@@ -5278,20 +5633,30 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
     }
 }
 
-static void Vt_shift_global_line_index_refs(Vt* self, size_t point, int64_t change)
+static void Vt_shift_global_line_index_refs(Vt* self, size_t point, int64_t change, bool refs_only)
 {
     LOG("Vt::shift_idx{ pt: %zu, delta: %ld }\n", point, change);
 
-    if (self->cursor.row >= point)
-        self->cursor.row += change;
+    if (!refs_only) {
+        if (self->cursor.row >= point)
+            self->cursor.row += change;
 
-    if (self->visual_scroll_top >= point)
-        self->visual_scroll_top += change;
+        if (self->visual_scroll_top >= point)
+            self->visual_scroll_top += change;
 
-    if (self->scroll_region_top >= point)
-        self->scroll_region_top += change;
-    if (self->scroll_region_bottom >= point)
-        self->scroll_region_bottom += change;
+        if (self->scroll_region_top >= point)
+            self->scroll_region_top += change;
+        if (self->scroll_region_bottom >= point)
+            self->scroll_region_bottom += change;
+    }
+
+    for (RcPtr_VtImageSurfaceView* rp = NULL;
+         (rp = Vector_iter_RcPtr_VtImageSurfaceView(&self->image_views, rp));) {
+        VtImageSurfaceView* sv = RcPtr_get_VtImageSurfaceView(rp);
+        if (sv) {
+            sv->anchor_global_index += change;
+        }
+    }
 
     for (RcPtr_VtCommand* rp = NULL;
          (rp = Vector_iter_RcPtr_VtCommand(&self->shell_commands, rp));) {
@@ -5319,7 +5684,7 @@ static void Vt_remove_scrollback(Vt* self, size_t lines)
 
     lines = MIN(lines, (self->lines.size - Vt_row(self)));
     Vector_remove_at_VtLine(&self->lines, 0, lines);
-    Vt_shift_global_line_index_refs(self, lines, -(int64_t)lines);
+    Vt_shift_global_line_index_refs(self, lines, -(int64_t)lines, false);
 
     for (RcPtr_VtCommand* rpp = NULL;
          (rpp = Vector_iter_RcPtr_VtCommand(&self->shell_commands, rpp));) {
@@ -5332,6 +5697,27 @@ static void Vt_remove_scrollback(Vt* self, size_t lines)
     while (self->shell_commands.size && (!RcPtr_get_VtCommand(self->shell_commands.buf) ||
                                          RcPtr_is_unique_VtCommand(self->shell_commands.buf))) {
         Vector_remove_at_RcPtr_VtCommand(&self->shell_commands, 0, 1);
+    }
+
+    while (self->image_views.size) {
+        bool removed = false;
+        for (RcPtr_VtImageSurfaceView* i = NULL;
+             (i = Vector_iter_RcPtr_VtImageSurfaceView(&self->image_views, i));) {
+            if (RcPtr_is_unique_VtImageSurfaceView(i)) {
+                Vector_remove_at_RcPtr_VtImageSurfaceView(
+                  &self->image_views,
+                  Vector_index_RcPtr_VtImageSurfaceView(&self->image_views, i),
+                  1);
+                RcPtr_destroy_VtImageSurfaceView(i);
+                removed = true;
+                break;
+            }
+            if (removed) {
+                continue;
+            } else {
+                break;
+            }
+        }
     }
 }
 
@@ -5848,15 +6234,23 @@ void Vt_get_output(Vt* self, char** out_buf, size_t* out_bytes)
 void Vt_destroy(Vt* self)
 {
     Vector_destroy_VtLine(&self->lines);
+
     if (Vt_alt_buffer_enabled(self)) {
         Vector_destroy_VtLine(&self->alt_lines);
     }
+
     Vector_destroy_char(&self->parser.active_sequence);
     Vector_destroy_DynStr(&self->title_stack);
     Vector_destroy_char(&self->unicode_input.buffer);
     Vector_destroy_char(&self->output);
     Vector_destroy_char(&self->uri_matcher.match);
+
+    Vector_destroy_RcPtr_VtImageSurface(&self->images);
+    Vector_destroy_RcPtr_VtImageSurfaceView(&self->image_views);
     Vector_destroy_RcPtr_VtCommand(&self->shell_commands);
+
+    RcPtr_destroy_VtImageSurface(&self->manipulated_image);
+
     free(self->title);
     free(self->active_hyperlink);
     free(self->work_dir);

@@ -16,10 +16,11 @@ const char*
 image_rgb_vs_src =
 "#version 120\n"
 "attribute vec4 coord;"
+"uniform vec2 offset;"
 "varying vec2 tex_coord;"
 "void main(){"
 "tex_coord=coord.zw;"
-"gl_Position=vec4(coord.xy,0,1);"
+"gl_Position=vec4(coord.xy+offset,0,1);"
 "}";
 
 

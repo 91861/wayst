@@ -15,13 +15,13 @@ static void gl_check_error();
 
 typedef struct
 {
-    char* name;
+    char  name[16];
     GLint location;
 } Uniform;
 
 typedef struct
 {
-    char* name;
+    char  name[16];
     GLint location;
 } Attribute;
 
@@ -33,6 +33,16 @@ typedef struct
     Attribute attribs[SHADER_MAX_NUM_VERT_ATTRIBS];
     Uniform   uniforms[SHADER_MAX_NUM_UNIFORMS];
 } Shader;
+
+static inline GLint Shader_uniform_location(const Shader* self, const char* name)
+{
+    for (uint_fast8_t i = 0; i < ARRAY_SIZE(self->uniforms); ++i) {
+        if (!strcmp(name, self->uniforms[i].name)) {
+            return self->uniforms[i].location;
+        }
+    }
+    ASSERT_UNREACHABLE;
+}
 
 typedef struct
 {
@@ -163,7 +173,7 @@ __attribute__((sentinel, cold)) static Shader Shader_new(const char* vs_src,
     glDetachShader(id, fs);
     glDeleteShader(fs);
 
-    Shader ret = { .id = id, .attribs = { { 0 } }, .uniforms = { { 0 } } };
+    Shader ret = { .id = id, .attribs = {{{0},0}}, .uniforms = {{{0},0}}};
 
     uint32_t attr_idx = 0, uni_idx = 0;
     va_list  ap;
@@ -171,11 +181,13 @@ __attribute__((sentinel, cold)) static Shader Shader_new(const char* vs_src,
     for (char* name = NULL; (name = va_arg(ap, char*));) {
         GLint res = glGetAttribLocation(id, name);
         if (res != -1) {
-            ret.attribs[attr_idx++] = (Attribute){ .location = res, .name = name };
+            ret.attribs[attr_idx] = (Attribute){ .location = res };
+            memcpy(ret.attribs[attr_idx++].name, name, strnlen(name, 16) + 1);
         } else {
             res = glGetUniformLocation(id, name);
             if (res != -1) {
-                ret.uniforms[uni_idx++] = (Uniform){ .location = res, .name = name };
+                ret.uniforms[uni_idx] = (Uniform){ .location = res };
+                memcpy(ret.uniforms[uni_idx++].name, name, strnlen(name, 16) + 1);
             } else {
                 ERR("Failed to bind shader variable \'%s\' location", name);
             }

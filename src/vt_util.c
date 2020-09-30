@@ -694,6 +694,19 @@ __attribute__((cold)) void Vt_dump_info(Vt* self)
             }
         }
 
+        if (self->lines.buf[i].images) {
+            for (uint16_t j = 0; j < self->lines.buf[i].images->size; ++j) {
+                VtLine*             ln  = &self->lines.buf[i];
+                VtImageSurfaceView* vu  = RcPtr_get_VtImageSurfaceView(&ln->images->buf[j]);
+                VtImageSurface*     src = RcPtr_get_VtImageSurface(&vu->source_image_surface);
+                printf("              image anchor[%u] id: %u %ux%u\n",
+                       j,
+                       src->id,
+                       src->width,
+                       src->height);
+            }
+        }
+
         Vector_destroy_char(&str);
     }
 }

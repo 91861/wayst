@@ -115,7 +115,7 @@
         self->buf = NULL;                                                                          \
     }                                                                                              \
                                                                                                    \
-    static inline size_t Vector_index_##t(Vector_##t* self, t* i)                                  \
+    static inline size_t Vector_index_##t(const Vector_##t* self, t* i)                            \
     {                                                                                              \
         ASSERT(i >= self->buf && (size_t)(i - self->buf) <= self->size,                            \
                "Vector iterator out of range");                                                    \
@@ -299,7 +299,7 @@
         self->buf = NULL;                                                                          \
     }                                                                                              \
                                                                                                    \
-    static inline size_t Vector_index_##t(Vector_##t* self, t* i)                                  \
+    static inline size_t Vector_index_##t(const Vector_##t* self, t* i)                            \
     {                                                                                              \
         ASSERT(i >= self->buf && (size_t)(i - self->buf) <= self->size,                            \
                "Vector iterator out of range");                                                    \

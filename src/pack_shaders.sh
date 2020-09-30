@@ -1,5 +1,6 @@
 #!/bin/bash
 # find glsl shaders in given directory and export them as a C header removing comments and whitespace wherever possible
+# TODO: grep for uniform declarations and generate #define-s with their indicies 
 
 function process {
     prepr_lines="`echo "$2"|grep .|grep '#'|sed 's/.*/"&\\\\\\\n"/'`"
