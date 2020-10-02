@@ -111,6 +111,7 @@ enum KeyCommands
     KCMD_MARK_SCROLL_UP,
     KCMD_MARK_SCROLL_DN,
 
+    KCMD_EXTERN_PIPE,
     KCMD_KEYBOARD_SELECT,
     KCMD_HTML_DUMP,
     KCMD_DUPLICATE,
@@ -128,6 +129,13 @@ enum LcdFilter
     LCD_FILTER_H_BGR,
     LCD_FILTER_V_RGB,
     LCD_FILTER_V_BGR,
+};
+
+enum extern_pipe_source_e
+{
+    EXTERN_PIPE_SOURCE_BUFFER,
+    EXTERN_PIPE_SOURCE_VIEWPORT,
+    EXTERN_PIPE_SOURCE_COMMAND,
 };
 
 typedef struct
@@ -166,7 +174,7 @@ typedef struct
 
     bool has_bold_fonts, has_italic_fonts, has_bold_italic_fonts, has_symbol_fonts, has_color_fonts;
 
-    AString term, vte_version, locale, title, directory, uri_handler;
+    AString term, vte_version, locale, title, directory, uri_handler, extern_pipe_handler;
 
     char* user_app_id;
     char* user_app_id_2;
@@ -227,6 +235,8 @@ typedef struct
         CURSOR_STYLE_BEAM,
         CURSOR_STYLE_UNDERLINE,
     } initial_cursor_style;
+
+    enum extern_pipe_source_e extern_pipe_source;
 
 } Settings;
 

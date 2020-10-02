@@ -1191,6 +1191,11 @@ static Vector_char Vt_line_to_string(const Vt*   self,
 }
 
 /**
+ * Get UTF-8 encoded string from a range of lines
+ */
+Vector_char Vt_region_to_string(Vt* self, size_t begin_line, size_t end_line);
+
+/**
  * Get current work directory */
 static const char* Vt_get_work_directory(const Vt* self)
 {

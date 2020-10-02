@@ -188,76 +188,82 @@ static struct option long_options[] = {
 #define OPT_URI_HANDLER_IDX 54
     [OPT_URI_HANDLER_IDX] = { "uri-handler", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_COPY_IDX 55
+#define OPT_EXTERN_PIPE_HANDLER_IDX 55
+    [OPT_EXTERN_PIPE_HANDLER_IDX] = { "extern-pipe", required_argument, 0, 0 },
+
+#define OPT_BIND_KEY_COPY_IDX 56
     [OPT_BIND_KEY_COPY_IDX] = { "bind-key-copy", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_PASTE_IDX 56
+#define OPT_BIND_KEY_PASTE_IDX 57
     [OPT_BIND_KEY_PASTE_IDX] = { "bind-key-paste", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_ENLARGE_IDX 57
+#define OPT_BIND_KEY_ENLARGE_IDX 58
     [OPT_BIND_KEY_ENLARGE_IDX] = { "bind-key-enlarge", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_SHRINK_IDX 58
+#define OPT_BIND_KEY_SHRINK_IDX 59
     [OPT_BIND_KEY_SHRINK_IDX] = { "bind-key-shrink", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_UNI_IDX 59
+#define OPT_BIND_KEY_UNI_IDX 60
     [OPT_BIND_KEY_UNI_IDX] = { "bind-key-unicode", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_PG_UP_IDX 60
+#define OPT_BIND_KEY_PG_UP_IDX 61
     [OPT_BIND_KEY_PG_UP_IDX] = { "bind-key-pg-up", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_PG_DN_IDX 61
+#define OPT_BIND_KEY_PG_DN_IDX 62
     [OPT_BIND_KEY_PG_DN_IDX] = { "bind-key-pg-down", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_LN_UP_IDX 62
+#define OPT_BIND_KEY_LN_UP_IDX 63
     [OPT_BIND_KEY_LN_UP_IDX] = { "bind-key-ln-up", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_LN_DN_IDX 63
+#define OPT_BIND_KEY_LN_DN_IDX 64
     [OPT_BIND_KEY_LN_DN_IDX] = { "bind-key-ln-down", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_MRK_UP_IDX 64
+#define OPT_BIND_KEY_MRK_UP_IDX 65
     [OPT_BIND_KEY_MRK_UP_IDX] = { "bind-key-mark-up", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_MRK_DN_IDX 65
+#define OPT_BIND_KEY_MRK_DN_IDX 66
     [OPT_BIND_KEY_MRK_DN_IDX] = { "bind-key-mark-down", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_COPY_CMD_IDX 66
+#define OPT_BIND_KEY_COPY_CMD_IDX 67
     [OPT_BIND_KEY_COPY_CMD_IDX] = { "bind-key-copy-output", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_KSM_IDX 67
+#define OPT_BIND_KEY_EXTERN_PIPE_IDX 68
+    [OPT_BIND_KEY_EXTERN_PIPE_IDX] = { "bind-key-extern-pipe", required_argument, 0, 0 },
+
+#define OPT_BIND_KEY_KSM_IDX 69
     [OPT_BIND_KEY_KSM_IDX] = { "bind-key-kbd-select", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_HTML_DUMP_IDX 68
+#define OPT_BIND_KEY_HTML_DUMP_IDX 70
     [OPT_BIND_KEY_HTML_DUMP_IDX] = { "bind-key-html-dump", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_DUP_IDX 69
+#define OPT_BIND_KEY_DUP_IDX 71
     [OPT_BIND_KEY_DUP_IDX] = { "bind-key-duplicate", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_DEBUG_IDX 70
+#define OPT_BIND_KEY_DEBUG_IDX 72
     [OPT_BIND_KEY_DEBUG_IDX] = { "bind-key-debug", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_QUIT_IDX 71
+#define OPT_BIND_KEY_QUIT_IDX 73
     [OPT_BIND_KEY_QUIT_IDX] = { "bind-key-quit", required_argument, 0, 0 },
 
-#define OPT_DEBUG_PTY_IDX 72
+#define OPT_DEBUG_PTY_IDX 74
     [OPT_DEBUG_PTY_IDX] = { "debug-pty", no_argument, 0, 'D' },
 
-#define OPT_DEBUG_VT_IDX 73
+#define OPT_DEBUG_VT_IDX 75
     [OPT_DEBUG_VT_IDX] = { "debug-vt", no_argument, 0, 0 },
 
-#define OPT_DEBUG_GFX_IDX 74
+#define OPT_DEBUG_GFX_IDX 76
     [OPT_DEBUG_GFX_IDX] = { "debug-gfx", no_argument, 0, 'G' },
 
-#define OPT_DEBUG_FONT_IDX 75
+#define OPT_DEBUG_FONT_IDX 77
     [OPT_DEBUG_FONT_IDX] = { "debug-font", no_argument, 0, 'F' },
 
-#define OPT_VERSION_IDX 76
+#define OPT_VERSION_IDX 78
     [OPT_VERSION_IDX] = { "version", no_argument, 0, 'v' },
 
-#define OPT_HELP_IDX 77
+#define OPT_HELP_IDX 79
     [OPT_HELP_IDX] = { "help", no_argument, 0, 'h' },
 
-#define OPT_SENTINEL_IDX 78
+#define OPT_SENTINEL_IDX 80
     [OPT_SENTINEL_IDX] = { 0 }
 };
 
@@ -333,12 +339,16 @@ static const char* long_options_descriptions[][2] = {
     [OPT_BLINK_IDX]        = { "bool:int?:int?:int?",
                         "Blinking cursor - enable:rate[ms]:suspend[ms]:end[s](<0 never)" },
 
-    [OPT_SCROLL_LINES_IDX] = { arg_int, "Lines scrolled per wheel click (default: 3)" },
-    [OPT_SCROLLBACK_IDX]   = { arg_int, "Set scrollback buffer size (default: 2000)" },
-    [OPT_URI_HANDLER_IDX]  = { arg_string, "Set URI handler program (default: xdg-open)" },
-    [OPT_PADDING_IDX]      = { "bool:int?",
+    [OPT_SCROLL_LINES_IDX]        = { arg_int, "Lines scrolled per wheel click (default: 3)" },
+    [OPT_SCROLLBACK_IDX]          = { arg_int, "Scrollback buffer size (default: 2000)" },
+    [OPT_URI_HANDLER_IDX]         = { arg_string, "URI handler program (default: xdg-open)" },
+    [OPT_EXTERN_PIPE_HANDLER_IDX] = { "string:name?",
+                                      "Extern pipe handler and mode - "
+                                      "executable:command/screen/buffer "
+                                      "(default: none:command)" },
+    [OPT_PADDING_IDX]             = { "bool:int?",
                           "Pad screen content: center:extra padding[px] (default: true:0)" },
-    [OPT_SCROLLBAR_IDX]    = { "int:int?:int?:int?",
+    [OPT_SCROLLBAR_IDX]           = { "int:int?:int?:int?",
                             "width[px]:min length[px]:hide delay[ms]:fade time[ms] (default: "
                             "10:20:1500:150)" },
 
@@ -364,9 +374,12 @@ static const char* long_options_descriptions[][2] = {
                                   "(default: "
                                   "C+S+Right)" },
 
-    [OPT_BIND_KEY_COPY_CMD_IDX] = { arg_key,
+    [OPT_BIND_KEY_COPY_CMD_IDX]    = { arg_key,
                                     "Copy last command output to clipboard key command (default: "
                                     "C+S+x)" },
+    [OPT_BIND_KEY_EXTERN_PIPE_IDX] = { arg_key,
+                                       "Pipe content to external program (default: "
+                                       "C+S+backslash)" },
 
     [OPT_BIND_KEY_KSM_IDX] = { arg_key, "Enter keyboard select mode key command (default: C+S+k)" },
     [OPT_BIND_KEY_HTML_DUMP_IDX] = { arg_key, "HTML screen dump key command (default: C+S+F12)" },

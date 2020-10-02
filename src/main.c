@@ -883,6 +883,45 @@ static bool App_maybe_handle_application_key(App*     self,
         }
         App_flash(self);
         return true;
+    } else if (KeyCommand_is_active(&cmd[KCMD_EXTERN_PIPE], key, rawkey, mods)) {
+        if (!settings.extern_pipe_handler.str) {
+            WRN("external pipe not configured\n");
+            App_flash(self);
+            return true;
+        }
+
+        Vector_char content;
+
+        switch (settings.extern_pipe_source) {
+            case EXTERN_PIPE_SOURCE_COMMAND: {
+                const VtCommand* command = Vt_get_last_completed_command(vt);
+                if (command) {
+                    content = Vt_command_to_string(vt, command, 0);
+                    break;
+                }
+            }
+            /* fallthrough */
+            case EXTERN_PIPE_SOURCE_VIEWPORT:
+                content =
+                  Vt_region_to_string(vt, Vt_visual_top_line(vt), Vt_visual_bottom_line(vt));
+                break;
+            case EXTERN_PIPE_SOURCE_BUFFER:
+                content = Vt_region_to_string(vt, 0, Vt_bottom_line(vt));
+                break;
+        }
+
+        if (content.size > 1) {
+            int pipe_input_fd =
+              spawn_process(NULL, settings.extern_pipe_handler.str, NULL, true, true);
+            write(pipe_input_fd, content.buf, content.size);
+            close(pipe_input_fd);
+        } else {
+            App_flash(self);
+        }
+
+        Vector_destroy_char(&content);
+
+        return true;
     }
 
     return false;

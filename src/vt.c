@@ -500,6 +500,28 @@ Vector_char Vt_select_region_to_string(Vt* self)
     return ret;
 }
 
+Vector_char Vt_region_to_string(Vt* self, size_t begin_line, size_t end_line)
+{
+    Vector_char tmp, ret = Vt_line_to_string(self,
+                                             begin_line,
+                                             0,
+                                             Vt_col(self),
+                                             Vt_line_at(self, begin_line)->was_reflown ? "" : "\n");
+    Vector_pop_char(&ret);
+    for (size_t i = begin_line + 1; i < end_line - 1; ++i) {
+        tmp =
+          Vt_line_to_string(self, i, 0, Vt_col(self), self->lines.buf[i].was_reflown ? "" : "\n");
+        Vector_pushv_char(&ret, tmp.buf, tmp.size - 1);
+        Vector_destroy_char(&tmp);
+    }
+
+    tmp = Vt_line_to_string(self, end_line, 0, Vt_col(self), "");
+    Vector_pushv_char(&ret, tmp.buf, tmp.size);
+    Vector_destroy_char(&tmp);
+
+    return ret;
+}
+
 /**
  * initialize selection region to cell by clicked pixel */
 void Vt_select_init(Vt* self, enum SelectMode mode, int32_t x, int32_t y)
@@ -4794,7 +4816,7 @@ static void Vt_delete_chars(Vt* self, size_t n)
 static inline void Vt_scroll_out_all_content(Vt* self)
 {
     int64_t to_add = 0;
-    for (size_t i = Vt_visual_bottom_line(self); i > Vt_visual_top_line(self); --i) {
+    for (size_t i = Vt_visual_bottom_line(self); i >= Vt_visual_top_line(self); --i) {
         if (self->lines.buf[i].data.size) {
             to_add += i;
             break;

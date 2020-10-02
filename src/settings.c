@@ -525,6 +525,12 @@ static void settings_make_default()
                 .is_name = false,
                 .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
             },
+
+            [KCMD_EXTERN_PIPE] = (KeyCommand) {
+                .key.code = KEY(backslash),
+                .is_name = false,
+                .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
+            },
         },
 
         .skip_config    = false,
@@ -546,7 +552,9 @@ static void settings_make_default()
         .title       = AString_new_static(APPLICATION_NAME),
         .user_app_id = NULL,
 
-        .uri_handler = AString_new_static("xdg-open"),
+        .uri_handler         = AString_new_static("xdg-open"),
+        .extern_pipe_handler = AString_new_uninitialized(),
+        .extern_pipe_source  = EXTERN_PIPE_SOURCE_COMMAND,
 
         .font_style_regular     = AString_new_uninitialized(),
         .font_style_bold        = AString_new_uninitialized(),
@@ -848,6 +856,29 @@ static void handle_option(const char opt, const int array_index, const char* val
             case 3:
                 settings.cursor_blink_end_s = strtol(buf.buf, NULL, 10);
                 break;
+                L_PROCESS_MULTI_ARG_PACK_END
+        } break;
+
+        case OPT_EXTERN_PIPE_HANDLER_IDX: {
+
+            L_PROCESS_MULTI_ARG_PACK_BEGIN(value)
+            case 0: {
+                Vector_Vector_char values = expand_list_value(buf.buf, on_list_expand_syntax_error);
+                AString_replace_with_dynamic(&settings.extern_pipe_handler, strdup(buf.buf));
+                Vector_destroy_Vector_char(&values);
+            } break;
+            case 1:
+                if (!strcasecmp(buf.buf, "buffer")) {
+                    settings.extern_pipe_source = EXTERN_PIPE_SOURCE_BUFFER;
+                } else if (!strcasecmp(buf.buf, "screen") || !strcasecmp(buf.buf, "viewport")) {
+                    settings.extern_pipe_source = EXTERN_PIPE_SOURCE_VIEWPORT;
+                } else if (!strcasecmp(buf.buf, "command")) {
+                    settings.extern_pipe_source = EXTERN_PIPE_SOURCE_COMMAND;
+                } else {
+                    L_WARN_BAD_VALUE
+                }
+                break;
+
                 L_PROCESS_MULTI_ARG_PACK_END
         } break;
 
@@ -1302,6 +1333,9 @@ static void handle_option(const char opt, const int array_index, const char* val
                 case OPT_BIND_KEY_QUIT_IDX:
                     command = &settings.key_commands[KCMD_QUIT];
                     break;
+                case OPT_BIND_KEY_EXTERN_PIPE_IDX:
+                    command = &settings.key_commands[KCMD_EXTERN_PIPE];
+                    break;
                 default:
                     ASSERT_UNREACHABLE;
             }
@@ -1457,6 +1491,7 @@ void settings_cleanup()
     AString_destroy(&settings.locale);
     AString_destroy(&settings.title);
     AString_destroy(&settings.uri_handler);
+    AString_destroy(&settings.extern_pipe_handler);
     AString_destroy(&settings.directory);
     AString_destroy(&settings.font_style_regular);
     AString_destroy(&settings.font_style_bold);
