@@ -3770,9 +3770,7 @@ static void Vt_handle_APC(Vt* self, char c)
                           image_height,
                           payload);
 
-                        if (error_string) {
-                            Vt_output_formated(self, "\e_Gi=%u;%s\e\\", id, error_string);
-                        }
+                        Vt_output_formated(self, "\e_Gi=%u;%s\e\\", id, OR(error_string, "OK"));
                     } break;
                     case VT_IMAGE_PROTO_ACTION_DISPLAY: {
                         Vt_img_proto_display(self, id, display_args);
@@ -3901,9 +3899,8 @@ static void Vt_handle_APC(Vt* self, char c)
             }
         }
 
-        Vector_destroy_char(&self->parser.active_sequence);
-        self->parser.active_sequence = Vector_new_char();
-        self->parser.state           = PARSER_STATE_LITERAL;
+        Vector_clear_char(&self->parser.active_sequence);
+        self->parser.state = PARSER_STATE_LITERAL;
     }
 }
 

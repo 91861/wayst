@@ -908,6 +908,9 @@ static bool App_maybe_handle_application_key(App*     self,
             case EXTERN_PIPE_SOURCE_BUFFER:
                 content = Vt_region_to_string(vt, 0, Vt_bottom_line(vt));
                 break;
+
+            default:
+                ASSERT_UNREACHABLE;
         }
 
         if (content.size > 1) {
