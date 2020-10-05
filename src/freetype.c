@@ -647,6 +647,9 @@ FreetypeOutput* Freetype_load_and_render_glyph(Freetype*              self,
 
 void Freetype_destroy(Freetype* self)
 {
+    if (!self->initialized) {
+        return;
+    }
     Freetype_unload_fonts(self);
     Vector_destroy_FreetypeStyledFamily(&self->primaries);
     Vector_destroy_FreetypeFace(&self->symbol_faces);
@@ -657,6 +660,6 @@ void Freetype_destroy(Freetype* self)
         FT_Bitmap_Done(self->ft, &self->converted_output_bitmap);
         self->conversion_bitmap_initialized = false;
     }
-    self->initialized = false;
     FT_Done_FreeType(self->ft);
+    self->initialized = false;
 }

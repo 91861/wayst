@@ -40,7 +40,7 @@
     static void MapEntry_destroy_##k##_##v(MapEntry_##k##_##v* self)                               \
     {                                                                                              \
         if (dtor) {                                                                                \
-            dtor(&self->value);                                                                    \
+            ((void (*)(v*))dtor)(&self->value);                                                    \
         }                                                                                          \
     }                                                                                              \
                                                                                                    \
@@ -74,7 +74,7 @@
         for (MapEntry_##k##_##v* i = NULL; (i = Vector_iter_MapEntry_##k##_##v(bucket, i));) {     \
             if (compare_func(&i->key, &entry.key)) {                                               \
                 if (dtor) {                                                                        \
-                    dtor(&i->value);                                                               \
+                    ((void (*)(v*))dtor)(&i->value);                                               \
                 }                                                                                  \
                 i->value = entry.value;                                                            \
                 return &i->value;                                                                  \

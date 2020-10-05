@@ -79,9 +79,13 @@
     }                                                                                              \
                                                                                                    \
     static inline void Vector_pushv_##t(Vector_##t* self, const t* const argv, size_t n)           \
-    { /* TODO: optimize */                                                                         \
-        for (size_t i = 0; i < n; ++i)                                                             \
-            Vector_push_##t(self, argv[i]);                                                        \
+    {                                                                                              \
+        if (unlikely(!n))                                                                          \
+            return;                                                                                \
+        if (unlikely(self->cap < self->size + n))                                                  \
+            self->buf = realloc(self->buf, (self->cap = self->size + n) * sizeof(t));              \
+        memcpy(self->buf + self->size, argv, n * sizeof(t));                                       \
+        self->size += n;                                                                           \
     }                                                                                              \
                                                                                                    \
     static inline void Vector_pop_n_##t(Vector_##t* self, size_t n)                                \
@@ -263,9 +267,13 @@
     }                                                                                              \
                                                                                                    \
     static inline void Vector_pushv_##t(Vector_##t* self, const t* const argv, size_t n)           \
-    { /* TODO: optimize */                                                                         \
-        for (size_t i = 0; i < n; ++i)                                                             \
-            Vector_push_##t(self, argv[i]);                                                        \
+    {                                                                                              \
+        if (unlikely(!n))                                                                          \
+            return;                                                                                \
+        if (unlikely(self->cap < self->size + n))                                                  \
+            self->buf = realloc(self->buf, (self->cap = self->size + n) * sizeof(t));              \
+        memcpy(self->buf + self->size, argv, n * sizeof(t));                                       \
+        self->size += n;                                                                           \
     }                                                                                              \
                                                                                                    \
     static inline void Vector_pop_n_##t(Vector_##t* self, size_t n)                                \

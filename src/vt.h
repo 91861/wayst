@@ -130,7 +130,7 @@ typedef struct
         VT_RUNE_BOLD,
         VT_RUNE_ITALIC,
         VT_RUNE_BOLD_ITALIC,
-        TV_RUNE_UNSTYLED,
+        VT_RUNE_UNSTYLED,
     } style : 3;
 } Rune;
 
