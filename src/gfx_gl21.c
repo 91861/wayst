@@ -2350,10 +2350,10 @@ static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const
                     default:;
                 }
                 glDrawArrays(GL_QUADS, 0, 4);
-                glDisable(GL_SCISSOR_TEST);
-                glDisable(GL_BLEND);
             }
         }
+        glDisable(GL_SCISSOR_TEST);
+        glDisable(GL_BLEND);
     }
 }
 
@@ -2572,7 +2572,7 @@ static void GfxOpenGL21_draw_overlays(GfxOpenGL21* self, const Vt* vt, const Ui*
 static void GfxOpenGL21_draw_flash(GfxOpenGL21* self, float fraction)
 {
     glEnable(GL_BLEND);
-    glViewport(0, 0, self->win_w, self->win_h);
+    glDisable(GL_SCISSOR_TEST);
     glBindTexture(GL_TEXTURE_2D, 0);
     Shader_use(&self->solid_fill_shader);
     float alpha = sinf((1.0 - fraction) * M_1_PI) / 4.0;
@@ -2707,10 +2707,12 @@ void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
                  ColorRGBA_get_float(vt->colors.bg, 1),
                  ColorRGBA_get_float(vt->colors.bg, 2),
                  ColorRGBA_get_float(vt->colors.bg, 3));
+
     glClear(GL_COLOR_BUFFER_BIT);
     for (VtLine* i = begin; i < end; ++i) {
         GfxOpenGL21_rasterize_line(gfx, vt, i, i - begin, false);
     }
+
     glDisable(GL_BLEND);
     glEnable(GL_SCISSOR_TEST);
     Pair_uint32_t chars = Gfx_get_char_size(self);
@@ -2751,12 +2753,10 @@ void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
     }
 
     GfxOpenGL21_draw_images(gfx, vt, false);
-
-    glBindTexture(GL_TEXTURE_2D, 0);
-    glDisable(GL_SCISSOR_TEST);
-    glEnable(GL_BLEND);
     GfxOpenGL21_draw_overlays(gfx, vt, ui);
+
     if (gfx->flash_fraction < 1.0f && gfx->flash_fraction > 0.0f) {
+        glViewport(0, 0, gfx->win_w, gfx->win_h);
         GfxOpenGL21_draw_flash(gfx, gfx->flash_fraction);
     }
 
