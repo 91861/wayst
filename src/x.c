@@ -67,7 +67,9 @@ static void     WindowX11_set_pointer_style(struct WindowBase* self, enum MouseP
 static void*    WindowX11_get_gl_ext_proc_adress(struct WindowBase* self, const char* name);
 static uint32_t WindowX11_get_keycode_from_name(struct WindowBase* self, char* name);
 static void     WindowX11_set_current_context(struct WindowBase* self, bool this);
-static TimePoint* WindowX11_process_timers(struct WindowBase* self)
+static inline void WindowX11_set_urgent(struct WindowBase* self);
+static inline void WindowX11_set_stack_order(struct WindowBase* self, bool front_or_back);
+static TimePoint*  WindowX11_process_timers(struct WindowBase* self)
 {
     return NULL;
 }
@@ -89,6 +91,8 @@ static struct IWindow window_interface_x11 = {
     .get_keycode_from_name  = WindowX11_get_keycode_from_name,
     .set_pointer_style      = WindowX11_set_pointer_style,
     .set_current_context    = WindowX11_set_current_context,
+    .set_urgent             = WindowX11_set_urgent,
+    .set_stack_order        = WindowX11_set_stack_order,
 };
 
 typedef struct
@@ -399,7 +403,7 @@ static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
     /* XSetIconName(globalX11->display, windowX11(win)->window, "wayst"); */
 
     XClassHint class_hint = { APPLICATION_NAME, "CLASS" };
-    XWMHints   wm_hints   = { .flags = InputHint, .input = 1 };
+    XWMHints   wm_hints   = { .flags = InputHint, .input = True };
     XSetWMProperties(globalX11->display,
                      windowX11(win)->window,
                      NULL,
@@ -438,6 +442,25 @@ struct WindowBase* Window_new_x11(Pair_uint32_t res)
     return win;
 }
 
+static inline void WindowX11_set_urgent(struct WindowBase* self)
+{
+    XEvent e               = { 0 };
+    e.type                 = ClientMessage;
+    e.xclient.window       = windowX11(self)->window;
+    e.xclient.message_type = XInternAtom(globalX11->display, "_NET_WM_STATE", True);
+    e.xclient.format       = 32;
+    e.xclient.data.l[0]    = _NET_WM_STATE_ADD;
+    e.xclient.data.l[1] = XInternAtom(globalX11->display, "_NET_WM_STATE_DEMANDS_ATTENTION", True);
+    e.xclient.data.l[3] = 0;
+
+    XSendEvent(globalX11->display,
+               DefaultRootWindow(globalX11->display),
+               False,
+               SubstructureRedirectMask | SubstructureNotifyMask,
+               (XEvent*)&e);
+    XFlush(globalX11->display);
+}
+
 static inline void WindowX11_fullscreen_change_state(struct WindowBase* self, const long arg)
 {
     XEvent e               = { 0 };
@@ -455,6 +478,15 @@ static inline void WindowX11_fullscreen_change_state(struct WindowBase* self, co
                SubstructureRedirectMask | SubstructureNotifyMask,
                (XEvent*)&e);
     XFlush(globalX11->display);
+}
+
+static inline void WindowX11_set_stack_order(struct WindowBase* self, bool front_or_back)
+{
+    if (front_or_back) {
+        XRaiseWindow(globalX11->display, windowX11(self)->window);
+    } else {
+        XLowerWindow(globalX11->display, windowX11(self)->window);
+    }
 }
 
 static void WindowX11_set_fullscreen(struct WindowBase* self, bool fullscreen)
@@ -547,6 +579,7 @@ static void WindowX11_events(struct WindowBase* self)
                     WindowX11_set_pointer_style(self, MOUSE_POINTER_ARROW);
                 }
                 FLAG_UNSET(self->state_flags, WINDOW_IS_IN_FOCUS);
+
                 break;
 
             case Expose:

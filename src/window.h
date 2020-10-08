@@ -60,6 +60,8 @@ struct IWindow
     void (*set_pointer_style)(struct WindowBase* self, enum MousePointerStyle);
     void* (*get_gl_ext_proc_adress)(struct WindowBase* self, const char* name);
     uint32_t (*get_keycode_from_name)(struct WindowBase* self, char* name);
+    void (*set_urgent)(struct WindowBase* self);
+    void (*set_stack_order)(struct WindowBase* self, bool front_or_back);
 };
 
 typedef struct WindowBase
@@ -189,6 +191,16 @@ static inline void Window_set_pointer_style(struct WindowBase* self, enum MouseP
 static inline uint32_t Window_get_keysym_from_name(struct WindowBase* self, char* name)
 {
     return self->interface->get_keycode_from_name(self, name);
+}
+
+static inline void Window_set_urgent(struct WindowBase* self)
+{
+    self->interface->set_urgent(self);
+}
+
+static inline void Window_set_stack_order(struct WindowBase* self, bool front_or_back)
+{
+    self->interface->set_stack_order(self, front_or_back);
 }
 
 /* Trivial base functions */

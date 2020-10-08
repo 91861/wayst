@@ -164,7 +164,11 @@ ssize_t Monitor_read(Monitor* self)
 
 ssize_t Monitor_write(Monitor* self, char* buffer, size_t bytes)
 {
-    return write(self->child_fd, buffer, bytes);
+    ssize_t ret = write(self->child_fd, buffer, bytes);
+    if (ret == -1) {
+        WRN("Writing to pty failed %s\n", strerror(errno));
+    }
+    return ret;
 }
 
 void Monitor_kill(Monitor* self)

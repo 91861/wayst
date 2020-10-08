@@ -107,15 +107,12 @@ static void Vt_output(Vt* self, const char* buf, size_t len)
 
 static void Vt_bell(Vt* self)
 {
-    if (!settings.no_flash) {
+    if (!settings.no_flash)
         CALL_FP(self->callbacks.on_visual_bell, self->callbacks.user_data);
-    }
-    if (self->modes.pop_on_bell) {
-        // TODO: CALL_FP(self->callbacks.on_raise, self->callbacks.user_data);
-    }
-    if (self->modes.urgency_on_bell) {
-        // TODO: CALL_FP(self->callbacks.on_set_urgent, self->callbacks.user_data);
-    }
+    if (self->modes.pop_on_bell)
+        CALL_FP(self->callbacks.on_restack_to_front, self->callbacks.user_data);
+    if (self->modes.urgency_on_bell)
+        CALL_FP(self->callbacks.on_urgency_set, self->callbacks.user_data);
 }
 
 static inline size_t Vt_top_line_alt(const Vt* const self)
@@ -4478,6 +4475,7 @@ static void Vt_handle_OSC(Vt* self, char c)
                               cmd->output_rows.first,
                               cmd->output_rows.second);
 
+                            CALL_FP(self->callbacks.on_urgency_set, self->callbacks.user_data);
                             if (minimized) {
                                 char* tm_str =
                                   TimeSpan_duration_string_approx(&cmd->execution_time);

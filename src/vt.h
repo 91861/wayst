@@ -398,6 +398,8 @@ typedef struct
         void (*on_clipboard_requested)(void*);
         void (*on_font_reload_requseted)(void*);
         void (*on_clipboard_sent)(void*, const char*);
+        void (*on_urgency_set)(void*);
+        void (*on_restack_to_front)(void*);
 
         void (*destroy_proxy)(void*, VtLineProxy*);
         void (*destroy_image_proxy)(void*, VtImageSurfaceProxy*);

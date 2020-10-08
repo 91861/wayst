@@ -100,6 +100,8 @@ static void*      WindowWl_get_gl_ext_proc_adress(struct WindowBase* self, const
 static uint32_t   WindowWl_get_keycode_from_name(struct WindowBase* self, char* name);
 static void       WindowWl_set_pointer_style(struct WindowBase* self, enum MousePointerStyle style);
 static void       WindowWl_set_current_context(struct WindowBase* self, bool this);
+static void       WindowWl_set_urgent(struct WindowBase* self);
+static void       WindowWl_set_stack_order(struct WindowBase* self, bool front_or_back);
 
 static struct IWindow window_interface_wayland = {
     .set_fullscreen         = WindowWl_set_fullscreen,
@@ -118,6 +120,8 @@ static struct IWindow window_interface_wayland = {
     .get_keycode_from_name  = WindowWl_get_keycode_from_name,
     .set_pointer_style      = WindowWl_set_pointer_style,
     .set_current_context    = WindowWl_set_current_context,
+    .set_urgent             = WindowWl_set_urgent,
+    .set_stack_order        = WindowWl_set_stack_order,
 };
 
 typedef struct
@@ -1587,6 +1591,16 @@ static void WindowWl_destroy(struct WindowBase* self)
     Vector_destroy_WlOutputInfo(&windowWl(self)->outputs);
 
     free(self);
+}
+
+static void WindowWl_set_urgent(struct WindowBase* self)
+{
+    /* currently there is no protocol extension for this */
+}
+
+static void WindowWl_set_stack_order(struct WindowBase* self, bool front_or_back)
+{
+    /* currently there is no protocol extension for this(?) */
 }
 
 static int WindowWl_get_connection_fd(struct WindowBase* self)

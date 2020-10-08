@@ -1423,6 +1423,17 @@ static Pair_uint32_t App_text_area_size(void* self)
     return win_size;
 }
 
+static void App_set_urgent(void* self)
+{
+    if (!Window_is_focused(((App*)self)->win))
+        Window_set_urgent(((App*)self)->win);
+}
+
+static void App_restack_to_front(void* self)
+{
+    Window_set_stack_order(((App*)self)->win, true);
+}
+
 static void App_set_callbacks(App* self)
 {
     self->vt.callbacks.user_data                           = self;
@@ -1445,6 +1456,8 @@ static void App_set_callbacks(App* self)
     self->vt.callbacks.on_action_performed                 = App_action;
     self->vt.callbacks.on_font_reload_requseted            = App_reload_font;
     self->vt.callbacks.on_desktop_notification_sent        = App_send_desktop_notification;
+    self->vt.callbacks.on_urgency_set                      = App_set_urgent,
+    self->vt.callbacks.on_restack_to_front                 = App_restack_to_front,
     self->vt.callbacks.destroy_proxy                       = App_destroy_proxy_handler;
     self->vt.callbacks.destroy_image_proxy                 = App_destroy_image_proxy_handler;
     self->vt.callbacks.destroy_image_view_proxy            = App_destroy_image_view_proxy_handler;
