@@ -6,8 +6,7 @@
 # About
 Simple terminal emulator for Wayland and X11 with OpenGL rendering and minimal dependencies.
 
-**Work in progress, expect bugs and missing features!**
-
+**This is roughly alpha quality, expect bugs!**
 
 # Features
 * Unicode support
@@ -16,21 +15,20 @@ Simple terminal emulator for Wayland and X11 with OpenGL rendering and minimal d
 * Dynamic colors
 * All text properties (squiggly underline, blinking, overline etc.)
 * Resizable font
-* Subpixel font rendering
+* Subpixel antialiasing
 * Mouse reporting
 * Scrollback
 * Mouse text selection
 * Clipboard
 * Configurable keybindings
-* Clickable links
-* Command history and marks[*](https://iterm2.com/documentation-shell-integration.html)
-
+* Clickable links, OSC 8 links
+* Command history and marks[*](https://github.com/91861/wayst#shell-integration)
+* kitty image protocol (experimental)
 
 # To-Do
-* All xterm and vte control sequences
 * Ligatures
-* Graphics
-
+* Sixel graphics
+* All xterm and vte control sequences
 
 # Building
 ```shell
@@ -48,7 +46,7 @@ make install
 
 To build without X11 or Wayland support set ```window_protocol=wayland``` or ```window_protocol=x11``` respectively. With both backends enabled wayst will default to wayland. You can force X11 mode with the ```xorg-only``` option.
 
-To build in debug mode set ```mode=debugoptimized```.
+To build with debuging symbols set ```mode=debugoptimized```.
 
 
 ## Installation from AUR
@@ -62,8 +60,9 @@ yay -S wayst-git
 
 # Usage
 
-#### Configuration:
+#### Configuration file
 All option can be set in a configuration file or passed as command line arguments. To see all supported options run ```wayst --help```.\
+\
 Wayst will look for: ```$XDG_CONFIG_HOME/wayst/config``` or ```$HOME/.config/wayst/config```.
 
 Example:
@@ -71,27 +70,22 @@ Example:
 # '#' starts a line comment
 # Strings with spaces need double quotes (use \" for " and \\ for \).
 
-style-bold = "Semibold"
-
 # Set a list of primary fonts (All available styles will be loaded)
+# You need to list EVERY font you want to use. for example:
+# "IBM Plex Sans Thai" for thai script, "Noto Sans Math" for math symbols.
 font = [
     # You can set codepoint ranges to which a given font should be applied.
     # Here we define <min>..u+24ff and u+2580..<max> to exclude the unicode
-    # box drawing block, those characters will be loaded (if present) from
+    # box drawing block. Those characters will be loaded (if present) from
     # the following fonts in this list.
     "mononoki:..u+24ff:u+2580..",
-
     "sauce code pro nerd font",
-
-    # Mixing ttf/otf with bitmap fonts is fine, as long as all ASCII
-    # characters use the same format.
-    #
-    # You can set a size offset to keep a font smaller/larger than
-    # the global font size.
+    # Mixing ttf/otf with bitmap fonts is ok
+    # You can set an offset to keep fonts smaller/larger than the global size.
     "Terminus:-3"
 ]
 
-# Or use a single font
+# Or just use a single font
 # font = "IBM Plex Mono"
 
 # Set a list of 'symbol' fonts (Only the 'Regular' style will be loaded)
@@ -100,28 +94,31 @@ font-symbol = [
     "FontAwesome"
 ]
 
+# Set a list of color bitmap fonts.
 font-color = "Noto Color Emoji"
 
+# use Semibold as the Bold style
+style-bold = "Semibold"
 font-size = 10
 dpi = 96
 
 # Load one of the default colorschemes
 colorscheme = "wayst"
-
 # Overwrite parts of the colorscheme
 fg-color = "#c7eeff"
 bg-color = "#000000ee"
+unfocused-tint = "#00000033"
 
-term = "xterm-256color"
 no-flash = true
 
+term = "xterm-256color"
+
 title = "Terminal"
-title-format = "%2$s - %1$s"  #  <set by program> - Terminal
-# title-format = "%s [%s]"    #  Terminal [<set by program>]
-# title-format = "%2$s"       #  <set by program>
+title-format = "%2$s - %1$s"  # <set by program> - Terminal
+# title-format = "%s [%s]"    # Terminal [<set by program>]
+# title-format = "%2$s"       # <set by program>
 
-
-
+scrollback = 1000
 
 # xorg keysym names are case sensitive!
 bind-key-debug=Ctrl+Shift+Return
@@ -131,26 +128,29 @@ bind-key-copy=Ctrl+Shift+y
 bind-key-paste=Ctrl+Shift+p
 ```
 
-#### Default Keybindings:
+#### Shell integration
+Wayst can use [iTerm2 shell integration sequences](https://iterm2.com/documentation-shell-integration.html) to track command history.
+
+#### Default Keybindings
 Keys|Action|
  --- | ---
 ```Ctrl```+```Shift```+```c```            | Copy to clipboard
-```Ctrl```+```Shift```+```x```            | Copy output of last command to clipboard
+```Ctrl```+```Shift```+```x```            | Copy output of last command to clipboard[*](https://github.com/91861/wayst#shell-integration)
 ```Ctrl```+```Shift```+```v```            | Paste from clipboard
 ```Ctrl```+```Shift```+```=```            | Increase font size
 ```Ctrl```+```Shift```+```-```            | Decrease font size
 ```Ctrl```+```Shift```+```Up/Down```      | Scroll
 ```Ctrl```+```Shift```+```Page Up/Down``` | Scroll by page
-```Ctrl```+```Shift```+```Left/Right```   | Jump to previous/next command output or mark
+```Ctrl```+```Shift```+```Left/Right```   | Jump to previous/next command output or mark[*](https://github.com/91861/wayst#shell-integration)
 ```Ctrl```+```Shift```+```u```            | Enter unicode character by hex code
 ```Ctrl```+```Shift```+```k```            | Enter vi-like keyboard select mode
 ```Ctrl```+```Shift```+```d```            | Start new instance in active work directory (set by OSC 7)
 ```Ctrl```+```Shift```+```F12```          | HTML screen dump
+```Ctrl```+```Shift```+```\```            | Pipe to external program
 ```LMB```                                 | Select text
 ```RMB```                                 | Change selected region
 ```Shift```+```LMB```                     | Select text in mouse reporting mode
 ```Ctrl``` + ```LMB```                    | Open link/Box select
-
 
 # License
 MIT
