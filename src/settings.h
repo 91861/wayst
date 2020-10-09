@@ -114,6 +114,7 @@ enum KeyCommands
     KCMD_EXTERN_PIPE,
     KCMD_KEYBOARD_SELECT,
     KCMD_HTML_DUMP,
+    KCMD_OPEN_PWD,
     KCMD_DUPLICATE,
     KCMD_DEBUG,
     KCMD_QUIT,
@@ -187,6 +188,8 @@ typedef struct
     /* colors - normal, highlight */
     ColorRGBA bg, bghl;
     ColorRGB  fg, fghl;
+
+    ColorRGBA dim_tint;
 
     bool highlight_change_fg;
 
@@ -280,7 +283,8 @@ static bool KeyCommand_is_active(KeyCommand* com, uint32_t key, uint32_t rawkey,
     /*
      * For whatever stupid reason keysym from string returns keysyms obtainable
      * by converting keycodes using a keyboard map for SOME, BUT NOT ALL KEYS!
-     * Those need to be compared to a 'non-shifted' keysym.
+     * Those need to be compared to a non-shifted 'raw' keysym (we can't just use keycodes instead
+     * because this would ignote window system key remaps like 'caps:swapescape').
      */
     return com->mods == mods && (rawkey > 65000 ? com->key.code == key : com->key.code == rawkey);
 }

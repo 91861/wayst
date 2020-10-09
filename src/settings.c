@@ -531,6 +531,12 @@ static void settings_make_default()
                 .is_name = false,
                 .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
             },
+
+            [KCMD_OPEN_PWD] = (KeyCommand) {
+                .key.code = KEY(F10),
+                .is_name = false,
+                .mods = MODIFIER_SHIFT | MODIFIER_CONTROL
+            },
         },
 
         .skip_config    = false,
@@ -571,6 +577,8 @@ static void settings_make_default()
         .bghl   = { .r = 50,  .g = 50,  .b = 50, .a = 240 },
         .fg     = { .r = 255, .g = 255, .b = 255 },
         .fghl   = { .r = 255, .g = 255, .b = 255 },
+
+        .dim_tint = { .r = 0, .g = 0, .b = 0, .a = 0 },
 
         .highlight_change_fg = false,
         .dynamic_title       = true,
@@ -1244,6 +1252,17 @@ static void handle_option(const char opt, const int array_index, const char* val
             }
         } break;
 
+        case OPT_UNFOCUSED_TINT_COLOR: {
+            bool      failed = false;
+            ColorRGBA parsed = ColorRGBA_from_hex(value, &failed);
+            if (!failed) {
+                settings.dim_tint = parsed;
+            } else {
+                L_WARN_BAD_COLOR
+            }
+
+        } break;
+
         case OPT_BIND_KEY_COPY_IDX ... OPT_BIND_KEY_QUIT_IDX: {
             // point 'name_start' to after the last '+'
             const char* name_start = value;
@@ -1335,6 +1354,9 @@ static void handle_option(const char opt, const int array_index, const char* val
                     break;
                 case OPT_BIND_KEY_EXTERN_PIPE_IDX:
                     command = &settings.key_commands[KCMD_EXTERN_PIPE];
+                    break;
+                case OPT_BIND_KEY_OPEN_PWD:
+                    command = &settings.key_commands[KCMD_OPEN_PWD];
                     break;
                 default:
                     ASSERT_UNREACHABLE;

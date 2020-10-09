@@ -3767,10 +3767,15 @@ static void Vt_handle_APC(Vt* self, char c)
                           image_height,
                           payload);
 
-                        Vt_output_formated(self, "\e_Gi=%u;%s\e\\", id, OR(error_string, "OK"));
+                        if (id) {
+                            Vt_output_formated(self, "\e_Gi=%u;%s\e\\", id, OR(error_string, "OK"));
+                        }
                     } break;
                     case VT_IMAGE_PROTO_ACTION_DISPLAY: {
                         Vt_img_proto_display(self, id, display_args);
+                        if (id) {
+                            Vt_output_formated(self, "\e_Gi=%u;%s\e\\", id, OR(error_string, "OK"));
+                        }
                     } break;
                     case VT_IMAGE_PROTO_ACTION_DELETE: {
 
@@ -3998,7 +4003,8 @@ static void Vt_handle_OSC(Vt* self, char c)
 
             /* Set X property on top-level window (prop=val) */
             case 3:
-                // TODO:
+                // TODO: CALL_FP(self->callbacs.on_xproperty_set, self->callbacks.user_data, seq +2,
+                // strstr(seq+2,"=") + 1);
                 WRN("OSC 3 not implemented\n");
                 break;
 
@@ -4064,7 +4070,7 @@ static void Vt_handle_OSC(Vt* self, char c)
 
             /* 105 ; c Reset Special Color Number c.
              * It is reset to the color specified by the corresponding X resource. Any number
-             * of c parameters may be given.  These parameters corre- spond to the special
+             * of c parameters may be given.  These parameters correspond to the special
              * colors which can be set using an OSC 5 control (or by adding the maximum number
              * of colors using an OSC 4  control).
              */
@@ -4076,29 +4082,31 @@ static void Vt_handle_OSC(Vt* self, char c)
              */
             case 106:
                 // TODO:
-                WRN("Dynamic colors not implemented \'%s\'\n", seq);
+                WRN("Special colors not implemented \'%s\'\n", seq);
                 break;
 
             /* pwd info as URI */
             case 7: {
                 free(self->work_dir);
+                free(self->client_host);
                 char* uri = seq + 2; // 7;
                 if (streq_wildcard(uri, "file:*") && strnlen(uri, 8) == 8) {
-                    uri += 7; // skip 'file://'
-
-                    /* skip hostname */
-                    while (*uri && *uri != '/') {
+                    uri += 6; // skip 'file://'
+                    char* host = uri;
+                    while (*uri && *uri != '/')
                         ++uri;
-                    }
-                    self->work_dir = strdup(uri);
-                    LOG("Vt::work-dir{ %s }\n", self->work_dir);
+                    ptrdiff_t s                            = uri - host;
+                    self->client_host                      = malloc(s + 1);
+                    strncpy(self->client_host, host, s)[s] = '\0';
+                    self->work_dir                         = strdup(uri + 1 /* skip second '/' */);
+                    LOG("Vt::osc7{ host: %s, pwd: %s }\n", self->client_host, self->work_dir);
                 } else {
-                    self->work_dir = NULL;
+                    self->work_dir = self->client_host = NULL;
                     WRN("Bad URI \'%s\', scheme is not \'file\'\n", uri);
                 }
             } break;
 
-                /* mark text as hyperlink with URL */
+            /* mark text as hyperlink with URL */
             case 8: {
                 strsep(&seq, ";");
                 strsep(&seq, ";");
@@ -4526,7 +4534,6 @@ static void Vt_handle_OSC(Vt* self, char c)
                     } else if (strstr(a, "RemoteHost")) {
                         char* tmp = strstr(a, "=") + 1;
                         if (tmp) {
-                            // TODO: is this localhost?
                             free(self->shell_integration_shell_host);
                             self->shell_integration_shell_host = strdup(tmp);
                         }
@@ -4546,13 +4553,15 @@ static void Vt_handle_OSC(Vt* self, char c)
                         Vt_clear_scrollback(self);
                     } else if (strstr(a, "SetMark")) {
                         Vt_cursor_line(self)->mark_explicit = true;
+                    } else if (strstr(a, "RequestAttention")) {
+                        CALL_FP(self->callbacks.on_urgency_set, self->callbacks.user_data);
+                    } else if (strstr(a, "StealFocus")) {
+                        CALL_FP(self->callbacks.on_restack_to_front, self->callbacks.user_data);
                     }
                     // TODO: ReportCellSize
                     // TODO: Copy
-                    // TODO: RequestAttention
                     // TODO: CopyToClipboard
                     // TODO: EndCopy
-                    // TODO: StealFocus
                 }
             } break;
 

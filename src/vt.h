@@ -400,6 +400,7 @@ typedef struct
         void (*on_clipboard_sent)(void*, const char*);
         void (*on_urgency_set)(void*);
         void (*on_restack_to_front)(void*);
+        const char* (*on_application_hostname_requested)(void*);
 
         void (*destroy_proxy)(void*, VtLineProxy*);
         void (*destroy_image_proxy)(void*, VtImageSurfaceProxy*);
@@ -530,10 +531,10 @@ typedef struct
     char* shell_integration_shell_id;
     int   shell_integration_protocol_version;
     char* shell_integration_shell_host;
-    // TODO: bool  shell_integration_shell_host_is_local;
     char* shell_integration_current_dir;
 
     char*         title;
+    char*         client_host;
     char*         work_dir;
     Vector_DynStr title_stack;
 
@@ -1193,15 +1194,34 @@ static Vector_char Vt_line_to_string(const Vt*   self,
 }
 
 /**
- * Get UTF-8 encoded string from a range of lines
- */
+ * Get UTF-8 encoded string from a range of lines */
 Vector_char Vt_region_to_string(Vt* self, size_t begin_line, size_t end_line);
 
 /**
- * Get current work directory */
+ * Get current work directory of client program */
 static const char* Vt_get_work_directory(const Vt* self)
 {
     return OR(self->work_dir, self->shell_integration_current_dir);
+}
+
+/**
+ * Get hostname of client program */
+static const char* Vt_get_client_host(const Vt* self)
+{
+    return OR(self->client_host, self->shell_integration_shell_host);
+}
+
+/**
+ * Get if client program is running on localhost, when in doubt assumes true */
+static bool Vt_client_host_is_local(const Vt* self)
+{
+    const char* application_host =
+      CALL_FP(self->callbacks.on_application_hostname_requested, self->callbacks.user_data);
+    const char* client_host = Vt_get_client_host(self);
+
+    LOG("Vt::host_is_local{ application: %s, client: %s }\n", application_host, client_host);
+
+    return (!application_host || !client_host) ? true : !strcmp(application_host, client_host);
 }
 
 void Vt_clear_scrollback(Vt* self);

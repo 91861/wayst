@@ -339,7 +339,7 @@ static inline bool unicode_is_private_use_area(char32_t codepoint)
 
 static bool is_in_tmp_dir(const char* path)
 {
-    return (path == strstr(path, "/tmp/") ||(path = strstr(path, getenv("PATH"))));
+    return (path == strstr(path, "/tmp/") || (path = strstr(path, getenv("PATH"))));
 }
 
 /**
@@ -347,6 +347,21 @@ static bool is_in_tmp_dir(const char* path)
 static char* get_running_binary_path()
 {
     return realpath("/proc/self/exe", 0);
+}
+
+/**
+ * Get hostname. Caller should free() */
+static char* get_hostname()
+{
+    char tmp[256];
+    tmp[255] = 0; /* if truncation occurs, it is unspecified whether the returned buffer includes a
+                     terminating null byte. */
+    if (gethostname(tmp, sizeof(tmp) - 1)) {
+        WRN("Could not get hostname %s\n", strerror(errno));
+        return NULL;
+    } else {
+        return strdup(tmp);
+    }
 }
 
 static int spawn_process(const char* opt_work_directory,

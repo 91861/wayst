@@ -566,7 +566,7 @@ static void WindowX11_events(struct WindowBase* self)
             case FocusIn:
                 XSetICFocus(globalX11->ic);
                 FLAG_SET(self->state_flags, WINDOW_IS_IN_FOCUS);
-                self->callbacks.activity_notify_handler(self->callbacks.user_data);
+                CALL_FP(self->callbacks.on_focus_changed, self->callbacks.user_data, true);
                 Window_notify_content_change(self);
                 if (Window_is_pointer_hidden(self)) {
                     WindowX11_set_pointer_style(self, MOUSE_POINTER_ARROW);
@@ -575,11 +575,11 @@ static void WindowX11_events(struct WindowBase* self)
 
             case FocusOut:
                 XUnsetICFocus(globalX11->ic);
+                FLAG_UNSET(self->state_flags, WINDOW_IS_IN_FOCUS);
+                CALL_FP(self->callbacks.on_focus_changed, self->callbacks.user_data, false);
                 if (Window_is_pointer_hidden(self)) {
                     WindowX11_set_pointer_style(self, MOUSE_POINTER_ARROW);
                 }
-                FLAG_UNSET(self->state_flags, WINDOW_IS_IN_FOCUS);
-
                 break;
 
             case Expose:

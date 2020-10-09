@@ -58,6 +58,8 @@ typedef struct
 
     bool exit;
 
+    char* hostname;
+
     // selection
     uint8_t   click_count;
     TimePoint next_click_limit;
@@ -266,6 +268,7 @@ static void App_run(App* self)
     Freetype_destroy(&self->freetype);
     Window_destroy(self->win);
     Vector_destroy_char(&self->ksm_input_buf);
+    free(self->hostname);
 }
 
 static void App_redraw(void* self)
@@ -925,6 +928,13 @@ static bool App_maybe_handle_application_key(App*     self,
         Vector_destroy_char(&content);
 
         return true;
+    } else if (KeyCommand_is_active(&cmd[KCMD_OPEN_PWD], key, rawkey, mods)) {
+        const char* wd = Vt_get_work_directory(&self->vt);
+        if (wd)
+            App_handle_uri(self, wd);
+        else
+            App_flash(self);
+        return true;
     }
 
     return false;
@@ -1156,11 +1166,9 @@ static bool App_maybe_consume_click(App*     self,
             self->next_click_limit = TimePoint_ms_from_now(DOUBLE_CLICK_DELAY_MS);
             if (self->click_count == 0) {
                 Vt_select_end(vt);
-                Vt_select_init(vt,
-                               FLAG_IS_SET(mods, MODIFIER_CONTROL) ? SELECT_MODE_BOX
-                                                                   : SELECT_MODE_NORMAL,
-                               x,
-                               y);
+                enum SelectMode mode =
+                  FLAG_IS_SET(mods, MODIFIER_CONTROL) ? SELECT_MODE_BOX : SELECT_MODE_NORMAL;
+                Vt_select_init(vt, mode, x, y);
                 self->selection_dragging_left = true;
                 Window_set_pointer_style(self->win, MOUSE_POINTER_I_BEAM);
             } else if (self->click_count == 1) {
@@ -1376,6 +1384,12 @@ static void App_send_desktop_notification(void* self, const char* opt_title, con
     spawn_process(NULL, argv[0], (char**)argv, true, false);
 }
 
+static void App_focus_changed(void* self, bool current_state)
+{
+    Window_notify_content_change(((App*)self)->win);
+    ((App*)self)->ui.draw_out_of_focus_tint = !current_state;
+}
+
 static bool App_minimized(void* self)
 {
     App* app = self;
@@ -1434,6 +1448,14 @@ static void App_restack_to_front(void* self)
     Window_set_stack_order(((App*)self)->win, true);
 }
 
+static const char* App_get_hostname(void* self)
+{
+    App* app = self;
+    if (!app->hostname)
+        app->hostname = get_hostname();
+    return app->hostname;
+}
+
 static void App_set_callbacks(App* self)
 {
     self->vt.callbacks.user_data                           = self;
@@ -1458,6 +1480,7 @@ static void App_set_callbacks(App* self)
     self->vt.callbacks.on_desktop_notification_sent        = App_send_desktop_notification;
     self->vt.callbacks.on_urgency_set                      = App_set_urgent,
     self->vt.callbacks.on_restack_to_front                 = App_restack_to_front,
+    self->vt.callbacks.on_application_hostname_requested   = App_get_hostname;
     self->vt.callbacks.destroy_proxy                       = App_destroy_proxy_handler;
     self->vt.callbacks.destroy_image_proxy                 = App_destroy_image_proxy_handler;
     self->vt.callbacks.destroy_image_view_proxy            = App_destroy_image_view_proxy_handler;
@@ -1469,6 +1492,7 @@ static void App_set_callbacks(App* self)
     self->win->callbacks.clipboard_handler       = App_clipboard_handler;
     self->win->callbacks.activity_notify_handler = App_action;
     self->win->callbacks.on_redraw_requested     = App_redraw;
+    self->win->callbacks.on_focus_changed        = App_focus_changed;
 
     self->gfx->callbacks.user_data                   = self;
     self->gfx->callbacks.load_extension_proc_address = App_load_extension_proc_address;

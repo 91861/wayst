@@ -94,6 +94,7 @@ typedef struct WindowBase
         void (*clipboard_handler)(void* user_data, const char* text);
         void (*activity_notify_handler)(void* user_data);
         void (*on_redraw_requested)(void* user_data);
+        void (*on_focus_changed)(void* user_data, bool current_state);
     } callbacks;
 
     char* title;

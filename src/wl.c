@@ -592,7 +592,7 @@ static void keyboard_handle_enter(void*               data,
                                   struct wl_array*    keys)
 {
     ((struct WindowBase*)data)
-      ->callbacks.activity_notify_handler(((struct WindowBase*)data)->callbacks.user_data);
+      ->callbacks.on_focus_changed(((struct WindowBase*)data)->callbacks.user_data, true);
     FLAG_SET(((struct WindowBase*)data)->state_flags, WINDOW_IS_IN_FOCUS);
 }
 
@@ -602,6 +602,8 @@ static void keyboard_handle_leave(void*               data,
                                   struct wl_surface*  surface)
 {
     globalWl->serial = serial;
+    ((struct WindowBase*)data)
+      ->callbacks.on_focus_changed(((struct WindowBase*)data)->callbacks.user_data, false);
     FLAG_UNSET(((struct WindowBase*)data)->state_flags, WINDOW_IS_IN_FOCUS);
     globalWl->keycode_to_repeat = 0;
 }

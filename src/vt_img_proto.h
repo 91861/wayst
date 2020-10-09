@@ -5,23 +5,40 @@
 #include "base64.h"
 #include "stb_image/stb_image.h"
 
-void Vt_img_proto_display(Vt* self, uint32_t id, vt_image_proto_display_args_t args);
+static const char* Vt_img_proto_display(Vt* self, uint32_t id, vt_image_proto_display_args_t args);
 
 const char* Vt_img_proto_validate(Vt*                           self,
                                   vt_image_proto_transmission_t transmission_type,
                                   vt_image_proto_compression_t  compression_type,
                                   uint8_t                       format)
 {
-    switch (transmission_type) {
-        // TODO: if client is not on localhost we should only allow direct
-        case VT_IMAGE_PROTO_TRANSMISSION_SHARED_MEM:
-            return "transmission medium not supported";
-        default:;
+    if (Vt_client_host_is_local(self)) {
+        switch (transmission_type) {
+            case VT_IMAGE_PROTO_TRANSMISSION_DIRECT:
+            case VT_IMAGE_PROTO_TRANSMISSION_FILE:
+            case VT_IMAGE_PROTO_TRANSMISSION_TEMP_FILE:
+                break;
+            default:;
+                return "transmission medium not supported";
+        }
+    } else {
+        switch (transmission_type) {
+            case VT_IMAGE_PROTO_TRANSMISSION_DIRECT:
+                break;
+            case VT_IMAGE_PROTO_TRANSMISSION_FILE:
+            case VT_IMAGE_PROTO_TRANSMISSION_TEMP_FILE:
+                return "client host is not local";
+            default:;
+                return "transmission medium not supported";
+        }
     }
+
     switch (compression_type) {
-        // case VT_IMAGE_PROTO_COMPRESSION_ZLIB://TODO: actually test if this works right
-        //     return "compression method not supported";
+        case VT_IMAGE_PROTO_COMPRESSION_NONE:
+        case VT_IMAGE_PROTO_COMPRESSION_ZLIB: // TODO: actually test if this works right
+            break;
         default:;
+            return "compression method not supported";
     }
     switch (format) {
         case 24:
@@ -57,6 +74,18 @@ static stbi_uc* image_from_base64(char*     data,
     return pixels;
 }
 
+static void maybe_unlink_tmp_file(const char* name)
+{
+    if (is_in_tmp_dir(name)) {
+        LOG("Vt::img_proto::unlink_tmp_file{ %s }\n", name);
+        unlink(name);
+    } else {
+        WRN("Temporary image file \'%s\' used for transmission is not located in a known tmp "
+            "directory and will NOT be unliked\n",
+            name);
+    }
+}
+
 static stbi_uc* image_from_base64_file_name(char*     file_name,
                                             size_t    opt_size,
                                             size_t    opt_offset,
@@ -80,10 +109,8 @@ static stbi_uc* image_from_base64_file_name(char*     file_name,
     stbi_uc* pixels = stbi_load_from_file(file, &width, &height, &channels, 4);
     fclose(file);
 
-    if (tmp && is_in_tmp_dir(decoded_name)) {
-        LOG("Vt::img_proto::delete_tmp_file{ %s }\n", decoded_name);
-        unlink(decoded_name);
-    }
+    if (tmp)
+        maybe_unlink_tmp_file(decoded_name);
 
     if (out_width)
         *out_width = width;
@@ -126,10 +153,9 @@ static uint8_t* data_from_base64_file_name(char*                        file_nam
         default:;
     }
 
-    if (tmp && is_in_tmp_dir(decoded_name)) {
-        LOG("Vt::img_proto::unlink_tmp_file{ %s }\n", decoded_name);
-        unlink(decoded_name);
-    }
+    if (tmp)
+        maybe_unlink_tmp_file(decoded_name);
+
     return pixels;
 }
 
@@ -413,17 +439,19 @@ static void Vt_recalculate_VtImageSurfaceView_dimensions(Vt* self, VtImageSurfac
 static void        Vt_insert_new_line(Vt* self);
 static inline void Vt_move_cursor(Vt* self, uint16_t column, uint16_t rows);
 
-/* the cursor position used to display the image must be the position when the final chunk is
- * received */
-void Vt_img_proto_display(Vt* self, uint32_t id, vt_image_proto_display_args_t args)
+static const char* Vt_img_proto_display(Vt* self, uint32_t id, vt_image_proto_display_args_t args)
 {
     RcPtr_VtImageSurface* source = Vt_get_image_surface_rp(self, id);
     if (!source)
-        return;
+        return "no such id";
 
     VtImageSurface* src = RcPtr_get_VtImageSurface(source);
-    if (!src || !src->width || !src->height)
-        return;
+    if (!src || !src->width || !src->height || src->state == VT_IMAGE_SURFACE_INCOMPLETE)
+        return "source transmission incomplete";
+    if (src->state == VT_IMAGE_SURFACE_DESTROYED)
+        return id ? "source explicitly deleted by client" : "source deleted";
+    if (src->state == VT_IMAGE_SURFACE_FAIL)
+        return "source transmission failed";
 
     uint16_t anchor_cell = self->cursor.col;
     VtLine*  ln          = Vt_cursor_line(self);
@@ -460,5 +488,8 @@ void Vt_img_proto_display(Vt* self, uint32_t id, vt_image_proto_display_args_t a
     for (int i = 1; i < image_view.cell_size.second; ++i) {
         Vt_insert_new_line(self);
     }
+
     Vt_move_cursor(self, self->cursor.col + image_view.cell_size.first, Vt_cursor_row(self));
+
+    return NULL;
 }

@@ -131,139 +131,145 @@ static struct option long_options[] = {
 #define OPT_COLORSCHEME_IDX 35
     [OPT_COLORSCHEME_IDX] = { "colorscheme", required_argument, 0, 0 },
 
-#define OPT_FONT_IDX 36
+#define OPT_UNFOCUSED_TINT_COLOR 36
+    [OPT_UNFOCUSED_TINT_COLOR] = { "unfocused-tint", required_argument, 0, 0 },
+
+#define OPT_FONT_IDX 37
     [OPT_FONT_IDX] = { "font", required_argument, 0, 0 },
 
-#define OPT_FONT_STYLE_REGULAR_IDX 37
+#define OPT_FONT_STYLE_REGULAR_IDX 38
     [OPT_FONT_STYLE_REGULAR_IDX] = { "style-regular", required_argument, 0, 0 },
 
-#define OPT_FONT_STYLE_BOLD_IDX 38
+#define OPT_FONT_STYLE_BOLD_IDX 39
     [OPT_FONT_STYLE_BOLD_IDX] = { "style-bold", required_argument, 0, 0 },
 
-#define OPT_FONT_STYLE_ITALIC_IDX 39
+#define OPT_FONT_STYLE_ITALIC_IDX 40
     [OPT_FONT_STYLE_ITALIC_IDX] = { "style-italic", required_argument, 0, 0 },
 
-#define OPT_FONT_STYLE_BOLD_ITALIC_IDX 40
+#define OPT_FONT_STYLE_BOLD_ITALIC_IDX 41
     [OPT_FONT_STYLE_BOLD_ITALIC_IDX] = { "style-bolditalic", required_argument, 0, 0 },
 
-#define OPT_FONT_FALLBACK_IDX 41
+#define OPT_FONT_FALLBACK_IDX 42
     [OPT_FONT_FALLBACK_IDX] = { "font-symbol", required_argument, 0, 0 },
 
-#define OPT_FONT_FALLBACK2_IDX 42
+#define OPT_FONT_FALLBACK2_IDX 43
     [OPT_FONT_FALLBACK2_IDX] = { "font-color", required_argument, 0, 0 },
 
-#define OPT_FONT_SIZE_IDX 43
+#define OPT_FONT_SIZE_IDX 44
     [OPT_FONT_SIZE_IDX] = { "font-size", required_argument, 0, 0 },
 
-#define OPT_DPI_IDX 44
+#define OPT_DPI_IDX 45
     [OPT_DPI_IDX] = { "dpi", required_argument, 0, 0 },
 
-#define OPT_GLYPH_PADDING_IDX 45
+#define OPT_GLYPH_PADDING_IDX 46
     [OPT_GLYPH_PADDING_IDX] = { "glyph-padding", required_argument, 0, 0 },
 
-#define OPT_GLYPH_ALIGN_IDX 46
+#define OPT_GLYPH_ALIGN_IDX 47
     [OPT_GLYPH_ALIGN_IDX] = { "glyph-align", required_argument, 0, 0 },
 
-#define OPT_LCD_ORDER_IDX 47
+#define OPT_LCD_ORDER_IDX 48
     [OPT_LCD_ORDER_IDX] = { "lcd-order", required_argument, 0, 0 },
 
-#define OPT_CURSOR_STYLE_IDX 48
+#define OPT_CURSOR_STYLE_IDX 49
     [OPT_CURSOR_STYLE_IDX] = { "cursor-style", required_argument, 0, 0 },
 
-#define OPT_BLINK_IDX 49
+#define OPT_BLINK_IDX 50
     [OPT_BLINK_IDX] = { "blink", required_argument, 0, 0 },
 
-#define OPT_PADDING_IDX 50
+#define OPT_PADDING_IDX 51
     [OPT_PADDING_IDX] = { "padding", required_argument, 0, 0 },
 
-#define OPT_SCROLLBAR_IDX 51
+#define OPT_SCROLLBAR_IDX 52
     [OPT_SCROLLBAR_IDX] = { "scrollbar", required_argument, 0, 0 },
 
-#define OPT_SCROLL_LINES_IDX 52
+#define OPT_SCROLL_LINES_IDX 53
     [OPT_SCROLL_LINES_IDX] = { "scroll-lines", required_argument, 0, 0 },
 
-#define OPT_SCROLLBACK_IDX 53
+#define OPT_SCROLLBACK_IDX 54
     [OPT_SCROLLBACK_IDX] = { "scrollback", required_argument, 0, 0 },
 
-#define OPT_URI_HANDLER_IDX 54
+#define OPT_URI_HANDLER_IDX 55
     [OPT_URI_HANDLER_IDX] = { "uri-handler", required_argument, 0, 0 },
 
-#define OPT_EXTERN_PIPE_HANDLER_IDX 55
+#define OPT_EXTERN_PIPE_HANDLER_IDX 56
     [OPT_EXTERN_PIPE_HANDLER_IDX] = { "extern-pipe", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_COPY_IDX 56
+#define OPT_BIND_KEY_COPY_IDX 57
     [OPT_BIND_KEY_COPY_IDX] = { "bind-key-copy", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_PASTE_IDX 57
+#define OPT_BIND_KEY_PASTE_IDX 58
     [OPT_BIND_KEY_PASTE_IDX] = { "bind-key-paste", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_ENLARGE_IDX 58
+#define OPT_BIND_KEY_ENLARGE_IDX 59
     [OPT_BIND_KEY_ENLARGE_IDX] = { "bind-key-enlarge", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_SHRINK_IDX 59
+#define OPT_BIND_KEY_SHRINK_IDX 60
     [OPT_BIND_KEY_SHRINK_IDX] = { "bind-key-shrink", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_UNI_IDX 60
+#define OPT_BIND_KEY_UNI_IDX 61
     [OPT_BIND_KEY_UNI_IDX] = { "bind-key-unicode", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_PG_UP_IDX 61
+#define OPT_BIND_KEY_PG_UP_IDX 62
     [OPT_BIND_KEY_PG_UP_IDX] = { "bind-key-pg-up", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_PG_DN_IDX 62
+#define OPT_BIND_KEY_PG_DN_IDX 63
     [OPT_BIND_KEY_PG_DN_IDX] = { "bind-key-pg-down", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_LN_UP_IDX 63
+#define OPT_BIND_KEY_LN_UP_IDX 64
     [OPT_BIND_KEY_LN_UP_IDX] = { "bind-key-ln-up", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_LN_DN_IDX 64
+#define OPT_BIND_KEY_LN_DN_IDX 65
     [OPT_BIND_KEY_LN_DN_IDX] = { "bind-key-ln-down", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_MRK_UP_IDX 65
+#define OPT_BIND_KEY_MRK_UP_IDX 66
     [OPT_BIND_KEY_MRK_UP_IDX] = { "bind-key-mark-up", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_MRK_DN_IDX 66
+#define OPT_BIND_KEY_MRK_DN_IDX 67
     [OPT_BIND_KEY_MRK_DN_IDX] = { "bind-key-mark-down", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_COPY_CMD_IDX 67
+#define OPT_BIND_KEY_COPY_CMD_IDX 68
     [OPT_BIND_KEY_COPY_CMD_IDX] = { "bind-key-copy-output", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_EXTERN_PIPE_IDX 68
+#define OPT_BIND_KEY_EXTERN_PIPE_IDX 69
     [OPT_BIND_KEY_EXTERN_PIPE_IDX] = { "bind-key-extern-pipe", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_KSM_IDX 69
+#define OPT_BIND_KEY_KSM_IDX 70
     [OPT_BIND_KEY_KSM_IDX] = { "bind-key-kbd-select", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_HTML_DUMP_IDX 70
+#define OPT_BIND_KEY_OPEN_PWD 71
+    [OPT_BIND_KEY_OPEN_PWD] = { "bind-key-open-pwd", required_argument, 0, 0 },
+
+#define OPT_BIND_KEY_HTML_DUMP_IDX 72
     [OPT_BIND_KEY_HTML_DUMP_IDX] = { "bind-key-html-dump", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_DUP_IDX 71
+#define OPT_BIND_KEY_DUP_IDX 73
     [OPT_BIND_KEY_DUP_IDX] = { "bind-key-duplicate", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_DEBUG_IDX 72
+#define OPT_BIND_KEY_DEBUG_IDX 74
     [OPT_BIND_KEY_DEBUG_IDX] = { "bind-key-debug", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_QUIT_IDX 73
+#define OPT_BIND_KEY_QUIT_IDX 75
     [OPT_BIND_KEY_QUIT_IDX] = { "bind-key-quit", required_argument, 0, 0 },
 
-#define OPT_DEBUG_PTY_IDX 74
+#define OPT_DEBUG_PTY_IDX 76
     [OPT_DEBUG_PTY_IDX] = { "debug-pty", no_argument, 0, 'D' },
 
-#define OPT_DEBUG_VT_IDX 75
+#define OPT_DEBUG_VT_IDX 77
     [OPT_DEBUG_VT_IDX] = { "debug-vt", no_argument, 0, 0 },
 
-#define OPT_DEBUG_GFX_IDX 76
+#define OPT_DEBUG_GFX_IDX 78
     [OPT_DEBUG_GFX_IDX] = { "debug-gfx", no_argument, 0, 'G' },
 
-#define OPT_DEBUG_FONT_IDX 77
+#define OPT_DEBUG_FONT_IDX 79
     [OPT_DEBUG_FONT_IDX] = { "debug-font", no_argument, 0, 'F' },
 
-#define OPT_VERSION_IDX 78
+#define OPT_VERSION_IDX 80
     [OPT_VERSION_IDX] = { "version", no_argument, 0, 'v' },
 
-#define OPT_HELP_IDX 79
+#define OPT_HELP_IDX 81
     [OPT_HELP_IDX] = { "help", no_argument, 0, 'h' },
 
-#define OPT_SENTINEL_IDX 80
+#define OPT_SENTINEL_IDX 82
     [OPT_SENTINEL_IDX] = { 0 }
 };
 
@@ -289,31 +295,34 @@ static const char* long_options_descriptions[][2] = {
                             "Allow window interactions - manipulation:information (default: "
                             "true:true)" },
 
-    [OPT_BG_COLOR_IDX]    = { arg_color_a, "Background color" },
-    [OPT_FG_COLOR_IDX]    = { arg_color, "Foreground color" },
-    [OPT_COLOR_0_IDX]     = { arg_color, "Palette color black" },
-    [OPT_COLOR_1_IDX]     = { arg_color, "Palette color red" },
-    [OPT_COLOR_2_IDX]     = { arg_color, "Palette color green" },
-    [OPT_COLOR_3_IDX]     = { arg_color, "Palette color yellow" },
-    [OPT_COLOR_4_IDX]     = { arg_color, "Palette color blue" },
-    [OPT_COLOR_5_IDX]     = { arg_color, "Palette color magenta" },
-    [OPT_COLOR_6_IDX]     = { arg_color, "Palette color cyan" },
-    [OPT_COLOR_7_IDX]     = { arg_color, "Palette color gray" },
-    [OPT_COLOR_8_IDX]     = { arg_color, "Palette color bright black" },
-    [OPT_COLOR_9_IDX]     = { arg_color, "Palette color bright red" },
-    [OPT_COLOR_10_IDX]    = { arg_color, "Palette color bright green" },
-    [OPT_COLOR_11_IDX]    = { arg_color, "Palette color bright yellow" },
-    [OPT_COLOR_12_IDX]    = { arg_color, "Palette color bright blue" },
-    [OPT_COLOR_13_IDX]    = { arg_color, "Palette color bright magenta" },
-    [OPT_COLOR_14_IDX]    = { arg_color, "Palette color bright cyan" },
-    [OPT_COLOR_15_IDX]    = { arg_color, "Palette color bright gray" },
-    [OPT_H_BG_COLOR_IDX]  = { arg_color_a, "Highlighted text background color" },
-    [OPT_H_FG_COLOR_IDX]  = { arg_color, "Highlighted text foreground color" },
-    [OPT_NO_FLASH_IDX]    = { NULL, "Disable visual bell" },
-    [OPT_COLORSCHEME_IDX] = { "name/int",
+    [OPT_BG_COLOR_IDX] = { arg_color_a, "Background color" },
+    [OPT_FG_COLOR_IDX] = { arg_color, "Foreground color" },
+    [OPT_COLOR_0_IDX]  = { arg_color, "Palette color black" },
+    [OPT_COLOR_1_IDX]  = { arg_color, "Palette color red" },
+    [OPT_COLOR_2_IDX]  = { arg_color, "Palette color green" },
+    [OPT_COLOR_3_IDX]  = { arg_color, "Palette color yellow" },
+    [OPT_COLOR_4_IDX]  = { arg_color, "Palette color blue" },
+    [OPT_COLOR_5_IDX]  = { arg_color, "Palette color magenta" },
+    [OPT_COLOR_6_IDX]  = { arg_color, "Palette color cyan" },
+    [OPT_COLOR_7_IDX]  = { arg_color, "Palette color gray" },
+    [OPT_COLOR_8_IDX]  = { arg_color, "Palette color bright black" },
+    [OPT_COLOR_9_IDX]  = { arg_color, "Palette color bright red" },
+    [OPT_COLOR_10_IDX] = { arg_color, "Palette color bright green" },
+    [OPT_COLOR_11_IDX] = { arg_color, "Palette color bright yellow" },
+    [OPT_COLOR_12_IDX] = { arg_color, "Palette color bright blue" },
+    [OPT_COLOR_13_IDX] = { arg_color, "Palette color bright magenta" },
+    [OPT_COLOR_14_IDX] = { arg_color, "Palette color bright cyan" },
+    [OPT_COLOR_15_IDX] = { arg_color, "Palette color bright gray" },
+
+    [OPT_H_BG_COLOR_IDX] = { arg_color_a, "Highlighted text background color" },
+    [OPT_H_FG_COLOR_IDX] = { arg_color, "Highlighted text foreground color" },
+
+    [OPT_NO_FLASH_IDX]         = { NULL, "Disable visual bell" },
+    [OPT_COLORSCHEME_IDX]      = { "name/int",
                               "Colorscheme name/index: wayst, linux, xterm, rxvt, yaru, tango, "
                               "orchis, "
                               "solarized" },
+    [OPT_UNFOCUSED_TINT_COLOR] = { arg_color_a, "Tint window when out of focus" },
 
     [OPT_FONT_IDX]               = { "[font, ...]", "Primary fonts (default: Monospace)" },
     [OPT_FONT_STYLE_REGULAR_IDX] = { arg_name, "Font style to use as default (default: Regular)" },
@@ -383,6 +392,7 @@ static const char* long_options_descriptions[][2] = {
 
     [OPT_BIND_KEY_KSM_IDX] = { arg_key, "Enter keyboard select mode key command (default: C+S+k)" },
     [OPT_BIND_KEY_HTML_DUMP_IDX] = { arg_key, "HTML screen dump key command (default: C+S+F12)" },
+    [OPT_BIND_KEY_OPEN_PWD]      = { arg_key, "Open working directory as URI (default: C+S+F10)" },
     [OPT_BIND_KEY_DUP_IDX]       = { arg_key,
                                "New instance in work directory key command (default: C+S+d)" },
 

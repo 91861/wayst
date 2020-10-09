@@ -2470,6 +2470,9 @@ static void GfxOpenGL21_draw_unicode_input(GfxOpenGL21* gfx, const Vt* vt)
 
 static void GfxOpenGL21_draw_scrollbar(GfxOpenGL21* self, const Scrollbar* scrollbar)
 {
+    glEnable(GL_BLEND);
+    glDisable(GL_SCISSOR_TEST);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     Shader_use(&self->solid_fill_shader);
     glUniform4f(self->solid_fill_shader.uniforms[0].location,
                 1.0f,
@@ -2577,6 +2580,23 @@ static void GfxOpenGL21_draw_flash(GfxOpenGL21* self, float fraction)
     Shader_use(&self->solid_fill_shader);
     float alpha = sinf((1.0 - fraction) * M_1_PI) / 4.0;
     glUniform4f(self->solid_fill_shader.uniforms[0].location, 1.0f, 1.0f, 1.0f, alpha);
+    glBindBuffer(GL_ARRAY_BUFFER, self->full_framebuffer_quad_vbo);
+    glVertexAttribPointer(self->solid_fill_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
+    glDrawArrays(GL_QUADS, 0, 4);
+}
+
+static void GfxOpenGL21_draw_tint(GfxOpenGL21* self)
+{
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    glDisable(GL_SCISSOR_TEST);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    Shader_use(&self->solid_fill_shader);
+    glUniform4f(self->solid_fill_shader.uniforms[0].location,
+                ColorRGBA_get_float(settings.dim_tint, 0),
+                ColorRGBA_get_float(settings.dim_tint, 1),
+                ColorRGBA_get_float(settings.dim_tint, 2),
+                ColorRGBA_get_float(settings.dim_tint, 3));
     glBindBuffer(GL_ARRAY_BUFFER, self->full_framebuffer_quad_vbo);
     glVertexAttribPointer(self->solid_fill_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
     glDrawArrays(GL_QUADS, 0, 4);
@@ -2758,6 +2778,10 @@ void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
     if (gfx->flash_fraction < 1.0f && gfx->flash_fraction > 0.0f) {
         glViewport(0, 0, gfx->win_w, gfx->win_h);
         GfxOpenGL21_draw_flash(gfx, gfx->flash_fraction);
+    }
+
+    if (unlikely(ui->draw_out_of_focus_tint && settings.dim_tint.a)) {
+        GfxOpenGL21_draw_tint(gfx);
     }
 
     if (unlikely(settings.debug_gfx)) {

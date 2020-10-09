@@ -31,4 +31,5 @@ typedef struct
     Scrollbar      scrollbar;
     struct Cursor* cursor;
     hovered_link_t hovered_link;
+    bool           draw_out_of_focus_tint;
 } Ui;
