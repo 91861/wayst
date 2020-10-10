@@ -655,6 +655,10 @@ __attribute__((cold)) GlyphAtlasEntry* GlyphAtlas_get_combined(GfxOpenGL21* gfx,
     }
     FreetypeOutput *output, *base_output;
     output = base_output = Freetype_load_and_render_glyph(gfx->freetype, rune->code, style);
+
+    if (!output)
+        return NULL;
+    
     GLenum internal_format;
     GLenum load_format;
     bool   scale = false;

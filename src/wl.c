@@ -102,6 +102,10 @@ static void       WindowWl_set_pointer_style(struct WindowBase* self, enum Mouse
 static void       WindowWl_set_current_context(struct WindowBase* self, bool this);
 static void       WindowWl_set_urgent(struct WindowBase* self);
 static void       WindowWl_set_stack_order(struct WindowBase* self, bool front_or_back);
+static int64_t    WindowWl_get_window_id(struct WindowBase* self)
+{
+    return -1;
+}
 
 static struct IWindow window_interface_wayland = {
     .set_fullscreen         = WindowWl_set_fullscreen,
@@ -122,6 +126,7 @@ static struct IWindow window_interface_wayland = {
     .set_current_context    = WindowWl_set_current_context,
     .set_urgent             = WindowWl_set_urgent,
     .set_stack_order        = WindowWl_set_stack_order,
+    .get_window_id          = WindowWl_get_window_id,
 };
 
 typedef struct

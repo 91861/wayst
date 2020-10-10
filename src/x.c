@@ -68,6 +68,7 @@ static void*    WindowX11_get_gl_ext_proc_adress(struct WindowBase* self, const 
 static uint32_t WindowX11_get_keycode_from_name(struct WindowBase* self, char* name);
 static void     WindowX11_set_current_context(struct WindowBase* self, bool this);
 static inline void WindowX11_set_urgent(struct WindowBase* self);
+static int64_t     WindowX11_get_window_id(struct WindowBase* self);
 static inline void WindowX11_set_stack_order(struct WindowBase* self, bool front_or_back);
 static TimePoint*  WindowX11_process_timers(struct WindowBase* self)
 {
@@ -93,12 +94,14 @@ static struct IWindow window_interface_x11 = {
     .set_current_context    = WindowX11_set_current_context,
     .set_urgent             = WindowX11_set_urgent,
     .set_stack_order        = WindowX11_set_stack_order,
+    .get_window_id          = WindowX11_get_window_id,
 };
 
 typedef struct
 {
     Display* display;
     Atom     wm_delete;
+    Atom     wm_ping;
 
     Cursor cursor_hidden;
     Cursor cursor_beam;
@@ -162,26 +165,31 @@ static void* WindowX11_get_gl_ext_proc_adress(struct WindowBase* self, const cha
 
 static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
 {
+    bool init_globals = false;
+
     if (!global) {
-        global = calloc(1, sizeof(WindowStatic) + sizeof(GlobalX11) - sizeof(uint8_t));
+        init_globals = true;
+        global       = calloc(1, sizeof(WindowStatic) + sizeof(GlobalX11) - sizeof(uint8_t));
     }
 
-    globalX11->display = XOpenDisplay(NULL);
-    if (!globalX11->display) {
-        free(global);
-        return NULL;
-    }
+    if (init_globals) {
+        globalX11->display = XOpenDisplay(NULL);
+        if (!globalX11->display) {
+            free(global);
+            return NULL;
+        }
 
-    int glx_major, glx_minor, qry_res;
-    if (!(qry_res = glXQueryVersion(globalX11->display, &glx_major, &glx_minor)) ||
-        (glx_major == 1 && glx_minor < 3)) {
-        WRN("GLX version to low\n");
-        free(global);
-        return NULL;
-    }
+        int glx_major, glx_minor, qry_res;
+        if (!(qry_res = glXQueryVersion(globalX11->display, &glx_major, &glx_minor)) ||
+            (glx_major == 1 && glx_minor < 3)) {
+            WRN("GLX version to low\n");
+            free(global);
+            return NULL;
+        }
 
-    if (!XSupportsLocale()) {
-        ERR("Xorg does not support locales\n");
+        if (!XSupportsLocale()) {
+            ERR("Xorg does not support locales\n");
+        }
     }
 
     struct WindowBase* win =
@@ -417,10 +425,25 @@ static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
     XSync(globalX11->display, False);
     XMapWindow(globalX11->display, windowX11(win)->window);
     glXMakeCurrent(globalX11->display, windowX11(win)->window, windowX11(win)->glx_context);
-    globalX11->wm_delete = XInternAtom(globalX11->display, "WM_DELETE_WINDOW", True);
-    XSetWMProtocols(globalX11->display, windowX11(win)->window, &globalX11->wm_delete, 1);
+
+    if (init_globals) {
+        globalX11->wm_delete = XInternAtom(globalX11->display, "WM_DELETE_WINDOW", True);
+        globalX11->wm_ping   = XInternAtom(globalX11->display, "_NET_WM_PING", True);
+    }
+    XSetWMProtocols(globalX11->display, windowX11(win)->window, &globalX11->wm_delete, 2);
+
     WindowX11_setup_pointer(win);
     XkbSelectEvents(globalX11->display, XkbUseCoreKbd, XkbAllEventsMask, XkbAllEventsMask);
+
+    pid_t pid = getpid();
+    XChangeProperty(globalX11->display,
+                    windowX11(win)->window,
+                    XInternAtom(globalX11->display, "_NET_WM_PID", False),
+                    XA_CARDINAL,
+                    32,
+                    PropModeReplace,
+                    (unsigned char*)&pid,
+                    1);
     XFlush(globalX11->display);
 
     return win;
@@ -597,8 +620,16 @@ static void WindowX11_events(struct WindowBase* self)
                 break;
 
             case ClientMessage:
+
                 if ((Atom)e->xclient.data.l[0] == globalX11->wm_delete) {
                     FLAG_SET(self->state_flags, WINDOW_IS_CLOSED);
+                } else if ((Atom)e->xclient.data.l[0] == globalX11->wm_ping) {
+                    e->xclient.window = DefaultRootWindow(globalX11->display);
+                    XSendEvent(globalX11->display,
+                               DefaultRootWindow(globalX11->display),
+                               True,
+                               SubstructureNotifyMask | SubstructureRedirectMask,
+                               e);
                 }
                 break;
 
@@ -815,6 +846,11 @@ static void WindowX11_set_swap_interval(struct WindowBase* self, int32_t ival)
     if (glXSwapIntervalEXT) {
         glXSwapIntervalEXT(globalX11->display, windowX11(self)->window, ival);
     }
+}
+
+static int64_t WindowX11_get_window_id(struct WindowBase* self)
+{
+    return windowX11(self)->window;
 }
 
 static void WindowX11_set_title(struct WindowBase* self, const char* title)

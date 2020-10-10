@@ -62,6 +62,7 @@ struct IWindow
     uint32_t (*get_keycode_from_name)(struct WindowBase* self, char* name);
     void (*set_urgent)(struct WindowBase* self);
     void (*set_stack_order)(struct WindowBase* self, bool front_or_back);
+    int64_t (*get_window_id)(struct WindowBase* self);
 };
 
 typedef struct WindowBase
@@ -202,6 +203,11 @@ static inline void Window_set_urgent(struct WindowBase* self)
 static inline void Window_set_stack_order(struct WindowBase* self, bool front_or_back)
 {
     self->interface->set_stack_order(self, front_or_back);
+}
+
+static inline int64_t Window_get_window_id(struct WindowBase* self)
+{
+    return self->interface->get_window_id(self);
 }
 
 /* Trivial base functions */

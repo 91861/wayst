@@ -1737,7 +1737,7 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
 
         /* Reverse video (DECSCNM) */
         case 5:
-            // TODO:
+            WRN("DECSCNM not implemented\n");
             break;
 
         /* Origin mode (DECCOM)
@@ -1813,6 +1813,12 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
         /* Keyboard usage (DECKBUM) */
         case 68:
             WRN("DECKBUM not implemented\n");
+            break;
+
+        /* Enable left and right margin mode (DECLRMM) */
+        case 69:
+            self->modes.left_and_right_margin = on;
+            WRN("DECLRMM not implemented\n");
             break;
 
         /* X11 xterm mouse protocol. */
@@ -2937,18 +2943,24 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
 
                             /* <ESC>[u - Restore cursor (SCORC, also ANSI.SYS) */
                             /* <ESC>[Ps SP u - Set margin-bell volume (DECSMBV), VT520 */
-                            case 'u':
+                            case 'u': {
                                 if (*seq == 'u') {
                                     // TODO: cursor restore
                                 } else {
                                     WRN("DECSMBV not implemented\n");
                                 }
-                                break;
+                            } break;
 
                             /* <ESC>[s - Save cursor (SCOSC, also ANSI.SYS) available only when
                              * DECLRMM is disabled */
+                            /* CSI Pl ; Pr s Set left and right margins (DECSLRM), VT420 and up.
+                             * This is available only when DECLRMM is enabled. */
                             case 's': {
-                                // TODO: save cursor
+                                if (*seq == 's') {
+                                    
+                                } else {
+                                    
+                                }
                             } break;
 
                             /* <ESC>[ Ps q - Manipulate keyboard LEDs (DECLL), VT100 */
@@ -4861,7 +4873,6 @@ static inline void Vt_clear_above(Vt* self)
 static inline void Vt_clear_display_and_scrollback(Vt* self)
 {
     Vt_visual_scroll_reset(self);
-    Vt_mark_proxy_fully_damaged(self, self->cursor.row);
     Vector_destroy_VtLine(&self->lines);
     self->lines = Vector_new_VtLine(self);
 

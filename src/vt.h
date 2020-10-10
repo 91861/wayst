@@ -631,6 +631,26 @@ typedef struct
         uint8_t application_keypad_cursor : 1;
         uint8_t pop_on_bell : 1;
         uint8_t urgency_on_bell : 1;
+
+
+        uint8_t left_and_right_margin : 1;
+        uint8_t margin_bell : 1;
+
+        /* VT300:
+         * When sixel display mode is enabled, the sixel active position begins at the upper-left
+         * corner of the ANSI text active position. Scrolling occurs when the sixel active position
+         * reaches the bottom margin of the graphics page. When sixel mode is exited, the text
+         * cursor is set to the current sixel cursor position.
+         *
+         * When sixel scrolling is disabled, the sixel active position begins at the upper-left
+         * corner of the active graphics page. The terminal ignores any commands that attempt to
+         * advance the active position below the bottom margin of the graphics page. When sixel mode
+         * is exited, the text cursor does not change from the position it was in when sixel mode
+         * was entered. */
+        uint8_t sixel_scrolling : 1;
+
+        /* Sixel scrolling leaves cursor to right of graphic. */
+        uint8_t sixel_scrolling_move_cursor_right : 1;
     } modes;
 
 #define VT_XT_MODIFY_KEYBOARD_DFT 0

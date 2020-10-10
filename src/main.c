@@ -107,6 +107,7 @@ static void App_set_callbacks(App* self);
 static void App_maybe_resize(App* self, Pair_uint32_t newres);
 static void App_handle_uri(App* self, const char* uri);
 static void App_update_hover(App* self, int32_t x, int32_t y);
+static void App_update_padding(App* self);
 
 static void* App_load_extension_proc_address(void* self, const char* name)
 {
@@ -180,14 +181,13 @@ static void App_init(App* self)
     Monitor_watch_window_system_fd(&self->monitor, Window_get_connection_fd(self->win));
 
     self->ui.scrollbar.width     = settings.scrollbar_width_px;
-    self->ui.pixel_offset_x      = 0;
-    self->ui.pixel_offset_y      = 0;
     self->ui.hovered_link.active = false;
-
-    self->swap_performed = false;
-    self->resolution     = size;
+    self->swap_performed         = false;
+    self->resolution             = size;
 
     Window_events(self->win);
+
+    App_update_padding(self);
 }
 
 static void App_run(App* self)
@@ -742,6 +742,89 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
     return false;
 }
 
+static void App_do_extern_pipe(App* self)
+{
+    if (!settings.extern_pipe_handler.str) {
+        WRN("external pipe not configured\n");
+        App_flash(self);
+        return;
+    }
+    enum extern_pipe_source_e source  = EXTERN_PIPE_SOURCE_BUFFER;
+    const VtCommand*          command = NULL;
+    Vector_char               content;
+    switch (settings.extern_pipe_source) {
+        case EXTERN_PIPE_SOURCE_COMMAND: {
+            command = Vt_get_last_completed_command(&self->vt);
+            if (command) {
+                source  = EXTERN_PIPE_SOURCE_COMMAND;
+                content = Vt_command_to_string(&self->vt, command, 0);
+                break;
+            }
+        }
+        /* fallthrough */
+        case EXTERN_PIPE_SOURCE_VIEWPORT:
+            source  = EXTERN_PIPE_SOURCE_VIEWPORT;
+            content = Vt_region_to_string(&self->vt,
+                                          Vt_visual_top_line(&self->vt),
+                                          Vt_visual_bottom_line(&self->vt));
+            break;
+        case EXTERN_PIPE_SOURCE_BUFFER:
+            content = Vt_region_to_string(&self->vt, 0, Vt_bottom_line(&self->vt));
+            break;
+        default:
+            ASSERT_UNREACHABLE;
+    }
+
+    if (content.size > 1) {
+        int   ti = 0;
+        char  tmp[16][128];
+        int   argc = 0;
+        char* argv[16];
+        argv[argc++] = settings.extern_pipe_handler.str;
+
+        snprintf(tmp[ti], sizeof(tmp[ti]), "--rows=%u", Vt_row(&self->vt));
+        argv[argc++] = tmp[ti++];
+        snprintf(tmp[ti], sizeof(tmp[ti]), "--columns=%u", Vt_col(&self->vt));
+        argv[argc++] = tmp[ti++];
+
+        snprintf(tmp[ti],
+                 sizeof(tmp[ti]),
+                 "--app-id=%s",
+                 OR(settings.user_app_id, APPLICATION_NAME));
+        argv[argc++] = tmp[ti++];
+
+        snprintf(tmp[ti], sizeof(tmp[ti]), "--pid=%u", getpid());
+        argv[argc++] = tmp[ti++];
+
+        snprintf(tmp[ti], sizeof(tmp[ti]), "--title=%s", self->vt.title);
+        argv[argc++] = tmp[ti++];
+
+        int64_t window_id = Window_get_window_id(self->win);
+        if (window_id >= 0) {
+            snprintf(tmp[ti], sizeof(tmp[ti]), "--x-window-id=%ld", window_id);
+            argv[argc++] = tmp[ti++];
+        }
+
+        switch (source) {
+            case EXTERN_PIPE_SOURCE_COMMAND:
+                snprintf(tmp[ti], sizeof(tmp[ti]), "--command=%s", command->command);
+                argv[argc++] = tmp[ti++];
+                snprintf(tmp[ti], sizeof(tmp[ti]), "--command-exit-code=%d", command->exit_status);
+                argv[argc++] = tmp[ti++];
+                break;
+            default:;
+        }
+        argv[argc++] = NULL;
+
+        int pipe_input_fd = spawn_process(NULL, argv[0], argv, true, true);
+        write(pipe_input_fd, content.buf, content.size);
+        close(pipe_input_fd);
+    } else
+        App_flash(self);
+
+    Vector_destroy_char(&content);
+}
+
 /**
  * key commands used by the terminal itself
  * @return keypress was consumed */
@@ -851,17 +934,15 @@ static bool App_maybe_handle_application_key(App*     self,
         if (Vt_visual_scroll_mark_up(vt)) {
             self->ui.scrollbar.visible = true;
             App_notify_content_change(self);
-        } else {
+        } else
             App_flash(self);
-        }
         return true;
     } else if (KeyCommand_is_active(&cmd[KCMD_MARK_SCROLL_DN], key, rawkey, mods)) {
         if (Vt_visual_scroll_mark_down(vt)) {
             self->ui.scrollbar.visible = true;
             App_notify_content_change(self);
-        } else {
+        } else
             App_flash(self);
-        }
         return true;
     } else if (KeyCommand_is_active(&cmd[KCMD_DUPLICATE], key, rawkey, mods)) {
         /* use the full path to the running file (it may have been started with a relative path) */
@@ -887,46 +968,7 @@ static bool App_maybe_handle_application_key(App*     self,
         App_flash(self);
         return true;
     } else if (KeyCommand_is_active(&cmd[KCMD_EXTERN_PIPE], key, rawkey, mods)) {
-        if (!settings.extern_pipe_handler.str) {
-            WRN("external pipe not configured\n");
-            App_flash(self);
-            return true;
-        }
-
-        Vector_char content;
-
-        switch (settings.extern_pipe_source) {
-            case EXTERN_PIPE_SOURCE_COMMAND: {
-                const VtCommand* command = Vt_get_last_completed_command(vt);
-                if (command) {
-                    content = Vt_command_to_string(vt, command, 0);
-                    break;
-                }
-            }
-            /* fallthrough */
-            case EXTERN_PIPE_SOURCE_VIEWPORT:
-                content =
-                  Vt_region_to_string(vt, Vt_visual_top_line(vt), Vt_visual_bottom_line(vt));
-                break;
-            case EXTERN_PIPE_SOURCE_BUFFER:
-                content = Vt_region_to_string(vt, 0, Vt_bottom_line(vt));
-                break;
-
-            default:
-                ASSERT_UNREACHABLE;
-        }
-
-        if (content.size > 1) {
-            int pipe_input_fd =
-              spawn_process(NULL, settings.extern_pipe_handler.str, NULL, true, true);
-            write(pipe_input_fd, content.buf, content.size);
-            close(pipe_input_fd);
-        } else {
-            App_flash(self);
-        }
-
-        Vector_destroy_char(&content);
-
+        App_do_extern_pipe(self);
         return true;
     } else if (KeyCommand_is_active(&cmd[KCMD_OPEN_PWD], key, rawkey, mods)) {
         const char* wd = Vt_get_work_directory(&self->vt);
@@ -936,7 +978,6 @@ static bool App_maybe_handle_application_key(App*     self,
             App_flash(self);
         return true;
     }
-
     return false;
 }
 
