@@ -817,7 +817,7 @@ static void App_do_extern_pipe(App* self)
         argv[argc++] = NULL;
 
         int pipe_input_fd = spawn_process(NULL, argv[0], argv, true, true);
-        write(pipe_input_fd, content.buf, content.size);
+        write(pipe_input_fd, content.buf, content.size -1);
         close(pipe_input_fd);
     } else
         App_flash(self);

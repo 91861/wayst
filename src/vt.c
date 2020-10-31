@@ -505,7 +505,7 @@ Vector_char Vt_region_to_string(Vt* self, size_t begin_line, size_t end_line)
                                              Vt_col(self),
                                              Vt_line_at(self, begin_line)->was_reflown ? "" : "\n");
     Vector_pop_char(&ret);
-    for (size_t i = begin_line + 1; i < end_line - 1; ++i) {
+    for (size_t i = begin_line + 1; i < end_line; ++i) {
         tmp =
           Vt_line_to_string(self, i, 0, Vt_col(self), self->lines.buf[i].was_reflown ? "" : "\n");
         Vector_pushv_char(&ret, tmp.buf, tmp.size - 1);
@@ -6304,6 +6304,7 @@ void Vt_destroy(Vt* self)
     free(self->active_hyperlink);
     free(self->work_dir);
     free(self->tab_ruler);
+    free(self->client_host);
     free(self->shell_integration_current_dir);
     free(self->shell_integration_shell_host);
     free(self->shell_integration_shell_id);
