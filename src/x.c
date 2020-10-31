@@ -288,7 +288,9 @@ static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
         visual_info = NULL;
     }
 
-    if (framebuffer_config_selected_idx < 0) {
+    bool found_alpha_config = !(framebuffer_config_selected_idx < 0);
+
+    if (!found_alpha_config) {
         WRN("No transparent framebuffer found\n");
         framebuffer_config_selected_idx = framebuffer_config_selected_no_alpha_idx;
     }
@@ -349,7 +351,7 @@ static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
           (const GLubyte*)"glXCreateContextAttribsARB");
     }
 
-    if (!glXCreateContextAttribsARB) {
+    if (!glXCreateContextAttribsARB || !found_alpha_config) {
         WRN("glXCreateContextAttribsARB not found\n");
         windowX11(win)->glx_context =
           glXCreateNewContext(globalX11->display,
