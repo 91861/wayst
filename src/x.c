@@ -8,6 +8,7 @@
 #include "vector.h"
 
 #include <X11/Xlib.h>
+#include <limits.h>
 #include <uchar.h>
 
 #include <GL/glx.h>
@@ -44,6 +45,8 @@ static int32_t convert_modifier_mask(unsigned int x_mask)
     }
     return mods;
 }
+
+DEF_VECTOR(char, NULL);
 
 static WindowStatic* global;
 
@@ -100,8 +103,10 @@ static struct IWindow window_interface_x11 = {
 typedef struct
 {
     Display* display;
-    Atom     wm_delete;
-    Atom     wm_ping;
+    Atom     wm_delete, wm_ping, wm_state;
+    Atom     clipboard, incr, uri_list_mime_type, utf8_string_mime_type;
+    Atom     dnd_enter, dnd_type_list, dnd_position, dnd_finished, dnd_leave, dnd_status, dnd_drop,
+      dnd_selection, dnd_action_copy, dnd_proxy;
 
     Cursor cursor_hidden;
     Cursor cursor_beam;
@@ -120,28 +125,77 @@ typedef struct
     Colormap             colormap;
     uint32_t             last_button_pressed;
     const char*          cliptext;
+
+    struct WindowX11_dnd_offer
+    {
+        const char* mime_type;
+        Atom        mime_type_atom;
+        Time        timestamp;
+        Atom        action;
+        Window      source_xid;
+        bool        accepted;
+    } dnd_offer;
 } WindowX11;
+
+void WindowX11_drop_dnd_offer(WindowX11* self)
+{
+    if (!self->dnd_offer.accepted) {
+        memset(&self->dnd_offer, 0, sizeof(self->dnd_offer));
+    }
+}
+
+void WindowX11_dnd_offer_handled(WindowX11* self)
+{
+    XClientMessageEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.display      = globalX11->display;
+    ev.window       = self->dnd_offer.source_xid;
+    ev.type         = ClientMessage;
+    ev.format       = 32;
+    ev.message_type = globalX11->dnd_status;
+    ev.data.l[0]    = self->window;
+    ev.data.l[1]    = 1;
+    ev.data.l[2]    = self->dnd_offer.action;
+
+    XSendEvent(globalX11->display, self->dnd_offer.source_xid, True, NoEventMask, (XEvent*)&ev);
+    XSync(globalX11->display, False);
+    XFlush(globalX11->display);
+
+    WindowX11_drop_dnd_offer(self);
+}
+
+void WindowX11_record_dnd_offer(WindowX11*  self,
+                                Window      source_xid,
+                                const char* mime,
+                                Atom        mime_atom,
+                                Atom        action)
+{
+    self->dnd_offer.source_xid     = source_xid;
+    self->dnd_offer.mime_type      = mime;
+    self->dnd_offer.mime_type_atom = mime_atom;
+    self->dnd_offer.action         = action;
+    self->dnd_offer.accepted       = false;
+}
 
 static void WindowX11_clipboard_send(struct WindowBase* self, const char* text)
 {
     if (windowX11(self)->cliptext)
         free((void*)windowX11(self)->cliptext);
 
-    Atom sel                  = XInternAtom(globalX11->display, "CLIPBOARD", False);
+    Atom sel                  = globalX11->clipboard;
     windowX11(self)->cliptext = text;
     XSetSelectionOwner(globalX11->display, sel, windowX11(self)->window, CurrentTime);
 }
 
 static void WindowX11_clipboard_get(struct WindowBase* self)
 {
-    Atom   clip  = XInternAtom(globalX11->display, "CLIPBOARD", 0);
-    Atom   utf8  = XInternAtom(globalX11->display, "UTF8_STRING", 0);
+    Atom   clip  = globalX11->clipboard;
     Window owner = XGetSelectionOwner(globalX11->display, clip);
 
     if (owner != None) {
         XConvertSelection(globalX11->display,
                           clip,
-                          utf8,
+                          globalX11->utf8_string_mime_type,
                           clip,
                           windowX11(self)->window,
                           CurrentTime);
@@ -259,19 +313,20 @@ static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
             continue;
         }
 
-        LOG("X::Visual picture format{depth: %d, r:%d(%d), g:%d(%d), b:%d(%d), a:%d(%d), type: %d, "
-            "pf id: %lu}\n",
-            visual_pict_format->depth,
-            visual_pict_format->direct.red,
-            visual_pict_format->direct.redMask,
-            visual_pict_format->direct.green,
-            visual_pict_format->direct.greenMask,
-            visual_pict_format->direct.blue,
-            visual_pict_format->direct.blueMask,
-            visual_pict_format->direct.alpha,
-            visual_pict_format->direct.alphaMask,
-            visual_pict_format->type,
-            visual_pict_format->id);
+        LOG(
+          "X::Visual picture format {depth: %d, r:%d(%d), g:%d(%d), b:%d(%d), a:%d(%d), type: %d, "
+          "pf id: %lu}\n",
+          visual_pict_format->depth,
+          visual_pict_format->direct.red,
+          visual_pict_format->direct.redMask,
+          visual_pict_format->direct.green,
+          visual_pict_format->direct.greenMask,
+          visual_pict_format->direct.blue,
+          visual_pict_format->direct.blueMask,
+          visual_pict_format->direct.alpha,
+          visual_pict_format->direct.alphaMask,
+          visual_pict_format->type,
+          visual_pict_format->id);
 
         if (visual_pict_format->direct.redMask > 0 && visual_pict_format->direct.greenMask > 0 &&
             visual_pict_format->direct.blueMask > 0 && visual_pict_format->depth >= 24) {
@@ -429,8 +484,23 @@ static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
     glXMakeCurrent(globalX11->display, windowX11(win)->window, windowX11(win)->glx_context);
 
     if (init_globals) {
-        globalX11->wm_delete = XInternAtom(globalX11->display, "WM_DELETE_WINDOW", True);
-        globalX11->wm_ping   = XInternAtom(globalX11->display, "_NET_WM_PING", True);
+        globalX11->wm_delete          = XInternAtom(globalX11->display, "WM_DELETE_WINDOW", True);
+        globalX11->wm_ping            = XInternAtom(globalX11->display, "_NET_WM_PING", True);
+        globalX11->wm_state           = XInternAtom(globalX11->display, "_NET_WM_STATE", True);
+        globalX11->incr               = XInternAtom(globalX11->display, "INCR", True);
+        globalX11->clipboard          = XInternAtom(globalX11->display, "CLIPBOARD", True);
+        globalX11->uri_list_mime_type = XInternAtom(globalX11->display, "text/uri-list", True);
+        globalX11->utf8_string_mime_type = XInternAtom(globalX11->display, "UTF8_STRING", True);
+        globalX11->dnd_enter             = XInternAtom(globalX11->display, "XdndEnter", True);
+        globalX11->dnd_type_list         = XInternAtom(globalX11->display, "XdndTypeList", True);
+        globalX11->dnd_position          = XInternAtom(globalX11->display, "XdndPosition", True);
+        globalX11->dnd_leave             = XInternAtom(globalX11->display, "XdndLeave", True);
+        globalX11->dnd_finished          = XInternAtom(globalX11->display, "XdndFinished", True);
+        globalX11->dnd_status            = XInternAtom(globalX11->display, "XdndStatus", True);
+        globalX11->dnd_drop              = XInternAtom(globalX11->display, "XdndDrop", True);
+        globalX11->dnd_selection         = XInternAtom(globalX11->display, "XdndSelection", True);
+        globalX11->dnd_action_copy       = XInternAtom(globalX11->display, "XdndActionCopy", True);
+        globalX11->dnd_proxy             = XInternAtom(globalX11->display, "XdndProxy", True);
     }
     XSetWMProtocols(globalX11->display, windowX11(win)->window, &globalX11->wm_delete, 2);
 
@@ -446,6 +516,17 @@ static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
                     PropModeReplace,
                     (unsigned char*)&pid,
                     1);
+
+    int xdnd_proto_version = 5;
+    XChangeProperty(globalX11->display,
+                    windowX11(win)->window,
+                    XInternAtom(globalX11->display, "XdndAware", False),
+                    XA_ATOM,
+                    32,
+                    PropModeReplace,
+                    (unsigned char*)&xdnd_proto_version,
+                    1);
+
     XFlush(globalX11->display);
 
     return win;
@@ -455,8 +536,9 @@ struct WindowBase* Window_new_x11(Pair_uint32_t res)
 {
     struct WindowBase* win = WindowX11_new(res.first, res.second);
 
-    if (!win)
+    if (!win) {
         return NULL;
+    }
 
     win->title = NULL;
     WindowX11_set_wm_name(win,
@@ -472,7 +554,7 @@ static inline void WindowX11_set_urgent(struct WindowBase* self)
     XEvent e               = { 0 };
     e.type                 = ClientMessage;
     e.xclient.window       = windowX11(self)->window;
-    e.xclient.message_type = XInternAtom(globalX11->display, "_NET_WM_STATE", True);
+    e.xclient.message_type = globalX11->wm_state;
     e.xclient.format       = 32;
     e.xclient.data.l[0]    = _NET_WM_STATE_ADD;
     e.xclient.data.l[1] = XInternAtom(globalX11->display, "_NET_WM_STATE_DEMANDS_ATTENTION", True);
@@ -491,7 +573,7 @@ static inline void WindowX11_fullscreen_change_state(struct WindowBase* self, co
     XEvent e               = { 0 };
     e.type                 = ClientMessage;
     e.xclient.window       = windowX11(self)->window;
-    e.xclient.message_type = XInternAtom(globalX11->display, "_NET_WM_STATE", True);
+    e.xclient.message_type = globalX11->wm_state;
     e.xclient.format       = 32;
     e.xclient.data.l[0]    = (long)arg;
     e.xclient.data.l[1]    = XInternAtom(globalX11->display, "_NET_WM_STATE_FULLSCREEN", True);
@@ -537,7 +619,7 @@ static void WindowX11_set_maximized(struct WindowBase* self, bool maximized)
     XEvent e               = { 0 };
     e.type                 = ClientMessage;
     e.xclient.window       = windowX11(self)->window;
-    e.xclient.message_type = XInternAtom(globalX11->display, "_NET_WM_STATE", True);
+    e.xclient.message_type = globalX11->wm_state;
     e.xclient.format       = 32;
     e.xclient.data.l[0]    = maximized ? _NET_WM_STATE_ADD : _NET_WM_STATE_REMOVE;
     e.xclient.data.l[1]    = XInternAtom(globalX11->display, "_NET_WM_STATE_MAXIMIZED_VERT", True);
@@ -571,6 +653,36 @@ static void WindowX11_resize(struct WindowBase* self, uint32_t w, uint32_t h)
     XConfigureWindow(globalX11->display, windowX11(self)->window, CWWidth, &changes);
 
     Window_notify_content_change(self);
+}
+
+static const char* ACCEPTED_DND_MIMES[] = {
+    "text/uri-list", "text/plain;charset=utf-8", "UTF8_STRING", "text/plain", "STRING", "TEXT",
+};
+
+static const char* mime_atom_list_select_preferred(Atom* list, size_t n, Atom* atom)
+{
+    int selected_index = -1;
+
+    for (uint8_t i = 0; i < n && list[i]; ++i) {
+        char* mime = XGetAtomName(globalX11->display, list[i]);
+        if (!mime) {
+            continue;
+        }
+        LOG("[%u] offered dnd MIME type: %s\n", i, mime);
+
+        for (uint_fast8_t j = 0;
+             (j < selected_index || selected_index < 0) && j < ARRAY_SIZE(ACCEPTED_DND_MIMES);
+             ++j) {
+            if (!strcmp(mime, ACCEPTED_DND_MIMES[j])) {
+                selected_index = j;
+                if (atom)
+                    *atom = list[i];
+            }
+        }
+        XFree(mime);
+    }
+
+    return selected_index < 0 ? NULL : ACCEPTED_DND_MIMES[selected_index];
 }
 
 static void WindowX11_events(struct WindowBase* self)
@@ -632,6 +744,128 @@ static void WindowX11_events(struct WindowBase* self)
                                True,
                                SubstructureNotifyMask | SubstructureRedirectMask,
                                e);
+                } else if ((Atom)e->xclient.message_type == globalX11->dnd_enter) {
+                    const char* mime                       = NULL;
+                    Window      source_xid                 = (Atom)e->xclient.data.l[0];
+                    bool        source_uses_xdnd_type_list = (Atom)e->xclient.data.l[1] & 1;
+                    Atom        action                     = (Atom)e->xclient.data.l[4];
+
+                    LOG("X::ClientMessage::dndEnter { source_xid: %lu, has_type_list: %d, "
+                        "protocol_version: %ld }\n",
+                        source_xid,
+                        source_uses_xdnd_type_list,
+                        (Atom)e->xclient.data.l[1] >> (sizeof(uint32_t) / sizeof(uint8_t) - 1) * 8);
+
+                    Atom mime_atom = 0;
+
+                    if (source_uses_xdnd_type_list) {
+                        unsigned long n_items = 0, bytes_after = 0;
+                        Atom*         mime_atom_list = NULL;
+                        Atom          actual_type_ret;
+                        int           actual_format_ret;
+                        int           status = XGetWindowProperty(globalX11->display,
+                                                        source_xid,
+                                                        globalX11->dnd_type_list,
+                                                        0,
+                                                        65536,
+                                                        False,
+                                                        AnyPropertyType,
+                                                        &actual_type_ret,
+                                                        &actual_format_ret,
+                                                        &n_items,
+                                                        &bytes_after,
+                                                        (unsigned char**)&mime_atom_list);
+                        if (status == Success && actual_type_ret != None &&
+                            actual_format_ret != 0) {
+                            mime =
+                              mime_atom_list_select_preferred(mime_atom_list, n_items, &mime_atom);
+                            XFree(mime_atom_list);
+                        }
+                    } else {
+                        Atom* list = (Atom*)e->xclient.data.l;
+                        mime       = mime_atom_list_select_preferred(list + 2, 3, &mime_atom);
+                    }
+
+                    if (mime) {
+                        WindowX11_record_dnd_offer(windowX11(self),
+                                                   source_xid,
+                                                   mime,
+                                                   mime_atom,
+                                                   action);
+                    }
+                } else if ((Atom)e->xclient.message_type == globalX11->dnd_position) {
+                    Window source_xid = (Atom)e->xclient.data.l[0];
+                    Time   timestamp  = (Atom)e->xclient.data.l[3];
+                    Atom   action     = (Atom)e->xclient.data.l[4];
+
+#ifdef DEBUG
+                    char* an = XGetAtomName(globalX11->display, (Atom)action);
+                    LOG("X::ClientMessage::dndPosition { source_xid: %lu, timestamp: %lu, mime: "
+                        "%s, action: %lu "
+                        "(%s) }\n",
+                        source_xid,
+                        timestamp,
+                        windowX11(self)->dnd_offer.mime_type,
+                        action,
+                        an);
+                    XFree(an);
+#endif
+
+                    XClientMessageEvent ev;
+                    memset(&ev, 0, sizeof(ev));
+                    ev.message_type = globalX11->dnd_status;
+                    ev.display      = globalX11->display;
+                    ev.window       = windowX11(self)->dnd_offer.source_xid;
+                    ev.type         = ClientMessage;
+                    ev.format       = 32;
+                    ev.data.l[0]    = windowX11(self)->window;
+                    ev.data.l[1]    = 1;
+                    ev.data.l[2]    = (self->x << 16) | self->y; // change this when we have splits
+                    ev.data.l[3]    = (self->w << 16) | self->h;
+                    ev.data.l[4]    = action;
+
+                    if (source_xid == windowX11(self)->dnd_offer.source_xid) {
+                        windowX11(self)->dnd_offer.timestamp = timestamp;
+                        XSendEvent(globalX11->display, source_xid, True, NoEventMask, (XEvent*)&ev);
+                        XFlush(globalX11->display);
+                    } else {
+                        ev.data.l[1] = 0;
+                        ev.data.l[4] = None;
+                        XSendEvent(globalX11->display, source_xid, True, NoEventMask, (XEvent*)&ev);
+                        XFlush(globalX11->display);
+                        WindowX11_drop_dnd_offer(windowX11(self));
+                    }
+
+                } else if ((Atom)e->xclient.message_type == globalX11->dnd_drop) {
+                    Window source_xid = (Atom)e->xclient.data.l[0];
+                    Time   timestamp  = (Atom)e->xclient.data.l[2];
+
+                    if (source_xid == windowX11(self)->dnd_offer.source_xid) {
+                        LOG(
+                          "X::ClientMessage::dndDrop { source_xid: %d, timestamp: %d, mime: %s }\n",
+                          (int)source_xid,
+                          (int)timestamp,
+                          windowX11(self)->dnd_offer.mime_type);
+
+                        windowX11(self)->dnd_offer.accepted = true;
+
+                        int ret = XConvertSelection(globalX11->display,
+                                                    globalX11->dnd_selection,
+                                                    windowX11(self)->dnd_offer.mime_type_atom,
+                                                    globalX11->dnd_selection,
+                                                    windowX11(self)->window,
+                                                    timestamp);
+
+                        if (ret == BadWindow || ret == BadAtom) {
+                            WRN("XConvertSelection failed: %d\n", ret);
+                        }
+                    } else {
+                        WindowX11_drop_dnd_offer(windowX11(self));
+                    }
+                } else if ((Atom)e->xclient.message_type == globalX11->dnd_leave) {
+                    LOG("X::ClientMessage::dndLeave { accepted: %d }\n",
+                        windowX11(self)->dnd_offer.accepted);
+                    WindowX11_drop_dnd_offer(windowX11(self));
                 }
                 break;
 
@@ -670,7 +904,7 @@ static void WindowX11_events(struct WindowBase* self)
                         break;
                 }
 
-                LOG("X::KeyPress{ status:%d, ret:%lu, bytes:%d, code:%u, no_consume:%d }\n",
+                LOG("X::event::KeyPress{ status:%d, ret:%lu, bytes:%d, code:%u, no_consume:%d }\n",
                     stat,
                     ret,
                     bytes,
@@ -760,7 +994,7 @@ static void WindowX11_events(struct WindowBase* self)
                                (XEvent*)&se);
                 } else {
                     /* accept */
-                    Atom utf8 = XInternAtom(globalX11->display, "UTF8_STRING", 0);
+                    Atom utf8 = globalX11->utf8_string_mime_type;
 
                     XChangeProperty(globalX11->display,
                                     e->xselectionrequest.requestor,
@@ -786,57 +1020,104 @@ static void WindowX11_events(struct WindowBase* self)
                 }
                 break;
 
-            case SelectionNotify:
-                if (e->xselection.property != None) {
-                    Atom           clip = XInternAtom(globalX11->display, "CLIPBOARD", 0);
-                    Atom           da, type, incr;
-                    int            di;
-                    unsigned long  dul, size;
-                    unsigned char* pret = NULL;
-                    incr                = XInternAtom(globalX11->display, "INCR", 0);
+            case SelectionNotify: {
+                Atom           clip = e->xselection.selection;
+                Atom           da, actual_type_return;
+                int            actual_format_return;
+                unsigned long  n_items, bytes_after;
+                unsigned char* prop_return = NULL;
+
+                Window target = windowX11(self)->window;
+                Atom   type   = AnyPropertyType;
+
+                XGetWindowProperty(globalX11->display,
+                                   target,
+                                   clip,
+                                   0,
+                                   0,
+                                   False,
+                                   type,
+                                   &actual_type_return,
+                                   &actual_format_return,
+                                   &n_items,
+                                   &bytes_after,
+                                   &prop_return);
+
+                XFree(prop_return);
+
+                if (actual_type_return != globalX11->incr) {
+                    /* if data is larger than chunk size (200-ish k), it's
+                     * probably not text anyway. TODO: actually do this properly */
                     XGetWindowProperty(globalX11->display,
-                                       windowX11(self)->window,
+                                       target,
                                        clip,
                                        0,
-                                       0,
+                                       bytes_after,
                                        False,
                                        AnyPropertyType,
-                                       &type,
-                                       &di,
-                                       &dul,
-                                       &size,
-                                       &pret);
-                    if (type != incr) {
-                        /* if data is larger than chunk size (200-ish k), it's
-                         * probably not text anyway */
-                        XGetWindowProperty(globalX11->display,
-                                           windowX11(self)->window,
-                                           clip,
-                                           0,
-                                           size,
-                                           False,
-                                           AnyPropertyType,
-                                           &da,
-                                           &di,
-                                           &dul,
-                                           &dul,
-                                           &pret);
+                                       &da,
+                                       &actual_format_return,
+                                       &n_items,
+                                       &bytes_after,
+                                       &prop_return);
 
-                        self->callbacks.clipboard_handler(self->callbacks.user_data, (char*)pret);
-                        XFree(pret);
+#ifdef DEBUG
+                    char* cname = XGetAtomName(globalX11->display, clip);
+                    char* ctype = actual_format_return == 0
+                                    ? NULL
+                                    : XGetAtomName(globalX11->display, actual_type_return);
+                    LOG("X::event::SelectionNotify { selection: %s, type: %lu (%s), ret: %s }\n",
+                        cname,
+                        actual_type_return,
+                        ctype,
+                        prop_return);
+
+                    free(ctype);
+                    free(cname);
+#endif
+
+                    if (actual_type_return == globalX11->uri_list_mime_type) {
+                        // If we drop files just copy their path(s)
+                        Vector_char actual_chars = Vector_new_char();
+                        char*       seq          = (char*)prop_return;
+                        for (char* a; (a = strsep(&seq, "\n"));) {
+                            char* start = strstr((char*)a, "://");
+                            if (start) {
+                                start += 3;
+                                Vector_pushv_char(&actual_chars, start, strlen(start) - 1);
+                                Vector_push_char(&actual_chars, ' ');
+                            } else {
+                                Vector_pop_char(&actual_chars);
+                            }
+                        }
+                        Vector_push_char(&actual_chars, '\0');
+
+                        self->callbacks.clipboard_handler(self->callbacks.user_data,
+                                                          actual_chars.buf);
+                        Vector_destroy_char(&actual_chars);
+                    } else {
+                        self->callbacks.clipboard_handler(self->callbacks.user_data,
+                                                          (char*)prop_return);
                     }
-                    XDeleteProperty(globalX11->display, windowX11(self)->window, clip);
+
+                    if (clip == globalX11->dnd_selection) {
+                        WindowX11_dnd_offer_handled(windowX11(self));
+                    }
+
+                    XFree(prop_return);
                 }
-                break;
+
+                XDeleteProperty(globalX11->display, windowX11(self)->window, clip);
+            } break;
 
             default:;
         }
     }
 }
 
-static void WindowX11_set_current_context(struct WindowBase* self, bool this)
+static void WindowX11_set_current_context(struct WindowBase* self, bool is_this)
 {
-    if (this) {
+    if (is_this) {
         glXMakeCurrent(globalX11->display, windowX11(self)->window, windowX11(self)->glx_context);
     } else {
         glXMakeCurrent(globalX11->display, None, NULL);
@@ -862,7 +1143,7 @@ static void WindowX11_set_title(struct WindowBase* self, const char* title)
     XChangeProperty(globalX11->display,
                     windowX11(self)->window,
                     XInternAtom(globalX11->display, "_NET_WM_NAME", False),
-                    XInternAtom(globalX11->display, "UTF8_STRING", False),
+                    globalX11->utf8_string_mime_type,
                     8,
                     PropModeReplace,
                     (unsigned char*)title,
