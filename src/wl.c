@@ -39,6 +39,8 @@
 
 static WindowStatic* global;
 
+DEF_VECTOR(char, NULL);
+
 #define globalWl       ((GlobalWl*)&global->extend_data)
 #define windowWl(base) ((WindowWl*)&base->extend_data)
 
@@ -188,7 +190,7 @@ typedef struct
     int32_t           target_frame_time_ms;
 } WlOutputInfo;
 
-DEF_VECTOR(WlOutputInfo, NULL)
+DEF_VECTOR(WlOutputInfo, NULL);
 
 typedef struct
 {
@@ -205,9 +207,9 @@ typedef struct
 
     struct wl_data_offer*  data_offer;
     struct wl_data_source* data_source;
-
-    char*       data_offer_mime;
-    const char* data_source_text;
+    struct wl_data_offer*  dnd_data_offer;
+    int8_t                 data_offer_mime_idx; // -1 for none
+    const char*            data_source_text;
 
     bool got_discrete_axis_event;
 
@@ -216,6 +218,11 @@ typedef struct
     bool                draw_next_frame;
 
 } WindowWl;
+
+/* in order of preference */
+static const char* ACCEPTED_DND_MIMES[] = {
+    "text/uri-list", "text/plain;charset=utf-8", "UTF8_STRING", "text/plain", "STRING", "TEXT",
+};
 
 static inline xkb_keysym_t keysym_filter_compose(xkb_keysym_t sym)
 {
@@ -240,6 +247,57 @@ static inline xkb_keysym_t keysym_filter_compose(xkb_keysym_t sym)
 
 static void WindowWl_swap_buffers(struct WindowBase* self);
 
+static void WindowWl_drain_pipe_to_clipboard(struct WindowBase* self,
+                                             int                pipe_fd,
+                                             bool               convert_mime_list)
+{
+#define PIPE_READ_CHUNK_SIZE 1024
+    char        buf[PIPE_READ_CHUNK_SIZE];
+    Vector_char text = Vector_new_char();
+
+    ssize_t rd;
+    do {
+        errno = 0;
+        rd    = read(pipe_fd, buf, PIPE_READ_CHUNK_SIZE);
+
+        if (rd <= 0) {
+            if (errno == EAGAIN) {
+                continue;
+            } else if (errno == EWOULDBLOCK) {
+                break;
+            } else if (errno) {
+                WRN("IO error: %s\n", strerror(errno));
+            }
+        }
+
+        // MIN to supress overflow warning
+        Vector_pushv_char(&text, buf, MIN(rd, PIPE_READ_CHUNK_SIZE));
+    } while (rd > 0);
+
+    Vector_push_char(&text, '\0');
+
+    if (convert_mime_list) {
+        Vector_char conv = Vector_new_char();
+        char*       seq  = (char*)text.buf;
+        for (char* a; (a = strsep(&seq, "\n"));) {
+            char* start = strstr((char*)a, "://");
+            if (start) {
+                start += 3;
+                Vector_pushv_char(&conv, start, strlen(start) - 1);
+                Vector_push_char(&conv, ' ');
+            } else {
+                Vector_pop_char(&conv);
+            }
+        }
+        Vector_push_char(&conv, '\0');
+        Vector_destroy_char(&text);
+        text = conv;
+    }
+
+    CALL_FP(self->callbacks.clipboard_handler, self->callbacks.user_data, text.buf);
+    Vector_destroy_char(&text);
+}
+
 static void WindowWl_clipboard_send(struct WindowBase* self, const char* text)
 {
     if (!text)
@@ -263,37 +321,27 @@ static void WindowWl_clipboard_send(struct WindowBase* self, const char* text)
 
 static void WindowWl_clipboard_get(struct WindowBase* self)
 {
-    if (windowWl(self)->data_offer_mime) {
-        LOG("last recorded wl_data_offer mime: \"%s\" \n", windowWl(self)->data_offer_mime);
+    if (windowWl(self)->data_offer_mime_idx > -1) {
+        LOG("last recorded wl_data_offer mime: \"%s\" \n",
+            ACCEPTED_DND_MIMES[windowWl(self)->data_offer_mime_idx]);
     }
 
     if (windowWl(self)->data_offer) {
-        int  fds[2];
-        char buf[4024] = { 0 };
+        int fds[2];
 
+        errno = 0;
         if (pipe(fds)) {
             WRN("IO error: %s\n", strerror(errno));
-            errno = 0;
             return;
         }
 
-        wl_data_offer_receive(windowWl(self)->data_offer, windowWl(self)->data_offer_mime, fds[1]);
+        wl_data_offer_receive(windowWl(self)->data_offer,
+                              ACCEPTED_DND_MIMES[windowWl(self)->data_offer_mime_idx],
+                              fds[1]);
 
         close(fds[1]);
-
         wl_display_roundtrip(globalWl->display);
-
-        int rd = read(fds[0], buf, 4023);
-        if (rd < 0) {
-            WRN("IO error: %s\n", strerror(errno));
-            errno = 0;
-        } else if (rd == 0) {
-            LOG("data_offer empty, did offering client exit?\n");
-            close(fds[0]);
-            return;
-        }
-        buf[rd < 0 ? 0 : rd] = 0;
-        self->callbacks.clipboard_handler(self->callbacks.user_data, buf);
+        WindowWl_drain_pipe_to_clipboard(self, fds[0], false);
         close(fds[0]);
     }
 }
@@ -815,6 +863,7 @@ static void xdg_toplevel_handle_configure(void*                data,
         win->w = width;
         win->h = height;
     }
+
     Window_notify_content_change(win);
     wl_egl_window_resize(windowWl(win)->egl_window, win->w, win->h, 0, 0);
 }
@@ -931,39 +980,68 @@ static void data_offer_handle_offer(void*                 data,
 {
     WindowWl* w = windowWl(((struct WindowBase*)data));
 
-    LOG("wl.data_offer::offer {mime_type: %s}\n", mime_type);
+    LOG("wl.data_offer::offer{ mime_type: %s ", mime_type);
 
-    if (!strcmp(mime_type, "text/plain;charset=utf-8") || !strcmp(mime_type, "text/plain")) {
-
-        LOG("accepting offer for MIME: %s\n", mime_type);
-
-        w->data_offer = wl_data_offer;
-
-        if (w->data_offer_mime)
-            free(w->data_offer_mime);
-        w->data_offer_mime = strdup(mime_type);
-
-        wl_data_offer_accept(wl_data_offer, 0, mime_type);
-    } else {
-        wl_data_offer_accept(wl_data_offer, 0, NULL);
+    for (uint_fast8_t i = 0; i < ARRAY_SIZE(ACCEPTED_DND_MIMES); ++i) {
+        if (!strcmp(mime_type, ACCEPTED_DND_MIMES[i]) &&
+            (w->data_offer_mime_idx == -1 || w->data_offer_mime_idx > i)) {
+            LOG("- ACCEPTED }\n");
+            w->data_offer          = wl_data_offer;
+            w->data_offer_mime_idx = i;
+            wl_data_offer_accept(wl_data_offer, 0, mime_type);
+            return;
+        }
     }
+
+    if (w->data_offer_mime_idx == -1) {
+        LOG(" - REJECTED(not supported) }\n");
+    } else {
+        LOG(" - REJECTED(\'%s\' is prefferable) }\n", ACCEPTED_DND_MIMES[w->data_offer_mime_idx]);
+    }
+
+    wl_data_offer_accept(wl_data_offer, 0, NULL);
 }
 
 static void data_offer_handle_source_actions(void*                 data,
                                              struct wl_data_offer* wl_data_offer,
                                              uint32_t              source_actions)
 {
-    LOG("wl.data_offer::source_actions\n");
+    LOG("wl.data_offer::source_actions{ supported actions: ");
+    if (source_actions & WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY) {
+        LOG("copy ");
+    }
+    if (source_actions & WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE) {
+        LOG("move ");
+    }
+    LOG("}\n");
 }
 
 static void data_offer_handle_action(void*                 data,
                                      struct wl_data_offer* wl_data_offer,
                                      uint32_t              dnd_action)
 {
-    LOG("wl.data_offer::action\n");
+    WindowWl* w = windowWl(((struct WindowBase*)data));
+    LOG("wl.data_offer::action{ current action: ");
+    switch (dnd_action) {
+        case WL_DATA_DEVICE_MANAGER_DND_ACTION_NONE:
+            LOG("none");
+            break;
+        case WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY:
+            LOG("copy");
+            if (w->data_offer_mime_idx > -1) {
+                wl_data_offer_accept(wl_data_offer,
+                                     globalWl->serial,
+                                     ACCEPTED_DND_MIMES[w->data_offer_mime_idx]);
+            }
+            break;
+        case WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE:
+            LOG("move");
+            break;
+    }
+    LOG(" }\n");
 }
 
-static struct wl_data_offer_listener data_offer_listener = {
+static const struct wl_data_offer_listener data_offer_listener = {
     .offer          = data_offer_handle_offer,
     .source_actions = data_offer_handle_source_actions,
     .action         = data_offer_handle_action,
@@ -971,10 +1049,10 @@ static struct wl_data_offer_listener data_offer_listener = {
 
 static void data_device_handle_data_offer(void*                  data,
                                           struct wl_data_device* wl_data_device,
-                                          struct wl_data_offer*  id)
+                                          struct wl_data_offer*  offer)
 {
     LOG("wl.data_device::offer\n");
-    wl_data_offer_add_listener(id, &data_offer_listener, data);
+    wl_data_offer_add_listener(offer, &data_offer_listener, data);
 }
 
 static void data_device_handle_enter(void*                  data,
@@ -983,14 +1061,26 @@ static void data_device_handle_enter(void*                  data,
                                      struct wl_surface*     surface,
                                      wl_fixed_t             x,
                                      wl_fixed_t             y,
-                                     struct wl_data_offer*  id)
+                                     struct wl_data_offer*  offer)
 {
+    /* attempt to initiate drag and drop */
     globalWl->serial = serial;
-    LOG("wl.data_device::enter\n");
+
+    LOG("wl.data_device::enter{ x: %f, y: %f }\n", wl_fixed_to_double(x), wl_fixed_to_double(y));
+
+    WindowWl* self = windowWl(((struct WindowBase*)data));
+
+    self->dnd_data_offer = offer;
+    wl_data_offer_set_actions(self->dnd_data_offer,
+                              WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY,
+                              WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY);
 }
 
 static void data_device_handle_leave(void* data, struct wl_data_device* wl_data_device)
 {
+    WindowWl* self            = windowWl(((struct WindowBase*)data));
+    self->dnd_data_offer      = NULL;
+    self->data_offer_mime_idx = -1;
     LOG("wl.data_device::leave\n");
 }
 
@@ -1000,19 +1090,66 @@ static void data_device_handle_motion(void*                  data,
                                       wl_fixed_t             x,
                                       wl_fixed_t             y)
 {
-    LOG("wl.data_device::motion\n");
+    WindowWl* self = windowWl(((struct WindowBase*)data));
+
+    LOG("wl.data_device::motion{ x: %f, y: %f, t: %u }\n",
+        wl_fixed_to_double(x),
+        wl_fixed_to_double(y),
+        time);
+
+    if (!self->dnd_data_offer) {
+        return;
+    }
+
+    wl_data_offer_set_actions(self->dnd_data_offer,
+                              WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY,
+                              WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY);
 }
 
 static void data_device_handle_drop(void* data, struct wl_data_device* wl_data_device)
 {
-    LOG("wl.data_device::drop\n");
+    LOG("wl.data_device::drop{ ");
+
+    struct WindowBase* base = (struct WindowBase*)data;
+    WindowWl*          self = windowWl(base);
+
+    if (!self->dnd_data_offer) {
+        LOG("<offer expired> }\n");
+        return;
+    }
+
+    struct wl_data_offer* offer    = self->dnd_data_offer;
+    int                   mime_idx = self->data_offer_mime_idx;
+
+    LOG("mime: %s }\n", ACCEPTED_DND_MIMES[mime_idx]);
+
+    int fds[2];
+    errno = 0;
+    if (pipe(fds)) {
+        WRN("IO error: %s\n", strerror(errno));
+        return;
+    }
+    wl_data_offer_receive(offer, ACCEPTED_DND_MIMES[mime_idx], fds[1]);
+    close(fds[1]);
+
+    wl_display_roundtrip(globalWl->display);
+    WindowWl_drain_pipe_to_clipboard(base, fds[0], mime_idx == 0);
+    close(fds[0]);
+
+    wl_data_offer_finish(offer);
+    wl_data_offer_destroy(offer);
+    self->dnd_data_offer = NULL;
 }
 
 static void data_device_handle_selection(void*                  data,
                                          struct wl_data_device* wl_data_device,
-                                         struct wl_data_offer*  id)
+                                         struct wl_data_offer*  offer)
 {
-    LOG("wl.data_device::selection\n");
+    LOG("wl.data_device::selection { has_offer: %d }\n", offer != NULL);
+
+    if (!offer) {
+        return;
+    }
 }
 
 static struct wl_data_device_listener data_device_listener = {
@@ -1036,7 +1173,7 @@ static void data_source_handle_send(void*                  data,
                                     const char*            mime_type,
                                     int32_t                fd)
 {
-    LOG("wl.data_source::send mime_type: %s\n", mime_type);
+    LOG("wl.data_source::send{ mime_type: %s }\n", mime_type);
 
     if (windowWl(((struct WindowBase*)data))->data_source_text &&
         (!strcmp(mime_type, "text/plain") || !strcmp(mime_type, "text/plain;charset=utf-8") ||
@@ -1091,7 +1228,7 @@ static void registry_add(void*               data,
                          const char*         interface,
                          uint32_t            version)
 {
-    LOG("wl_registry.name: %-40s ver: %2u", interface, version);
+    LOG("wl_registry.name{ name: %-40s, ver: %2u", interface, version);
 
     if (!strcmp(interface, wl_compositor_interface.name)) {
         globalWl->compositor = wl_registry_bind(registry, name, &wl_compositor_interface, version);
@@ -1117,7 +1254,7 @@ static void registry_add(void*               data,
     } else {
         LOG(" - unused");
     }
-    LOG("\n");
+    LOG(" }\n");
 }
 
 static void registry_remove(void* data, struct wl_registry* registry, uint32_t name) {}
@@ -1198,6 +1335,8 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h)
     FLAG_SET(win->state_flags, WINDOW_IS_MINIMIZED);
 
     win->interface = &window_interface_wayland;
+
+    windowWl(win)->data_offer_mime_idx = -1;
 
     globalWl->registry = wl_display_get_registry(globalWl->display);
     wl_registry_add_listener(globalWl->registry, &registry_listener, win);
@@ -1592,7 +1731,6 @@ static void WindowWl_destroy(struct WindowBase* self)
     wl_registry_destroy(globalWl->registry);
     wl_display_disconnect(globalWl->display);
 
-    free((void*)windowWl(self)->data_offer_mime);
     free((void*)windowWl(self)->data_source_text);
 
     Vector_destroy_WlOutputInfo(&windowWl(self)->outputs);

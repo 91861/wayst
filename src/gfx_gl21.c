@@ -2579,6 +2579,7 @@ static void GfxOpenGL21_draw_overlays(GfxOpenGL21* self, const Vt* vt, const Ui*
 static void GfxOpenGL21_draw_flash(GfxOpenGL21* self, float fraction)
 {
     glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glDisable(GL_SCISSOR_TEST);
     glBindTexture(GL_TEXTURE_2D, 0);
     Shader_use(&self->solid_fill_shader);
