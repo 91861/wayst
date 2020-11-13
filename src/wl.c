@@ -263,9 +263,9 @@ static void WindowWl_drain_pipe_to_clipboard(struct WindowBase* self,
         if (rd <= 0) {
             if (errno == EAGAIN) {
                 continue;
-            } else if (errno == EWOULDBLOCK) {
+            } else if (errno == EWOULDBLOCK || errno == 0) {
                 break;
-            } else if (errno) {
+            } else {
                 WRN("IO error: %s\n", strerror(errno));
             }
         }
@@ -300,8 +300,9 @@ static void WindowWl_drain_pipe_to_clipboard(struct WindowBase* self,
 
 static void WindowWl_clipboard_send(struct WindowBase* self, const char* text)
 {
-    if (!text)
+    if (!text) {
         return;
+    }
 
     WindowWl* w = windowWl(self);
 
@@ -321,28 +322,30 @@ static void WindowWl_clipboard_send(struct WindowBase* self, const char* text)
 
 static void WindowWl_clipboard_get(struct WindowBase* self)
 {
-    if (windowWl(self)->data_offer_mime_idx > -1) {
+    if (windowWl(self)->data_offer_mime_idx > -1 && windowWl(self)->data_offer) {
         LOG("last recorded wl_data_offer mime: \"%s\" \n",
             ACCEPTED_DND_MIMES[windowWl(self)->data_offer_mime_idx]);
-    }
 
-    if (windowWl(self)->data_offer) {
-        int fds[2];
+        if (windowWl(self)->data_offer) {
+            int fds[2];
 
-        errno = 0;
-        if (pipe(fds)) {
-            WRN("IO error: %s\n", strerror(errno));
-            return;
+            errno = 0;
+            if (pipe(fds)) {
+                WRN("IO error: %s\n", strerror(errno));
+                return;
+            }
+
+            wl_data_offer_receive(windowWl(self)->data_offer,
+                                  ACCEPTED_DND_MIMES[windowWl(self)->data_offer_mime_idx],
+                                  fds[1]);
+
+            close(fds[1]);
+            wl_display_roundtrip(globalWl->display);
+            WindowWl_drain_pipe_to_clipboard(self,
+                                             fds[0],
+                                             windowWl(self)->data_offer_mime_idx == 0);
+            close(fds[0]);
         }
-
-        wl_data_offer_receive(windowWl(self)->data_offer,
-                              ACCEPTED_DND_MIMES[windowWl(self)->data_offer_mime_idx],
-                              fds[1]);
-
-        close(fds[1]);
-        wl_display_roundtrip(globalWl->display);
-        WindowWl_drain_pipe_to_clipboard(self, fds[0], false);
-        close(fds[0]);
     }
 }
 
@@ -975,7 +978,7 @@ static const struct wl_output_listener output_listener = {
 /* data device listener */
 
 static void data_offer_handle_offer(void*                 data,
-                                    struct wl_data_offer* wl_data_offer,
+                                    struct wl_data_offer* data_offer,
                                     const char*           mime_type)
 {
     WindowWl* w = windowWl(((struct WindowBase*)data));
@@ -983,12 +986,24 @@ static void data_offer_handle_offer(void*                 data,
     LOG("wl.data_offer::offer{ mime_type: %s ", mime_type);
 
     for (uint_fast8_t i = 0; i < ARRAY_SIZE(ACCEPTED_DND_MIMES); ++i) {
-        if (!strcmp(mime_type, ACCEPTED_DND_MIMES[i]) &&
-            (w->data_offer_mime_idx == -1 || w->data_offer_mime_idx > i)) {
-            LOG("- ACCEPTED }\n");
-            w->data_offer          = wl_data_offer;
+
+        if (strcmp(mime_type, ACCEPTED_DND_MIMES[i])) {
+            continue;
+        }
+
+        bool prefferable_mime = (w->data_offer_mime_idx == -1 || w->data_offer_mime_idx >= i);
+
+        if (data_offer != w->data_offer) {
+            LOG("- ACCEPTED(new data) }\n");
+            w->data_offer          = data_offer;
             w->data_offer_mime_idx = i;
-            wl_data_offer_accept(wl_data_offer, 0, mime_type);
+            wl_data_offer_accept(data_offer, 0, mime_type);
+            return;
+        } else if (prefferable_mime) {
+            LOG("- ACCEPTED(preffered mime type) }\n");
+            w->data_offer          = data_offer;
+            w->data_offer_mime_idx = i;
+            wl_data_offer_accept(data_offer, 0, mime_type);
             return;
         }
     }
@@ -999,7 +1014,7 @@ static void data_offer_handle_offer(void*                 data,
         LOG(" - REJECTED(\'%s\' is prefferable) }\n", ACCEPTED_DND_MIMES[w->data_offer_mime_idx]);
     }
 
-    wl_data_offer_accept(wl_data_offer, 0, NULL);
+    wl_data_offer_accept(data_offer, 0, NULL);
 }
 
 static void data_offer_handle_source_actions(void*                 data,
@@ -1017,7 +1032,7 @@ static void data_offer_handle_source_actions(void*                 data,
 }
 
 static void data_offer_handle_action(void*                 data,
-                                     struct wl_data_offer* wl_data_offer,
+                                     struct wl_data_offer* data_offer,
                                      uint32_t              dnd_action)
 {
     WindowWl* w = windowWl(((struct WindowBase*)data));
@@ -1029,7 +1044,7 @@ static void data_offer_handle_action(void*                 data,
         case WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY:
             LOG("copy");
             if (w->data_offer_mime_idx > -1) {
-                wl_data_offer_accept(wl_data_offer,
+                wl_data_offer_accept(data_offer,
                                      globalWl->serial,
                                      ACCEPTED_DND_MIMES[w->data_offer_mime_idx]);
             }
