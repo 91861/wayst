@@ -6,6 +6,7 @@
  * TODO:
  * - It makes more sense for the unicode input prompt to be here
  * - Move flash animations here
+ * - Multiple vt instacnes within the same application
  */
 
 #define _GNU_SOURCE
@@ -64,6 +65,7 @@ typedef struct
     uint8_t   click_count;
     TimePoint next_click_limit;
     bool      selection_dragging_left;
+
     enum SelectionDragRight
     {
         SELECT_DRAG_RIGHT_NONE = 0,
@@ -194,6 +196,7 @@ static void App_run(App* self)
 {
     while (!(self->exit || Window_is_closed(self->win))) {
         int timeout_ms = 0;
+
         if (!self->swap_performed) {
             if (self->closest_pending_wakeup) {
                 timeout_ms = TimePoint_is_ms_ahead(*(self->closest_pending_wakeup));
@@ -205,6 +208,7 @@ static void App_run(App* self)
         Monitor_wait(&self->monitor, timeout_ms);
 
         self->closest_pending_wakeup = NULL;
+
         if (Monitor_are_window_system_events_pending(&self->monitor)) {
             Window_events(self->win);
         }
@@ -216,17 +220,22 @@ static void App_run(App* self)
 
         char*  buf;
         size_t len;
+
         Vt_get_output(&self->vt, &buf, &len);
+
         if (len) {
             Monitor_write(&self->monitor, buf, len);
         }
+
         ssize_t bytes = 0;
         do {
             if (unlikely(settings.debug_slow)) {
                 usleep(5000);
                 App_notify_content_change(self);
             }
+
             bytes = Monitor_read(&self->monitor);
+
             if (bytes > 0) {
                 Vt_interpret(&self->vt, self->monitor.input_buffer, bytes);
                 Gfx_notify_action(self->gfx);
@@ -236,16 +245,20 @@ static void App_run(App* self)
         } while (bytes && likely(!settings.debug_slow));
 
         Vt_get_output(&self->vt, &buf, &len);
+
         if (len) {
             Monitor_write(&self->monitor, buf, len);
         }
 
         App_maybe_resize(self, Window_size(self->win));
-        if (self->ui.scrollbar.visible || self->vt.scrolling_visual) {
+
+        if (self->ui.scrollbar.visible || self->vt.scrolling_visual ||
+            self->autoscroll != AUTOSCROLL_NONE) {
             App_do_autoscroll(self);
             App_update_scrollbar_vis(self);
             App_update_scrollbar_dims(self);
         }
+
         App_update_cursor(self);
 
         TimePoint* closest_gfx_timer;
@@ -253,10 +266,17 @@ static void App_run(App* self)
             !!Gfx_set_focus(self->gfx, FLAG_IS_SET(self->win->state_flags, WINDOW_IS_IN_FOCUS))) {
             Window_notify_content_change(self->win);
         }
+
         if ((closest_gfx_timer && !self->closest_pending_wakeup) ||
             (closest_gfx_timer && self->closest_pending_wakeup &&
              TimePoint_is_earlier(*closest_gfx_timer, *self->closest_pending_wakeup))) {
             self->closest_pending_wakeup = closest_gfx_timer;
+        }
+
+        if ((self->autoscroll && !self->closest_pending_wakeup) ||
+            (self->autoscroll && self->closest_pending_wakeup &&
+             TimePoint_is_earlier(self->autoscroll_next_step, *self->closest_pending_wakeup))) {
+            self->closest_pending_wakeup = &self->autoscroll_next_step;
         }
 
         self->swap_performed = Window_maybe_swap(self->win);
@@ -817,7 +837,7 @@ static void App_do_extern_pipe(App* self)
         argv[argc++] = NULL;
 
         int pipe_input_fd = spawn_process(NULL, argv[0], argv, true, true);
-        write(pipe_input_fd, content.buf, content.size -1);
+        write(pipe_input_fd, content.buf, content.size - 1);
         close(pipe_input_fd);
     } else
         App_flash(self);
@@ -1050,8 +1070,12 @@ static bool App_scrollbar_consume_click(App*     self,
                                         int32_t  x,
                                         int32_t  y)
 {
-    Vt* vt           = &self->vt;
-    self->autoscroll = AUTOSCROLL_NONE;
+    Vt* vt = &self->vt;
+
+    if (!self->selection_dragging_left) {
+        self->autoscroll = AUTOSCROLL_NONE;
+    }
+
     if (!self->ui.scrollbar.visible || button > 3)
         return false;
     if (self->ui.scrollbar.dragging && !state) {
@@ -1101,6 +1125,7 @@ static bool App_scrollbar_consume_click(App*     self,
     } else {
         return false;
     }
+
     App_update_scrollbar_dims(self);
     App_notify_content_change(self);
 
@@ -1131,13 +1156,16 @@ static void App_do_autoscroll(App* self)
 {
     Vt* vt = &self->vt;
     App_update_scrollbar_vis(self);
+
     if (self->autoscroll == AUTOSCROLL_UP && TimePoint_passed(self->autoscroll_next_step)) {
+        LOG("App::do_autoscroll{ direction: up }\n");
         self->ui.scrollbar.visible = true;
         Vt_visual_scroll_up(vt);
         self->autoscroll_next_step = TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS);
         App_update_scrollbar_dims(self);
         App_notify_content_change(self);
     } else if (self->autoscroll == AUTOSCROLL_DN && TimePoint_passed(self->autoscroll_next_step)) {
+        LOG("App::do_autoscroll{ direction: down }\n");
         Vt_visual_scroll_down(vt);
         self->autoscroll_next_step = TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS);
         App_update_scrollbar_dims(self);
@@ -1149,18 +1177,47 @@ static void App_do_autoscroll(App* self)
  * @return event was consumed */
 static bool App_consume_drag(App* self, uint32_t button, int32_t x, int32_t y)
 {
-    Vt* vt            = &self->vt;
+    Vt* vt = &self->vt;
+
     self->click_count = 0;
+    self->autoscroll  = AUTOSCROLL_NONE;
+
     if (button == MOUSE_BTN_LEFT && self->selection_dragging_left) {
-        if (vt->selection.next_mode) {
-            Vt_select_commit(vt);
+        int32_t high_bound = self->ui.pixel_offset_y + 1;
+        int32_t low_bound  = self->win->h - self->ui.pixel_offset_y - 1;
+
+        LOG("App::select_drag{ %d x %d ", x, y);
+
+        if (y <= high_bound) {
+            self->autoscroll           = AUTOSCROLL_UP;
+            self->autoscroll_next_step = TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS);
+            Vt_select_set_end(vt, x, high_bound + 1);
+            App_update_scrollbar_dims(self);
+            App_notify_content_change(self);
+            LOG("(start autoscroll up) }\n");
+        } else if (y >= low_bound) {
+            self->autoscroll           = AUTOSCROLL_DN;
+            self->autoscroll_next_step = TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS);
+            Vt_select_set_end(vt, x, low_bound - 1);
+            App_update_scrollbar_dims(self);
+            App_notify_content_change(self);
+            LOG("(start autoscroll down) }\n");
+        } else {
+            LOG("}\n");
+            if (vt->selection.next_mode) {
+                Vt_select_commit(vt);
+            }
+            Vt_select_set_end(vt, x, y);
         }
-        Vt_select_set_end(vt, x, y);
+
         return true;
     } else if (button == MOUSE_BTN_RIGHT && self->selection_dragging_right) {
+        LOG("App::select_modify_drag{ %d x %d set selection point: ", x, y);
         if (self->selection_dragging_right == SELECT_DRAG_RIGHT_BACK) {
+            LOG("end }\n");
             Vt_select_set_end(vt, x, y);
         } else {
+            LOG("front }\n");
             Vt_select_set_front(vt, x, y);
         }
         return true;
@@ -1294,19 +1351,25 @@ static void App_button_handler(void*    self,
     if (!vt_wants_scroll && (button == MOUSE_BTN_WHEEL_DOWN && state)) {
         uint8_t lines             = ammount ? ammount : settings.scroll_discrete_lines;
         app->ui.scrollbar.visible = true;
+
         for (uint8_t i = 0; i < lines; ++i) {
-            if (Vt_visual_scroll_down(vt))
+            if (Vt_visual_scroll_down(vt)) {
                 break;
+            }
         }
+
         App_update_scrollbar_dims(self);
         App_notify_content_change(self);
     } else if (!vt_wants_scroll && (button == MOUSE_BTN_WHEEL_UP && state)) {
         uint8_t lines             = ammount ? ammount : settings.scroll_discrete_lines;
         app->ui.scrollbar.visible = true;
+
         for (uint8_t i = 0; i < lines; ++i) {
-            if (Vt_visual_scroll_up(vt))
+            if (Vt_visual_scroll_up(vt)) {
                 break;
+            }
         }
+
         App_update_scrollbar_vis(self);
         App_update_scrollbar_dims(self);
         App_notify_content_change(self);
@@ -1317,6 +1380,7 @@ static void App_button_handler(void*    self,
             Pair_uint16_t cells = Vt_pixels_to_cells(vt, x, y);
             cells.second += Vt_visual_top_line(vt);
             const char* uri = Vt_uri_at(vt, cells.first, cells.second);
+
             if (uri) {
                 App_handle_uri(self, uri);
                 return;
@@ -1331,17 +1395,21 @@ static void App_update_hover(App* self, int32_t x, int32_t y)
     if (self->selection_dragging_left || self->selection_dragging_right)
         return;
 
+    self->autoscroll = AUTOSCROLL_NONE;
+
     Pair_uint16_t cells = Vt_pixels_to_cells(&self->vt, x, y);
     cells.second += Vt_visual_top_line(&self->vt);
+
     if (Vt_uri_at(&self->vt, cells.first, cells.second)) {
         if (self->win->current_pointer_style != MOUSE_POINTER_HAND) {
             Window_set_pointer_style(self->win, MOUSE_POINTER_HAND);
         }
+
         Pair_size_t   rows;
         Pair_uint16_t cols;
         const char*   uri;
-        if ((uri = Vt_uri_range_at(&self->vt, cells.first, cells.second, &rows, &cols))) {
 
+        if ((uri = Vt_uri_range_at(&self->vt, cells.first, cells.second, &rows, &cols))) {
             hovered_link_t new_hovered_link = {
                 .active         = true,
                 .start_line_idx = rows.first,
@@ -1367,6 +1435,7 @@ static void App_update_hover(App* self, int32_t x, int32_t y)
             self->ui.hovered_link.active = false;
             App_notify_content_change(self);
         }
+
         if (self->win->current_pointer_style != MOUSE_POINTER_ARROW) {
             Window_set_pointer_style(self->win, MOUSE_POINTER_ARROW);
         }
@@ -1378,6 +1447,7 @@ static void App_motion_handler(void* self, uint32_t button, int32_t x, int32_t y
     App* app = self;
     x        = CLAMP(x - app->ui.pixel_offset_x, 0, (int32_t)app->resolution.first);
     y        = CLAMP(y - app->ui.pixel_offset_y, 0, (int32_t)app->resolution.second);
+
     if (button) {
         if (!App_scrollbar_consume_drag(self, button, x, y) &&
             !App_consume_drag(self, button, x, y)) {
@@ -1414,13 +1484,14 @@ static void App_set_monitor_callbacks(App* self)
 
 static void App_handle_uri(App* self, const char* uri)
 {
-    LOG("Opening URI: \'%s\'\n", uri);
+    LOG("App::handle_uri{ \'%s\' }\n", uri);
     const char* argv[] = { settings.uri_handler.str, uri, NULL };
     spawn_process(Vt_get_work_directory(&self->vt), argv[0], (char**)argv, true, false);
 }
 
 static void App_send_desktop_notification(void* self, const char* opt_title, const char* text)
 {
+    LOG("App::send_desktop_notification{ title: %s text: %s }\n", opt_title, text);
     const char* argv[] = { "notify-send", OR(opt_title, text), opt_title ? text : NULL, NULL };
     spawn_process(NULL, argv[0], (char**)argv, true, false);
 }
@@ -1492,8 +1563,11 @@ static void App_restack_to_front(void* self)
 static const char* App_get_hostname(void* self)
 {
     App* app = self;
-    if (!app->hostname)
+
+    if (!app->hostname) {
         app->hostname = get_hostname();
+    }
+
     return app->hostname;
 }
 
