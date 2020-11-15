@@ -51,6 +51,7 @@ typedef struct
     Vt       vt;
     Freetype freetype;
     Monitor  monitor;
+    int      written_bytes;
 
     Pair_uint32_t resolution;
 
@@ -87,6 +88,8 @@ typedef struct
     TimePoint ksm_last_input;
 
     Ui ui;
+
+    Vector_char queued_output_buffer;
 
     enum AutoscrollDir
     {
@@ -197,7 +200,7 @@ static void App_run(App* self)
     while (!(self->exit || Window_is_closed(self->win))) {
         int timeout_ms = 0;
 
-        if (!self->swap_performed) {
+        if (!self->swap_performed && self->vt.output.size == 0) {
             if (self->closest_pending_wakeup) {
                 timeout_ms = TimePoint_is_ms_ahead(*(self->closest_pending_wakeup));
             } else {
@@ -211,20 +214,22 @@ static void App_run(App* self)
 
         if (Monitor_are_window_system_events_pending(&self->monitor)) {
             Window_events(self->win);
+
+            char*        buf;
+            size_t       len;
+            Vector_char* out = Vt_get_output(&self->vt, PIPE_BUF - self->written_bytes, &buf, &len);
+            if (out) {
+                if (out->size) {
+                    Monitor_write(&self->monitor, out->buf, out->size);
+                }
+            } else if (len) {
+                Monitor_write(&self->monitor, buf, len);
+            }
         }
 
         TimePoint* pending_window_timer = Window_process_timers(self->win);
         if (pending_window_timer) {
             self->closest_pending_wakeup = pending_window_timer;
-        }
-
-        char*  buf;
-        size_t len;
-
-        Vt_get_output(&self->vt, &buf, &len);
-
-        if (len) {
-            Monitor_write(&self->monitor, buf, len);
         }
 
         ssize_t bytes = 0;
@@ -234,7 +239,8 @@ static void App_run(App* self)
                 App_notify_content_change(self);
             }
 
-            bytes = Monitor_read(&self->monitor);
+            self->written_bytes = 0;
+            bytes               = Monitor_read(&self->monitor);
 
             if (bytes > 0) {
                 Vt_interpret(&self->vt, self->monitor.input_buffer, bytes);
@@ -244,10 +250,15 @@ static void App_run(App* self)
             }
         } while (bytes && likely(!settings.debug_slow));
 
-        Vt_get_output(&self->vt, &buf, &len);
-
-        if (len) {
-            Monitor_write(&self->monitor, buf, len);
+        char*        buf;
+        size_t       len;
+        Vector_char* out = Vt_get_output(&self->vt, PIPE_BUF, &buf, &len);
+        if (out) {
+            if (out->size) {
+                Monitor_write(&self->monitor, out->buf, self->written_bytes = out->size);
+            }
+        } else if (len) {
+            Monitor_write(&self->monitor, buf, self->written_bytes = len);
         }
 
         App_maybe_resize(self, Window_size(self->win));
@@ -327,7 +338,8 @@ static void App_maybe_resize(App* self, Pair_uint32_t newres)
 
 static void App_clipboard_handler(void* self, const char* text)
 {
-    Vt_handle_clipboard(&((App*)self)->vt, text);
+    App* app = self;
+    Vt_handle_clipboard(&app->vt, text);
 }
 
 static void App_reload_font(void* self)

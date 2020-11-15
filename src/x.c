@@ -24,6 +24,8 @@
 #define _NET_WM_STATE_ADD    1l
 #define _NET_WM_STATE_TOGGLE 2l
 
+#define INCR_TIMEOUT_MS 500
+
 #define GLX_CONTEXT_MAJOR_VERSION_ARB 0x2091
 #define GLX_CONTEXT_MINOR_VERSION_ARB 0x2092
 #define GLX_SWAP_INTERVAL_EXT         0x20F1
@@ -107,6 +109,14 @@ typedef struct
     Atom     clipboard, incr, uri_list_mime_type, utf8_string_mime_type;
     Atom     dnd_enter, dnd_type_list, dnd_position, dnd_finished, dnd_leave, dnd_status, dnd_drop,
       dnd_selection, dnd_action_copy, dnd_proxy;
+
+    struct globalX11_incr
+    {
+        Atom        listen_property;
+        TimePoint   listen_timeout;
+        Vector_char data;
+        Window      source;
+    } incr_transfer;
 
     Cursor cursor_hidden;
     Cursor cursor_beam;
@@ -370,7 +380,8 @@ static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
 
     long event_mask = KeyPressMask | ButtonPressMask | ButtonReleaseMask |
                       SubstructureRedirectMask | StructureNotifyMask | PointerMotionMask |
-                      ExposureMask | FocusChangeMask | KeymapStateMask | VisibilityChangeMask;
+                      ExposureMask | FocusChangeMask | KeymapStateMask | VisibilityChangeMask |
+                      PropertyChangeMask;
 
     windowX11(win)->set_win_attribs = (XSetWindowAttributes){
         .colormap = windowX11(win)->colormap = colormap,
@@ -1020,6 +1031,72 @@ static void WindowX11_events(struct WindowBase* self)
                 }
                 break;
 
+            case PropertyNotify: {
+                if (e->xproperty.state == PropertyNewValue &&
+                    e->xproperty.window == globalX11->incr_transfer.source &&
+                    e->xproperty.atom == globalX11->incr_transfer.listen_property) {
+                    /* continue incremental transfer */
+                    if (TimePoint_passed(globalX11->incr_transfer.listen_timeout)) {
+                        WRN("Cooperating client (xid: %ld) failed to communicate\n",
+                            globalX11->incr_transfer.source);
+                        Vector_clear_char(&globalX11->incr_transfer.data);
+                        globalX11->incr_transfer.listen_property = 0;
+                        globalX11->incr_transfer.source          = 0;
+                    } else {
+                        Atom           actual_type_return;
+                        int            actual_format_return;
+                        unsigned long  n_items, bytes_after;
+                        unsigned char* prop_return = NULL;
+
+                        XGetWindowProperty(
+                          globalX11->display,
+                          globalX11->incr_transfer.source,
+                          globalX11->incr_transfer.listen_property,
+                          0,
+                          LONG_MAX,
+                          True, // Deleting this tells the source to switch to the next chunk
+                          AnyPropertyType,
+                          &actual_type_return,
+                          &actual_format_return,
+                          &n_items,
+                          &bytes_after,
+                          &prop_return);
+
+                        if (n_items) {
+#ifdef DEBUG
+                            char* name = XGetAtomName(globalX11->display, e->xproperty.atom);
+                            LOG("X::event::PropertyNotify{ received %lu byte chunk, prop: %s }\n",
+                                n_items,
+                                name);
+                            XFree(name);
+#endif
+
+                            Vector_pushv_char(&globalX11->incr_transfer.data,
+                                              (char*)prop_return,
+                                              n_items);
+
+                            globalX11->incr_transfer.listen_timeout =
+                              TimePoint_ms_from_now(INCR_TIMEOUT_MS);
+
+                        } else {
+#ifdef DEBUG
+                            char* name = XGetAtomName(globalX11->display, e->xproperty.atom);
+                            LOG("X::event::PropertyNotify{ transfer completed, prop: %s }\n", name);
+                            XFree(name);
+#endif
+                            Vector_push_char(&globalX11->incr_transfer.data, '\0');
+                            CALL_FP(self->callbacks.clipboard_handler,
+                                    self->callbacks.user_data,
+                                    globalX11->incr_transfer.data.buf);
+                            Vector_clear_char(&globalX11->incr_transfer.data);
+                            globalX11->incr_transfer.listen_property = 0;
+                            globalX11->incr_transfer.source          = 0;
+                        }
+                        XFree(prop_return);
+                    }
+                }
+            } break;
+
             case SelectionNotify: {
                 Atom           clip = e->xselection.selection;
                 Atom           da, actual_type_return;
@@ -1045,9 +1122,32 @@ static void WindowX11_events(struct WindowBase* self)
 
                 XFree(prop_return);
 
-                if (actual_type_return != globalX11->incr) {
-                    /* if data is larger than chunk size (200-ish k), it's
-                     * probably not text anyway. TODO: actually do this properly */
+#ifdef DEBUG
+                char *cname, *ctype;
+                LOG("X::event::SelectionNotify { name: %s, type_ret: %lu (%s), prop_ret: %s }\n",
+                    (cname = XGetAtomName(globalX11->display, clip)),
+                    actual_type_return,
+                    ctype = (actual_format_return == 0
+                               ? NULL
+                               : XGetAtomName(globalX11->display, actual_type_return)),
+                    prop_return);
+                free(ctype);
+                free(cname);
+#endif
+
+                if (actual_type_return == globalX11->incr) {
+                    /* if data is larger than maximum property size (200-ish k) the selection will
+                     * be sent in chunks, 'INCR-ementally'. Initiate transfer by deleting the
+                     * property. This tell the source to change it to the first chunk of the actual
+                     * data. We will get a PropertyNotify event, set stuff up so we know what to
+                     * grab there */
+                    LOG("X::event::SelectionNotify{ start incremental transfer }\n");
+                    XDeleteProperty(globalX11->display, target, clip);
+                    globalX11->incr_transfer.listen_property = clip;
+                    globalX11->incr_transfer.listen_timeout = TimePoint_s_from_now(INCR_TIMEOUT_MS);
+                    globalX11->incr_transfer.source         = target;
+                    Vector_clear_char(&globalX11->incr_transfer.data);
+                } else {
                     XGetWindowProperty(globalX11->display,
                                        target,
                                        clip,
@@ -1060,21 +1160,6 @@ static void WindowX11_events(struct WindowBase* self)
                                        &n_items,
                                        &bytes_after,
                                        &prop_return);
-
-#ifdef DEBUG
-                    char* cname = XGetAtomName(globalX11->display, clip);
-                    char* ctype = actual_format_return == 0
-                                    ? NULL
-                                    : XGetAtomName(globalX11->display, actual_type_return);
-                    LOG("X::event::SelectionNotify { selection: %s, type: %lu (%s), ret: %s }\n",
-                        cname,
-                        actual_type_return,
-                        ctype,
-                        prop_return);
-
-                    free(ctype);
-                    free(cname);
-#endif
 
                     if (actual_type_return == globalX11->uri_list_mime_type) {
                         // If we drop files just copy their path(s)
@@ -1181,7 +1266,6 @@ static void WindowX11_destroy(struct WindowBase* self)
     XUndefineCursor(globalX11->display, windowX11(self)->window);
     XFreeCursor(globalX11->display, globalX11->cursor_beam);
     XFreeCursor(globalX11->display, globalX11->cursor_hidden);
-
     XUnmapWindow(globalX11->display, windowX11(self)->window);
 
     glXMakeCurrent(globalX11->display, 0, 0);
@@ -1194,7 +1278,7 @@ static void WindowX11_destroy(struct WindowBase* self)
 
     XDestroyWindow(globalX11->display, windowX11(self)->window);
     XCloseDisplay(globalX11->display);
-
+    Vector_destroy_char(&globalX11->incr_transfer.data);
     free(self);
 }
 

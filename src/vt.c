@@ -1172,6 +1172,7 @@ void Vt_init(Vt* self, uint32_t cols, uint32_t rows)
 
     self->parser.active_sequence = Vector_new_char();
     self->output                 = Vector_new_char();
+    self->staged_output          = Vector_new_char();
     self->lines                  = Vector_new_VtLine(self);
 
     for (size_t i = 0; i < self->ws.ws_row; ++i) {
@@ -2957,9 +2958,8 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                              * This is available only when DECLRMM is enabled. */
                             case 's': {
                                 if (*seq == 's') {
-                                    
+
                                 } else {
-                                    
                                 }
                             } break;
 
@@ -6265,19 +6265,28 @@ static void Vt_set_title(Vt* self, const char* title)
     CALL_FP(self->callbacks.on_title_changed, self->callbacks.user_data, self->title);
 }
 
-void Vt_get_output(Vt* self, char** out_buf, size_t* out_bytes)
+Vector_char* Vt_get_output(Vt* self, size_t len, char** out_buf, size_t* out_size)
 {
-    ASSERT(out_buf && out_bytes, "has outputs");
+    if (likely(self->output.size < len)) {
+        ASSERT(out_buf && out_size, "has output ptrs");
+        *out_buf = self->output.buf;
+        *out_size = self->output.size;
+        Vector_clear_char(&self->output);
+        return NULL;
+    } else {
+        len = MIN(len, self->output.size);
+        Vector_clear_char(&self->staged_output);
+        Vector_pushv_char(&self->staged_output, self->output.buf, len);
+        
+        if (unlikely(settings.debug_pty) && self->output.size) {
+            char* str = pty_string_prettyfy(self->output.buf, len);
+            fprintf(stderr, "pty.write(%3zu) <~ { %s }\n\n", len, str);
+            free(str);
+        }
 
-    if (unlikely(settings.debug_pty) && self->output.size) {
-        char* str = pty_string_prettyfy(self->output.buf, self->output.size);
-        fprintf(stderr, "pty.write(%3zu) <~ { %s }\n\n", self->output.size, str);
-        free(str);
+        Vector_remove_at_char(&self->output, 0, len);
+        return &self->staged_output;
     }
-
-    *out_buf   = self->output.buf;
-    *out_bytes = self->output.size;
-    Vector_clear_char(&self->output);
 }
 
 void Vt_destroy(Vt* self)
@@ -6292,6 +6301,7 @@ void Vt_destroy(Vt* self)
     Vector_destroy_DynStr(&self->title_stack);
     Vector_destroy_char(&self->unicode_input.buffer);
     Vector_destroy_char(&self->output);
+    Vector_destroy_char(&self->staged_output);
     Vector_destroy_char(&self->uri_matcher.match);
 
     Vector_destroy_RcPtr_VtImageSurface(&self->images);

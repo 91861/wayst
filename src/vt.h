@@ -451,7 +451,7 @@ typedef struct
     struct winsize ws;
     struct termios tios;
     int            master_fd;
-    Vector_char    output;
+    Vector_char    output, staged_output;
 
     bool wrap_next;
 
@@ -631,7 +631,6 @@ typedef struct
         uint8_t application_keypad_cursor : 1;
         uint8_t pop_on_bell : 1;
         uint8_t urgency_on_bell : 1;
-
 
         uint8_t left_and_right_margin : 1;
         uint8_t margin_bell : 1;
@@ -909,7 +908,7 @@ void Vt_interpret(Vt* self, char* buf, size_t bytes);
 
 /**
  * Ger response message */
-void Vt_get_output(Vt* self, char** out_buf, size_t* out_bytes);
+Vector_char* Vt_get_output(Vt* self, size_t len, char** out_buf, size_t* out_size);
 
 /**
  * Get lines that should be visible */
