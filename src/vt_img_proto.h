@@ -458,7 +458,7 @@ static const char* Vt_img_proto_display(Vt* self, uint32_t id, vt_image_proto_di
 
     if (!ln->images) {
         ln->images  = malloc(sizeof(Vector_RcPtr_VtImageSurfaceView));
-        *ln->images = Vector_new_RcPtr_VtImageSurfaceView(self);
+        *ln->images = Vector_new_RcPtr_VtImageSurfaceView();
     }
 
     VtImageSurfaceView image_view;

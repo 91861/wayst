@@ -468,7 +468,7 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
     self->ksm_last_input = TimePoint_now();
 
     switch (rawkey) {
-        case KEY(Escape): // Escape
+        case KEY(Escape):
             Vt_select_end(vt);
             App_notify_content_change(self);
             self->keyboard_select_mode = false;

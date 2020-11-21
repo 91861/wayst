@@ -16,9 +16,13 @@ else
 	INCLUDES = -I/usr/include/freetype2/
 endif
 
-ifeq ($(mode),debug)
+ifeq ($(mode),sanitized)
 	CFLAGS = -std=c18 -MD -O0 -g3 -ffinite-math-only -fno-rounding-math -fshort-enums -fsanitize=address -fsanitize=undefined -DDEBUG
 	LDFLAGS =  -fsanitize=address -fsanitize=undefined -fsanitize=unreachable
+	LDLIBS += -lGLU
+else ifeq ($(mode),debug)
+	CFLAGS = -std=c18 -MD -g -O0 -fno-omit-frame-pointer -fshort-enums -DDEBUG
+	LDFLAGS = -O0 -g
 	LDLIBS += -lGLU
 else ifeq ($(mode),debugoptimized)
 	CFLAGS = -std=c18 -MD -g -O2 -fno-omit-frame-pointer -mtune=generic -ffast-math -fshort-enums -DDEBUG
@@ -36,7 +40,7 @@ else
 	LDLIBS += -lutf8proc
 endif
 
-CCWNO = -Wall -Wextra -Wno-unused-parameter -Wno-address -Wno-unused-function -Werror=implicit-function-declaration
+CCWNO = -Wall -Wextra -Wno-unused-parameter -Wno-unused-function -Werror=implicit-function-declaration
 
 SRCS = $(wildcard $(SRC_DIR)/*.c wildcard $(SRC_DIR)/wcwidth/wcwidth.c)
 SRCS_WLEXTS = $(wildcard $(SRC_DIR)/wl_exts/*.c)

@@ -11,7 +11,9 @@
 #include <stdlib.h>
 
 #define DEF_RC_PTR(t, dtor)                                                                        \
-    typedef struct                                                                                 \
+    _Pragma("GCC diagnostic push") _Pragma("GCC diagnostic ignored \"-Waddress\"")                 \
+                                                                                                   \
+      typedef struct                                                                               \
     {                                                                                              \
         uint32_t refcount;                                                                         \
         alignas(alignof(void*)) t payload;                                                         \
@@ -91,10 +93,13 @@
             return NULL;                                                                           \
         ASSERT(!self->block || self->block->refcount, "is valid");                                 \
         return self->block ? &self->block->payload : NULL;                                         \
-    }
+    }                                                                                              \
+    _Pragma("GCC diagnostic pop")
 
 #define DEF_RC_PTR_DA(t, dtor, dtorctx_t)                                                          \
-    typedef struct                                                                                 \
+    _Pragma("GCC diagnostic push") _Pragma("GCC diagnostic ignored \"-Waddress\"")                 \
+                                                                                                   \
+      typedef struct                                                                               \
     {                                                                                              \
         void*    dtor_arg;                                                                         \
         uint32_t refcount;                                                                         \
@@ -176,4 +181,5 @@
             return NULL;                                                                           \
         ASSERT(!self->block || self->block->refcount, "is valid");                                 \
         return self->block ? &self->block->payload : NULL;                                         \
-    }
+    }                                                                                              \
+    _Pragma("GCC diagnostic pop")

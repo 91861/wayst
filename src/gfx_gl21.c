@@ -658,7 +658,7 @@ __attribute__((cold)) GlyphAtlasEntry* GlyphAtlas_get_combined(GfxOpenGL21* gfx,
 
     if (!output)
         return NULL;
-    
+
     GLenum internal_format;
     GLenum load_format;
     bool   scale = false;
@@ -981,10 +981,10 @@ __attribute__((hot)) static GlyphAtlasEntry* GlyphAtlas_get(GfxOpenGL21* gfx,
         }
     }
     if (!settings.has_bold_italic_fonts && rune->style == VT_RUNE_BOLD_ITALIC) {
-        alt.style = settings.has_bold_fonts
-                      ? VT_RUNE_BOLD
-                      : settings.has_italic_fonts ? VT_RUNE_ITALIC : VT_RUNE_NORMAL;
-        entry = Map_get_Rune_GlyphAtlasEntry(&self->entry_map, &alt);
+        alt.style = settings.has_bold_fonts     ? VT_RUNE_BOLD
+                    : settings.has_italic_fonts ? VT_RUNE_ITALIC
+                                                : VT_RUNE_NORMAL;
+        entry     = Map_get_Rune_GlyphAtlasEntry(&self->entry_map, &alt);
         if (likely(entry)) {
             return entry;
         }
@@ -1585,7 +1585,19 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_underline_ra
  *
  * Should only be called by GfxOpenGL21_rasterize_line()
  *
- * TODO: This is terrible. Maybe introduce 'render pass', 'render subpass' structs for this?
+ * TODO: This is terrible. Maybe introduce a RenderPass that stores progress of updating a proxy?
+ *       Then we could have a glMapBuffer()-d vbo and queue all vertex data transfers at once.
+ *
+ *       void draw_vt(Vt vt) {
+ *           ...
+ *           for (i : lines)
+ *               if (i->damage)
+ *                   passes.push(RenderPass_new(i));
+ *           for (i : passes) RenderPass_gen_vertex_data(i);
+ *           for (i : passes) { RenderPass_sync(i); RenderPass_rasterize(i); }
+ *           ...
+ *
+ *       which theoretically should be much faster than this nonsense.
  */
 __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
   GfxOpenGL21*    gfx,
@@ -1660,12 +1672,10 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
        : Vt_rune_fg(vt, each_rune_same_bg))
 
 #define L_CALC_FG_COLOR                                                                            \
-    !settings.highlight_change_fg                                                                  \
-      ? L_CALC_DIM_BLEND_COLOR                                                                     \
-      : unlikely(                                                                                  \
-          Vt_is_cell_selected(vt, each_rune_same_bg - vt_line->data.buf, visual_line_index))       \
-          ? vt->colors.highlight.fg                                                                \
-          : L_CALC_DIM_BLEND_COLOR
+    !settings.highlight_change_fg ? L_CALC_DIM_BLEND_COLOR                                         \
+    : unlikely(Vt_is_cell_selected(vt, each_rune_same_bg - vt_line->data.buf, visual_line_index))  \
+      ? vt->colors.highlight.fg                                                                    \
+      : L_CALC_DIM_BLEND_COLOR
 
                     if (each_rune_same_bg == each_rune ||
                         !ColorRGB_eq(L_CALC_FG_COLOR, active_fg_color)) {
@@ -2361,8 +2371,7 @@ static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const
     }
 }
 
-__attribute__((cold))
-static void GfxOpenGL21_draw_unicode_input(GfxOpenGL21* gfx, const Vt* vt)
+__attribute__((cold)) static void GfxOpenGL21_draw_unicode_input(GfxOpenGL21* gfx, const Vt* vt)
 {
     size_t begin = MIN(vt->cursor.col, vt->ws.ws_col - vt->unicode_input.buffer.size - 1);
     size_t row   = vt->cursor.row - Vt_visual_top_line(vt);

@@ -30,8 +30,11 @@
  *  note: iterators are expected to be valid
  *
  * */
+
 #define DEF_VECTOR(t, dtor, ...)                                                                   \
-    typedef struct                                                                                 \
+    _Pragma("GCC diagnostic push") _Pragma("GCC diagnostic ignored \"-Waddress\"")                 \
+                                                                                                   \
+      typedef struct                                                                               \
     {                                                                                              \
         size_t cap, size;                                                                          \
         t*     buf;                                                                                \
@@ -134,16 +137,18 @@
                                                                                                    \
     static inline t* Vector_iter_##t(Vector_##t* self, t* i)                                       \
     {                                                                                              \
-        return unlikely(!self->size)                                                               \
-                 ? NULL                                                                            \
-                 : !i ? self->buf : (size_t)(i - self->buf) + 1 < self->size ? i + 1 : NULL;       \
+        return unlikely(!self->size)                      ? NULL                                   \
+               : !i                                       ? self->buf                              \
+               : (size_t)(i - self->buf) + 1 < self->size ? i + 1                                  \
+                                                          : NULL;                                  \
     }                                                                                              \
                                                                                                    \
     static inline t* Vector_iter_back_##t(Vector_##t* self, t* i)                                  \
     {                                                                                              \
-        return unlikely(!self->size)                                                               \
-                 ? NULL                                                                            \
-                 : !i ? &self->buf[self->size - 1] : (i == self->buf) ? NULL : i - 1;              \
+        return unlikely(!self->size) ? NULL                                                        \
+               : !i                  ? &self->buf[self->size - 1]                                  \
+               : (i == self->buf)    ? NULL                                                        \
+                                     : i - 1;                                                         \
     }                                                                                              \
                                                                                                    \
     static inline t* Vector_insert_##t(Vector_##t* self, t* i, t arg)                              \
@@ -209,10 +214,13 @@
     static inline void Vector_shrink_##t(Vector_##t* self)                                         \
     {                                                                                              \
         self->buf = realloc(self->buf, (self->cap = self->size) * sizeof(t));                      \
-    }
+    }                                                                                              \
+    _Pragma("GCC diagnostic pop")
 
 #define DEF_VECTOR_DA(t, dtor, dtorctx_t)                                                          \
-    typedef struct                                                                                 \
+    _Pragma("GCC diagnostic push") _Pragma("GCC diagnostic ignored \"-Waddress\"")                 \
+                                                                                                   \
+      typedef struct                                                                               \
     {                                                                                              \
         size_t cap, size;                                                                          \
         t*     buf;                                                                                \
@@ -322,16 +330,18 @@
                                                                                                    \
     static inline t* Vector_iter_##t(Vector_##t* self, t* i)                                       \
     {                                                                                              \
-        return unlikely(!self->size)                                                               \
-                 ? NULL                                                                            \
-                 : !i ? self->buf : (size_t)(i - self->buf) + 1 < self->size ? i + 1 : NULL;       \
+        return unlikely(!self->size)                      ? NULL                                   \
+               : !i                                       ? self->buf                              \
+               : (size_t)(i - self->buf) + 1 < self->size ? i + 1                                  \
+                                                          : NULL;                                  \
     }                                                                                              \
                                                                                                    \
     static inline t* Vector_iter_back_##t(Vector_##t* self, t* i)                                  \
     {                                                                                              \
-        return unlikely(!self->size)                                                               \
-                 ? NULL                                                                            \
-                 : !i ? &self->buf[self->size - 1] : (i == self->buf) ? NULL : i - 1;              \
+        return unlikely(!self->size) ? NULL                                                        \
+               : !i                  ? &self->buf[self->size - 1]                                  \
+               : (i == self->buf)    ? NULL                                                        \
+                                     : i - 1;                                                         \
     }                                                                                              \
                                                                                                    \
     static inline t* Vector_insert_##t(Vector_##t* self, t* i, t arg)                              \
@@ -397,4 +407,5 @@
     static inline void Vector_shrink_##t(Vector_##t* self)                                         \
     {                                                                                              \
         self->buf = realloc(self->buf, (self->cap = self->size) * sizeof(t));                      \
-    }
+    }                                                                                              \
+    _Pragma("GCC diagnostic pop")
