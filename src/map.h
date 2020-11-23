@@ -23,7 +23,7 @@
  *      DEF_MAP(Key, Value, Key_hash, Key_eq, Value_destroy)
  *      // DEF_MAP(Key, Value, Key_hash, Key_eq, NULL)
  *
- *      Map_Key_Value my_map =  Map_new_Key_Value(10);
+ *      Map_Key_Value my_map = Map_new_Key_Value(10);
  *      Value* inserted_value = Map_insert_Key_Value(&my_map,(Key){1,2}, (Value){...});
  *      Value* val = Map_get_Key_Value(&my_map,(Key){1,2});
  *      bool was_found_and_removed = Map_remove_Key_Value(&my_map,(Key){1,2});
@@ -31,6 +31,12 @@
  **/
 
 #define DEF_MAP(k, v, hash_func, compare_func, dtor)                                               \
+    _Pragma("GCC diagnostic push");                                                                \
+    _Pragma("GCC diagnostic ignored \"-Waddress\"");                                               \
+    _Pragma("GCC diagnostic push");                                                                \
+    _Pragma("GCC diagnostic ignored \"-Wunused-function\"");                                       \
+    _Pragma("GCC diagnostic push");                                                                \
+    _Pragma("GCC diagnostic ignored \"-Wunused-parameter\"");                                      \
     typedef struct                                                                                 \
     {                                                                                              \
         k key;                                                                                     \
@@ -124,4 +130,7 @@
     static void Map_destroy_##k##_##v(Map_##k##_##v* self)                                         \
     {                                                                                              \
         Vector_destroy_Vector_MapEntry_##k##_##v(&self->buckets);                                  \
-    }
+    }                                                                                              \
+    _Pragma("GCC diagnostic pop");                                                                 \
+    _Pragma("GCC diagnostic pop");                                                                 \
+    _Pragma("GCC diagnostic pop");

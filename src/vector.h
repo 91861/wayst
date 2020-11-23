@@ -32,9 +32,14 @@
  * */
 
 #define DEF_VECTOR(t, dtor, ...)                                                                   \
-    _Pragma("GCC diagnostic push") _Pragma("GCC diagnostic ignored \"-Waddress\"")                 \
+    _Pragma("GCC diagnostic push");                                                                \
+    _Pragma("GCC diagnostic ignored \"-Waddress\"");                                               \
+    _Pragma("GCC diagnostic push");                                                                \
+    _Pragma("GCC diagnostic ignored \"-Wunused-function\"");                                       \
+    _Pragma("GCC diagnostic push");                                                                \
+    _Pragma("GCC diagnostic ignored \"-Wunused-parameter\"");                                      \
                                                                                                    \
-      typedef struct                                                                               \
+    typedef struct                                                                                 \
     {                                                                                              \
         size_t cap, size;                                                                          \
         t*     buf;                                                                                \
@@ -215,12 +220,19 @@
     {                                                                                              \
         self->buf = realloc(self->buf, (self->cap = self->size) * sizeof(t));                      \
     }                                                                                              \
-    _Pragma("GCC diagnostic pop")
+    _Pragma("GCC diagnostic pop");                                                                 \
+    _Pragma("GCC diagnostic pop");                                                                 \
+    _Pragma("GCC diagnostic pop");
 
 #define DEF_VECTOR_DA(t, dtor, dtorctx_t)                                                          \
-    _Pragma("GCC diagnostic push") _Pragma("GCC diagnostic ignored \"-Waddress\"")                 \
+    _Pragma("GCC diagnostic push");                                                                \
+    _Pragma("GCC diagnostic ignored \"-Waddress\"");                                               \
+    _Pragma("GCC diagnostic push");                                                                \
+    _Pragma("GCC diagnostic ignored \"-Wunused-function\"");                                       \
+    _Pragma("GCC diagnostic push");                                                                \
+    _Pragma("GCC diagnostic ignored \"-Wunused-parameter\"");                                      \
                                                                                                    \
-      typedef struct                                                                               \
+    typedef struct                                                                                 \
     {                                                                                              \
         size_t cap, size;                                                                          \
         t*     buf;                                                                                \
@@ -408,4 +420,6 @@
     {                                                                                              \
         self->buf = realloc(self->buf, (self->cap = self->size) * sizeof(t));                      \
     }                                                                                              \
-    _Pragma("GCC diagnostic pop")
+    _Pragma("GCC diagnostic pop");                                                                 \
+    _Pragma("GCC diagnostic pop");                                                                 \
+    _Pragma("GCC diagnostic pop");

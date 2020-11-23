@@ -11,9 +11,14 @@
 #include <stdlib.h>
 
 #define DEF_RC_PTR(t, dtor)                                                                        \
-    _Pragma("GCC diagnostic push") _Pragma("GCC diagnostic ignored \"-Waddress\"")                 \
+    _Pragma("GCC diagnostic push");                                                                \
+    _Pragma("GCC diagnostic ignored \"-Waddress\"");                                               \
+    _Pragma("GCC diagnostic push");                                                                \
+    _Pragma("GCC diagnostic ignored \"-Wunused-function\"");                                       \
+    _Pragma("GCC diagnostic push");                                                                \
+    _Pragma("GCC diagnostic ignored \"-Wunused-parameter\"");                                      \
                                                                                                    \
-      typedef struct                                                                               \
+    typedef struct                                                                                 \
     {                                                                                              \
         uint32_t refcount;                                                                         \
         alignas(alignof(void*)) t payload;                                                         \
@@ -94,12 +99,19 @@
         ASSERT(!self->block || self->block->refcount, "is valid");                                 \
         return self->block ? &self->block->payload : NULL;                                         \
     }                                                                                              \
-    _Pragma("GCC diagnostic pop")
+    _Pragma("GCC diagnostic pop");                                                                 \
+    _Pragma("GCC diagnostic pop");                                                                 \
+    _Pragma("GCC diagnostic pop");
 
 #define DEF_RC_PTR_DA(t, dtor, dtorctx_t)                                                          \
-    _Pragma("GCC diagnostic push") _Pragma("GCC diagnostic ignored \"-Waddress\"")                 \
+    _Pragma("GCC diagnostic push");                                                                \
+    _Pragma("GCC diagnostic ignored \"-Waddress\"");                                               \
+    _Pragma("GCC diagnostic push");                                                                \
+    _Pragma("GCC diagnostic ignored \"-Wunused-function\"");                                       \
+    _Pragma("GCC diagnostic push");                                                                \
+    _Pragma("GCC diagnostic ignored \"-Wunused-parameter\"");                                      \
                                                                                                    \
-      typedef struct                                                                               \
+    typedef struct                                                                                 \
     {                                                                                              \
         void*    dtor_arg;                                                                         \
         uint32_t refcount;                                                                         \
@@ -182,4 +194,6 @@
         ASSERT(!self->block || self->block->refcount, "is valid");                                 \
         return self->block ? &self->block->payload : NULL;                                         \
     }                                                                                              \
-    _Pragma("GCC diagnostic pop")
+    _Pragma("GCC diagnostic pop");                                                                 \
+    _Pragma("GCC diagnostic pop");                                                                 \
+    _Pragma("GCC diagnostic pop");

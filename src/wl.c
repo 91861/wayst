@@ -24,7 +24,6 @@
 #include <wayland-cursor.h>
 #include <wayland-egl.h>
 
-#include "wl_exts/kde-decoration.h"
 #include "wl_exts/xdg-decoration.h"
 #include "wl_exts/xdg-shell.h"
 
