@@ -626,6 +626,8 @@ static void settings_make_default()
 
         .initial_cursor_blinking = true,
         .initial_cursor_style    = CURSOR_STYLE_BLOCK,
+
+        .decoration_style = DECORATION_STYLE_FULL,
     };
 }
 
@@ -1069,6 +1071,18 @@ static void handle_option(const char opt, const int array_index, const char* val
         case OPT_DPI_IDX:
             settings.font_dpi = strtoul(value, NULL, 10);
             break;
+
+        case OPT_DECORATIONS: {
+            if (!strcasecmp(value, "full")) {
+                settings.decoration_style = DECORATION_STYLE_FULL;
+            } else if (!strcasecmp(value, "minimal")) {
+                settings.decoration_style = DECORATION_STYLE_MINIMAL;
+            } else if (!strcasecmp(value, "none")) {
+                settings.decoration_style = DECORATION_STYLE_NONE;
+            } else {
+                L_WARN_BAD_VALUE;
+            }
+        } break;
 
         case OPT_COLORSCHEME_IDX:
             if (!strcasecmp(value, "wayst")) {

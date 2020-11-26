@@ -27,10 +27,50 @@
 
 #define INCR_TIMEOUT_MS 500
 
+/* Motif hints from Xm/MwmUtil.h */
+typedef struct
+{
+    uint32_t flags;
+    uint32_t functions;
+    uint32_t decorations;
+    int32_t  input_mode;
+    uint32_t status;
+} mwm_hints_t;
+
+#define MWM_HINTS_FUNCTIONS   (1L << 0)
+#define MWM_HINTS_DECORATIONS (1L << 1)
+#define MWM_HINTS_INPUT_MODE  (1L << 2)
+#define MWM_HINTS_STATUS      (1L << 3)
+
+#define MWM_FUNC_ALL      (1L << 0)
+#define MWM_FUNC_RESIZE   (1L << 1)
+#define MWM_FUNC_MOVE     (1L << 2)
+#define MWM_FUNC_MINIMIZE (1L << 3)
+#define MWM_FUNC_MAXIMIZE (1L << 4)
+#define MWM_FUNC_CLOSE    (1L << 5)
+
+#define MWM_DECOR_ALL      (1L << 0)
+#define MWM_DECOR_BORDER   (1L << 1)
+#define MWM_DECOR_RESIZEH  (1L << 2)
+#define MWM_DECOR_TITLE    (1L << 3)
+#define MWM_DECOR_MENU     (1L << 4)
+#define MWM_DECOR_MINIMIZE (1L << 5)
+#define MWM_DECOR_MAXIMIZE (1L << 6)
+
+#define MWM_INPUT_MODELESS                  0
+#define MWM_INPUT_PRIMARY_APPLICATION_MODAL 1
+#define MWM_INPUT_SYSTEM_MODAL              2
+#define MWM_INPUT_FULL_APPLICATION_MODAL    3
+#define MWM_INPUT_APPLICATION_MODAL         MWM_INPUT_PRIMARY_APPLICATION_MODAL
+
+#define MWM_TEAROFF_WINDOW (1L << 0)
+
+
 #define GLX_CONTEXT_MAJOR_VERSION_ARB 0x2091
 #define GLX_CONTEXT_MINOR_VERSION_ARB 0x2092
 #define GLX_SWAP_INTERVAL_EXT         0x20F1
 #define GLX_MAX_SWAP_INTERVAL_EXT     0x20F2
+
 
 static APIENTRY PFNGLXSWAPINTERVALEXTPROC glXSwapIntervalEXT = NULL;
 
@@ -543,7 +583,6 @@ static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
                                            visual_info->visual,
                                            CWBorderPixel | CWColormap | CWEventMask,
                                            &windowX11(win)->set_win_attribs);
-
     if (!windowX11(win)->window) {
         ERR("Failed to create X11 window");
     }
@@ -574,6 +613,35 @@ static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
                      NULL,
                      &wm_hints,
                      &class_hint);
+
+    if (settings.decoration_style != DECORATION_STYLE_FULL) {
+        mwm_hints_t motif_hints;
+
+        if (settings.decoration_style == DECORATION_STYLE_MINIMAL) {
+            motif_hints = (mwm_hints_t){
+                .decorations = MWM_DECOR_ALL,
+                .status      = MWM_HINTS_DECORATIONS,
+                .flags       = MWM_HINTS_DECORATIONS,
+            };
+        } else if (settings.decoration_style == DECORATION_STYLE_NONE) {
+            motif_hints = (mwm_hints_t){
+                .flags = MWM_HINTS_DECORATIONS,
+            };
+        } else {
+            ASSERT_UNREACHABLE;
+        }
+
+        Atom atom_motif_hints = XInternAtom(globalX11->display, "_MOTIF_WM_HINTS", False);
+
+        XChangeProperty(globalX11->display,
+                        windowX11(win)->window,
+                        atom_motif_hints,
+                        atom_motif_hints,
+                        32,
+                        PropModeReplace,
+                        (unsigned char*)&motif_hints,
+                        5);
+    }
 
     XSync(globalX11->display, False);
     XMapWindow(globalX11->display, windowX11(win)->window);

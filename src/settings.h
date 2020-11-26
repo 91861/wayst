@@ -232,6 +232,13 @@ typedef struct
 
     bool initial_cursor_blinking;
 
+    enum decoration_style_e
+    {
+        DECORATION_STYLE_FULL,
+        DECORATION_STYLE_MINIMAL,
+        DECORATION_STYLE_NONE,
+    } decoration_style;
+
     enum initial_cursor_style_e
     {
         CURSOR_STYLE_BLOCK,

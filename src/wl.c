@@ -1428,19 +1428,22 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h)
 
         xdg_toplevel_add_listener(windowWl(win)->xdg_toplevel, &xdg_toplevel_listener, win);
 
-        if (globalWl->decoration_manager) {
-            windowWl(win)->toplevel_decoration =
-              zxdg_decoration_manager_v1_get_toplevel_decoration(globalWl->decoration_manager,
-                                                                 windowWl(win)->xdg_toplevel);
+        if (settings.decoration_style != DECORATION_STYLE_NONE) {
+            if (globalWl->decoration_manager) {
+                windowWl(win)->toplevel_decoration =
+                  zxdg_decoration_manager_v1_get_toplevel_decoration(globalWl->decoration_manager,
+                                                                     windowWl(win)->xdg_toplevel);
 
-            zxdg_toplevel_decoration_v1_add_listener(windowWl(win)->toplevel_decoration,
-                                                     &zxdg_toplevel_decoration_listener,
-                                                     win);
+                zxdg_toplevel_decoration_v1_add_listener(windowWl(win)->toplevel_decoration,
+                                                         &zxdg_toplevel_decoration_listener,
+                                                         win);
 
-            zxdg_toplevel_decoration_v1_set_mode(windowWl(win)->toplevel_decoration,
-                                                 ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
-        } else
-            WRN("Wayland compositor does not provide window decorations\n");
+                zxdg_toplevel_decoration_v1_set_mode(windowWl(win)->toplevel_decoration,
+                                                     ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
+            } else {
+                WRN("Wayland compositor does not provide window decorations\n");
+            }
+        }
 
         wl_surface_commit(windowWl(win)->surface);
         wl_surface_add_listener(windowWl(win)->surface, &wl_surface_listener, win);
@@ -1718,7 +1721,7 @@ static void WindowWl_destroy(struct WindowBase* self)
     eglDestroySurface(globalWl->egl_display, windowWl(self)->egl_surface);
     eglDestroyContext(globalWl->egl_display, windowWl(self)->egl_context);
 
-    if (globalWl->decoration_manager) {
+    if (globalWl->decoration_manager && windowWl(self)->toplevel_decoration) {
         zxdg_toplevel_decoration_v1_destroy(windowWl(self)->toplevel_decoration);
     }
 
