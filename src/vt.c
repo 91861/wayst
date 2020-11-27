@@ -769,10 +769,19 @@ void Vt_select_set_front_cell(Vt* self, int32_t x, int32_t y)
     }
 }
 
+static void Vt_select_clamp_to_buffer(Vt* self)
+{
+    self->selection.begin_line = MIN(self->selection.begin_line, self->lines.size - 1);
+    self->selection.end_line   = MIN(self->selection.end_line, self->lines.size - 1);
+}
+
 void Vt_select_end(Vt* self)
 {
+    if (self->selection.mode) {
+        Vt_mark_proxies_damaged_in_selected_region(self);
+    }
+    Vt_select_clamp_to_buffer(self);
     self->selection.mode = SELECT_MODE_NONE;
-    Vt_mark_proxies_damaged_in_selected_region(self);
     CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
 }
 
@@ -6269,7 +6278,7 @@ Vector_char* Vt_get_output(Vt* self, size_t len, char** out_buf, size_t* out_siz
 {
     if (likely(self->output.size < len)) {
         ASSERT(out_buf && out_size, "has output ptrs");
-        *out_buf = self->output.buf;
+        *out_buf  = self->output.buf;
         *out_size = self->output.size;
         Vector_clear_char(&self->output);
         return NULL;
@@ -6277,7 +6286,7 @@ Vector_char* Vt_get_output(Vt* self, size_t len, char** out_buf, size_t* out_siz
         len = MIN(len, self->output.size);
         Vector_clear_char(&self->staged_output);
         Vector_pushv_char(&self->staged_output, self->output.buf, len);
-        
+
         if (unlikely(settings.debug_pty) && self->output.size) {
             char* str = pty_string_prettyfy(self->output.buf, len);
             fprintf(stderr, "pty.write(%3zu) <~ { %s }\n\n", len, str);
