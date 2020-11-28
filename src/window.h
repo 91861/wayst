@@ -55,6 +55,8 @@ struct IWindow
     int (*get_connection_fd)(struct WindowBase* self);
     void (*clipboard_send)(struct WindowBase* self, const char* text);
     void (*clipboard_get)(struct WindowBase* self);
+    void (*primary_send)(struct WindowBase* self, const char* text);
+    void (*primary_get)(struct WindowBase* self);
     void (*set_swap_interval)(struct WindowBase* self, int val);
     void (*set_current_context)(struct WindowBase* self, bool this);
     void (*set_pointer_style)(struct WindowBase* self, enum MousePointerStyle);
@@ -179,6 +181,16 @@ static inline void Window_clipboard_get(struct WindowBase* self)
 static inline void Window_clipboard_send(struct WindowBase* self, const char* text)
 {
     self->interface->clipboard_send(self, text);
+}
+
+static inline void Window_primary_get(struct WindowBase* self)
+{
+    self->interface->primary_get(self);
+}
+
+static inline void Window_primary_send(struct WindowBase* self, const char* text)
+{
+    self->interface->primary_send(self, text);
 }
 
 static inline void Window_set_pointer_style(struct WindowBase* self, enum MousePointerStyle style)

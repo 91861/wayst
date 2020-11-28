@@ -368,6 +368,11 @@ static void App_clipboard_send(void* self, const char* text)
     Window_clipboard_send(((App*)self)->win, text);
 }
 
+static void App_primary_send(void* self, const char* text)
+{
+    Window_primary_send(((App*)self)->win, text);
+}
+
 static void App_clipboard_get(void* self)
 {
     Window_clipboard_get(((App*)self)->win);
@@ -1336,7 +1341,8 @@ static bool App_maybe_consume_click(App*     self,
             Vt_handle_clipboard(&self->vt, text.buf);
             Vector_destroy_char(&text);
         } else {
-            ; // TODO: we don't own primary, get it from the window system
+            /* we don't own primary, get it from the window system */
+            Window_primary_get(self->win);
         }
     } else if (vt->selection.mode != SELECT_MODE_NONE && state) {
         Window_set_pointer_style(self->win, MOUSE_POINTER_ARROW);
@@ -1510,8 +1516,19 @@ static void App_send_desktop_notification(void* self, const char* opt_title, con
 
 static void App_focus_changed(void* self, bool current_state)
 {
-    Window_notify_content_change(((App*)self)->win);
-    ((App*)self)->ui.draw_out_of_focus_tint = !current_state;
+    App* app = self;
+    Window_notify_content_change(app->win);
+
+    app->ui.draw_out_of_focus_tint = !current_state;
+
+    if (!current_state) {
+        Vector_char txt = Vt_select_region_to_string(&app->vt);
+        if (txt.size) {
+            App_primary_send(self, txt.buf);
+        } else {
+            Vector_destroy_char(&txt);
+        }
+    }
 }
 
 static bool App_minimized(void* self)

@@ -65,12 +65,10 @@ typedef struct
 
 #define MWM_TEAROFF_WINDOW (1L << 0)
 
-
 #define GLX_CONTEXT_MAJOR_VERSION_ARB 0x2091
 #define GLX_CONTEXT_MINOR_VERSION_ARB 0x2092
 #define GLX_SWAP_INTERVAL_EXT         0x20F1
 #define GLX_MAX_SWAP_INTERVAL_EXT     0x20F2
-
 
 static APIENTRY PFNGLXSWAPINTERVALEXTPROC glXSwapIntervalEXT = NULL;
 
@@ -107,6 +105,8 @@ static void     WindowX11_set_swap_interval(struct WindowBase* self, int32_t iva
 static bool     WindowX11_maybe_swap(struct WindowBase* self);
 static void     WindowX11_destroy(struct WindowBase* self);
 static int      WindowX11_get_connection_fd(struct WindowBase* self);
+static void     WindowX11_primary_get(struct WindowBase* self);
+static void     WindowX11_primary_send(struct WindowBase* self, const char* text);
 static void     WindowX11_clipboard_get(struct WindowBase* self);
 static void     WindowX11_clipboard_send(struct WindowBase* self, const char* text);
 static void     WindowX11_set_pointer_style(struct WindowBase* self, enum MousePointerStyle style);
@@ -133,6 +133,8 @@ static struct IWindow window_interface_x11 = {
     .get_connection_fd      = WindowX11_get_connection_fd,
     .clipboard_send         = WindowX11_clipboard_send,
     .clipboard_get          = WindowX11_clipboard_get,
+    .primary_get            = WindowX11_primary_get,
+    .primary_send           = WindowX11_primary_send,
     .set_swap_interval      = WindowX11_set_swap_interval,
     .get_gl_ext_proc_adress = WindowX11_get_gl_ext_proc_adress,
     .get_keycode_from_name  = WindowX11_get_keycode_from_name,
@@ -204,13 +206,14 @@ typedef struct
 
 typedef struct
 {
-    Window                    window;
-    GLXContext                glx_context;
-    XEvent                    event;
-    XSetWindowAttributes      set_win_attribs;
-    Colormap                  colormap;
-    uint32_t                  last_button_pressed;
-    RcPtr_clipboard_content_t clipboard_content;
+    Window               window;
+    GLXContext           glx_context;
+    XEvent               event;
+    XSetWindowAttributes set_win_attribs;
+    Colormap             colormap;
+    uint32_t             last_button_pressed;
+
+    RcPtr_clipboard_content_t clipboard_content, primary_content;
 
     struct WindowX11_dnd_offer
     {
@@ -267,6 +270,48 @@ void WindowX11_record_dnd_offer(WindowX11*  self,
     self->dnd_offer.accepted       = false;
 }
 
+static void WindowX11_primary_send(struct WindowBase* self, const char* text)
+{
+    RcPtr_new_in_place_of_clipboard_content_t(&windowX11(self)->primary_content);
+    *RcPtr_get_clipboard_content_t(&windowX11(self)->primary_content) = (clipboard_content_t){
+        .data = (char*)text,
+        .size = 0,
+    };
+
+    XSetSelectionOwner(globalX11->display, XA_PRIMARY, windowX11(self)->window, CurrentTime);
+
+    if (XGetSelectionOwner(globalX11->display, XA_PRIMARY) != windowX11(self)->window) {
+        WRN("Failed to take ownership of PRIMARY selection\n");
+    }
+}
+
+static void WindowX11_primary_get(struct WindowBase* self)
+{
+    Window owner = XGetSelectionOwner(globalX11->display, XA_PRIMARY);
+
+    if (owner == windowX11(self)->window) {
+        clipboard_content_t* cc = RcPtr_get_clipboard_content_t(&windowX11(self)->primary_content);
+
+        if (cc && cc->data) {
+            LOG("X::clipboard_get{ we own the PRIMARY selection }\n");
+            CALL_FP(self->callbacks.clipboard_handler, self->callbacks.user_data, cc->data);
+        } else {
+            LOG("X::clipboard_get{ we own the PRIMARY selection, but have no data }\n");
+        }
+    } else if (owner != None) {
+        LOG("X::clipboard_get{ convert from owner: %ld }\n", owner);
+
+        XConvertSelection(globalX11->display,
+                          XA_PRIMARY,
+                          globalX11->atom.utf8_string_mime_type,
+                          XA_PRIMARY,
+                          windowX11(self)->window,
+                          CurrentTime);
+    } else {
+        LOG("X::clipboard_get{ PRIMARY selection has no owner }\n");
+    }
+}
+
 static void WindowX11_clipboard_send(struct WindowBase* self, const char* text)
 {
     RcPtr_new_in_place_of_clipboard_content_t(&windowX11(self)->clipboard_content);
@@ -291,7 +336,6 @@ static void WindowX11_clipboard_get(struct WindowBase* self)
     Window owner = XGetSelectionOwner(globalX11->display, globalX11->atom.clipboard);
 
     if (owner == windowX11(self)->window) {
-
         clipboard_content_t* cc =
           RcPtr_get_clipboard_content_t(&windowX11(self)->clipboard_content);
 
@@ -1182,12 +1226,21 @@ static void WindowX11_event_motion(struct WindowBase* self, XMotionEvent* e)
 
 static void WindowX11_event_selection_clear(struct WindowBase* self, XSelectionClearEvent* e)
 {
-    RcPtr_destroy_clipboard_content_t(&windowX11(self)->clipboard_content);
+    if (e->selection == XA_PRIMARY || e->selection == globalX11->atom.clipboard) {
+        RcPtr_destroy_clipboard_content_t(e->selection == XA_PRIMARY
+                                            ? &windowX11(self)->primary_content
+                                            : &windowX11(self)->clipboard_content);
+    }
 }
 
 static void WindowX11_event_selection_request(struct WindowBase* self, XSelectionRequestEvent* e)
 {
-    clipboard_content_t* cc = RcPtr_get_clipboard_content_t(&windowX11(self)->clipboard_content);
+    RcPtr_clipboard_content_t* cc_ptr =
+      e->selection == XA_PRIMARY                  ? &windowX11(self)->primary_content
+      : e->selection == globalX11->atom.clipboard ? &windowX11(self)->clipboard_content
+                                                  : NULL;
+
+    clipboard_content_t* cc = RcPtr_get_clipboard_content_t(cc_ptr);
 
     if (!cc || !cc->data) {
         /* deny */
@@ -1256,7 +1309,7 @@ static void WindowX11_event_selection_request(struct WindowBase* self, XSelectio
 
                 RcPtr_new_shared_in_place_of_clipboard_content_t(
                   &globalX11->incr_transfer_out.clipboard_content,
-                  &windowX11(self)->clipboard_content);
+                  cc_ptr);
 
                 if (globalX11->incr_transfer_out.active &&
                     !TimePoint_passed(globalX11->incr_transfer_out.listen_timeout)) {
@@ -1359,6 +1412,8 @@ static void WindowX11_event_property_notify(struct WindowBase* self, XPropertyEv
                             PropModeReplace,
                             0,
                             0);
+
+            XSelectInput(globalX11->display, globalX11->incr_transfer_out.requestor, 0);
 
             globalX11->incr_transfer_out.current_offset += globalX11->incr_transfer_out.chunk_size;
             globalX11->incr_transfer_out.active = false;
@@ -1627,6 +1682,8 @@ static bool WindowX11_maybe_swap(struct WindowBase* self)
 static void WindowX11_destroy(struct WindowBase* self)
 {
     RcPtr_destroy_clipboard_content_t(&windowX11(self)->clipboard_content);
+    RcPtr_destroy_clipboard_content_t(&windowX11(self)->primary_content);
+
     XUndefineCursor(globalX11->display, windowX11(self)->window);
     XUnmapWindow(globalX11->display, windowX11(self)->window);
     glXMakeCurrent(globalX11->display, 0, 0);

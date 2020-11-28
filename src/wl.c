@@ -97,6 +97,8 @@ static void       WindowWl_destroy(struct WindowBase* self);
 static int        WindowWl_get_connection_fd(struct WindowBase* self);
 static void       WindowWl_clipboard_send(struct WindowBase* self, const char* text);
 static void       WindowWl_clipboard_get(struct WindowBase* self);
+static void       WindowWl_primary_send(struct WindowBase* self, const char* text);
+static void       WindowWl_primary_get(struct WindowBase* self);
 static void*      WindowWl_get_gl_ext_proc_adress(struct WindowBase* self, const char* name);
 static uint32_t   WindowWl_get_keycode_from_name(struct WindowBase* self, char* name);
 static void       WindowWl_set_pointer_style(struct WindowBase* self, enum MousePointerStyle style);
@@ -120,6 +122,8 @@ static struct IWindow window_interface_wayland = {
     .get_connection_fd      = WindowWl_get_connection_fd,
     .clipboard_send         = WindowWl_clipboard_send,
     .clipboard_get          = WindowWl_clipboard_get,
+    .primary_send           = WindowWl_primary_send,
+    .primary_get            = WindowWl_primary_get,
     .set_swap_interval      = WindowWl_set_swap_interval,
     .get_gl_ext_proc_adress = WindowWl_get_gl_ext_proc_adress,
     .get_keycode_from_name  = WindowWl_get_keycode_from_name,
@@ -297,6 +301,12 @@ static void WindowWl_drain_pipe_to_clipboard(struct WindowBase* self,
     Vector_destroy_char(&text);
 }
 
+static void WindowWl_primary_send(struct WindowBase* self, const char* text)
+{
+    free((void*)text);
+    // TODO: primary-selection-unstable-v1
+}
+
 static void WindowWl_clipboard_send(struct WindowBase* self, const char* text)
 {
     if (!text) {
@@ -317,6 +327,11 @@ static void WindowWl_clipboard_send(struct WindowBase* self, const char* text)
     wl_data_source_offer(w->data_source, "text/plain;charset=utf-8");
 
     wl_data_device_set_selection(globalWl->data_device, w->data_source, globalWl->serial);
+}
+
+static void WindowWl_primary_get(struct WindowBase* self)
+{
+    // TODO: primary-selection-unstable-v1
 }
 
 static void WindowWl_clipboard_get(struct WindowBase* self)
