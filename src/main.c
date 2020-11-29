@@ -302,6 +302,24 @@ static void App_run(App* self)
     free(self->hostname);
 }
 
+/* Whenever some other application sets primary selection while we are out of focus, upon focus gain
+ * we should end our selection */
+static void App_primary_claimed_by_other_client(void* self)
+{
+    App* app = self;
+
+    if (app->vt.selection.mode) {
+        LOG("App::selection_claimed\n");
+        Vt_select_end(&app->vt);
+    }
+}
+
+static void App_selection_end_handler(void* self)
+{
+    //App* app = self;
+    LOG("App::selection_end\n");
+}
+
 static void App_redraw(void* self)
 {
     App* app = self;
@@ -1521,7 +1539,7 @@ static void App_focus_changed(void* self, bool current_state)
 
     app->ui.draw_out_of_focus_tint = !current_state;
 
-    if (!current_state) {
+    if (!current_state && app->vt.selection.mode) {
         Vector_char txt = Vt_select_region_to_string(&app->vt);
         if (txt.size) {
             App_primary_send(self, txt.buf);
@@ -1628,6 +1646,7 @@ static void App_set_callbacks(App* self)
     self->vt.callbacks.destroy_proxy                       = App_destroy_proxy_handler;
     self->vt.callbacks.destroy_image_proxy                 = App_destroy_image_proxy_handler;
     self->vt.callbacks.destroy_image_view_proxy            = App_destroy_image_view_proxy_handler;
+    self->vt.callbacks.on_select_end                       = App_selection_end_handler;
 
     self->win->callbacks.user_data               = self;
     self->win->callbacks.key_handler             = App_key_handler;
@@ -1637,6 +1656,7 @@ static void App_set_callbacks(App* self)
     self->win->callbacks.activity_notify_handler = App_action;
     self->win->callbacks.on_redraw_requested     = App_redraw;
     self->win->callbacks.on_focus_changed        = App_focus_changed;
+    self->win->callbacks.on_primary_changed      = App_primary_claimed_by_other_client;
 
     self->gfx->callbacks.user_data                   = self;
     self->gfx->callbacks.load_extension_proc_address = App_load_extension_proc_address;

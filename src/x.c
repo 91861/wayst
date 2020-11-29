@@ -226,14 +226,14 @@ typedef struct
     } dnd_offer;
 } WindowX11;
 
-void WindowX11_drop_dnd_offer(WindowX11* self)
+static void WindowX11_drop_dnd_offer(WindowX11* self)
 {
     if (!self->dnd_offer.accepted) {
         memset(&self->dnd_offer, 0, sizeof(self->dnd_offer));
     }
 }
 
-void WindowX11_dnd_offer_handled(WindowX11* self)
+static void WindowX11_dnd_offer_handled(WindowX11* self)
 {
     XClientMessageEvent ev = {
         .display      = globalX11->display,
@@ -257,11 +257,11 @@ void WindowX11_dnd_offer_handled(WindowX11* self)
     WindowX11_drop_dnd_offer(self);
 }
 
-void WindowX11_record_dnd_offer(WindowX11*  self,
-                                Window      source_xid,
-                                const char* mime,
-                                Atom        mime_atom,
-                                Atom        action)
+static void WindowX11_record_dnd_offer(WindowX11*  self,
+                                       Window      source_xid,
+                                       const char* mime,
+                                       Atom        mime_atom,
+                                       Atom        action)
 {
     self->dnd_offer.source_xid     = source_xid;
     self->dnd_offer.mime_type      = mime;
@@ -272,6 +272,10 @@ void WindowX11_record_dnd_offer(WindowX11*  self,
 
 static void WindowX11_primary_send(struct WindowBase* self, const char* text)
 {
+    if (!text) {
+        return;
+    }
+
     RcPtr_new_in_place_of_clipboard_content_t(&windowX11(self)->primary_content);
     *RcPtr_get_clipboard_content_t(&windowX11(self)->primary_content) = (clipboard_content_t){
         .data = (char*)text,
@@ -955,8 +959,13 @@ static void WindowX11_event_focus_in(struct WindowBase* self, XFocusInEvent* e)
     FLAG_SET(self->state_flags, WINDOW_IS_IN_FOCUS);
     CALL_FP(self->callbacks.on_focus_changed, self->callbacks.user_data, true);
     Window_notify_content_change(self);
+
     if (Window_is_pointer_hidden(self)) {
         WindowX11_set_pointer_style(self, MOUSE_POINTER_ARROW);
+    }
+
+    if (XGetSelectionOwner(globalX11->display, XA_PRIMARY) != windowX11(self)->window) {
+        CALL_FP(self->callbacks.on_primary_changed, self->callbacks.user_data);
     }
 }
 

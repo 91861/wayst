@@ -782,6 +782,7 @@ void Vt_select_end(Vt* self)
     }
     Vt_select_clamp_to_buffer(self);
     self->selection.mode = SELECT_MODE_NONE;
+    CALL_FP(self->callbacks.on_select_end, self->callbacks.user_data);
     CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
 }
 

@@ -389,6 +389,7 @@ typedef struct
         void (*on_action_performed)(void*);
         void (*on_repaint_required)(void*);
         void (*on_visual_bell)(void*);
+        void (*on_select_end)(void*);
         void (*on_desktop_notification_sent)(void*, const char* opt_title, const char* text);
         void (*on_window_maximize_state_set)(void*, bool);
         void (*on_window_fullscreen_state_set)(void*, bool);

@@ -10,6 +10,7 @@
 #include "vector.h"
 
 #include <assert.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,6 +25,8 @@
 #include <wayland-cursor.h>
 #include <wayland-egl.h>
 
+#include "window.h"
+#include "wl_exts/wp-primary-selection.h"
 #include "wl_exts/xdg-decoration.h"
 #include "wl_exts/xdg-shell.h"
 
@@ -163,6 +166,9 @@ typedef struct
     struct wl_data_device_manager* data_device_manager;
     struct wl_data_device*         data_device;
 
+    struct zwp_primary_selection_device_manager_v1* primary_manager;
+    struct zwp_primary_selection_device_v1*         primary_device;
+
     struct wl_shell*                   wl_shell;
     struct xdg_wm_base*                xdg_shell;
     struct zxdg_decoration_manager_v1* decoration_manager;
@@ -214,6 +220,11 @@ typedef struct
     int8_t                 data_offer_mime_idx; // -1 for none
     const char*            data_source_text;
 
+    struct zwp_primary_selection_offer_v1 * primary_offer, *new_primary_offer;
+    struct zwp_primary_selection_source_v1* primary_source;
+    int8_t      primary_offer_mime_idx, new_primary_offer_mime_idx; // -1 for none
+    const char* primary_source_text;
+
     bool got_discrete_axis_event;
 
     Vector_WlOutputInfo outputs;
@@ -223,14 +234,19 @@ typedef struct
 } WindowWl;
 
 /* in order of preference */
-static const char* ACCEPTED_DND_MIMES[] = {
+static const char* ACCEPTED_MIMES[] = {
     "text/uri-list", "text/plain;charset=utf-8", "UTF8_STRING", "text/plain", "STRING", "TEXT",
+};
+
+static const char* OFFERED_MIMES[] = {
+    "text/plain;charset=utf-8", "UTF8_STRING", "text/plain", "STRING", "TEXT",
 };
 
 static inline xkb_keysym_t keysym_filter_compose(xkb_keysym_t sym)
 {
-    if (!globalWl->xkb.compose_state || sym == XKB_KEY_NoSymbol)
+    if (!globalWl->xkb.compose_state || sym == XKB_KEY_NoSymbol) {
         return sym;
+    }
 
     if (xkb_compose_state_feed(globalWl->xkb.compose_state, sym) != XKB_COMPOSE_FEED_ACCEPTED) {
         return sym;
@@ -301,10 +317,173 @@ static void WindowWl_drain_pipe_to_clipboard(struct WindowBase* self,
     Vector_destroy_char(&text);
 }
 
+static void primary_selection_source_listener_handle_send(
+  void*                                   data,
+  struct zwp_primary_selection_source_v1* source,
+  const char*                             mime_type,
+  int32_t                                 fd)
+{
+    LOG("wl::primary_source::send{ mime: %s }\n", mime_type);
+
+    WindowWl* w = windowWl(((struct WindowBase*)data));
+
+    bool is_supported_mime = false;
+    for (uint_fast8_t i = 0; i < ARRAY_SIZE(OFFERED_MIMES); ++i) {
+        if (!strcmp(mime_type, OFFERED_MIMES[i])) {
+            is_supported_mime = true;
+            break;
+        }
+    }
+
+    if (w->primary_source_text && is_supported_mime) {
+        LOG("writing \'%s\' to fd\n", w->primary_source_text);
+        write(fd, w->primary_source_text, strlen(w->primary_source_text));
+    }
+
+    close(fd);
+}
+
+static void primary_selection_source_listener_handle_canceled(
+  void*                                   data,
+  struct zwp_primary_selection_source_v1* source)
+{
+    WindowWl* w = windowWl(((struct WindowBase*)data));
+    LOG("wl::primary_source::cancelled\n");
+
+    zwp_primary_selection_source_v1_destroy(source);
+    w->primary_source = NULL;
+}
+
+struct zwp_primary_selection_source_v1_listener primary_selection_source_listener = {
+    .send      = primary_selection_source_listener_handle_send,
+    .cancelled = primary_selection_source_listener_handle_canceled,
+};
+
+void primary_selection_offer_handle_offer(void*                                  data,
+                                          struct zwp_primary_selection_offer_v1* primary_offer,
+                                          const char*                            mime_type)
+{
+    WindowWl* w = windowWl(((struct WindowBase*)data));
+
+    LOG("wl::primary_selection_offer::offer{ mime_type: %s }", mime_type);
+
+    for (uint_fast8_t i = 0; i < ARRAY_SIZE(ACCEPTED_MIMES); ++i) {
+        if (strcmp(mime_type, ACCEPTED_MIMES[i])) {
+            continue;
+        }
+
+        bool prefferable_mime =
+          (w->new_primary_offer_mime_idx == -1 || w->new_primary_offer_mime_idx >= i);
+
+        if (primary_offer != w->new_primary_offer) {
+            LOG("- ACCEPTED(new data) }\n");
+            w->new_primary_offer          = primary_offer;
+            w->new_primary_offer_mime_idx = i;
+            return;
+        } else if (prefferable_mime) {
+            LOG("- ACCEPTED(preffered mime type) }\n");
+            w->new_primary_offer          = primary_offer;
+            w->new_primary_offer_mime_idx = i;
+            return;
+        }
+    }
+
+    if (w->new_primary_offer_mime_idx == -1) {
+        LOG(" - REJECTED(not supported) }\n");
+    } else {
+        LOG(" - REJECTED(\'%s\' is prefferable) }\n",
+            ACCEPTED_MIMES[w->new_primary_offer_mime_idx]);
+    }
+}
+
+struct zwp_primary_selection_offer_v1_listener primary_selection_offer_listener = {
+    .offer = primary_selection_offer_handle_offer,
+};
+
+/* Data offer changed add a listener to this to get mime types */
+static void primary_selection_device_handle_data_offer(
+  void*                                   data,
+  struct zwp_primary_selection_device_v1* device,
+  struct zwp_primary_selection_offer_v1*  offer)
+{
+    struct WindowBase* self = data;
+
+    windowWl(self)->new_primary_offer = offer;
+
+    zwp_primary_selection_offer_v1_add_listener(offer, &primary_selection_offer_listener, data);
+}
+
+/* Got a new offer and mimetypes have been sent, replace the old offer with this */
+static void primary_selection_device_handle_selection(
+  void*                                   data,
+  struct zwp_primary_selection_device_v1* device,
+  struct zwp_primary_selection_offer_v1*  offer)
+{
+    struct WindowBase* self = data;
+
+    if (offer) {
+        CALL_FP(self->callbacks.on_primary_changed, self->callbacks.user_data);
+    }
+
+    LOG("wl::primary_selection_offer::selection{ mime_type: %s }\n",
+        windowWl(self)->new_primary_offer_mime_idx == -1
+          ? "<none>"
+          : ACCEPTED_MIMES[windowWl(self)->new_primary_offer_mime_idx]);
+
+    if (windowWl(self)->primary_offer &&
+        windowWl(self)->primary_offer != windowWl(self)->new_primary_offer) {
+        zwp_primary_selection_offer_v1_destroy(windowWl(self)->primary_offer);
+    }
+
+    windowWl(self)->primary_offer              = windowWl(self)->new_primary_offer;
+    windowWl(self)->primary_offer_mime_idx     = windowWl(self)->new_primary_offer_mime_idx;
+    windowWl(self)->new_primary_offer          = NULL;
+    windowWl(self)->new_primary_offer_mime_idx = -1;
+}
+
+struct zwp_primary_selection_device_v1_listener primary_selection_device_listener = {
+    .data_offer = primary_selection_device_handle_data_offer,
+    .selection  = primary_selection_device_handle_selection,
+};
+
 static void WindowWl_primary_send(struct WindowBase* self, const char* text)
 {
-    free((void*)text);
-    // TODO: primary-selection-unstable-v1
+    if (!text) {
+        /* We no longer have a selection */
+        if (globalWl->primary_manager) {
+            zwp_primary_selection_device_v1_set_selection(globalWl->primary_device,
+                                                          NULL,
+                                                          globalWl->serial);
+        }
+        return;
+    }
+
+    if (!globalWl->primary_manager) {
+        free((void*)text);
+        return;
+    }
+
+    free((void*)windowWl(self)->primary_source_text);
+    windowWl(self)->primary_source_text = text;
+
+    if (windowWl(self)->primary_source) {
+        zwp_primary_selection_source_v1_destroy(windowWl(self)->primary_source);
+    }
+
+    windowWl(self)->primary_source =
+      zwp_primary_selection_device_manager_v1_create_source(globalWl->primary_manager);
+
+    zwp_primary_selection_source_v1_add_listener(windowWl(self)->primary_source,
+                                                 &primary_selection_source_listener,
+                                                 self);
+
+    for (uint_fast8_t i = 0; i < ARRAY_SIZE(OFFERED_MIMES); ++i) {
+        zwp_primary_selection_source_v1_offer(windowWl(self)->primary_source, OFFERED_MIMES[i]);
+    }
+
+    zwp_primary_selection_device_v1_set_selection(globalWl->primary_device,
+                                                  windowWl(self)->primary_source,
+                                                  globalWl->serial);
 }
 
 static void WindowWl_clipboard_send(struct WindowBase* self, const char* text)
@@ -318,27 +497,52 @@ static void WindowWl_clipboard_send(struct WindowBase* self, const char* text)
     LOG("making a data source\n");
 
     free((void*)w->data_source_text);
-
     windowWl(self)->data_source_text = text;
+
+    if (windowWl(self)->data_source) {
+        wl_data_source_destroy(windowWl(self)->data_source);
+    }
+
     windowWl(self)->data_source =
       wl_data_device_manager_create_data_source(globalWl->data_device_manager);
     wl_data_source_add_listener(w->data_source, &data_source_listener, self);
 
-    wl_data_source_offer(w->data_source, "text/plain;charset=utf-8");
+    for (uint_fast8_t i = 0; i < ARRAY_SIZE(OFFERED_MIMES); ++i) {
+        wl_data_source_offer(w->data_source, OFFERED_MIMES[i]);
+    }
 
     wl_data_device_set_selection(globalWl->data_device, w->data_source, globalWl->serial);
 }
 
 static void WindowWl_primary_get(struct WindowBase* self)
 {
-    // TODO: primary-selection-unstable-v1
+    if (windowWl(self)->primary_offer_mime_idx > -1 && windowWl(self)->primary_offer) {
+        LOG("last recorded primary_selection_v1_data_offer mime: \"%s\" \n",
+            ACCEPTED_MIMES[windowWl(self)->primary_offer_mime_idx]);
+
+        int fds[2];
+
+        errno = 0;
+        if (pipe(fds)) {
+            WRN("IO error: %s\n", strerror(errno));
+            return;
+        }
+
+        zwp_primary_selection_offer_v1_receive(windowWl(self)->primary_offer,
+                                               ACCEPTED_MIMES[windowWl(self)->data_offer_mime_idx],
+                                               fds[1]);
+        close(fds[1]);
+        wl_display_roundtrip(globalWl->display);
+        WindowWl_drain_pipe_to_clipboard(self, fds[0], windowWl(self)->data_offer_mime_idx == 0);
+        close(fds[0]);
+    }
 }
 
 static void WindowWl_clipboard_get(struct WindowBase* self)
 {
     if (windowWl(self)->data_offer_mime_idx > -1 && windowWl(self)->data_offer) {
         LOG("last recorded wl_data_offer mime: \"%s\" \n",
-            ACCEPTED_DND_MIMES[windowWl(self)->data_offer_mime_idx]);
+            ACCEPTED_MIMES[windowWl(self)->data_offer_mime_idx]);
 
         if (windowWl(self)->data_offer) {
             int fds[2];
@@ -350,7 +554,7 @@ static void WindowWl_clipboard_get(struct WindowBase* self)
             }
 
             wl_data_offer_receive(windowWl(self)->data_offer,
-                                  ACCEPTED_DND_MIMES[windowWl(self)->data_offer_mime_idx],
+                                  ACCEPTED_MIMES[windowWl(self)->data_offer_mime_idx],
                                   fds[1]);
 
             close(fds[1]);
@@ -599,8 +803,9 @@ static void keyboard_handle_keymap(void*               data,
 
     char* map_str = mmap(NULL, size, PROT_READ, MAP_PRIVATE, fd, 0);
 
-    if (map_str == MAP_FAILED)
+    if (map_str == MAP_FAILED) {
         ERR("Reading keymap info failed");
+    }
 
     globalWl->xkb.keymap = xkb_keymap_new_from_string(globalWl->xkb.ctx,
                                                       map_str,
@@ -610,8 +815,9 @@ static void keyboard_handle_keymap(void*               data,
     munmap(map_str, size);
     close(fd);
 
-    if (!globalWl->xkb.keymap)
+    if (!globalWl->xkb.keymap) {
         ERR("Failed to generate keymap");
+    }
 
     globalWl->xkb.state       = xkb_state_new(globalWl->xkb.keymap);
     globalWl->xkb.clean_state = xkb_state_new(globalWl->xkb.keymap);
@@ -637,16 +843,18 @@ static void keyboard_handle_keymap(void*               data,
                                             XKB_COMPOSE_COMPILE_NO_FLAGS);
     }
 
-    if (!globalWl->xkb.compose_table)
+    if (!globalWl->xkb.compose_table) {
         ERR("Failed to generate keyboard compose table, is locale \'%s\' "
             "correct?",
             settings.locale.str);
+    }
 
     globalWl->xkb.compose_state =
       xkb_compose_state_new(globalWl->xkb.compose_table, XKB_COMPOSE_STATE_NO_FLAGS);
 
-    if (!globalWl->xkb.compose_state)
+    if (!globalWl->xkb.compose_state) {
         ERR("Failed to create compose state");
+    }
 
     globalWl->xkb.ctrl_mask  = 1 << xkb_keymap_mod_get_index(globalWl->xkb.keymap, "Control");
     globalWl->xkb.alt_mask   = 1 << xkb_keymap_mod_get_index(globalWl->xkb.keymap, "Mod1");
@@ -661,6 +869,7 @@ static void keyboard_handle_enter(void*               data,
                                   struct wl_surface*  surface,
                                   struct wl_array*    keys)
 {
+    globalWl->serial = serial;
     ((struct WindowBase*)data)
       ->callbacks.on_focus_changed(((struct WindowBase*)data)->callbacks.user_data, true);
     FLAG_SET(((struct WindowBase*)data)->state_flags, WINDOW_IS_IN_FOCUS);
@@ -685,20 +894,22 @@ static void keyboard_handle_key(void*               data,
                                 uint32_t            key,
                                 uint32_t            state)
 {
+    globalWl->serial = serial;
+
     bool               is_repeat_event = !keyboard;
     struct WindowBase* win             = data;
     uint32_t           utf, code = key + 8;
     xkb_keysym_t       sym, rawsym, composed_sym;
 
     if (!is_repeat_event) {
-        globalWl->serial = serial;
         FLAG_SET(win->state_flags, WINDOW_NEEDS_SWAP);
     }
 
     sym = composed_sym = xkb_state_key_get_one_sym(globalWl->xkb.state, code);
 
-    if (keysym_is_mod(sym))
+    if (keysym_is_mod(sym)) {
         return;
+    }
 
     rawsym = xkb_state_key_get_one_sym(globalWl->xkb.clean_state, code);
 
@@ -825,7 +1036,12 @@ static void zxdg_toplevel_decoration_manager_handle_configure(
   void*                               data,
   struct zxdg_toplevel_decoration_v1* zxdg_toplevel_decoration_v1,
   uint32_t                            mode)
-{}
+{
+    LOG("wl::zxdg_toplevel_decoration::configure{ mode: %u }\n", mode);
+
+    /* struct WindowBase* self = data; */
+    /* xdg_surface_ack_configure(windowWl(self)->xdg_surface, globalWl->serial); */
+}
 
 static const struct zxdg_toplevel_decoration_v1_listener zxdg_toplevel_decoration_listener = {
     .configure = zxdg_toplevel_decoration_manager_handle_configure
@@ -999,9 +1215,9 @@ static void data_offer_handle_offer(void*                 data,
 
     LOG("wl.data_offer::offer{ mime_type: %s ", mime_type);
 
-    for (uint_fast8_t i = 0; i < ARRAY_SIZE(ACCEPTED_DND_MIMES); ++i) {
+    for (uint_fast8_t i = 0; i < ARRAY_SIZE(ACCEPTED_MIMES); ++i) {
 
-        if (strcmp(mime_type, ACCEPTED_DND_MIMES[i])) {
+        if (strcmp(mime_type, ACCEPTED_MIMES[i])) {
             continue;
         }
 
@@ -1025,7 +1241,7 @@ static void data_offer_handle_offer(void*                 data,
     if (w->data_offer_mime_idx == -1) {
         LOG(" - REJECTED(not supported) }\n");
     } else {
-        LOG(" - REJECTED(\'%s\' is prefferable) }\n", ACCEPTED_DND_MIMES[w->data_offer_mime_idx]);
+        LOG(" - REJECTED(\'%s\' is prefferable) }\n", ACCEPTED_MIMES[w->data_offer_mime_idx]);
     }
 
     wl_data_offer_accept(data_offer, 0, NULL);
@@ -1060,7 +1276,7 @@ static void data_offer_handle_action(void*                 data,
             if (w->data_offer_mime_idx > -1) {
                 wl_data_offer_accept(data_offer,
                                      globalWl->serial,
-                                     ACCEPTED_DND_MIMES[w->data_offer_mime_idx]);
+                                     ACCEPTED_MIMES[w->data_offer_mime_idx]);
             }
             break;
         case WL_DATA_DEVICE_MANAGER_DND_ACTION_MOVE:
@@ -1137,7 +1353,7 @@ static void data_device_handle_motion(void*                  data,
 
 static void data_device_handle_drop(void* data, struct wl_data_device* wl_data_device)
 {
-    LOG("wl.data_device::drop{ ");
+    LOG("wl::data_device::drop{ ");
 
     struct WindowBase* base = (struct WindowBase*)data;
     WindowWl*          self = windowWl(base);
@@ -1150,7 +1366,7 @@ static void data_device_handle_drop(void* data, struct wl_data_device* wl_data_d
     struct wl_data_offer* offer    = self->dnd_data_offer;
     int                   mime_idx = self->data_offer_mime_idx;
 
-    LOG("mime: %s }\n", ACCEPTED_DND_MIMES[mime_idx]);
+    LOG("mime: %s }\n", ACCEPTED_MIMES[mime_idx]);
 
     int fds[2];
     errno = 0;
@@ -1158,7 +1374,7 @@ static void data_device_handle_drop(void* data, struct wl_data_device* wl_data_d
         WRN("IO error: %s\n", strerror(errno));
         return;
     }
-    wl_data_offer_receive(offer, ACCEPTED_DND_MIMES[mime_idx], fds[1]);
+    wl_data_offer_receive(offer, ACCEPTED_MIMES[mime_idx], fds[1]);
     close(fds[1]);
 
     wl_display_roundtrip(globalWl->display);
@@ -1174,7 +1390,7 @@ static void data_device_handle_selection(void*                  data,
                                          struct wl_data_device* wl_data_device,
                                          struct wl_data_offer*  offer)
 {
-    LOG("wl.data_device::selection { has_offer: %d }\n", offer != NULL);
+    LOG("wl::data_device::selection { has_offer: %d }\n", offer != NULL);
 
     if (!offer) {
         return;
@@ -1194,7 +1410,7 @@ static void data_source_handle_target(void*                  data,
                                       struct wl_data_source* wl_data_source,
                                       const char*            mime_type)
 {
-    LOG("wl.data_source::target\n");
+    LOG("wl::data_source::target\n");
 }
 
 static void data_source_handle_send(void*                  data,
@@ -1202,41 +1418,54 @@ static void data_source_handle_send(void*                  data,
                                     const char*            mime_type,
                                     int32_t                fd)
 {
-    LOG("wl.data_source::send{ mime_type: %s }\n", mime_type);
+    LOG("wl::data_source::send{ mime_type: %s }\n", mime_type);
 
-    if (windowWl(((struct WindowBase*)data))->data_source_text &&
-        (!strcmp(mime_type, "text/plain") || !strcmp(mime_type, "text/plain;charset=utf-8") ||
-         !strcmp(mime_type, "TEXT") || !strcmp(mime_type, "STRING") ||
-         !strcmp(mime_type, "UTF8_STRING"))) {
-        LOG("writing \'%s\' to fd\n", windowWl(((struct WindowBase*)data))->data_source_text);
+    WindowWl* w = windowWl(((struct WindowBase*)data));
 
-        write(fd,
-              windowWl(((struct WindowBase*)data))->data_source_text,
-              strlen(windowWl(((struct WindowBase*)data))->data_source_text));
+    bool is_supported_mime = false;
+    for (uint_fast8_t i = 0; i < ARRAY_SIZE(OFFERED_MIMES); ++i) {
+        if (!strcmp(mime_type, OFFERED_MIMES[i])) {
+            is_supported_mime = true;
+            break;
+        }
     }
+
+    if (w->data_source_text && is_supported_mime) {
+        LOG("writing \'%s\' to fd\n", w->data_source_text);
+        write(fd, w->data_source_text, strlen(w->data_source_text));
+    }
+
     close(fd);
 }
 
 static void data_source_handle_cancelled(void* data, struct wl_data_source* wl_data_source)
 {
-    LOG("wl.data_source::canceled\n");
+    WindowWl* w = windowWl(((struct WindowBase*)data));
+
+    wl_data_source_destroy(wl_data_source);
+    w->data_source = NULL;
+
+    LOG("wl::data_source::canceled\n");
 }
 
 static void data_source_handle_dnd_drop_performed(void* data, struct wl_data_source* wl_data_source)
 {
-    LOG("wl.data_source::dnd_drop_performed\n");
+    /* source should NOT be destroyed here */
+    LOG("wl::data_source::dnd_drop_performed\n");
 }
 
 static void data_source_handle_dnd_finished(void* data, struct wl_data_source* wl_data_source)
 {
-    LOG("wl.data_source::dnd_finished\n");
+    // WindowWl* w = windowWl(((struct WindowBase*)data));
+    wl_data_source_destroy(wl_data_source);
+    LOG("wl::data_source::dnd_finished\n");
 }
 
 static void data_source_handle_action(void*                  data,
                                       struct wl_data_source* wl_data_source,
                                       uint32_t               dnd_action)
 {
-    LOG("wl.data_source::action\n");
+    LOG("wl::data_source::action\n");
 }
 
 static struct wl_data_source_listener data_source_listener = {
@@ -1257,7 +1486,7 @@ static void registry_add(void*               data,
                          const char*         interface,
                          uint32_t            version)
 {
-    LOG("wl_registry.name{ name: %-40s, ver: %2u", interface, version);
+    LOG("wl::registry_add{ name: %-40s, ver: %2u", interface, version);
 
     if (!strcmp(interface, wl_compositor_interface.name)) {
         globalWl->compositor = wl_registry_bind(registry, name, &wl_compositor_interface, version);
@@ -1280,8 +1509,14 @@ static void registry_add(void*               data,
     } else if (!strcmp(interface, wl_data_device_manager_interface.name)) {
         globalWl->data_device_manager =
           wl_registry_bind(registry, name, &wl_data_device_manager_interface, version);
+    } else if (!strcmp(interface, zwp_primary_selection_device_manager_v1_interface.name)) {
+        globalWl->primary_manager =
+          wl_registry_bind(registry,
+                           name,
+                           &zwp_primary_selection_device_manager_v1_interface,
+                           version);
     } else {
-        LOG(" - unused");
+        LOG(" (unused)");
     }
     LOG(" }\n");
 }
@@ -1365,7 +1600,8 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h)
 
     win->interface = &window_interface_wayland;
 
-    windowWl(win)->data_offer_mime_idx = -1;
+    windowWl(win)->data_offer_mime_idx    = -1;
+    windowWl(win)->primary_offer_mime_idx = -1;
 
     globalWl->registry = wl_display_get_registry(globalWl->display);
     wl_registry_add_listener(globalWl->registry, &registry_listener, win);
@@ -1376,6 +1612,19 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h)
           wl_data_device_manager_get_data_device(globalWl->data_device_manager, globalWl->seat);
 
         wl_data_device_add_listener(globalWl->data_device, &data_device_listener, win);
+    }
+
+    if (globalWl->primary_manager) {
+        globalWl->primary_device =
+          zwp_primary_selection_device_manager_v1_get_device(globalWl->primary_manager,
+                                                             globalWl->seat);
+
+        zwp_primary_selection_device_v1_add_listener(globalWl->primary_device,
+                                                     &primary_selection_device_listener,
+                                                     win);
+    } else {
+        WRN("%s not supported by compositor\n",
+            zwp_primary_selection_device_manager_v1_interface.name);
     }
 
     setup_cursor(win);
@@ -1757,6 +2006,14 @@ static void WindowWl_destroy(struct WindowBase* self)
         wl_data_device_destroy(globalWl->data_device);
     }
 
+    if (windowWl(self)->data_source) {
+        wl_data_source_destroy(windowWl(self)->data_source);
+    }
+
+    if (windowWl(self)->primary_source) {
+        zwp_primary_selection_source_v1_destroy(windowWl(self)->primary_source);
+    }
+
     eglTerminate(globalWl->egl_display);
     eglReleaseThread();
 
@@ -1764,6 +2021,7 @@ static void WindowWl_destroy(struct WindowBase* self)
     wl_display_disconnect(globalWl->display);
 
     free((void*)windowWl(self)->data_source_text);
+    free((void*)windowWl(self)->primary_source_text);
 
     Vector_destroy_WlOutputInfo(&windowWl(self)->outputs);
 

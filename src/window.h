@@ -98,6 +98,7 @@ typedef struct WindowBase
         void (*activity_notify_handler)(void* user_data);
         void (*on_redraw_requested)(void* user_data);
         void (*on_focus_changed)(void* user_data, bool current_state);
+        void (*on_primary_changed)(void* user_data);
     } callbacks;
 
     char* title;
