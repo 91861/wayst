@@ -363,7 +363,6 @@ static void Vt_grapheme_break(Vt* self)
     self->utf8proc_state = 0;
 #endif
     self->last_codepoint = 0;
-    self->last_interted  = NULL;
 }
 
 static void Vt_set_fg_color_custom(Vt* self, ColorRGB color, VtRune* opt_target)
@@ -2932,8 +2931,9 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                     int arg = short_sequence_get_int_argument(seq);
                                     if (arg <= 0)
                                         arg = 1;
+                                    VtRune repeated = *self->last_interted;
                                     for (int i = 0; i < arg; ++i) {
-                                        Vt_insert_char_at_cursor(self, *self->last_interted);
+                                        Vt_insert_char_at_cursor(self, repeated);
                                     }
                                 }
                             } break;
@@ -4815,7 +4815,8 @@ static void Vt_delete_chars(Vt* self, size_t n)
         Vt_set_bg_color_default(self, NULL);
     }
 
-    for (uint16_t i = Vt_cursor_line(self)->data.size - 1; i < Vt_col(self); ++i) {
+    uint16_t st = Vt_cursor_line(self)->data.size ? Vt_cursor_line(self)->data.size - 1 : 0;
+    for (uint16_t i = st; i < Vt_col(self); ++i) {
         Vector_push_VtRune(&Vt_cursor_line(self)->data, self->parser.char_state);
     }
 
@@ -5045,7 +5046,7 @@ static inline void Vt_move_cursor(Vt* self, uint16_t column, uint16_t rows)
         max_row = Vt_bottom_line(self);
         min_row = Vt_top_line(self);
     }
-    self->last_interted = NULL;
+
     self->cursor.row    = CLAMP(rows + Vt_top_line(self), min_row, max_row);
     self->cursor.col    = MIN(column, (uint32_t)Vt_col(self) - 1);
 

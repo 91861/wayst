@@ -235,7 +235,7 @@ static void App_run(App* self)
         ssize_t bytes = 0;
         do {
             if (unlikely(settings.debug_slow)) {
-                usleep(5000);
+                usleep(50000);
                 App_notify_content_change(self);
             }
 
