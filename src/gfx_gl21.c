@@ -1426,6 +1426,7 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_underline_ra
     // lines are drawn in the same color as the character, unless the line color was explicitly set
     ColorRGB line_color = Vt_rune_ln_clr(vt, &vt_line->data.buf[range.first]);
     glDisable(GL_SCISSOR_TEST);
+    glEnable(GL_BLEND);
 
     for (const VtRune* each_rune = vt_line->data.buf + range.first;
          each_rune <= vt_line->data.buf + range.second;
