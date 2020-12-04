@@ -178,7 +178,9 @@ void FreetypeFace_load(Freetype*                      freetype,
 
 void FreetypeFace_unload(FreetypeFace* self)
 {
-    FT_Done_Face(self->face);
+    if (self->loaded) {
+        FT_Done_Face(self->face);
+    }
     self->loaded             = false;
     self->glyph_width_pixels = 0;
     self->line_height_pixels = 0;
@@ -540,29 +542,46 @@ Freetype Freetype_new()
 
 void Freetype_load_fonts(Freetype* self)
 {
-    for (FreetypeStyledFamily* i = NULL;
-         (i = Vector_iter_FreetypeStyledFamily(&self->primaries, i));) {
-        FreetypeStyledFamily_load(self, i, settings.font_size, settings.font_dpi);
+
+    if (settings.defer_font_loading) {
+        FreetypeStyledFamily_load(self,
+                                  Vector_first_FreetypeStyledFamily(&self->primaries),
+                                  settings.font_size,
+                                  settings.font_dpi);
+
+        self->primary_output_type =
+          Vector_first_FreetypeStyledFamily(&self->primaries)->output_type;
+    } else {
+        for (FreetypeStyledFamily* i = NULL;
+             (i = Vector_iter_FreetypeStyledFamily(&self->primaries, i));) {
+            FreetypeStyledFamily_load(self, i, settings.font_size, settings.font_dpi);
+        }
+
+        self->primary_output_type =
+          Vector_first_FreetypeStyledFamily(&self->primaries)->output_type;
+
+        for (FreetypeFace* i = NULL; (i = Vector_iter_FreetypeFace(&self->symbol_faces, i));) {
+            FreetypeFace_load(self,
+                              i,
+                              settings.font_size + i->size_offset,
+                              settings.font_dpi,
+                              self->target_output_type,
+                              false);
+        }
+
+        for (FreetypeFace* i = NULL; (i = Vector_iter_FreetypeFace(&self->color_faces, i));) {
+            FreetypeFace_load(self,
+                              i,
+                              settings.font_size + i->size_offset,
+                              settings.font_dpi,
+                              FT_OUTPUT_COLOR_BGRA,
+                              false);
+        }
     }
-    self->primary_output_type = Vector_first_FreetypeStyledFamily(&self->primaries)->output_type;
-    for (FreetypeFace* i = NULL; (i = Vector_iter_FreetypeFace(&self->symbol_faces, i));) {
-        FreetypeFace_load(self,
-                          i,
-                          settings.font_size + i->size_offset,
-                          settings.font_dpi,
-                          self->target_output_type,
-                          false);
-    }
-    for (FreetypeFace* i = NULL; (i = Vector_iter_FreetypeFace(&self->color_faces, i));) {
-        FreetypeFace_load(self,
-                          i,
-                          settings.font_size + i->size_offset,
-                          settings.font_dpi,
-                          FT_OUTPUT_COLOR_BGRA,
-                          false);
-    }
+
     self->glyph_width_pixels =
       Vector_first_FreetypeStyledFamily(&self->primaries)->regular->glyph_width_pixels;
+
     self->line_height_pixels =
       Vector_first_FreetypeStyledFamily(&self->primaries)->regular->line_height_pixels;
 }
@@ -573,9 +592,11 @@ void Freetype_unload_fonts(Freetype* self)
          (i = Vector_iter_FreetypeStyledFamily(&self->primaries, i));) {
         FreetypeStyledFamily_unload(i);
     }
+
     for (FreetypeFace* i = NULL; (i = Vector_iter_FreetypeFace(&self->symbol_faces, i));) {
         FreetypeFace_unload(i);
     }
+
     for (FreetypeFace* i = NULL; (i = Vector_iter_FreetypeFace(&self->color_faces, i));) {
         FreetypeFace_unload(i);
     }
@@ -614,6 +635,10 @@ FreetypeOutput* Freetype_load_and_render_glyph(Freetype*              self,
     for (FreetypeStyledFamily* i = NULL;
          (i = Vector_iter_FreetypeStyledFamily(&self->primaries, i));) {
         if (FreetypeStyledFamily_applies_to(i, codepoint)) {
+            if (unlikely(!i->regular->loaded)) {
+                FreetypeStyledFamily_load(self, i, settings.font_size, settings.font_dpi);
+            }
+
             output = FreetypeStyledFamily_load_and_render_glyph(self, i, codepoint, style);
             if (output) {
                 return output;
@@ -623,6 +648,15 @@ FreetypeOutput* Freetype_load_and_render_glyph(Freetype*              self,
     if (self->symbol_faces.size) {
         for (FreetypeFace* i = NULL; (i = Vector_iter_FreetypeFace(&self->symbol_faces, i));) {
             if (FreetypeFace_applies_to(i, codepoint)) {
+                if (unlikely(!i->loaded)) {
+                    FreetypeFace_load(self,
+                                      i,
+                                      settings.font_size + i->size_offset,
+                                      settings.font_dpi,
+                                      self->target_output_type,
+                                      false);
+                }
+
                 output = FreetypeFace_load_and_render_glyph(self, i, codepoint);
                 if (output) {
                     output->style = FT_STYLE_NONE;
@@ -634,6 +668,15 @@ FreetypeOutput* Freetype_load_and_render_glyph(Freetype*              self,
     if (self->color_faces.size) {
         for (FreetypeFace* i = NULL; (i = Vector_iter_FreetypeFace(&self->color_faces, i));) {
             if (FreetypeFace_applies_to(i, codepoint)) {
+                if (unlikely(!i->loaded)) {
+                    FreetypeFace_load(self,
+                                      i,
+                                      settings.font_size + i->size_offset,
+                                      settings.font_dpi,
+                                      self->target_output_type,
+                                      false);
+                }
+
                 output = FreetypeFace_load_and_render_glyph(self, i, codepoint);
                 if (output) {
                     output->style = FT_STYLE_NONE;

@@ -158,121 +158,127 @@ static struct option long_options[] = {
 #define OPT_FONT_FALLBACK2_IDX 44
     [OPT_FONT_FALLBACK2_IDX] = { "font-color", required_argument, 0, 0 },
 
-#define OPT_FONT_SIZE_IDX 45
+#define OPT_FLUSH_FC_CACHE_IDX 45
+    [OPT_FLUSH_FC_CACHE_IDX] = { "flush-fc-cache", no_argument, 0, 'l' },
+
+#define OPT_PRELOAD_ALL_FONTS_IDX 46
+    [OPT_PRELOAD_ALL_FONTS_IDX] = { "preload-all-fonts", no_argument, 0, 'o' },
+
+#define OPT_FONT_SIZE_IDX 47
     [OPT_FONT_SIZE_IDX] = { "font-size", required_argument, 0, 0 },
 
-#define OPT_DPI_IDX 46
+#define OPT_DPI_IDX 48
     [OPT_DPI_IDX] = { "dpi", required_argument, 0, 0 },
 
-#define OPT_GLYPH_PADDING_IDX 47
+#define OPT_GLYPH_PADDING_IDX 49
     [OPT_GLYPH_PADDING_IDX] = { "glyph-padding", required_argument, 0, 0 },
 
-#define OPT_GLYPH_ALIGN_IDX 48
+#define OPT_GLYPH_ALIGN_IDX 50
     [OPT_GLYPH_ALIGN_IDX] = { "glyph-align", required_argument, 0, 0 },
 
-#define OPT_LCD_ORDER_IDX 49
+#define OPT_LCD_ORDER_IDX 51
     [OPT_LCD_ORDER_IDX] = { "lcd-order", required_argument, 0, 0 },
 
-#define OPT_CURSOR_STYLE_IDX 50
+#define OPT_CURSOR_STYLE_IDX 52
     [OPT_CURSOR_STYLE_IDX] = { "cursor-style", required_argument, 0, 0 },
 
-#define OPT_BLINK_IDX 51
+#define OPT_BLINK_IDX 53
     [OPT_BLINK_IDX] = { "blink", required_argument, 0, 0 },
 
-#define OPT_PADDING_IDX 52
+#define OPT_PADDING_IDX 54
     [OPT_PADDING_IDX] = { "padding", required_argument, 0, 0 },
 
-#define OPT_SCROLLBAR_IDX 53
+#define OPT_SCROLLBAR_IDX 55
     [OPT_SCROLLBAR_IDX] = { "scrollbar", required_argument, 0, 0 },
 
-#define OPT_SCROLL_LINES_IDX 54
+#define OPT_SCROLL_LINES_IDX 56
     [OPT_SCROLL_LINES_IDX] = { "scroll-lines", required_argument, 0, 0 },
 
-#define OPT_SCROLLBACK_IDX 55
+#define OPT_SCROLLBACK_IDX 57
     [OPT_SCROLLBACK_IDX] = { "scrollback", required_argument, 0, 0 },
 
-#define OPT_URI_HANDLER_IDX 56
+#define OPT_URI_HANDLER_IDX 58
     [OPT_URI_HANDLER_IDX] = { "uri-handler", required_argument, 0, 0 },
 
-#define OPT_EXTERN_PIPE_HANDLER_IDX 57
+#define OPT_EXTERN_PIPE_HANDLER_IDX 59
     [OPT_EXTERN_PIPE_HANDLER_IDX] = { "extern-pipe", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_COPY_IDX 58
+#define OPT_BIND_KEY_COPY_IDX 60
     [OPT_BIND_KEY_COPY_IDX] = { "bind-key-copy", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_PASTE_IDX 59
+#define OPT_BIND_KEY_PASTE_IDX 61
     [OPT_BIND_KEY_PASTE_IDX] = { "bind-key-paste", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_ENLARGE_IDX 60
+#define OPT_BIND_KEY_ENLARGE_IDX 62
     [OPT_BIND_KEY_ENLARGE_IDX] = { "bind-key-enlarge", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_SHRINK_IDX 61
+#define OPT_BIND_KEY_SHRINK_IDX 63
     [OPT_BIND_KEY_SHRINK_IDX] = { "bind-key-shrink", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_UNI_IDX 62
+#define OPT_BIND_KEY_UNI_IDX 64
     [OPT_BIND_KEY_UNI_IDX] = { "bind-key-unicode", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_PG_UP_IDX 63
+#define OPT_BIND_KEY_PG_UP_IDX 65
     [OPT_BIND_KEY_PG_UP_IDX] = { "bind-key-pg-up", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_PG_DN_IDX 64
+#define OPT_BIND_KEY_PG_DN_IDX 66
     [OPT_BIND_KEY_PG_DN_IDX] = { "bind-key-pg-down", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_LN_UP_IDX 65
+#define OPT_BIND_KEY_LN_UP_IDX 67
     [OPT_BIND_KEY_LN_UP_IDX] = { "bind-key-ln-up", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_LN_DN_IDX 66
+#define OPT_BIND_KEY_LN_DN_IDX 68
     [OPT_BIND_KEY_LN_DN_IDX] = { "bind-key-ln-down", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_MRK_UP_IDX 67
+#define OPT_BIND_KEY_MRK_UP_IDX 69
     [OPT_BIND_KEY_MRK_UP_IDX] = { "bind-key-mark-up", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_MRK_DN_IDX 68
+#define OPT_BIND_KEY_MRK_DN_IDX 70
     [OPT_BIND_KEY_MRK_DN_IDX] = { "bind-key-mark-down", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_COPY_CMD_IDX 69
+#define OPT_BIND_KEY_COPY_CMD_IDX 71
     [OPT_BIND_KEY_COPY_CMD_IDX] = { "bind-key-copy-output", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_EXTERN_PIPE_IDX 70
+#define OPT_BIND_KEY_EXTERN_PIPE_IDX 72
     [OPT_BIND_KEY_EXTERN_PIPE_IDX] = { "bind-key-extern-pipe", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_KSM_IDX 71
+#define OPT_BIND_KEY_KSM_IDX 73
     [OPT_BIND_KEY_KSM_IDX] = { "bind-key-kbd-select", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_OPEN_PWD 72
+#define OPT_BIND_KEY_OPEN_PWD 74
     [OPT_BIND_KEY_OPEN_PWD] = { "bind-key-open-pwd", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_HTML_DUMP_IDX 73
+#define OPT_BIND_KEY_HTML_DUMP_IDX 75
     [OPT_BIND_KEY_HTML_DUMP_IDX] = { "bind-key-html-dump", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_DUP_IDX 74
+#define OPT_BIND_KEY_DUP_IDX 76
     [OPT_BIND_KEY_DUP_IDX] = { "bind-key-duplicate", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_DEBUG_IDX 75
+#define OPT_BIND_KEY_DEBUG_IDX 77
     [OPT_BIND_KEY_DEBUG_IDX] = { "bind-key-debug", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_QUIT_IDX 76
+#define OPT_BIND_KEY_QUIT_IDX 78
     [OPT_BIND_KEY_QUIT_IDX] = { "bind-key-quit", required_argument, 0, 0 },
 
-#define OPT_DEBUG_PTY_IDX 77
+#define OPT_DEBUG_PTY_IDX 79
     [OPT_DEBUG_PTY_IDX] = { "debug-pty", no_argument, 0, 'D' },
 
-#define OPT_DEBUG_VT_IDX 78
+#define OPT_DEBUG_VT_IDX 80
     [OPT_DEBUG_VT_IDX] = { "debug-vt", no_argument, 0, 0 },
 
-#define OPT_DEBUG_GFX_IDX 79
+#define OPT_DEBUG_GFX_IDX 81
     [OPT_DEBUG_GFX_IDX] = { "debug-gfx", no_argument, 0, 'G' },
 
-#define OPT_DEBUG_FONT_IDX 80
+#define OPT_DEBUG_FONT_IDX 82
     [OPT_DEBUG_FONT_IDX] = { "debug-font", no_argument, 0, 'F' },
 
-#define OPT_VERSION_IDX 81
+#define OPT_VERSION_IDX 83
     [OPT_VERSION_IDX] = { "version", no_argument, 0, 'v' },
 
-#define OPT_HELP_IDX 82
+#define OPT_HELP_IDX 84
     [OPT_HELP_IDX] = { "help", no_argument, 0, 'h' },
 
-#define OPT_SENTINEL_IDX 83
+#define OPT_SENTINEL_IDX 85
     [OPT_SENTINEL_IDX] = { 0 }
 };
 
@@ -340,6 +346,9 @@ static const char* long_options_descriptions[][2] = {
                                          "Bold:Italic)" },
     [OPT_FONT_FALLBACK_IDX]          = { "[font, ...]", "Symbol fonts" },
     [OPT_FONT_FALLBACK2_IDX]         = { "[font, ...]", "Color bitmap fonts" },
+
+    [OPT_FLUSH_FC_CACHE_IDX]    = { NULL, "Rebuild fontconfig cache" },
+    [OPT_PRELOAD_ALL_FONTS_IDX] = { NULL, "Load all fonts on startup" },
 
     [OPT_FONT_SIZE_IDX]     = { arg_int, "Font size" },
     [OPT_DPI_IDX]           = { arg_int, "Font dpi (default: 96)" },

@@ -248,6 +248,9 @@ typedef struct
 
     enum extern_pipe_source_e extern_pipe_source;
 
+    bool defer_font_loading;
+    bool flush_ft_cache;
+
 } Settings;
 
 extern Settings settings;

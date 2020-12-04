@@ -24,8 +24,16 @@
 #define CONFIG_SUBDIRECTORY_NAME "wayst"
 #endif
 
+#ifndef CACHE_SUBDIRECTORY_NAME
+#define CACHE_SUBDIRECTORY_NAME "wayst"
+#endif
+
 #ifndef CONFIG_FILE_NAME
 #define CONFIG_FILE_NAME "config"
+#endif
+
+#ifndef FONTCONFIG_CACHE_FILE_NAME
+#define FONTCONFIG_CACHE_FILE_NAME "fc-cache"
 #endif
 
 #ifndef DFT_TITLE_FMT
@@ -235,10 +243,156 @@ static void settings_colorscheme_load_preset(uint8_t idx)
     }
 }
 
+static bool find_font_cached()
+{
+    char* xdg_cache_home = getenv("XDG_CACHE_HOME");
+    char* cache_file     = NULL;
+    FILE* file           = NULL;
+
+    if (xdg_cache_home) {
+        cache_file =
+          asprintf("%s/" CACHE_SUBDIRECTORY_NAME "/" FONTCONFIG_CACHE_FILE_NAME, xdg_cache_home);
+    } else {
+        char* home = getenv("HOME");
+        if (home) {
+            cache_file =
+              asprintf("%s/.cache/" CACHE_SUBDIRECTORY_NAME "/" FONTCONFIG_CACHE_FILE_NAME, home);
+        } else {
+            WRN("could not find cache directory\n");
+            return true;
+        }
+    }
+
+    file = fopen(cache_file, "r");
+    LOG("using fontconfig cache file: %s\n", cache_file);
+    free(cache_file);
+
+    if (!file) {
+        LOG("failed to open fontconfig cache file (%s)\n", strerror(errno));
+        return true;
+    }
+
+    char type;
+    char family_name[512];
+    char file_names[4][512];
+
+    for (StyledFontInfo* i = NULL; (i = Vector_iter_StyledFontInfo(&settings.styled_fonts, i));) {
+        fscanf(file, "\n%c%511[^\n]", &type, family_name);
+        for (uint_fast8_t j = 0; j < 4; ++j) {
+            file_names[j][0] = '\0';
+            fscanf(file, "\t%511[^\n]", file_names[j]);
+        }
+        if (type == 'S' && !strcmp(family_name, i->family_name) &&
+            (file_names[0][0] != '-' || file_names[0][1] != 0)) {
+            i->regular_file_name = strdup(file_names[0]);
+
+            if (!strcmp(file_names[1], "-")) {
+                i->bold_file_name = NULL;
+            } else {
+                settings.has_bold_fonts = true;
+                i->bold_file_name       = strdup(file_names[1]);
+            }
+
+            if (!strcmp(file_names[2], "-")) {
+                i->italic_file_name = NULL;
+            } else {
+                settings.has_italic_fonts = true;
+                i->italic_file_name       = strdup(file_names[2]);
+            }
+
+            if (!strcmp(file_names[3], "-")) {
+                i->bold_italic_file_name = NULL;
+            } else {
+                settings.has_bold_italic_fonts = true;
+                i->bold_italic_file_name       = strdup(file_names[3]);
+            }
+        } else {
+            goto abort;
+        }
+        fgetc(file); // skip \n
+    }
+
+    for (UnstyledFontInfo* i = NULL;
+         (i = Vector_iter_UnstyledFontInfo(&settings.symbol_fonts, i));) {
+        fscanf(file, "\n%c%511[^\n]", &type, family_name);
+        if (type == 'Y' && !strcmp(family_name, i->family_name) &&
+            (file_names[0][0] != '-' || file_names[0][1] != 0)) {
+            fscanf(file, "\t%511[^\n]", file_names[0]);
+            i->file_name              = strdup(file_names[0]);
+            settings.has_symbol_fonts = true;
+        } else {
+            goto abort;
+        }
+        fgetc(file); // skip \n
+    }
+
+    for (UnstyledFontInfo* i = NULL;
+         (i = Vector_iter_UnstyledFontInfo(&settings.color_fonts, i));) {
+        fscanf(file, "\n%c%511[^\n]", &type, family_name);
+        if (type == 'C' && !strcmp(family_name, i->family_name) &&
+            (file_names[0][0] != '-' || file_names[0][1] != 0)) {
+            fscanf(file, "\t%511[^\n]", file_names[0]);
+            i->file_name             = strdup(file_names[0]);
+            settings.has_color_fonts = true;
+        } else {
+            goto abort;
+        }
+        fgetc(file); // skip \n
+    }
+
+    fclose(file);
+    LOG("fontconfig cache loaded succesfully\n");
+    return false;
+
+abort:
+    fclose(file);
+    settings.has_bold_fonts        = true;
+    settings.has_italic_fonts      = true;
+    settings.has_bold_italic_fonts = true;
+    settings.has_symbol_fonts      = true;
+    settings.has_color_fonts       = true;
+    return true;
+}
+
 /**
  * Use fontconfig to get font files */
-static void find_font()
+__attribute__((cold)) static void find_font()
 {
+    char* cache_dir      = NULL;
+    char* xdg_cache_home = getenv("XDG_CACHE_HOME");
+
+    if (xdg_cache_home) {
+        cache_dir = asprintf("%s/" CACHE_SUBDIRECTORY_NAME, xdg_cache_home);
+    } else {
+        char* home = getenv("HOME");
+        if (home) {
+            cache_dir = asprintf("%s/.cache/" CACHE_SUBDIRECTORY_NAME, home);
+        }
+    }
+
+    FILE* cache_file = NULL;
+
+    if (cache_dir) {
+        struct stat _st;
+        if (stat(cache_dir, &_st) == -1) {
+            mkdir(cache_dir, 0700);
+            WRN("cache directory did not exist, created \'%s\'\n", cache_dir);
+        }
+
+        char* cache_file_name = asprintf("%s/%s", cache_dir, FONTCONFIG_CACHE_FILE_NAME);
+
+        LOG("writing cache file: %s\n", cache_file_name);
+
+        cache_file = fopen(cache_file_name, "w");
+
+        if (!cache_file) {
+            WRN("failed to open fontconfig cache file for writing: %s\n", strerror(errno));
+        }
+
+        free(cache_file_name);
+        free(cache_dir);
+    }
+
 #define L_DROP_IF_SAME(file1, file2)                                                               \
     if (file2 && file1 && !strcmp(file1, file2)) {                                                 \
         if (unlikely(settings.debug_font)) {                                                       \
@@ -253,12 +407,14 @@ static void find_font()
 
     char* default_file =
       FontconfigContext_get_file(&fc_context, NULL, NULL, settings.font_size, NULL, NULL);
+
     char* default_file_bold = FontconfigContext_get_file(&fc_context,
                                                          NULL,
                                                          OR(settings.font_style_bold.str, "Bold"),
                                                          settings.font_size,
                                                          NULL,
                                                          NULL);
+
     char* default_file_italic =
       FontconfigContext_get_file(&fc_context,
                                  NULL,
@@ -266,6 +422,7 @@ static void find_font()
                                  settings.font_size,
                                  NULL,
                                  NULL);
+
     char* default_file_bold_italic =
       FontconfigContext_get_file(&fc_context,
                                  NULL,
@@ -290,15 +447,14 @@ static void find_font()
                                                         settings.font_size + i->size_offset,
                                                         &is_bitmap,
                                                         &exact_match);
-        /* if (!exact_match) { */
-        /*     L_DROP_IF_SAME(regular_file, default_file); */
-        /* } */
+
         char* bold_file = FontconfigContext_get_file(&fc_context,
                                                      main_family,
                                                      OR(settings.font_style_bold.str, "Bold"),
                                                      settings.font_size + i->size_offset,
                                                      NULL,
                                                      &exact_match);
+
         if (!exact_match) {
             L_DROP_IF_SAME(bold_file, default_file);
         }
@@ -335,13 +491,20 @@ static void find_font()
         L_DROP_IF_SAME(bold_italic_file, italic_file);
         L_DROP_IF_SAME(bold_italic_file, default_file);
 
+        free(i->regular_file_name);
         i->regular_file_name = regular_file;
+
+        free(i->bold_file_name);
         if ((i->bold_file_name = bold_file)) {
             settings.has_bold_fonts = true;
         }
+
+        free(i->italic_file_name);
         if ((i->italic_file_name = italic_file)) {
             settings.has_italic_fonts = true;
         }
+
+        free(i->bold_italic_file_name);
         if ((i->bold_italic_file_name = bold_italic_file)) {
             settings.has_bold_italic_fonts = true;
         }
@@ -350,6 +513,16 @@ static void find_font()
             WRN("Could not find font \'%s\'\n", i->family_name);
         } else {
             ++loaded_fonts;
+        }
+
+        if (cache_file) {
+            fprintf(cache_file,
+                    "S%s\n\t%s\n\t%s\n\t%s\n\t%s\n",
+                    main_family,
+                    OR(regular_file, "-"),
+                    OR(bold_file, "-"),
+                    OR(italic_file, "-"),
+                    OR(bold_italic_file, "-"));
         }
 
         if (unlikely(settings.debug_font)) {
@@ -380,11 +553,18 @@ static void find_font()
         if (!exact_match) {
             L_DROP_IF_SAME(file, default_file);
         }
+
+        free(i->file_name);
         if ((i->file_name = file)) {
             settings.has_symbol_fonts = true;
         } else {
             WRN("Could not find font \'%s\'\n", i->family_name);
         }
+
+        if (cache_file && file) {
+            fprintf(cache_file, "Y%s\n\t%s\n", i->family_name, file);
+        }
+
         if (unlikely(settings.debug_font)) {
             printf("Loaded unstyled (symbol) font:\n  file:     %s\n", OR(file, "(none)"));
         }
@@ -402,14 +582,25 @@ static void find_font()
         if (!exact_match) {
             L_DROP_IF_SAME(file, default_file);
         }
+
+        free(i->file_name);
         if ((i->file_name = file)) {
             settings.has_color_fonts = true;
         } else {
             WRN("Could not find font \'%s\'\n", i->family_name);
         }
+
+        if (cache_file && file) {
+            fprintf(cache_file, "C%s\n\t%s\n", i->family_name, file);
+        }
+
         if (unlikely(settings.debug_font)) {
             printf("Loaded unstyled (color) font:\n  file:     %s\n", OR(file, "(none)"));
         }
+    }
+
+    if (cache_file) {
+        fclose(cache_file);
     }
 
     free(default_file);
@@ -628,12 +819,17 @@ static void settings_make_default()
         .initial_cursor_style    = CURSOR_STYLE_BLOCK,
 
         .decoration_style = DECORATION_STYLE_FULL,
+
+        .defer_font_loading = true,
+        .flush_ft_cache     = false,
     };
 }
 
 static void settings_complete_defaults()
 {
-    find_font();
+    if (unlikely(settings.flush_ft_cache || find_font_cached())) {
+        find_font();
+    }
 
     // set up locale
     if (!settings.locale.str) {
@@ -774,6 +970,12 @@ static void handle_option(const char opt, const int array_index, const char* val
             case 'h':
                 print_help_and_exit();
                 break;
+            case 'l':
+                settings.flush_ft_cache = true;
+                break;
+            case 'o':
+                settings.defer_font_loading = true;
+                break;
         }
         return;
     }
@@ -822,6 +1024,14 @@ static void handle_option(const char opt, const int array_index, const char* val
 
         case OPT_DYNAMIC_TITLE_IDX:
             settings.dynamic_title = value ? strtob(value) : true;
+            break;
+
+        case OPT_FLUSH_FC_CACHE_IDX:
+            settings.flush_ft_cache = true;
+            break;
+
+        case OPT_PRELOAD_ALL_FONTS_IDX:
+            settings.defer_font_loading = true;
             break;
 
         case OPT_NO_FLASH_IDX:
@@ -1391,7 +1601,7 @@ static void settings_get_opts(const int argc, char* const* argv, const bool cfg_
         /* print 'invalid option' error message only once */
         opterr   = cfg_file_check;
         int opid = 0;
-        o        = getopt_long(argc, argv, "XctDGFfhv", long_options, &opid);
+        o        = getopt_long(argc, argv, "XctDGFfhvlo", long_options, &opid);
         if (o == -1) {
             break;
         }
