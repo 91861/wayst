@@ -1612,8 +1612,8 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
   bool*           has_blinking_chars,
   bool*           has_underlined_chars)
 {
-    const double scalex = 2.0f / texture_dims.first;
-    const double scaley = 2.0f / texture_dims.second;
+    const double scalex = 2.0 / texture_dims.first;
+    const double scaley = 2.0 / texture_dims.second;
 
     GLint     bg_pixels_begin          = range.first * gfx->glyph_width_pixels, bg_pixels_end;
     ColorRGBA active_bg_color          = vt->colors.bg;
@@ -1726,10 +1726,10 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                                     l /= s;
                                 }
 
-                                float x3 = -1.0f +
-                                           (float)column * gfx->glyph_width_pixels * scalex + l +
+                                float x3 = -1.0 +
+                                           (double)column * gfx->glyph_width_pixels * scalex + l +
                                            gfx->pen_begin_pixels_x * scalex;
-                                float y3 = -1.0f + gfx->pen_begin_pixels_y * scaley - t;
+                                float y3 = -1.0 + gfx->pen_begin_pixels_y * scaley - t;
 
                                 float buf[] = {
                                     x3,     y3,     entry->tex_coords[0], entry->tex_coords[1],
@@ -1747,7 +1747,6 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                                                    ARRAY_SIZE(buf));
                             }
                         }
-
                         GLint clip_begin = (same_colors_block_begin_rune - vt_line->data.buf) *
                                            gfx->glyph_width_pixels;
                         GLsizei clip_end =
@@ -2055,8 +2054,8 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
     switch (vt_line->damage.type) {
         case VT_LINE_DAMAGE_RANGE: {
 
-            size_t range_begin_idx = vt_line->damage.front;
-            size_t range_end_idx   = vt_line->damage.end + 1;
+            size_t    range_begin_idx     = vt_line->damage.front;
+            size_t    range_end_idx       = vt_line->damage.end + 1;
 
             while (range_begin_idx) {
                 char32_t this_char = vt_line->data.buf[range_begin_idx].rune.code;
@@ -2068,9 +2067,16 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
                 --range_begin_idx;
             }
 
-            while (range_end_idx < vt_line->data.size && range_end_idx &&
-                   vt_line->data.buf[range_end_idx - 1].rune.code != ' ') {
+            while (range_end_idx < vt_line->data.size && range_end_idx) {
+                char32_t this_char = vt_line->data.buf[range_begin_idx].rune.code;
+                char32_t prev_char = vt_line->data.buf[range_begin_idx - 1].rune.code;
+                //char32_t next_char = vt_line->data.buf[range_begin_idx + 1].rune.code;
+
                 ++range_end_idx;
+                if (this_char == ' ' && !unicode_is_private_use_area(prev_char) &&
+                    wcwidth(prev_char) < 2) {
+                    break;
+                }
             }
 
             _GfxOpenGL21_rasterize_line_range(gfx,

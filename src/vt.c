@@ -6,6 +6,7 @@
 #include "util.h"
 
 #include "vt.h"
+#include "vt_private.h"
 
 #include <fcntl.h>
 #include <limits.h>
@@ -95,15 +96,10 @@ static inline void VtLine_strip_blanks(VtLine* self)
     }
 }
 
-static void Vt_output(Vt* self, const char* buf, size_t len)
+void Vt_output(Vt* self, const char* buf, size_t len)
 {
     Vector_pushv_char(&self->output, buf, len);
 }
-
-#define Vt_output_formated(vt, fmt, ...)                                                           \
-    char _tmp[64];                                                                                 \
-    int  _len = snprintf(_tmp, sizeof(_tmp), fmt, __VA_ARGS__);                                    \
-    Vt_output((vt), _tmp, _len);
 
 static void Vt_bell(Vt* self)
 {
@@ -1742,12 +1738,12 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
 
         /* Smooth (Slow) Scroll (DECSCLM), VT100. */
         case 4:
-            WRN("DECSCLM not implemented\n");
+            STUB("DECSCLM");
             break;
 
         /* Reverse video (DECSCNM) */
         case 5:
-            WRN("DECSCNM not implemented\n");
+            STUB("DECSCNM");
             break;
 
         /* Origin mode (DECCOM)
@@ -1773,6 +1769,7 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
 
         /* Start Blinking Cursor (AT&T 610) */
         case 12:
+            self->cursor.blinking = true;
             break;
 
         /* Very visible cursor (CVVIS) */
@@ -1806,29 +1803,28 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
         case 64:
         /* Vertical cursor-coupling mode (DECVCCM) */
         case 61:
-            WRN("Page cursor-coupling not implemented\n");
+            STUB("DECPCCM/DECVCCM");
             break;
 
         /* Numeric keypad (DECNKM) */
         case 66:
-            WRN("DECNKM not implemented\n");
+            STUB("DECNKM");
             break;
 
         /* Set Backarrow key to backspace/delete (DECBKM) */
         case 67:
-            // TODO:
-            WRN("DECBKM not implemented\n");
+            STUB("DECBKM");
             break;
 
         /* Keyboard usage (DECKBUM) */
         case 68:
-            WRN("DECKBUM not implemented\n");
+            STUB("DECKBUM");
             break;
 
         /* Enable left and right margin mode (DECLRMM) */
         case 69:
             self->modes.left_and_right_margin = on;
-            WRN("DECLRMM not implemented\n");
+            STUB("DECLRMM");
             break;
 
         /* X11 xterm mouse protocol. */
@@ -1838,7 +1834,7 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
 
         /* Highlight mouse tracking, xterm */
         case 1001:
-            WRN("Highlight mouse tracking not implemented\n");
+            STUB("Highlight mouse tracking");
             break;
 
         /* xterm cell motion mouse tracking */
@@ -1857,7 +1853,7 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
 
         /* utf8 Mouse Mode */
         case 1005:
-            WRN("utf8 mouse mode not implemented\n");
+            STUB("utf8 mouse mode");
             break;
 
         /* SGR mouse mode */
@@ -1867,42 +1863,44 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
 
         /* urxvt mouse mode */
         case 1015:
-            WRN("urxvt mouse mode not implemented\n");
+            STUB("urxvt mouse mode");
             break;
 
         case 1034:
-            WRN("xterm eightBitInput not implemented\n");
+            STUB("xterm eightBitInput");
             break;
 
         case 1035:
-            WRN("xterm numLock not implemented\n");
+            STUB("xterm numLock");
             break;
 
+            /* xterm metaSendsEscape */
         case 1036:
-            WRN("xterm metaSendsEscape not implemented\n");
+            STUB("xterm metaSendsEscape")
             break;
 
         case 1037:
             self->modes.del_sends_del = on;
             break;
 
+        /* xterm altSendsEscape */
         case 1039:
-            self->modes.no_alt_sends_esc = on;
+            self->modes.no_alt_sends_esc = !on;
             break;
 
-        /* Bell sets urgent WM hint */
+        /* Bell sets urgent WM hint (xterm) */
         case 1042:
             self->modes.urgency_on_bell = on;
             break;
 
-        /* Bell raises window */
+        /* Bell raises window popOnBell (xterm) */
         case 1043:
             self->modes.pop_on_bell = on;
             break;
 
-        /* Use alternate screen buffer, xterm */
+        /* Use alternate screen buffer, (xterm) */
         case 47:
-        /* Also use alternate screen buffer, xterm */
+        /* Also use alternate screen buffer (xterm) */
         case 1047:
         /* After saving the cursor, switch to the Alternate Screen Buffer,
          * clearing it first. */
@@ -1919,11 +1917,23 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
             break;
 
         case 1051: /* Sun function-key mode, xterm. */
+            STUB("Sun function-key mode");
+            break;
+
         case 1052: /* HP function-key mode, xterm. */
+            STUB("HP function-key mode");
+            break;
+
         case 1053: /* SCO function-key mode, xterm. */
+            STUB("SCO function-key mode");
+            break;
+
         case 1060: /* legacy keyboard emulation, i.e, X11R6, */
+            STUB("legacy keyboard emulation");
+            break;
+
         case 1061: /* VT220 keyboard emulation, xterm. */
-            WRN("Unimplemented keyboard option\n");
+            STUB("VT220 keyboard emulation");
             break;
 
         default:
@@ -1989,7 +1999,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                              */
                             case 'p': {
                                 /* Not recognized */
-                                WRN("DEC mode state reports not implemented\n");
+                                STUB("DECRQM");
                             } break;
 
                             default:
@@ -2195,13 +2205,13 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                             /* <ECS>[ Ps SP @ - Shift left Ps columns(s) (default = 1) (SL), ECMA-48
                              */
                             case '@': {
-                                WRN("SL not implemented\n");
+                                STUB("SL");
                             } break;
 
                             /* <ESC>[ Ps SP A - Shift right Ps columns(s) (default = 1) (SR),
                              * ECMA-48 */
                             case 'A': {
-                                WRN("SP not implemented\n");
+                                STUB("SP");
                             } break;
 
                             /* <ESC>[ Ps SP q - Set cursor style (DECSCUSR) */
@@ -2252,7 +2262,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                              * 2 => DECSED and DECSEL can erase.
                              */
                             case 'q': {
-                                WRN("Character protection not implemented\n");
+                                STUB("DECSCA");
                             } break;
 
                             /* <ESC>[ Pl ; Pc "p - Set conformance level (DECSCL), VT220 and up.
@@ -2268,7 +2278,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                              *   2 => 8-bit controls.
                              */
                             case 'p': {
-                                WRN("DEC conformance levels not implemented\n");
+                                STUB("DECSCL");
                             } break;
 
                             default:
@@ -2297,7 +2307,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                              */
                             case '{': {
                                 MULTI_ARG_IS_ERROR
-                                WRN("XTPUSHSGR not implemented\n");
+                                STUB("XTPUSHSGR");
                             } break;
 
                             /* <ESC>[ Pt ; Pl ; Pb ; Pr #|
@@ -2309,7 +2319,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                              */
                             case '|': {
                                 MULTI_ARG_IS_ERROR
-                                WRN("XTREPORTSGR not implemented\n");
+                                STUB("XTREPORTSGR");
                             } break;
 
                             /* <ESC>[#} - Pop video attributes from stack (XTPOPSGR), xterm.
@@ -2322,7 +2332,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                             /* <ESC>[#q - Alias for <ESC>[#} */
                             case 'q': {
                                 MULTI_ARG_IS_ERROR
-                                WRN("XTPOPSGR not implemented\n");
+                                STUB("XTPOPSGR");
                             } break;
 
                             /* <ESC>[ Pm #P - Push current dynamic and ANSI-palette colors onto
@@ -2334,7 +2344,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                              */
                             case 'P': {
                                 MULTI_ARG_IS_ERROR
-                                WRN("XTPUSHCOLORS not implemented\n");
+                                STUB("XTPUSHCOLORS");
                             } break;
 
                             /* <ESC>[ Pm #Q -  Pop stack to set dynamic- and ANSI-palette
@@ -2346,7 +2356,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                              */
                             case 'Q': {
                                 MULTI_ARG_IS_ERROR
-                                WRN("XTPOPCOLORS not implemented\n");
+                                STUB("XTPOPCOLORS");
                             } break;
 
                             /* <ESC> #R
@@ -2356,7 +2366,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                              */
                             case 'R': {
                                 MULTI_ARG_IS_ERROR
-                                WRN("XTREPORTCOLORS not implemented\n");
+                                STUB("XTREPORTCOLORS");
                             } break;
 
                             default:
@@ -2382,7 +2392,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                              * definition.
                              */
                             case 'w': {
-                                WRN("Filter rectangle locator events not implemented\n");
+                                STUB("DECEFR");
                             } break;
 
                             /* <ESC>[ Ps ; Pu 'z - Enable Locator Reporting (DECELR)
@@ -2395,7 +2405,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                              *   1    => Pixels
                              */
                             case 'z': {
-                                WRN("Locator reporting not implemented\n");
+                                STUB("DECELR");
                             } break;
 
                             /* <ESC>[ Pm '{ - Select Locator Events (DECSLE)
@@ -2407,7 +2417,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                              * 4 => on button up OFF
                              */
                             case '{': {
-                                WRN("Locator events not implemented\n");
+                                STUB("DECSLE");
                             } break;
 
                             /* <ESC>[ Ps '| - Request Locator Position (DECRQLP)
@@ -2454,12 +2464,12 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
 
                             /* <ESC>['} - Insert Ps Column(s) (default = 1) (DECIC), VT420 and up */
                             case '}': {
-                                WRN("DECIC not implemented\n");
+                                STUB("DECIC");
                             } break;
 
                             /* <ESC>['~ - Delete Ps Column(s) (default = 1) (DECDC), VT420 and up */
                             case '~': {
-                                WRN("DECDC not implemented\n");
+                                STUB("DECDC");
                             } break;
 
                             default:
@@ -2477,7 +2487,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                              */
                             case 'x': {
                                 MULTI_ARG_IS_ERROR
-                                WRN("DECSACE not implemented\n");
+                                STUB("DECSACE");
                             } break;
 
                             /* <ESC>[ Pi ; Pg ; Pt ; Pl ; Pb ; Pr *y
@@ -2488,13 +2498,13 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                              * hexadecimal digits 0-9 and A-F.
                              */
                             case 'y': {
-                                WRN("DECRQCRA not implemented\n");
+                                STUB("DECRQCRA");
                             } break;
 
                             /* <ESC>[*| - Select number of lines per screen (DECSNLS), VT420 and up
                              */
                             case '|': {
-                                WRN("DECSNLS not implemented\n");
+                                STUB("DECSNLS");
                             } break;
 
                             default:
@@ -2529,7 +2539,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                              * Ps denotes the SGR attributes to change: 0, 1, 4, 5, 7
                              */
                             case 'r': {
-                                WRN("DECCARA not implemented\n");
+                                STUB("DECCARA");
                             } break;
 
                             /* <ESC>[ Pt ; Pl ; Pb ; Pr ; Ps $t - Reverse Attributes in Rectangular
@@ -2539,7 +2549,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                              * reverse, i.e.,  1, 4, 5, 7.
                              */
                             case 't': {
-                                WRN("DECRARA not implemented\n");
+                                STUB("DECRARA");
                             } break;
 
                             /* <ESC>[ Ps $w - Request presentation state report (DECRQPSR), VT320
@@ -2555,7 +2565,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                              *     characters.
                              */
                             case 'w': {
-                                WRN("DECRQPSR not implemented\n");
+                                STUB("DECRQPSR");
                             } break;
 
                             /* <ESC>[ Pc ; Pt ; Pl ; Pb ; Pr $x - Fill Rectangular Area (DECFRA),
@@ -2565,26 +2575,26 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                              * Pt ; Pl ; Pb ; Pr denotes the rectangle
                              */
                             case 'x': {
-                                WRN("DECFRA not implemented\n");
+                                STUB("DECFRA");
                             } break;
 
                             /* <ESC>[ Pt ; Pl ; Pb ; Pr $z
                              * Erase Rectangular Area (DECERA), VT400 and up
                              */
                             case 'z': {
-                                WRN("DECERA not implemented\n");
+                                STUB("DECERA");
                             } break;
 
                             /* <ESC>[ Pt ; Pl ; Pb ; Pr ${
                              * Selective Erase Rectangular Area (DECSERA), VT400 and up
                              */
                             case '{': {
-                                WRN("DECSERA not implemented\n");
+                                STUB("DECSERA");
                             } break;
 
                             /* <ESC>[ Ps $| - Select columns per page (DECSCPP), VT340 */
                             case '|': {
-                                WRN("DECSCPP not implemented\n");
+                                STUB("DECSCPP");
                             } break;
 
                             default:
@@ -3015,7 +3025,8 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                      * Omitted parameters reuse the current height or width. Zero
                                      * parameters use the display's height or width.
                                      *
-                                     * FIXME: This should accounts for window decorations.
+                                     * FIXME: This should accounts for window decorations
+                                     * (_NET_FRAME_EXTENTS).
                                      */
                                     case 4:
                                         if (!settings.windowops_manip) {
@@ -3040,7 +3051,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                             }
                                             if (target_w == 0 || target_h == 0) {
                                                 // TODO: get display size
-                                                WRN("Display size in XTWINOPS not implemented\n");
+                                                STUB("XTWINOPS display size reports");
                                                 break;
                                             }
 
@@ -3102,7 +3113,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                                   currnet_text_area_dims.second;
                                             }
                                             if (target_cols == 0 || target_rows == 0) {
-                                                WRN("Display size in XTWINOPS not implemented\n");
+                                                STUB("XTWINOPS display size reports");
                                                 break;
                                             }
 
@@ -3291,8 +3302,16 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
 
                                     /* Resize window to args[1] lines (DECSLPP) */
                                     default: {
-                                        // int arg = short_sequence_get_int_argument(seq);
-                                        // uint32_t ypixels = gfx_pixels(arg, 0).first;
+                                        Pair_uint32_t target_dims = CALL_FP(
+                                          self->callbacks.on_window_size_from_cells_requested,
+                                          self->callbacks.user_data,
+                                          Vt_col(self),
+                                          short_sequence_get_int_argument(seq));
+
+                                        CALL_FP(self->callbacks.on_window_dimensions_set,
+                                                self->callbacks.user_data,
+                                                target_dims.first,
+                                                target_dims.second);
                                     }
                                 }
 
@@ -5047,8 +5066,8 @@ static inline void Vt_move_cursor(Vt* self, uint16_t column, uint16_t rows)
         min_row = Vt_top_line(self);
     }
 
-    self->cursor.row    = CLAMP(rows + Vt_top_line(self), min_row, max_row);
-    self->cursor.col    = MIN(column, (uint32_t)Vt_col(self) - 1);
+    self->cursor.row = CLAMP(rows + Vt_top_line(self), min_row, max_row);
+    self->cursor.col = MIN(column, (uint32_t)Vt_col(self) - 1);
 
     VtCommand*       cmd;
     RcPtr_VtCommand* cmd_ptr;
@@ -5453,13 +5472,13 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
                  * The column shifted past the left margin is lost.
                  **/
                 case '9':
-                    WRN("VT400 shifting cursor movement not implemented\n");
+                    STUB("DECBI/DECFI");
                     self->parser.state = PARSER_STATE_LITERAL;
                     break;
 
                 /* Coding Method Delimiter (CMD) */
                 case 'd':
-                    WRN("CMD not implemented\n");
+                    STUB("CMD");
                     self->parser.state = PARSER_STATE_LITERAL;
                     break;
 
@@ -5512,7 +5531,7 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
 
                 /* Start of string */
                 case 'X':
-                    WRN("SOS not implemented\n");
+                    STUB("SOS");
                     self->parser.state = PARSER_STATE_LITERAL;
                     break;
 
@@ -5520,7 +5539,7 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
                 case 'V':
                 /* End of guarded area */
                 case 'W':
-                    WRN("Guarded areas not implemented\n");
+                    STUB("SGA/EGA");
                     self->parser.state = PARSER_STATE_LITERAL;
                     break;
 
@@ -5838,340 +5857,12 @@ void Vt_get_visible_lines(const Vt* self, VtLine** out_begin, VtLine** out_end)
     }
 }
 
-static const char* application_cursor_key_response(const uint32_t key)
-{
-    switch (key) {
-        case KEY(Up):
-            return "\eOA";
-        case KEY(Down):
-            return "\eOB";
-        case KEY(Right):
-            return "\eOC";
-        case KEY(Left):
-            return "\eOD";
-        case KEY(End):
-            return "\eOF";
-        case KEY(Home):
-            return "\eOH";
-        case 127:
-            return "\e[3~";
-        default:
-            return NULL;
-    }
-}
-
-static const char* Vt_get_normal_cursor_key_response(Vt* self, const uint32_t key)
-{
-    if (self->modes.application_keypad_cursor) {
-        return application_cursor_key_response(key);
-    }
-
-    switch (key) {
-        case KEY(Up):
-            return "\e[A";
-        case KEY(Down):
-            return "\e[B";
-        case KEY(Right):
-            return "\e[C";
-        case KEY(Left):
-            return "\e[D";
-        case KEY(End):
-            return "\e[F";
-        case KEY(Home):
-            return "\e[H";
-        case 127:
-            return "\e[3~";
-        default:
-            return NULL;
-    }
-}
-
-/**
- * Get response format string in normal keypad mode */
-static const char* mod_cursor_key_response(const uint32_t key)
-{
-    switch (key) {
-        case KEY(Up):
-            return "\e[1;%dA";
-        case KEY(Down):
-            return "\e[1;%dB";
-        case KEY(Right):
-            return "\e[1;%dC";
-        case KEY(Left):
-            return "\e[1;%dD";
-        case KEY(End):
-            return "\e[1;%dF";
-        case KEY(Home):
-            return "\e[1;%dH";
-        case 127:
-            return "\e[3;%d~";
-        default:
-            return NULL;
-    }
-}
-
 /**
  * Start entering unicode codepoint as hex */
 void Vt_start_unicode_input(Vt* self)
 {
     self->unicode_input.active = true;
     CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
-}
-
-/**
- * Respond to key event for unicode input
- * @return keypress was consumed */
-static bool Vt_maybe_handle_unicode_input_key(Vt*      self,
-                                              uint32_t key,
-                                              uint32_t rawkey,
-                                              uint32_t mods)
-{
-    if (self->unicode_input.active) {
-        if (key == 13) {
-            // Enter
-            Vector_push_char(&self->unicode_input.buffer, 0);
-            self->unicode_input.active = false;
-            char32_t result            = strtol(self->unicode_input.buffer.buf, NULL, 16);
-            Vector_clear_char(&self->unicode_input.buffer);
-            if (result) {
-                LOG("unicode input \'%s\' -> %d\n", self->unicode_input.buffer.buf, result);
-
-                char             tmp[32];
-                static mbstate_t mbstate;
-                int              mb_len = c32rtomb(tmp, result, &mbstate);
-                if (mb_len) {
-                    Vt_output(self, tmp, mb_len);
-                }
-            } else {
-                WRN("Failed to parse \'%s\'\n", self->unicode_input.buffer.buf);
-            }
-        } else if (key == 27) {
-            // Escape
-            self->unicode_input.buffer.size = 0;
-            self->unicode_input.active      = false;
-            CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
-        } else if (key == 8) {
-            // Backspace
-            if (self->unicode_input.buffer.size) {
-                Vector_pop_char(&self->unicode_input.buffer);
-            } else {
-                self->unicode_input.buffer.size = 0;
-                self->unicode_input.active      = false;
-            }
-            CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
-        } else if (isxdigit(key)) {
-            if (self->unicode_input.buffer.size > 8) {
-                CALL_FP(self->callbacks.on_visual_bell, self->callbacks.user_data);
-            } else {
-                Vector_push_char(&self->unicode_input.buffer, key);
-                CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
-            }
-        } else {
-            CALL_FP(self->callbacks.on_visual_bell, self->callbacks.user_data);
-        }
-        return true;
-    }
-    return false;
-}
-
-/**
- * Respond to key event if it is a keypad key
- * @return keypress was consumed */
-static bool Vt_maybe_handle_keypad_key(Vt* self, uint32_t key, uint32_t mods)
-{
-    const char* resp = NULL;
-    if (mods) {
-        resp = mod_cursor_key_response(key);
-        if (resp) {
-            Vt_output_formated(self, resp, mods + 1);
-            return true;
-        }
-    } else {
-        resp = Vt_get_normal_cursor_key_response(self, key);
-        if (resp) {
-            Vt_output(self, resp, strlen(resp));
-            return true;
-        }
-    }
-
-    return false;
-}
-
-/**
- * Respond to key event if it is a function key
- * @return keypress was consumed */
-static bool Vt_maybe_handle_function_key(Vt* self, uint32_t key, uint32_t mods)
-{
-    if (key >= KEY(F1) && key <= KEY(F35)) {
-        int f_num = (key + 1) - KEY(F1);
-        if (mods) {
-            if (f_num < 5) {
-                Vt_output_formated(self, "\e[1;%u%c", mods + 1, f_num + 'O');
-            } else if (f_num == 5) {
-                Vt_output_formated(self, "\e[%d;%u~", f_num + 10, mods + 1);
-            } else if (f_num < 11) {
-                Vt_output_formated(self, "\e[%d;%u~", f_num + 11, mods + 1);
-            } else {
-                Vt_output_formated(self, "\e[%d;%u~", f_num + 12, mods + 1);
-            }
-        } else {
-            if (f_num < 5) {
-                Vt_output_formated(self, "\eO%c", f_num + 'O');
-            } else if (f_num == 5) {
-                Vt_output_formated(self, "\e[%d~", f_num + 10);
-            } else if (f_num < 11) {
-                Vt_output_formated(self, "\e[%d~", f_num + 11);
-            } else {
-                Vt_output_formated(self, "\e[%d~", f_num + 12);
-            }
-        }
-        return true;
-    } else /* not f-key */ {
-        if (mods) {
-            if (key == KEY(Insert)) {
-                Vt_output_formated(self, "\e[2;%u~", mods + 1);
-                return true;
-            } else if (key == KEY(Delete)) {
-                Vt_output_formated(self, "\e[3;%u~", mods + 1);
-                return true;
-            } else if (key == KEY(Home)) {
-                Vt_output_formated(self, "\e[1;%u~", mods + 1);
-                return true;
-            } else if (key == KEY(End)) {
-                Vt_output_formated(self, "\e[4;%u~", mods + 1);
-                return true;
-            } else if (key == KEY(Page_Up)) {
-                Vt_output_formated(self, "\e[5;%u~", mods + 1);
-                return true;
-            } else if (key == KEY(Page_Down)) {
-                Vt_output_formated(self, "\e[6;%u~", mods + 1);
-                return true;
-            }
-
-        } else /* no mods */ {
-            if (key == KEY(Insert)) {
-                Vt_output(self, "\e[2~", 4);
-                return true;
-            } else if (key == KEY(Delete)) {
-                Vt_output(self, "\e[3~", 4);
-                return true;
-            } else if (key == KEY(Page_Up)) {
-                Vt_output(self, "\e[5~", 4);
-                return true;
-            } else if (key == KEY(Page_Down)) {
-                Vt_output(self, "\e[6~", 4);
-                return true;
-            }
-        }
-    }
-
-    return false;
-}
-
-/**
- *  Substitute keypad keys with normal ones */
-static uint32_t numpad_key_convert(uint32_t key)
-{
-    switch (key) {
-        case KEY(KP_Add):
-            return '+';
-        case KEY(KP_Subtract):
-            return '-';
-        case KEY(KP_Multiply):
-            return '*';
-        case KEY(KP_Divide):
-            return '/';
-        case KEY(KP_Equal):
-            return '=';
-        case KEY(KP_Decimal):
-            return '.';
-        case KEY(KP_Separator):
-            return '.';
-        case KEY(KP_Space):
-            return ' ';
-
-        case KEY(KP_Up):
-            return KEY(Up);
-        case KEY(KP_Down):
-            return KEY(Down);
-        case KEY(KP_Left):
-            return KEY(Left);
-        case KEY(KP_Right):
-            return KEY(Right);
-
-        case KEY(KP_Page_Up):
-            return KEY(Page_Up);
-        case KEY(KP_Page_Down):
-            return KEY(Page_Down);
-
-        case KEY(KP_Insert):
-            return KEY(Insert);
-        case KEY(KP_Delete):
-            return KEY(Delete);
-        case KEY(KP_Home):
-            return KEY(Home);
-        case KEY(KP_End):
-            return KEY(End);
-        case KEY(KP_Begin):
-            return KEY(Begin);
-        case KEY(KP_Tab):
-            return KEY(Tab);
-        case KEY(KP_Enter):
-            return KEY(Return);
-
-        case KEY(KP_F1):
-            return KEY(F1);
-        case KEY(KP_F2):
-            return KEY(F2);
-        case KEY(KP_F3):
-            return KEY(F3);
-        case KEY(KP_F4):
-            return KEY(F4);
-
-        case KEY(KP_0)... KEY(KP_9):
-            return '0' + key - KEY(KP_0);
-        default:
-            return key;
-    }
-}
-
-/**
- * Respond to key event */
-void Vt_handle_key(void* _self, uint32_t key, uint32_t rawkey, uint32_t mods)
-{
-    Vt* self = _self;
-
-    key = numpad_key_convert(key);
-
-    if (!Vt_maybe_handle_unicode_input_key(self, key, rawkey, mods) &&
-        !Vt_maybe_handle_keypad_key(self, key, mods) &&
-        !Vt_maybe_handle_function_key(self, key, mods)) {
-
-        if (FLAG_IS_SET(mods, MODIFIER_ALT) && !self->modes.no_alt_sends_esc) {
-            Vector_push_char(&self->output, '\e');
-        }
-        if (unlikely(FLAG_IS_SET(mods, MODIFIER_CONTROL))) {
-            if (unlikely(key == ' ')) {
-                key = 0;
-            } else if (isalpha(key)) {
-                key = tolower(key) - 'a';
-            }
-        }
-        if (unlikely(key == '\b') && ((mods & MODIFIER_ALT) == mods || !mods) &&
-            settings.bsp_sends_del) {
-            key = 127;
-        }
-        char             tmp[32];
-        static mbstate_t mbstate;
-        size_t           mb_len = c32rtomb(tmp, key, &mbstate);
-        if (mb_len) {
-            Vt_output(self, tmp, mb_len);
-        }
-    }
-
-    if (settings.scroll_on_key) {
-        Vt_visual_scroll_reset(self);
-    }
 }
 
 void Vt_handle_button(void*    _self,

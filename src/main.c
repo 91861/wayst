@@ -44,6 +44,10 @@
 #define KSM_CLEAR_INPUT_BUFFER_DELAY_MS 1000
 #endif
 
+#ifndef AUTOSCROLL_TRIGGER_MARGIN_PX
+#define AUTOSCROLL_TRIGGER_MARGIN_PX 2
+#endif
+
 typedef struct
 {
     Window_* win;
@@ -76,10 +80,12 @@ typedef struct
     bool keyboard_select_mode;
 
     // scrollbar
-    TimePoint scrollbar_hide_time;
-    TimePoint autoscroll_next_step;
-    float     scrollbar_drag_position;
-    bool      last_scrolling;
+    TimePoint    scrollbar_hide_time;
+    TimePoint    autoscroll_next_step;
+    float        scrollbar_drag_position;
+    bool         last_scrolling;
+    bool         autoselect;
+    Pair_int32_t autoscroll_autoselect;
 
     Cursor ksm_cursor;
 
@@ -235,7 +241,7 @@ static void App_run(App* self)
         ssize_t bytes = 0;
         do {
             if (unlikely(settings.debug_slow)) {
-                usleep(50000);
+                usleep(5000);
                 App_notify_content_change(self);
             }
 
@@ -316,7 +322,7 @@ static void App_primary_claimed_by_other_client(void* self)
 
 static void App_selection_end_handler(void* self)
 {
-    //App* app = self;
+    // App* app = self;
     LOG("App::selection_end\n");
 }
 
@@ -1206,6 +1212,12 @@ static void App_do_autoscroll(App* self)
         App_update_scrollbar_dims(self);
         App_notify_content_change(self);
     }
+
+    if (self->autoselect) {
+        Vt_select_set_end(&self->vt,
+                          self->autoscroll_autoselect.first,
+                          self->autoscroll_autoselect.second);
+    }
 }
 
 /**
@@ -1215,30 +1227,43 @@ static bool App_consume_drag(App* self, uint32_t button, int32_t x, int32_t y)
     Vt* vt = &self->vt;
 
     self->click_count = 0;
-    self->autoscroll  = AUTOSCROLL_NONE;
-
     if (button == MOUSE_BTN_LEFT && self->selection_dragging_left) {
-        int32_t high_bound = self->ui.pixel_offset_y + 1;
-        int32_t low_bound  = self->win->h - self->ui.pixel_offset_y - 1;
+        int32_t high_bound = self->ui.pixel_offset_y + AUTOSCROLL_TRIGGER_MARGIN_PX;
+        int32_t low_bound  = self->win->h - self->ui.pixel_offset_y - AUTOSCROLL_TRIGGER_MARGIN_PX;
 
         LOG("App::select_drag{ %d x %d ", x, y);
 
         if (y <= high_bound) {
-            self->autoscroll           = AUTOSCROLL_UP;
-            self->autoscroll_next_step = TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS);
-            Vt_select_set_end(vt, x, high_bound + 1);
+            self->autoselect = true;
+            if (!self->autoscroll) {
+                self->autoscroll_next_step = TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS);
+            }
+            self->autoscroll = AUTOSCROLL_UP;
+            Vt_select_set_end(
+              vt,
+              (self->autoscroll_autoselect.first = x),
+              (self->autoscroll_autoselect.second = high_bound - AUTOSCROLL_TRIGGER_MARGIN_PX));
             App_update_scrollbar_dims(self);
             App_notify_content_change(self);
             LOG("(start autoscroll up) }\n");
         } else if (y >= low_bound) {
-            self->autoscroll           = AUTOSCROLL_DN;
-            self->autoscroll_next_step = TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS);
-            Vt_select_set_end(vt, x, low_bound - 1);
+            self->autoselect = true;
+            if (!self->autoscroll) {
+                self->autoscroll_next_step = TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS);
+            }
+            self->autoscroll = AUTOSCROLL_DN;
+            Vt_select_set_end(
+              vt,
+              (self->autoscroll_autoselect.first = x),
+              (self->autoscroll_autoselect.second = low_bound + AUTOSCROLL_TRIGGER_MARGIN_PX));
             App_update_scrollbar_dims(self);
             App_notify_content_change(self);
             LOG("(start autoscroll down) }\n");
         } else {
             LOG("}\n");
+
+            self->autoselect = false;
+            self->autoscroll = AUTOSCROLL_NONE;
             if (vt->selection.next_mode) {
                 Vt_select_commit(vt);
             }
@@ -1247,6 +1272,8 @@ static bool App_consume_drag(App* self, uint32_t button, int32_t x, int32_t y)
 
         return true;
     } else if (button == MOUSE_BTN_RIGHT && self->selection_dragging_right) {
+        self->autoselect = false;
+        self->autoscroll = AUTOSCROLL_NONE;
         LOG("App::select_modify_drag{ %d x %d set selection point: ", x, y);
         if (self->selection_dragging_right == SELECT_DRAG_RIGHT_BACK) {
             LOG("end }\n");
@@ -1383,6 +1410,7 @@ static void App_button_handler(void*    self,
     x                    = CLAMP(x - app->ui.pixel_offset_x, 0, (int32_t)app->resolution.first);
     y                    = CLAMP(y - app->ui.pixel_offset_y, 0, (int32_t)app->resolution.second);
     bool vt_wants_scroll = Vt_reports_mouse(&app->vt);
+    app->autoselect      = false;
 
     if (!vt_wants_scroll && (button == MOUSE_BTN_WHEEL_DOWN && state)) {
         uint8_t lines             = ammount ? ammount : settings.scroll_discrete_lines;
@@ -1458,7 +1486,9 @@ static void App_update_hover(App* self, int32_t x, int32_t y)
                 self->ui.hovered_link = new_hovered_link;
                 App_notify_content_change(self);
 
-                LOG("App::link hover{\'%s\': %ux%zu - %ux%zu}\n",
+                LOG("App::link hover{ [%dx%d]:\'%s\': %ux%zu - %ux%zu}\n",
+                    x,
+                    y,
                     uri,
                     cols.first,
                     rows.first,

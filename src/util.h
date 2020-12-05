@@ -80,6 +80,11 @@
 
 #define STATIC_ASSERT(cond, msg) typedef char static_assertion_##msg[(cond) ? 1 : -1]
 
+#define STUB(_feature)                                                                             \
+    {                                                                                              \
+        WRN("%s not implemented\n", _feature);                                                     \
+    }
+
 #define WRN(...)                                                                                   \
     {                                                                                              \
         fputs("[\e[33mwarning\e[m] ", stderr);                                                     \
@@ -269,6 +274,7 @@ DEF_PAIR(double);
 DEF_PAIR(wchar_t);
 DEF_PAIR(size_t);
 DEF_PAIR(ssize_t);
+DEF_PAIR(bool);
 
 /** check string equality case insensitive */
 bool strneqci(const char* restrict s1, const char* restrict s2, const size_t n);

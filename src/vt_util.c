@@ -60,6 +60,7 @@ const char* Vt_uri_range_at(Vt*            self,
     VtLine*  ln;
     uint16_t ln_base_idx;
     uint16_t line_start_column = start_column;
+
     for (size_t r = row; r + 1; --r) {
         ln = Vt_line_at(self, r);
 
@@ -98,7 +99,7 @@ const char* Vt_uri_range_at(Vt*            self,
 
     /* Back */
     uint16_t line_end_column = end_column;
-    for (size_t r = row; r < Vt_row(self); ++r) {
+    for (size_t r = row; r < Vt_visual_bottom_line(self); ++r) {
         ln = Vt_line_at(self, r);
 
         if (!ln || !ln->links || line_end_column >= ln->data.size) {
@@ -664,7 +665,9 @@ __attribute__((cold)) void Vt_dump_info(Vt* self)
         printf("%s%c %c %c %4zu%c s:%3zu dmg:%d proxy{%3d,%3d,%3d,%3d} reflow{%d,%d,%d} "
                "marks{%d,%d,%d,%d} data{%.90s%s}" TERMCOLOR_RESET "\n",
                i == self->cursor.row ? TERMCOLOR_BOLD : "",
-               i == Vt_top_line(self) ? 'v' : i == Vt_bottom_line(self) ? '^' : ' ',
+               i == Vt_top_line(self)      ? 'v'
+               : i == Vt_bottom_line(self) ? '^'
+                                           : ' ',
                i == Vt_get_scroll_region_top(self) || i == Vt_get_scroll_region_bottom(self) ? '-'
                                                                                              : ' ',
                i == Vt_visual_top_line(self) || i == Vt_visual_bottom_line(self) ? '*' : ' ',

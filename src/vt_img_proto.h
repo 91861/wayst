@@ -1,6 +1,7 @@
 #pragma once
 
 #include "vt.h"
+#include "vt_private.h"
 
 #include "base64.h"
 #include "stb_image/stb_image.h"
@@ -435,9 +436,6 @@ static void Vt_recalculate_VtImageSurfaceView_dimensions(Vt* self, VtImageSurfac
     }
 }
 
-// TODO: vt_private.h ?
-static void        Vt_insert_new_line(Vt* self);
-static inline void Vt_move_cursor(Vt* self, uint16_t column, uint16_t rows);
 
 static const char* Vt_img_proto_display(Vt* self, uint32_t id, vt_image_proto_display_args_t args)
 {
