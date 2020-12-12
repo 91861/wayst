@@ -952,9 +952,6 @@ static void handle_option(const char opt, const int array_index, const char* val
             case 't':
                 settings.dynamic_title = false;
                 break;
-            case 'f':
-                settings.no_flash = true;
-                break;
             case 'v':
                 print_version_and_exit();
                 break;
@@ -1034,8 +1031,16 @@ static void handle_option(const char opt, const int array_index, const char* val
             settings.defer_font_loading = true;
             break;
 
-        case OPT_NO_FLASH_IDX:
-            settings.no_flash = value ? strtob(value) : true;
+        case OPT_VISUAL_BELL:
+            if (!strcmp(value, "none")) {
+                settings.no_flash = true;
+            } else {
+                bool failed = false;
+                settings.bell_flash = ColorRGBA_from_hex(value, &failed);
+                if (failed) {
+                    L_WARN_BAD_COLOR;
+                }
+            }
             break;
 
         case OPT_DEBUG_PTY_IDX:
@@ -1601,7 +1606,7 @@ static void settings_get_opts(const int argc, char* const* argv, const bool cfg_
         /* print 'invalid option' error message only once */
         opterr   = cfg_file_check;
         int opid = 0;
-        o        = getopt_long(argc, argv, "XctDGFfhvlo", long_options, &opid);
+        o        = getopt_long(argc, argv, "XctDGFhvlo", long_options, &opid);
         if (o == -1) {
             break;
         }

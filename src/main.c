@@ -215,12 +215,10 @@ static void App_run(App* self)
         }
 
         Monitor_wait(&self->monitor, timeout_ms);
-
         self->closest_pending_wakeup = NULL;
 
         if (Monitor_are_window_system_events_pending(&self->monitor)) {
             Window_events(self->win);
-
             char*        buf;
             size_t       len;
             Vector_char* out = Vt_get_output(&self->vt, PIPE_BUF - self->written_bytes, &buf, &len);

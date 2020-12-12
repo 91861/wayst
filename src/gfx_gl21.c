@@ -2054,8 +2054,8 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
     switch (vt_line->damage.type) {
         case VT_LINE_DAMAGE_RANGE: {
 
-            size_t    range_begin_idx     = vt_line->damage.front;
-            size_t    range_end_idx       = vt_line->damage.end + 1;
+            size_t range_begin_idx = vt_line->damage.front;
+            size_t range_end_idx   = vt_line->damage.end + 1;
 
             while (range_begin_idx) {
                 char32_t this_char = vt_line->data.buf[range_begin_idx].rune.code;
@@ -2068,9 +2068,9 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
             }
 
             while (range_end_idx < vt_line->data.size && range_end_idx) {
-                char32_t this_char = vt_line->data.buf[range_begin_idx].rune.code;
-                char32_t prev_char = vt_line->data.buf[range_begin_idx - 1].rune.code;
-                //char32_t next_char = vt_line->data.buf[range_begin_idx + 1].rune.code;
+                char32_t this_char = vt_line->data.buf[range_end_idx].rune.code;
+                char32_t prev_char = vt_line->data.buf[range_end_idx - 1].rune.code;
+                // char32_t next_char = vt_line->data.buf[range_begin_idx + 1].rune.code;
 
                 ++range_end_idx;
                 if (this_char == ' ' && !unicode_is_private_use_area(prev_char) &&
@@ -2599,8 +2599,12 @@ static void GfxOpenGL21_draw_flash(GfxOpenGL21* self, float fraction)
     glDisable(GL_SCISSOR_TEST);
     glBindTexture(GL_TEXTURE_2D, 0);
     Shader_use(&self->solid_fill_shader);
-    float alpha = sinf((1.0 - fraction) * M_1_PI) / 4.0;
-    glUniform4f(self->solid_fill_shader.uniforms[0].location, 1.0f, 1.0f, 1.0f, alpha);
+    float alpha = sinf((1.0 - fraction) * M_1_PI) / 1.0;
+    glUniform4f(self->solid_fill_shader.uniforms[0].location,
+                ColorRGBA_get_float(settings.bell_flash, 0),
+                ColorRGBA_get_float(settings.bell_flash, 1),
+                ColorRGBA_get_float(settings.bell_flash, 2),
+                ColorRGBA_get_float(settings.bell_flash, 3) * alpha);
     glBindBuffer(GL_ARRAY_BUFFER, self->full_framebuffer_quad_vbo);
     glVertexAttribPointer(self->solid_fill_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
     glDrawArrays(GL_QUADS, 0, 4);
@@ -2687,8 +2691,9 @@ static void GfxOpenGL21_load_image_view(GfxOpenGL21* self, VtImageSurfaceView* v
 
 static void GfxOpenGL21_draw_image_view(GfxOpenGL21* self, const Vt* vt, VtImageSurfaceView* view)
 {
-    if (!Vt_ImageSurfaceView_is_visual_visible(vt, view))
+    if (!Vt_ImageSurfaceView_is_visual_visible(vt, view)) {
         return;
+    }
 
     VtImageSurface* surf = RcPtr_get_VtImageSurface(&view->source_image_surface);
     GfxOpenGL21_load_image(self, surf);

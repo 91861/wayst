@@ -38,9 +38,11 @@ const char* Vt_img_proto_validate(Vt*                           self,
         case VT_IMAGE_PROTO_COMPRESSION_NONE:
         case VT_IMAGE_PROTO_COMPRESSION_ZLIB: // TODO: actually test if this works right
             break;
+
         default:;
             return "compression method not supported";
     }
+
     switch (format) {
         case 24:
         case 32:
@@ -49,6 +51,7 @@ const char* Vt_img_proto_validate(Vt*                           self,
         default:
             return "image format not supported";
     }
+
     return NULL;
 }
 
@@ -63,15 +66,21 @@ static stbi_uc* image_from_base64(char*     data,
     memset(decoded, 0, sizeof(decoded));
     base64_decode(data, decoded);
 
-    int      width, height, channels;
+    int width, height, channels;
+    stbi_info_from_memory((const stbi_uc*)decoded, out_len, &width, &height, &channels);
     stbi_uc* pixels =
-      stbi_load_from_memory((const stbi_uc*)decoded, out_len, &width, &height, &channels, 4);
+      stbi_load_from_memory((const stbi_uc*)decoded, out_len, &width, &height, &channels, channels);
 
-    if (out_width)
+    if (out_width) {
         *out_width = width;
-    if (out_height)
+    }
+
+    if (out_height) {
         *out_height = height;
+    }
+
     *out_bytes_per_pixel = channels;
+
     return pixels;
 }
 
@@ -81,7 +90,7 @@ static void maybe_unlink_tmp_file(const char* name)
         LOG("Vt::img_proto::unlink_tmp_file{ %s }\n", name);
         unlink(name);
     } else {
-        WRN("Temporary image file \'%s\' used for transmission is not located in a known tmp "
+        WRN("Temporary image file \'%s\' used for transmission is not located in a known temporary "
             "directory and will NOT be unliked\n",
             name);
     }
@@ -101,22 +110,37 @@ static stbi_uc* image_from_base64_file_name(char*     file_name,
 
     LOG("Vt::img_proto::read_image_file{ %s }\n", decoded_name);
     FILE* file = fopen(decoded_name, "rb");
-    if (!file)
+
+    if (!file) {
+        WRN("Failed to open file \'%s\', %s\n", decoded_name, strerror(errno));
         return NULL;
+    }
 
     fseek(file, opt_offset, SEEK_SET);
 
-    int      width, height, channels;
-    stbi_uc* pixels = stbi_load_from_file(file, &width, &height, &channels, 4);
+    int width, height, channels;
+    stbi_info_from_file(file, &width, &height, &channels);
+    stbi_uc* pixels = stbi_load_from_file(file, &width, &height, &channels, channels);
     fclose(file);
 
-    if (tmp)
-        maybe_unlink_tmp_file(decoded_name);
+    LOG("Vt::img_proto::read_image_file{ name: %s, dims: %dx%d, channels: %d }\n",
+        decoded_name,
+        width,
+        height,
+        channels);
 
-    if (out_width)
+    if (tmp) {
+        maybe_unlink_tmp_file(decoded_name);
+    }
+
+    if (out_width) {
         *out_width = width;
-    if (out_height)
+    }
+
+    if (out_height) {
         *out_height = height;
+    }
+
     *out_bytes_per_pixel = channels;
 
     return pixels;
@@ -134,8 +158,12 @@ static uint8_t* data_from_base64_file_name(char*                        file_nam
 
     LOG("Vt::img_proto::read_raw_file{ %s }\n", decoded_name);
     FILE* file = fopen(decoded_name, "rb");
-    if (!file)
+
+    if (!file) {
+        WRN("Failed to open file \'%s\', %s\n", decoded_name, strerror(errno));
         return NULL;
+    }
+
     fseek(file, 0, SEEK_END);
     size_t size_file = ftell(file);
     opt_size         = OR(opt_size, (size_file - opt_offset));
@@ -154,8 +182,9 @@ static uint8_t* data_from_base64_file_name(char*                        file_nam
         default:;
     }
 
-    if (tmp)
+    if (tmp) {
         maybe_unlink_tmp_file(decoded_name);
+    }
 
     return pixels;
 }
@@ -182,11 +211,14 @@ static RcPtr_VtImageSurface* Vt_get_image_surface_rp(Vt* self, uint32_t id)
             }
         }
     }
+
     if (!surface && RcPtr_get_VtImageSurface(&self->manipulated_image)) {
         surface = &self->manipulated_image;
     }
+
     return surface;
 }
+
 static VtImageSurface* Vt_get_image_surface(Vt* self, uint32_t id)
 {
     VtImageSurface* surface = NULL;
@@ -201,9 +233,11 @@ static VtImageSurface* Vt_get_image_surface(Vt* self, uint32_t id)
             }
         }
     }
+
     if (!surface) {
         surface = RcPtr_get_VtImageSurface(&self->manipulated_image);
     }
+
     return surface;
 }
 
@@ -229,6 +263,7 @@ const char* Vt_img_proto_transmit(Vt*                           self,
         CALL_FP(self->callbacks.destroy_image_proxy, self->callbacks.user_data, &surface->proxy);
         surface->state = VT_IMAGE_SURFACE_INCOMPLETE;
     }
+
     if (!surface) {
         VtImageSurface srf;
         srf.fragments = Vector_new_uint8_t();
@@ -238,6 +273,7 @@ const char* Vt_img_proto_transmit(Vt*                           self,
 
         RcPtr_VtImageSurface rc        = RcPtr_new_VtImageSurface(self);
         *RcPtr_get_VtImageSurface(&rc) = srf;
+
         if (id) {
             Vector_push_RcPtr_VtImageSurface(&self->images, rc);
             surface = RcPtr_get_VtImageSurface(Vector_last_RcPtr_VtImageSurface(&self->images));
@@ -254,15 +290,19 @@ const char* Vt_img_proto_transmit(Vt*                           self,
                 surface->display_on_transmission_completed = true;
                 surface->display_args                      = display_args;
             }
+
             if (format == 100) {
                 surface->png_data_transmission = true;
             }
 
             Vector_pushv_uint8_t(&surface->fragments, (uint8_t*)payload, strlen(payload));
+
             if (is_complete) {
                 Vector_push_uint8_t(&surface->fragments, 0);
+
                 if (!surface->png_data_transmission) {
                     uint8_t* data = data_from_base64(surface->fragments.buf, compression_type);
+
                     if (data) {
                         surface->state = VT_IMAGE_SURFACE_READY;
                         Vector_clear_uint8_t(&surface->fragments);
@@ -277,9 +317,9 @@ const char* Vt_img_proto_transmit(Vt*                           self,
                                 RcPtr_destroy_VtImageSurface(&self->manipulated_image);
                             }
                         }
-                    } else
+                    } else {
                         fail_msg = "image format error";
-
+                    }
                 } else {
                     stbi_uc* image = image_from_base64((char*)surface->fragments.buf,
                                                        &surface->width,
@@ -296,20 +336,25 @@ const char* Vt_img_proto_transmit(Vt*                           self,
 
                         if (surface->display_on_transmission_completed) {
                             Vt_img_proto_display(self, id, surface->display_args);
+
                             if (!id) {
                                 RcPtr_destroy_VtImageSurface(&self->manipulated_image);
                             }
                         }
 
-                    } else
+                    } else {
                         fail_msg = "image format error";
+                    }
                 }
 
             } else {
-                if (width)
+                if (width) {
                     surface->width = width;
-                if (height)
+                }
+
+                if (height) {
                     surface->height = height;
+                }
             }
         } break;
 
@@ -319,25 +364,31 @@ const char* Vt_img_proto_transmit(Vt*                           self,
                 surface->display_on_transmission_completed = true;
                 surface->display_args                      = display_args;
             }
+
             bool     is_raw_pixel_data = format != 100;
             stbi_uc* image             = NULL;
             uint8_t* raw_image         = NULL;
 
             if (is_raw_pixel_data) {
                 surface->bytes_per_pixel = 4;
-                raw_image                = data_from_base64_file_name(payload,
+
+                raw_image = data_from_base64_file_name(payload,
                                                        compression_type,
                                                        size,
                                                        offset,
                                                        transmission_type ==
                                                          VT_IMAGE_PROTO_TRANSMISSION_TEMP_FILE);
-                if (width)
+                if (width) {
                     surface->width = width;
-                if (height)
+                }
+
+                if (height) {
                     surface->height = height;
+                }
             } else {
                 surface->bytes_per_pixel = 4;
-                image                    = image_from_base64_file_name(payload,
+
+                image = image_from_base64_file_name(payload,
                                                     size,
                                                     offset,
                                                     &surface->width,
@@ -361,8 +412,9 @@ const char* Vt_img_proto_transmit(Vt*                           self,
                         RcPtr_destroy_VtImageSurface(&self->manipulated_image);
                     }
                 }
-            } else
+            } else {
                 fail_msg = "image format error";
+            }
 
         } break;
 
@@ -374,6 +426,7 @@ const char* Vt_img_proto_transmit(Vt*                           self,
         Vector_clear_uint8_t(&surface->fragments);
         surface->state = VT_IMAGE_SURFACE_FAIL;
     }
+
     return fail_msg;
 }
 
@@ -428,6 +481,7 @@ static void Vt_recalculate_VtImageSurfaceView_dimensions(Vt* self, VtImageSurfac
           (view->sample_dims_px.first ? view->sample_dims_px.first : src->width);
         view->cell_size.first = image_width / self->pixels_per_cell_x;
     }
+
     if (!(view->cell_size.second = view->cell_scale_rect.second)) {
         int32_t image_height =
           view->anchor_offset_px.second +
@@ -436,20 +490,27 @@ static void Vt_recalculate_VtImageSurfaceView_dimensions(Vt* self, VtImageSurfac
     }
 }
 
-
 static const char* Vt_img_proto_display(Vt* self, uint32_t id, vt_image_proto_display_args_t args)
 {
     RcPtr_VtImageSurface* source = Vt_get_image_surface_rp(self, id);
-    if (!source)
+
+    if (!source) {
         return "no such id";
+    }
 
     VtImageSurface* src = RcPtr_get_VtImageSurface(source);
-    if (!src || !src->width || !src->height || src->state == VT_IMAGE_SURFACE_INCOMPLETE)
+
+    if (!src || !src->width || !src->height || src->state == VT_IMAGE_SURFACE_INCOMPLETE) {
         return "source transmission incomplete";
-    if (src->state == VT_IMAGE_SURFACE_DESTROYED)
+    }
+
+    if (src->state == VT_IMAGE_SURFACE_DESTROYED) {
         return id ? "source explicitly deleted by client" : "source deleted";
-    if (src->state == VT_IMAGE_SURFACE_FAIL)
+    }
+
+    if (src->state == VT_IMAGE_SURFACE_FAIL) {
         return "source transmission failed";
+    }
 
     uint16_t anchor_cell = self->cursor.col;
     VtLine*  ln          = Vt_cursor_line(self);

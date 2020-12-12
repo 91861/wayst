@@ -95,7 +95,7 @@ typedef struct
 } KeyCommand;
 
 // indicies into array in settings
-enum KeyCommands
+enum key_command_e
 {
     KCMD_COPY = 0,
     KCMD_COPY_OUTPUT,
@@ -122,7 +122,7 @@ enum KeyCommands
     NUM_KEY_COMMANDS, // array size
 };
 
-enum LcdFilter
+enum lcd_filter_e
 {
     LCD_FILTER_UNDEFINED, // use window system if available
     LCD_FILTER_NONE,
@@ -180,10 +180,10 @@ typedef struct
     char* user_app_id;
     char* user_app_id_2;
 
-    uint16_t       font_size;
-    uint16_t       font_size_fallback;
-    uint16_t       font_dpi;
-    enum LcdFilter lcd_filter;
+    uint16_t          font_size;
+    uint16_t          font_size_fallback;
+    uint16_t          font_dpi;
+    enum lcd_filter_e lcd_filter;
 
     /* colors - normal, highlight */
     ColorRGBA bg, bghl;

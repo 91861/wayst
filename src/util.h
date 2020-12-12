@@ -327,7 +327,8 @@ static inline bool unicode_is_private_use_area(char32_t codepoint)
 
 static bool is_in_tmp_dir(const char* path)
 {
-    return (path == strstr(path, "/tmp/") || (path = strstr(path, getenv("PATH"))));
+    return (path == strstr(path, "/tmp/") || path == strstr(path, "/dev/shm/") ||
+            (path = strstr(path, getenv("PATH"))));
 }
 
 /**

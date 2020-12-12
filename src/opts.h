@@ -128,8 +128,8 @@ static struct option long_options[] = {
 #define OPT_H_FG_COLOR_IDX 34
     [OPT_H_FG_COLOR_IDX] = { "h-fg-color", required_argument, 0, 0 },
 
-#define OPT_NO_FLASH_IDX 35
-    [OPT_NO_FLASH_IDX] = { "no-flash", no_argument, 0, 'f' },
+#define OPT_VISUAL_BELL 35
+    [OPT_VISUAL_BELL] = { "visual-bell", required_argument, 0, 0 },
 
 #define OPT_COLORSCHEME_IDX 36
     [OPT_COLORSCHEME_IDX] = { "colorscheme", required_argument, 0, 0 },
@@ -330,7 +330,7 @@ static const char* long_options_descriptions[][2] = {
     [OPT_H_BG_COLOR_IDX] = { arg_color_a, "Highlighted text background color" },
     [OPT_H_FG_COLOR_IDX] = { arg_color, "Highlighted text foreground color" },
 
-    [OPT_NO_FLASH_IDX]         = { NULL, "Disable visual bell" },
+    [OPT_VISUAL_BELL]         = { "#RRGGBBAA/name", "Visual bell efect - overlay, none" },
     [OPT_COLORSCHEME_IDX]      = { "name/int",
                               "Colorscheme name/index: wayst, linux, xterm, rxvt, yaru, tango, "
                               "orchis, "

@@ -1676,11 +1676,7 @@ static bool WindowX11_maybe_swap(struct WindowBase* self)
 {
     if (self->paint && !FLAG_IS_SET(self->state_flags, WINDOW_IS_MINIMIZED)) {
         self->paint = false;
-
-        if (self->callbacks.on_redraw_requested) {
-            self->callbacks.on_redraw_requested(self->callbacks.user_data);
-        }
-
+        CALL_FP(self->callbacks.on_redraw_requested, self->callbacks.user_data);
         glXSwapBuffers(globalX11->display, windowX11(self)->window);
         return true;
     } else {

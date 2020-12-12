@@ -1145,7 +1145,7 @@ static void output_handle_geometry(void*             data,
                                    const char*       model,
                                    int32_t           transform)
 {
-    enum LcdFilter settings_value = LCD_FILTER_UNDEFINED;
+    enum lcd_filter_e settings_value = LCD_FILTER_UNDEFINED;
 
     switch (subpixel) {
         case WL_OUTPUT_SUBPIXEL_NONE:
@@ -1164,8 +1164,9 @@ static void output_handle_geometry(void*             data,
             break;
     }
 
-    if (settings.lcd_filter == LCD_FILTER_UNDEFINED)
+    if (settings.lcd_filter == LCD_FILTER_UNDEFINED) {
         settings.lcd_filter = settings_value;
+    }
 }
 
 static void output_handle_mode(void*             data,
@@ -1891,10 +1892,11 @@ static void WindowWl_swap_buffers(struct WindowBase* self)
 {
     self->paint                     = false;
     windowWl(self)->draw_next_frame = false;
-    if (self->callbacks.on_redraw_requested) {
+
+    if (likely(self->callbacks.on_redraw_requested)) {
         self->callbacks.on_redraw_requested(self->callbacks.user_data);
     }
-    if (eglSwapBuffers(globalWl->egl_display, windowWl(self)->egl_surface) != EGL_TRUE) {
+    if (unlikely(eglSwapBuffers(globalWl->egl_display, windowWl(self)->egl_surface) != EGL_TRUE)) {
         ERR("buffer swap failed EGL Error %s\n", egl_get_error_string(eglGetError()));
     }
     struct wl_callback* frame_callback = wl_surface_frame(windowWl(self)->surface);

@@ -313,11 +313,12 @@ static void Vt_uri_next_char(Vt* self, char32_t c)
     }
 }
 
-static void Vt_about_to_delete_line_by_scroll_up(Vt* self, size_t idx)
+static inline void Vt_about_to_delete_line_by_scroll_up(Vt* self, size_t idx)
 {
     VtLine* src = &self->lines.buf[idx];
     VtLine* tgt = &self->lines.buf[idx + 1];
-    if (src->images) {
+    
+    if (unlikely(src->images)) {
         for (RcPtr_VtImageSurfaceView* i = NULL;
              (i = Vector_iter_RcPtr_VtImageSurfaceView(src->images, i));) {
             VtImageSurfaceView* view = RcPtr_get_VtImageSurfaceView(i);
@@ -442,54 +443,23 @@ static ColorRGB Vt_active_line_color(const Vt* self)
     return Vt_rune_ln_clr(self, &self->parser.char_state);
 }
 
-/**
- * Get string from selected region */
-Vector_char Vt_select_region_to_string(Vt* self)
+void Vt_clear_all_proxies(Vt* self)
 {
-    Vector_char ret, tmp;
-    size_t      begin_char_idx, end_char_idx;
-    size_t      begin_line = MIN(self->selection.begin_line, self->selection.end_line);
-    size_t      end_line   = MAX(self->selection.begin_line, self->selection.end_line);
-
-    if (begin_line == end_line && self->selection.mode != SELECT_MODE_NONE) {
-        begin_char_idx = MIN(self->selection.begin_char_idx, self->selection.end_char_idx);
-        end_char_idx   = MAX(self->selection.begin_char_idx, self->selection.end_char_idx);
-        return Vt_line_to_string(self, begin_line, begin_char_idx, end_char_idx + 1, "");
-    } else if (self->selection.begin_line < self->selection.end_line) {
-        begin_char_idx = self->selection.begin_char_idx;
-        end_char_idx   = self->selection.end_char_idx;
-    } else {
-        begin_char_idx = self->selection.end_char_idx;
-        end_char_idx   = self->selection.begin_char_idx;
-    }
-
-    if (self->selection.mode == SELECT_MODE_NORMAL) {
-        char* term = self->lines.buf[begin_line + 1].rejoinable ? "" : "\n";
-        ret        = Vt_line_to_string(self, begin_line, begin_char_idx, 0, term);
-        Vector_pop_char(&ret);
-        for (size_t i = begin_line + 1; i < end_line; ++i) {
-            char* term_mid = self->lines.buf[i + 1].rejoinable ? "" : "\n";
-            tmp            = Vt_line_to_string(self, i, 0, 0, term_mid);
-            Vector_pushv_char(&ret, tmp.buf, tmp.size - 1);
-            Vector_destroy_char(&tmp);
+    Vt_clear_proxies_in_region(self, 0, self->lines.size - 1);
+    if (Vt_alt_buffer_enabled(self)) {
+        for (size_t i = 0; i < self->alt_lines.size - 1; ++i) {
+            Vt_clear_line_proxy(self, &self->alt_lines.buf[i]);
         }
-        tmp = Vt_line_to_string(self, end_line, 0, end_char_idx + 1, "");
-        Vector_pushv_char(&ret, tmp.buf, tmp.size - 1);
-        Vector_destroy_char(&tmp);
-    } else if (self->selection.mode == SELECT_MODE_BOX) {
-        ret = Vt_line_to_string(self, begin_line, begin_char_idx, end_char_idx + 1, "\n");
-        Vector_pop_char(&ret);
-        for (size_t i = begin_line + 1; i <= end_line; ++i) {
-            char* term = i == end_line ? "" : "\n";
-            tmp        = Vt_line_to_string(self, i, begin_char_idx, end_char_idx + 1, term);
-            Vector_pushv_char(&ret, tmp.buf, tmp.size - 1);
-            Vector_destroy_char(&tmp);
-        }
-    } else {
-        ret = Vector_new_char();
     }
-    Vector_push_char(&ret, '\0');
-    return ret;
+}
+
+void Vt_clear_all_image_proxies(Vt* self)
+{
+    for (RcPtr_VtImageSurfaceView* i = NULL;
+         (i = Vector_iter_RcPtr_VtImageSurfaceView(&self->image_views, i));) {
+        VtImageSurfaceView* srf = RcPtr_get_VtImageSurfaceView(i);
+        CALL_FP(self->callbacks.destroy_image_view_proxy, self->callbacks.user_data, &srf->proxy);
+    }
 }
 
 Vector_char Vt_region_to_string(Vt* self, size_t begin_line, size_t end_line)
@@ -512,273 +482,6 @@ Vector_char Vt_region_to_string(Vt* self, size_t begin_line, size_t end_line)
     Vector_destroy_char(&tmp);
 
     return ret;
-}
-
-/**
- * initialize selection region to cell by clicked pixel */
-void Vt_select_init(Vt* self, enum SelectMode mode, int32_t x, int32_t y)
-{
-    self->selection.next_mode = mode;
-
-    x              = CLAMP(x, 0, self->ws.ws_xpixel);
-    y              = CLAMP(y, 0, self->ws.ws_ypixel);
-    size_t click_x = (double)x / self->pixels_per_cell_x;
-    size_t click_y = (double)y / self->pixels_per_cell_y;
-
-    self->selection.click_begin_char_idx = click_x;
-    self->selection.click_begin_line     = Vt_visual_top_line(self) + click_y;
-}
-
-/**
- * initialize selection region to cell by cell screen coordinates */
-void Vt_select_init_cell(Vt* self, enum SelectMode mode, int32_t x, int32_t y)
-{
-    self->selection.next_mode = mode;
-
-    x = CLAMP(x, 0, Vt_col(self));
-    y = CLAMP(y, 0, Vt_row(self));
-
-    self->selection.click_begin_char_idx = x;
-    self->selection.click_begin_line     = Vt_visual_top_line(self) + y;
-}
-
-/**
- * initialize selection region to clicked word */
-void Vt_select_init_word(Vt* self, int32_t x, int32_t y)
-{
-    self->selection.mode = SELECT_MODE_NORMAL;
-
-    x = CLAMP(x, 0, self->ws.ws_xpixel);
-    y = CLAMP(y, 0, self->ws.ws_ypixel);
-
-    size_t click_x = (double)x / self->pixels_per_cell_x;
-    size_t click_y = (double)y / self->pixels_per_cell_y;
-
-    Vector_VtRune* ln = &self->lines.buf[Vt_visual_top_line(self) + click_y].data;
-
-    size_t cmax  = ln->size;
-    size_t begin = click_x;
-    size_t end   = click_x;
-    while (begin - 1 < cmax && begin > 0 && !isspace(ln->buf[begin - 1].rune.code)) {
-        --begin;
-    }
-    while (end + 1 < cmax && end > 0 && !isspace(ln->buf[end + 1].rune.code)) {
-        ++end;
-    }
-    self->selection.begin_char_idx = begin;
-    self->selection.end_char_idx   = end;
-    self->selection.begin_line = self->selection.end_line = Vt_visual_top_line(self) + click_y;
-    Vt_mark_proxy_fully_damaged(self, self->selection.begin_line);
-}
-
-/**
- * initialize selection region to clicked line */
-void Vt_select_init_line(Vt* self, int32_t y)
-{
-    self->selection.mode = SELECT_MODE_NORMAL;
-
-    y = CLAMP(y, 0, self->ws.ws_ypixel);
-
-    size_t click_y = (double)y / self->pixels_per_cell_y;
-
-    self->selection.begin_char_idx = 0;
-    self->selection.end_char_idx   = Vt_col(self);
-    self->selection.begin_line = self->selection.end_line = Vt_visual_top_line(self) + click_y;
-    Vt_mark_proxy_fully_damaged(self, self->selection.begin_line);
-}
-
-static void Vt_mark_line_proxy_fully_damaged(Vt* self, VtLine* line)
-{
-    CALL_FP(self->callbacks.on_action_performed, self->callbacks.user_data);
-    line->damage.type = VT_LINE_DAMAGE_FULL;
-}
-
-static void Vt_mark_proxy_fully_damaged(Vt* self, size_t idx)
-{
-    Vt_mark_line_proxy_fully_damaged(self, &self->lines.buf[idx]);
-}
-
-static void Vt_mark_proxy_damaged_cell(Vt* self, size_t line, size_t rune)
-{
-    CALL_FP(self->callbacks.on_action_performed, self->callbacks.user_data);
-    switch (self->lines.buf[line].damage.type) {
-        case VT_LINE_DAMAGE_NONE:
-            self->lines.buf[line].damage.type  = VT_LINE_DAMAGE_RANGE;
-            self->lines.buf[line].damage.front = rune;
-            self->lines.buf[line].damage.end   = rune;
-            break;
-
-        case VT_LINE_DAMAGE_RANGE: {
-            size_t lo = MIN(self->lines.buf[line].damage.front, rune);
-            size_t hi = MAX(self->lines.buf[line].damage.end, rune);
-
-            self->lines.buf[line].damage.front = lo;
-            self->lines.buf[line].damage.end   = hi;
-        } break;
-
-        case VT_LINE_DAMAGE_SHIFT: {
-
-        } break;
-
-        default:
-            return;
-    }
-}
-
-static inline void Vt_mark_proxies_damaged_in_region(Vt* self, size_t begin, size_t end)
-{
-    size_t lo = MIN(begin, end);
-    size_t hi = MAX(begin, end);
-    for (size_t i = lo; i <= hi; ++i) {
-        Vt_mark_proxy_fully_damaged(self, i);
-    }
-}
-
-static inline void Vt_clear_line_proxy(Vt* self, VtLine* line)
-{
-    Vt_mark_line_proxy_fully_damaged(self, line);
-    CALL_FP(self->callbacks.destroy_proxy, self->callbacks.user_data, &line->proxy);
-}
-
-static inline void Vt_clear_proxy(Vt* self, size_t idx)
-{
-    Vt_clear_line_proxy(self, &self->lines.buf[idx]);
-}
-
-static inline void Vt_clear_proxies_in_region(Vt* self, size_t begin, size_t end)
-{
-    size_t lo = MIN(begin, end);
-    size_t hi = MAX(begin, end);
-    for (size_t i = lo; i <= hi; ++i) {
-        Vt_clear_proxy(self, i);
-    }
-}
-
-void Vt_clear_all_proxies(Vt* self)
-{
-    Vt_clear_proxies_in_region(self, 0, self->lines.size - 1);
-    if (Vt_alt_buffer_enabled(self)) {
-        for (size_t i = 0; i < self->alt_lines.size - 1; ++i) {
-            Vt_clear_line_proxy(self, &self->alt_lines.buf[i]);
-        }
-    }
-}
-
-static void Vt_clear_all_image_proxies(Vt* self)
-{
-    for (RcPtr_VtImageSurfaceView* i = NULL;
-         (i = Vector_iter_RcPtr_VtImageSurfaceView(&self->image_views, i));) {
-        VtImageSurfaceView* srf = RcPtr_get_VtImageSurfaceView(i);
-        CALL_FP(self->callbacks.destroy_image_view_proxy, self->callbacks.user_data, &srf->proxy);
-    }
-}
-
-static inline void Vt_mark_proxies_damaged_in_selected_region(Vt* self)
-{
-    Vt_mark_proxies_damaged_in_region(self, self->selection.begin_line, self->selection.end_line);
-}
-
-static inline void Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(Vt* self)
-{
-    if (self->selection.mode) {
-        size_t selection_lo = MIN(self->selection.begin_line, self->selection.end_line);
-        size_t selection_hi = MAX(self->selection.begin_line, self->selection.end_line);
-
-        size_t start = MAX(selection_lo, self->scroll_region_top);
-        size_t end   = MIN(MIN(selection_hi, self->scroll_region_bottom - 1), self->lines.size - 1);
-        Vt_mark_proxies_damaged_in_region(self, start ? (start - 1) : 0, end + 1);
-    }
-}
-
-void Vt_select_commit(Vt* self)
-{
-    if (self->selection.next_mode != SELECT_MODE_NONE) {
-        self->selection.mode           = self->selection.next_mode;
-        self->selection.next_mode      = SELECT_MODE_NONE;
-        self->selection.begin_line     = self->selection.click_begin_line;
-        self->selection.end_line       = self->selection.click_begin_line;
-        self->selection.begin_char_idx = self->selection.click_begin_char_idx;
-        self->selection.end_char_idx   = self->selection.click_begin_char_idx;
-        Vt_mark_proxies_damaged_in_selected_region(self);
-        CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
-    }
-}
-
-void Vt_select_set_end(Vt* self, int32_t x, int32_t y)
-{
-    if (self->selection.mode != SELECT_MODE_NONE) {
-        x = CLAMP(x, 0, self->ws.ws_xpixel);
-        y = CLAMP(y, 0, self->ws.ws_ypixel);
-
-        size_t click_x = (double)x / self->pixels_per_cell_x;
-        size_t click_y = (double)y / self->pixels_per_cell_y;
-        Vt_select_set_end_cell(self, click_x, click_y);
-    }
-}
-
-void Vt_select_set_end_cell(Vt* self, int32_t x, int32_t y)
-{
-    if (self->selection.mode != SELECT_MODE_NONE) {
-        size_t old_end = self->selection.end_line;
-
-        x = CLAMP(x, 0, Vt_col(self));
-        y = CLAMP(y, 0, Vt_row(self));
-
-        self->selection.end_line     = Vt_visual_top_line(self) + y;
-        self->selection.end_char_idx = x;
-
-        size_t lo = MIN(MIN(old_end, self->selection.end_line), self->selection.begin_line);
-        size_t hi = MAX(MAX(old_end, self->selection.end_line), self->selection.begin_line);
-        Vt_mark_proxies_damaged_in_region(self, hi, lo);
-        CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
-    }
-}
-
-void Vt_select_set_front(Vt* self, int32_t x, int32_t y)
-{
-    if (self->selection.mode != SELECT_MODE_NONE) {
-        x = CLAMP(x, 0, self->ws.ws_xpixel);
-        y = CLAMP(y, 0, self->ws.ws_ypixel);
-
-        size_t click_x = (double)x / self->pixels_per_cell_x;
-        size_t click_y = (double)y / self->pixels_per_cell_y;
-        Vt_select_set_front_cell(self, click_x, click_y);
-    }
-}
-
-void Vt_select_set_front_cell(Vt* self, int32_t x, int32_t y)
-{
-    if (self->selection.mode != SELECT_MODE_NONE) {
-        size_t old_front = self->selection.begin_line;
-
-        x = CLAMP(x, 0, Vt_col(self));
-        y = CLAMP(y, 0, Vt_row(self));
-
-        self->selection.begin_line     = Vt_visual_top_line(self) + y;
-        self->selection.begin_char_idx = x;
-
-        size_t lo = MIN(MIN(old_front, self->selection.end_line), self->selection.begin_line);
-        size_t hi = MAX(MAX(old_front, self->selection.end_line), self->selection.begin_line);
-        Vt_mark_proxies_damaged_in_region(self, hi, lo);
-        CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
-    }
-}
-
-static void Vt_select_clamp_to_buffer(Vt* self)
-{
-    self->selection.begin_line = MIN(self->selection.begin_line, self->lines.size - 1);
-    self->selection.end_line   = MIN(self->selection.end_line, self->lines.size - 1);
-}
-
-void Vt_select_end(Vt* self)
-{
-    if (self->selection.mode) {
-        Vt_mark_proxies_damaged_in_selected_region(self);
-    }
-    Vt_select_clamp_to_buffer(self);
-    self->selection.mode = SELECT_MODE_NONE;
-    CALL_FP(self->callbacks.on_select_end, self->callbacks.user_data);
-    CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
 }
 
 static inline char32_t char_sub_uk(char original)
@@ -5732,7 +5435,7 @@ static void Vt_shift_global_line_index_refs(Vt* self, size_t point, int64_t chan
     for (RcPtr_VtImageSurfaceView* rp = NULL;
          (rp = Vector_iter_RcPtr_VtImageSurfaceView(&self->image_views, rp));) {
         VtImageSurfaceView* sv = RcPtr_get_VtImageSurfaceView(rp);
-        if (sv) {
+        if (sv && sv->anchor_global_index >= point) {
             sv->anchor_global_index += change;
         }
     }
