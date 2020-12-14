@@ -325,6 +325,22 @@ static inline bool unicode_is_private_use_area(char32_t codepoint)
     return codepoint >= 0xE000 && codepoint <= 0xF8FF;
 }
 
+static inline bool unicode_is_dingbat(char32_t codepoint)
+{
+    return codepoint >= 0x2700 && codepoint <= 0x27BF;
+}
+
+static inline bool unicode_is_special(char32_t codepoint)
+{
+    return codepoint >= 0xFFF0 && codepoint <= 0xFFFF;
+}
+
+static inline bool unicode_is_ambiguous_width(char32_t codepoint)
+{
+    return unicode_is_private_use_area(codepoint) || unicode_is_dingbat(codepoint) ||
+           unicode_is_special(codepoint);
+}
+
 static bool is_in_tmp_dir(const char* path)
 {
     return (path == strstr(path, "/tmp/") || path == strstr(path, "/dev/shm/") ||

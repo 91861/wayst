@@ -827,7 +827,7 @@ static void settings_make_default()
 
 static void settings_complete_defaults()
 {
-    if (unlikely(settings.flush_ft_cache || find_font_cached())) {
+    if (unlikely(settings.flush_ft_cache || settings.debug_font || find_font_cached())) {
         find_font();
     }
 
@@ -1035,7 +1035,7 @@ static void handle_option(const char opt, const int array_index, const char* val
             if (!strcmp(value, "none")) {
                 settings.no_flash = true;
             } else {
-                bool failed = false;
+                bool failed         = false;
                 settings.bell_flash = ColorRGBA_from_hex(value, &failed);
                 if (failed) {
                     L_WARN_BAD_COLOR;

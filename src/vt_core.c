@@ -4689,16 +4689,24 @@ __attribute__((hot)) static void Vt_insert_char_at_cursor(Vt* self, VtRune c)
 #else
     width = wcwidth(c.rune.code);
 #endif
+
     if (unlikely(width > 1)) {
         VtRune tmp    = c;
         tmp.rune.code = VT_RUNE_CODE_WIDE_TAIL;
+
         for (int i = 0; i < (width - 1); ++i) {
-            if (Vt_cursor_line(self)->data.size <= self->cursor.col)
+            if (Vt_cursor_line(self)->data.size <= self->cursor.col) {
                 Vector_push_VtRune(&Vt_cursor_line(self)->data, tmp);
-            else
+            } else {
                 *Vt_cursor_cell(self) = tmp;
+            }
+
             ++self->cursor.col;
+            Vt_mark_proxy_damaged_cell(self, self->cursor.row, self->cursor.col);
         }
+    } else if (unlikely(unicode_is_ambiguous_width(c.rune.code))) {
+        Vector_push_VtRune(&Vt_cursor_line(self)->data, self->blank_space);
+        Vt_mark_proxy_damaged_cell(self, self->cursor.row, self->cursor.col + 1);
     }
 
     self->wrap_next  = self->cursor.col >= (size_t)Vt_col(self);

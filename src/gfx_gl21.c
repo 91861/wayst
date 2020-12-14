@@ -833,6 +833,7 @@ __attribute__((cold)) GlyphAtlasEntry* GlyphAtlas_get_combined(GfxOpenGL21* gfx,
                 tgt_page = self->current_rgb_page = Vector_last_GlyphAtlasPage(&self->pages);
             }
             break;
+
         case FT_OUTPUT_GRAYSCALE:
             tgt_page = self->current_grayscale_page;
             if (unlikely(!tgt_page || !GlyphAtlasPage_can_push_tex(tgt_page, tex))) {
@@ -847,6 +848,7 @@ __attribute__((cold)) GlyphAtlasEntry* GlyphAtlas_get_combined(GfxOpenGL21* gfx,
                 tgt_page = self->current_grayscale_page = Vector_last_GlyphAtlasPage(&self->pages);
             }
             break;
+
         case FT_OUTPUT_COLOR_BGRA:
             tgt_page = self->current_rgba_page;
             if (unlikely(!tgt_page || !GlyphAtlasPage_can_push_tex(tgt_page, tex))) {
@@ -960,6 +962,7 @@ __attribute__((hot)) static GlyphAtlasEntry* GlyphAtlas_get(GfxOpenGL21* gfx,
                                                             const Rune*  rune)
 {
     GlyphAtlasEntry* entry = Map_get_Rune_GlyphAtlasEntry(&self->entry_map, rune);
+
     if (likely(entry)) {
         return entry;
     }
@@ -1710,8 +1713,9 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                                   GlyphAtlas_get(gfx,
                                                  &gfx->glyph_atlas,
                                                  &each_rune_filtered_visible->rune);
-                                if (!entry)
+                                if (!entry) {
                                     continue;
+                                }
 
                                 float h = (float)entry->height * scaley;
                                 float w = (float)entry->width * scalex;
@@ -2053,14 +2057,14 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
 
     switch (vt_line->damage.type) {
         case VT_LINE_DAMAGE_RANGE: {
-
             size_t range_begin_idx = vt_line->damage.front;
             size_t range_end_idx   = vt_line->damage.end + 1;
 
             while (range_begin_idx) {
                 char32_t this_char = vt_line->data.buf[range_begin_idx].rune.code;
                 char32_t prev_char = vt_line->data.buf[range_begin_idx - 1].rune.code;
-                if (this_char == ' ' && !unicode_is_private_use_area(prev_char) &&
+
+                if (this_char == ' ' && !unicode_is_ambiguous_width(prev_char) &&
                     wcwidth(prev_char) < 2) {
                     break;
                 }
@@ -2070,10 +2074,9 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
             while (range_end_idx < vt_line->data.size && range_end_idx) {
                 char32_t this_char = vt_line->data.buf[range_end_idx].rune.code;
                 char32_t prev_char = vt_line->data.buf[range_end_idx - 1].rune.code;
-                // char32_t next_char = vt_line->data.buf[range_begin_idx + 1].rune.code;
 
                 ++range_end_idx;
-                if (this_char == ' ' && !unicode_is_private_use_area(prev_char) &&
+                if (this_char == ' ' && !unicode_is_ambiguous_width(prev_char) &&
                     wcwidth(prev_char) < 2) {
                     break;
                 }

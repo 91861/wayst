@@ -219,15 +219,19 @@ FreetypeOutput* FreetypeFace_load_and_render_glyph(Freetype*     freetype,
     ASSERT(self->loaded, "face loaded before rendering")
 
     FT_Error e;
+
     if ((e = FT_Load_Char(self->face, codepoint, self->load_flags))) {
         WRN("glyph load error %c(%d) %s\n", codepoint, codepoint, ft_error_to_string(e));
     }
+
     if ((e = FT_Render_Glyph(self->face->glyph, self->render_mode))) {
         WRN("glyph render error %c(%d) %s\n", codepoint, codepoint, ft_error_to_string(e));
     }
+
     if (self->face->glyph->glyph_index == 0) {
         return NULL;
     }
+
     bool is_packed = self->face->glyph->bitmap.pixel_mode == FT_PIXEL_MODE_MONO;
     if (is_packed) {
         Freetype_convert_mono_bitmap_to_grayscale(freetype, &self->face->glyph->bitmap);
@@ -244,8 +248,10 @@ FreetypeOutput* FreetypeFace_load_and_render_glyph(Freetype*     freetype,
           self->face->glyph->bitmap.rows / height_factor_for_output(self->output_type);
         freetype->output.pixels = self->face->glyph->bitmap.buffer;
     }
+
     freetype->output.left = self->face->glyph->bitmap_left;
     freetype->output.top  = self->face->glyph->bitmap_top;
+
     if (is_packed || self->output_type == FT_OUTPUT_GRAYSCALE) {
         freetype->output.type      = FT_OUTPUT_GRAYSCALE;
         freetype->output.alignment = 1;
@@ -423,6 +429,7 @@ FreetypeOutput* FreetypeStyledFamily_load_and_render_glyph(Freetype*            
     enum FreetypeFontStyle final_style;
     FreetypeFace*   source_face = FreetypeStyledFamily_select_face(self, style, &final_style);
     FreetypeOutput* output = FreetypeFace_load_and_render_glyph(freetype, source_face, codepoint);
+
     if (output) {
         output->style = final_style;
     }
@@ -673,7 +680,7 @@ FreetypeOutput* Freetype_load_and_render_glyph(Freetype*              self,
                                       i,
                                       settings.font_size + i->size_offset,
                                       settings.font_dpi,
-                                      self->target_output_type,
+                                      FT_OUTPUT_COLOR_BGRA,
                                       false);
                 }
 
