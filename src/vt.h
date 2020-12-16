@@ -197,6 +197,7 @@ typedef struct
     TimeSpan           execution_time;
     int                exit_status;
     vt_command_state_t state;
+    bool               is_vte_protocol : 1;
 } VtCommand;
 
 static void VtCommand_destroy(VtCommand* self)

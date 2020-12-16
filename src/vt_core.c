@@ -7,6 +7,7 @@
 
 #include "vt.h"
 #include "vt_private.h"
+#include "vt_shell.h"
 
 #include <fcntl.h>
 #include <limits.h>
@@ -317,7 +318,7 @@ static inline void Vt_about_to_delete_line_by_scroll_up(Vt* self, size_t idx)
 {
     VtLine* src = &self->lines.buf[idx];
     VtLine* tgt = &self->lines.buf[idx + 1];
-    
+
     if (unlikely(src->images)) {
         for (RcPtr_VtImageSurfaceView* i = NULL;
              (i = Vector_iter_RcPtr_VtImageSurfaceView(src->images, i));) {
@@ -4058,7 +4059,7 @@ static void Vt_handle_OSC(Vt* self, char c)
                 WRN("Selection manipulation not implemented\n");
                 break;
 
-            /* Shell integration mark (FinalTerm)
+            /* Shell integration mark (FinalTerm/iTerm2)
              * https://iterm2.com/documentation-shell-integration.html
              *
              * [PROMPT]prompt% [COMMAND_START] ls -l
@@ -4075,192 +4076,25 @@ static void Vt_handle_OSC(Vt* self, char c)
                 switch (seq[4] /* 113;? */) {
                     /* PROMPT */
                     case 'A':
-                        self->shell_integration_state = VT_SHELL_INTEG_STATE_PROMPT;
+                        Vt_shell_integration_begin_prompt(self);
                         break;
 
-                        /* COMMAND_START */
-                    case 'B': {
-                        RcPtr_VtCommand new_command        = RcPtr_new_VtCommand();
-                        *RcPtr_get_VtCommand(&new_command) = (VtCommand){
-                            .command              = NULL,
-                            .command_start_row    = self->cursor.row,
-                            .command_start_column = self->cursor.col,
-                            .state                = VT_COMMAND_STATE_TYPING,
-                        };
+                    /* COMMAND_START */
+                    case 'B':
+                        Vt_shell_integration_begin_command(self);
+                        break;
 
-                        for (VtCommand* c; (c = RcPtr_get_VtCommand(Vector_last_RcPtr_VtCommand(
-                                              &self->shell_commands))) &&
-                                           c->state != VT_COMMAND_STATE_COMPLETED;) {
-                            Vector_pop_RcPtr_VtCommand(&self->shell_commands);
-                        }
+                    /* COMMAND_EXECUTED */
+                    case 'C':
+                        Vt_shell_integration_begin_execution(self, false);
+                        break;
 
-                        Vector_push_RcPtr_VtCommand(&self->shell_commands, new_command);
-
-                        self->shell_integration_state = VT_SHELL_INTEG_STATE_COMMAND;
-                    } break;
-
-                        /* COMMAND_EXECUTED */
-                    case 'C': {
-                        RcPtr_VtCommand* cmd_ptr =
-                          Vector_last_RcPtr_VtCommand(&self->shell_commands);
-                        VtCommand* cmd = NULL;
-
-                        if (!cmd_ptr || !(cmd = RcPtr_get_VtCommand(cmd_ptr))) {
-                            self->shell_integration_state = VT_SHELL_INTEG_STATE_NONE;
-                            break;
-                        }
-                        if (cmd->command_start_row > self->cursor.row ||
-                            (cmd->command_start_row == self->cursor.row &&
-                             cmd->command_start_column >= self->cursor.col)) {
-                            self->shell_integration_state = VT_SHELL_INTEG_STATE_NONE;
-                            break;
-                        }
-
-                        cmd->state = VT_COMMAND_STATE_RUNNING;
-
-                        for (size_t i = cmd->command_start_row; i < self->cursor.row; ++i) {
-                            Vt_line_at(self, i)->mark_command_invoke = true;
-                        }
-
-                        Vt_cursor_line(self)->mark_command_output_start = true;
-                        RcPtr_new_shared_in_place_of_VtCommand(
-                          &Vt_cursor_line(self)->linked_command,
-                          cmd_ptr);
-
-                        cmd->output_rows.first    = self->cursor.row;
-                        cmd->execution_time.start = TimePoint_now();
-
-                        Vector_char command_string_builder;
-                        if (cmd->command_start_row == self->cursor.row - 1) {
-                            VtLine* ln              = Vt_line_at(self, cmd->command_start_row);
-                            ln->mark_command_invoke = true;
-                            command_string_builder  = VtLine_to_string(ln,
-                                                                      cmd->command_start_column,
-                                                                      self->cursor.col,
-                                                                      NULL);
-
-                            for (char* r; command_string_builder.size &&
-                                          (r = Vector_last_char(&command_string_builder)) &&
-                                          *r == ' ';) {
-                                Vector_pop_char(&command_string_builder);
-                            }
-
-                        } else {
-                            VtLine* ln              = Vt_line_at(self, cmd->command_start_row);
-                            ln->mark_command_invoke = true;
-                            command_string_builder  = VtLine_to_string(ln,
-                                                                      cmd->command_start_column,
-                                                                      Vt_col(self) - 1,
-                                                                      NULL);
-
-                            for (char* r; command_string_builder.size &&
-                                          (r = Vector_last_char(&command_string_builder)) &&
-                                          *r == ' ';) {
-                                Vector_pop_char(&command_string_builder);
-                            }
-
-                            Vector_push_char(&command_string_builder, '\n');
-
-                            for (size_t row = cmd->command_start_row + 1; row < self->cursor.row;
-                                 ++row) {
-                                ln                      = Vt_line_at(self, row);
-                                ln->mark_command_invoke = true;
-                                Vector_char tmp = VtLine_to_string(ln, 0, Vt_col(self), NULL);
-
-                                for (char* r; command_string_builder.size &&
-                                              (r = Vector_last_char(&command_string_builder)) &&
-                                              *r == ' ';) {
-                                    Vector_pop_char(&command_string_builder);
-                                }
-
-                                if (row != self->cursor.row - 1) {
-                                    Vector_push_char(&command_string_builder, '\n');
-                                }
-
-                                if (tmp.size) {
-                                    Vector_pushv_char(&command_string_builder,
-                                                      tmp.buf,
-                                                      tmp.size - 1);
-                                }
-                                Vector_destroy_char(&tmp);
-                            }
-                        }
-
-                        Vector_push_char(&command_string_builder, '\0');
-                        cmd->command = strdup(command_string_builder.buf);
-                        Vector_destroy_char(&command_string_builder);
-
-                        self->shell_integration_state = VT_SHELL_INTEG_STATE_OUTPUT;
-                    } break;
-
-                        /* COMMAND_FINISHED */
-                    case 'D': {
-                        RcPtr_VtCommand* cmd_ptr =
-                          Vector_last_RcPtr_VtCommand(&self->shell_commands);
-                        VtCommand* cmd = NULL;
-
-                        if (!cmd_ptr || !(cmd = RcPtr_get_VtCommand(cmd_ptr))) {
-                            self->shell_integration_state = VT_SHELL_INTEG_STATE_NONE;
-                            break;
-                        }
-
-                        cmd->state       = VT_COMMAND_STATE_COMPLETED;
-                        cmd->exit_status = strnlen(seq, 6) >= 6 ? atoi(seq + 6 /* 133;D; */) : 0;
-                        cmd->execution_time.end = TimePoint_now();
-                        cmd->output_rows.second = self->cursor.row;
-
-                        VtLine* ln = Vt_line_at(self, self->cursor.row - 1);
-
-                        if (ln) {
-                            ln->mark_command_output_end = true;
-
-                            bool minimized = CALL_FP(self->callbacks.on_minimized_state_requested,
-                                                     self->callbacks.user_data);
-
-                            LOG(
-                              "Vt::command_finished{ command: \'%s\' [%u:%zu], status: %d, output: "
-                              "%zu..%zu }\n",
-                              cmd->command,
-                              cmd->command_start_column,
-                              cmd->command_start_row,
-                              cmd->exit_status,
-                              cmd->output_rows.first,
-                              cmd->output_rows.second);
-
-                            CALL_FP(self->callbacks.on_urgency_set, self->callbacks.user_data);
-                            if (minimized) {
-                                char* tm_str =
-                                  TimeSpan_duration_string_approx(&cmd->execution_time);
-                                char* notification_title =
-                                  cmd->exit_status
-                                    ? asprintf("\'%s\' failed(%d), took %s",
-                                               cmd->command,
-                                               cmd->exit_status,
-                                               tm_str)
-                                    : asprintf("\'%s\' finished in %s", cmd->command, tm_str);
-
-                                Vector_char output = Vt_command_to_string(self, cmd, 1);
-
-                                if (output.size > 32) {
-                                    for (uint32_t i = 0; i < (output.size - 32); ++i) {
-                                        Vector_pop_char(&output);
-                                    }
-                                    Vector_pushv_char(&output, "…", strlen("…") + 1);
-                                }
-
-                                CALL_FP(self->callbacks.on_desktop_notification_sent,
-                                        self->callbacks.user_data,
-                                        notification_title,
-                                        output.buf);
-
-                                Vector_destroy_char(&output);
-                                free(notification_title);
-                                free(tm_str);
-                            }
-                        }
-
-                        self->shell_integration_state = VT_SHELL_INTEG_STATE_NONE;
-                    } break;
+                    /* COMMAND_FINISHED */
+                    case 'D':
+                        Vt_shell_integration_end_execution(
+                          self,
+                          strnlen(seq, 6) >= 6 ? seq + 6 : NULL /* 133;D; */);
+                        break;
 
                     default:
                         WRN("Invalid shell integration command\n");
@@ -4321,10 +4155,17 @@ static void Vt_handle_OSC(Vt* self, char c)
                                     NULL,
                                     tokens.buf[1].buf + 1);
                         } else if (tokens.size == 3) {
-                            CALL_FP(self->callbacks.on_desktop_notification_sent,
-                                    self->callbacks.user_data,
-                                    tokens.buf[1].buf + 1,
-                                    tokens.buf[2].buf + 1);
+                            if (!strcmp(tokens.buf[1].buf + 1, "Command completed")) {
+                                Vt_shell_integration_active_command_name_changed(self,
+                                                                                 tokens.buf[2].buf +
+                                                                                   1);
+                                Vt_shell_integration_end_execution(self, NULL);
+                            } else {
+                                CALL_FP(self->callbacks.on_desktop_notification_sent,
+                                        self->callbacks.user_data,
+                                        tokens.buf[1].buf + 1,
+                                        tokens.buf[2].buf + 1);
+                            }
                         } else {
                             WRN("Unexpected argument in OSC 777 \'%s\'\n", seq);
                         }
@@ -4332,16 +4173,24 @@ static void Vt_handle_OSC(Vt* self, char c)
                         WRN("Second argument to OSC 777 \'%s\' is not \'notify\'\n", seq);
                     }
                 } else {
-                    WRN("OSC 777 \'%s\' not enough arguments\n", seq);
-                }
+                    if (tokens.size) {
+                        if (!strcmp(tokens.buf[0].buf + 1, "precmd")) {
+                            Vt_shell_integration_begin_prompt(self);
+                            Vt_shell_integration_begin_command(self);
+                        } else if (!strcmp(tokens.buf[0].buf + 1, "preexec")) {
+                            Vt_shell_integration_begin_execution(self, true);
+                        } else {
+                            WRN("OSC 777 \'%s\' not enough arguments\n", seq);
+                        }
+                    }
 
-                Vector_destroy_Vector_char(&tokens);
+                    Vector_destroy_Vector_char(&tokens);
+                }
             } break;
 
             default:
                 WRN("Unknown OSC: %s\n", self->parser.active_sequence.buf);
         }
-
         Vector_destroy_char(&self->parser.active_sequence);
         self->parser.active_sequence = Vector_new_char();
         self->parser.state           = PARSER_STATE_LITERAL;
@@ -5170,17 +5019,17 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
 
                 /* Back Index (DECBI) (VT400)
                  *
-                 * This control function moves the cursor backward one column. If the cursor is at
-                 * the left margin, all screen data within the margins moves onecolumn to the right.
-                 * The column shifted past the right margin is lost
+                 * This control function moves the cursor backward one column. If the cursor is
+                 * at the left margin, all screen data within the margins moves onecolumn to the
+                 * right. The column shifted past the right margin is lost
                  */
                 case '6':
 
                 /* Forward Index (DECFI) (VT400)
                  *
-                 * This control function moves the cursor forward one column. If the cursor is at
-                 * the right margin, all screen data within the margins moves onecolumn to the left.
-                 * The column shifted past the left margin is lost.
+                 * This control function moves the cursor forward one column. If the cursor is
+                 *at the right margin, all screen data within the margins moves onecolumn to the
+                 *left. The column shifted past the left margin is lost.
                  **/
                 case '9':
                     STUB("DECBI/DECFI");
