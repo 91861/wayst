@@ -276,6 +276,10 @@ static bool find_font_cached()
     char family_name[512];
     char file_names[4][512];
 
+    if (unlikely(!settings.styled_fonts.size)) {
+        goto abort;
+    }
+
     for (StyledFontInfo* i = NULL; (i = Vector_iter_StyledFontInfo(&settings.styled_fonts, i));) {
         fscanf(file, "\n%c%511[^\n]", &type, family_name);
         for (uint_fast8_t j = 0; j < 4; ++j) {
@@ -312,32 +316,36 @@ static bool find_font_cached()
         fgetc(file); // skip \n
     }
 
-    for (UnstyledFontInfo* i = NULL;
-         (i = Vector_iter_UnstyledFontInfo(&settings.symbol_fonts, i));) {
-        fscanf(file, "\n%c%511[^\n]", &type, family_name);
-        if (type == 'Y' && !strcmp(family_name, i->family_name) &&
-            (file_names[0][0] != '-' || file_names[0][1] != 0)) {
-            fscanf(file, "\t%511[^\n]", file_names[0]);
-            i->file_name              = strdup(file_names[0]);
-            settings.has_symbol_fonts = true;
-        } else {
-            goto abort;
+    if (settings.symbol_fonts.size) {
+        for (UnstyledFontInfo* i = NULL;
+             (i = Vector_iter_UnstyledFontInfo(&settings.symbol_fonts, i));) {
+            fscanf(file, "\n%c%511[^\n]", &type, family_name);
+            if (type == 'Y' && !strcmp(family_name, i->family_name) &&
+                (file_names[0][0] != '-' || file_names[0][1] != 0)) {
+                fscanf(file, "\t%511[^\n]", file_names[0]);
+                i->file_name              = strdup(file_names[0]);
+                settings.has_symbol_fonts = true;
+            } else {
+                goto abort;
+            }
+            fgetc(file); // skip \n
         }
-        fgetc(file); // skip \n
     }
 
-    for (UnstyledFontInfo* i = NULL;
-         (i = Vector_iter_UnstyledFontInfo(&settings.color_fonts, i));) {
-        fscanf(file, "\n%c%511[^\n]", &type, family_name);
-        if (type == 'C' && !strcmp(family_name, i->family_name) &&
-            (file_names[0][0] != '-' || file_names[0][1] != 0)) {
-            fscanf(file, "\t%511[^\n]", file_names[0]);
-            i->file_name             = strdup(file_names[0]);
-            settings.has_color_fonts = true;
-        } else {
-            goto abort;
+    if (settings.color_fonts.size) {
+        for (UnstyledFontInfo* i = NULL;
+             (i = Vector_iter_UnstyledFontInfo(&settings.color_fonts, i));) {
+            fscanf(file, "\n%c%511[^\n]", &type, family_name);
+            if (type == 'C' && !strcmp(family_name, i->family_name) &&
+                (file_names[0][0] != '-' || file_names[0][1] != 0)) {
+                fscanf(file, "\t%511[^\n]", file_names[0]);
+                i->file_name             = strdup(file_names[0]);
+                settings.has_color_fonts = true;
+            } else {
+                goto abort;
+            }
+            fgetc(file); // skip \n
         }
-        fgetc(file); // skip \n
     }
 
     fclose(file);
@@ -1675,8 +1683,10 @@ static void handle_config_option(const char* restrict key, const char* restrict 
 static void find_config_path()
 {
     AString retval = AString_new_copy(&settings.config_path);
-    if (retval.str)
+
+    if (retval.str) {
         return;
+    }
 
     char* tmp = NULL;
     if ((tmp = getenv("XDG_CONFIG_HOME"))) {

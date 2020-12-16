@@ -282,6 +282,14 @@ FreetypeStyledFamily FreetypeStyledFamily_new(const char*                    reg
 {
     ASSERT(regular_file, "regular file not null");
 
+    LOG("ft::StyledFamily_new{ r: %s, b: %s, i: %s, bi: %s, so: %d, ot: %d }\n",
+        regular_file,
+        opt_bold_file,
+        opt_italic_file,
+        opt_bold_italic_file,
+        size_offset,
+        output_type);
+
     FreetypeStyledFamily self = { .faces            = Vector_new_FreetypeFace(),
                                   .regular          = NULL,
                                   .bold             = NULL,
@@ -341,6 +349,7 @@ void FreetypeStyledFamily_load(Freetype*             freetype,
     for (FreetypeFace* i = NULL; (i = Vector_iter_FreetypeFace(&self->faces, i));) {
         FreetypeFace_load(freetype, i, size + i->size_offset, dpi, self->output_type, true);
     }
+
     self->output_type = Vector_first_FreetypeFace(&self->faces)->output_type;
 }
 
