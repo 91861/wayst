@@ -109,7 +109,7 @@ fg-color = "#c7eeff"
 bg-color = "#000000ee"
 unfocused-tint = "#00000033"
 
-no-flash = true
+visual-bell = none
 
 term = "xterm-256color"
 
