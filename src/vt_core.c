@@ -480,7 +480,7 @@ Vector_char Vt_region_to_string(Vt* self, size_t begin_line, size_t end_line)
     Vector_char tmp, ret = Vt_line_to_string(self,
                                              begin_line,
                                              0,
-                                             Vt_col(self) - 1,
+                                             Vt_col(self),
                                              Vt_line_at(self, begin_line)->was_reflown ? "" : "\n");
     Vector_pop_char(&ret);
     for (size_t i = begin_line + 1; i < end_line; ++i) {
@@ -5270,7 +5270,7 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
                 case '`':
                 /* Enable Manual Input (EMI) */
                 case 'b':
-                    WRN("Manual input not implemented\n");
+                    STUB("EMI/DMI");
                     self->parser.state = PARSER_STATE_LITERAL;
                     break;
 
@@ -5494,7 +5494,7 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
             break;
 
         case PARSER_STATE_CHARSET:
-            WRN("Unimplemented character set select command\n");
+            STUB("character set select command");
             self->parser.state = PARSER_STATE_LITERAL;
             break;
 

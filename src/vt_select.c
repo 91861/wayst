@@ -3,7 +3,6 @@
 #include "vt.h"
 #include "vt_private.h"
 
-
 /**
  * initialize selection region to cell by clicked pixel */
 void Vt_select_init(Vt* self, enum SelectMode mode, int32_t x, int32_t y)
@@ -191,11 +190,11 @@ Vector_char Vt_select_region_to_string(Vt* self)
 
     if (self->selection.mode == SELECT_MODE_NORMAL) {
         char* term = self->lines.buf[begin_line + 1].rejoinable ? "" : "\n";
-        ret        = Vt_line_to_string(self, begin_line, begin_char_idx, 0, term);
+        ret        = Vt_line_to_string(self, begin_line, begin_char_idx, Vt_col(self), term);
         Vector_pop_char(&ret);
         for (size_t i = begin_line + 1; i < end_line; ++i) {
             char* term_mid = self->lines.buf[i + 1].rejoinable ? "" : "\n";
-            tmp            = Vt_line_to_string(self, i, 0, 0, term_mid);
+            tmp            = Vt_line_to_string(self, i, 0, Vt_col(self), term_mid);
             Vector_pushv_char(&ret, tmp.buf, tmp.size - 1);
             Vector_destroy_char(&tmp);
         }
