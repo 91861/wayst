@@ -53,6 +53,9 @@ DEF_PAIR(GLuint);
 
 #define IMG_VIEW_PROXY_INDEX_VBO_ID 0
 
+#define SIXEL_PROXY_INDEX_TEXTURE_ID 0
+#define SIXEL_PROXY_INDEX_VBO_ID     1
+
 #include "gl_exts/glext.h"
 
 static PFNGLBUFFERSUBDATAARBPROC        glBufferSubData;
@@ -354,6 +357,7 @@ void          GfxOpenGL21_reload_font(Gfx* self);
 void          GfxOpenGL21_destroy_proxy(Gfx* self, uint32_t* proxy);
 void          GfxOpenGL21_destroy_image_proxy(Gfx* self, uint32_t* proxy);
 void          GfxOpenGL21_destroy_image_view_proxy(Gfx* self, uint32_t* proxy);
+void          GfxOpenGL21_destroy_sixel_proxy(Gfx* self, uint32_t* proxy);
 
 static struct IGfx gfx_interface_opengl21 = {
     .draw                        = GfxOpenGL21_draw,
@@ -370,6 +374,7 @@ static struct IGfx gfx_interface_opengl21 = {
     .destroy_proxy               = GfxOpenGL21_destroy_proxy,
     .destroy_image_proxy         = GfxOpenGL21_destroy_image_proxy,
     .destroy_image_view_proxy    = GfxOpenGL21_destroy_image_view_proxy,
+    .destroy_sixel_proxy         = GfxOpenGL21_destroy_sixel_proxy,
 };
 
 Gfx* Gfx_new_OpenGL21(Freetype* freetype)
@@ -753,14 +758,19 @@ __attribute__((cold)) GlyphAtlasEntry* GlyphAtlas_get_combined(GfxOpenGL21* gfx,
 
     for (uint32_t i = 0; i < VT_RUNE_MAX_COMBINE + 1; ++i) {
         char32_t c = i ? rune->combine[i - 1] : rune->code;
-        if (!c)
+        if (!c) {
             break;
-        if (i)
+        }
+
+        if (i) {
             output = Freetype_load_and_render_glyph(gfx->freetype, c, style);
+        }
+
         if (!output) {
             WRN("Missing combining glyph u+%X\n", c);
             continue;
         }
+
         GLuint tmp_tex;
         glGenTextures(1, &tmp_tex);
         glBindTexture(GL_TEXTURE_2D, tmp_tex);
@@ -807,9 +817,11 @@ __attribute__((cold)) GlyphAtlasEntry* GlyphAtlas_get_combined(GfxOpenGL21* gfx,
     glUseProgram(old_shader);
     glBindFramebuffer(GL_FRAMEBUFFER, old_fb);
     glViewport(old_viewport[0], old_viewport[1], old_viewport[2], old_viewport[3]);
+
     if (!old_depth_test) {
         glDisable(GL_DEPTH_TEST);
     }
+
     if (old_scissor_test) {
         glEnable(GL_SCISSOR_TEST);
     }
@@ -1568,8 +1580,6 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_underline_ra
                 L_SET_BOUNDS_BEGIN(each_rune->overline, 3);
                 L_SET_BOUNDS_BEGIN(each_rune->curlyunderline, 4);
                 L_SET_BOUNDS_BEGIN(each_rune->hyperlink_idx, 5);
-            }
-            if (each_rune != vt_line->data.buf + range.second) {
                 drawing[0] = each_rune->underlined;
                 drawing[1] = each_rune->doubleunderline;
                 drawing[2] = each_rune->strikethrough;
@@ -1579,6 +1589,7 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_underline_ra
             } else {
                 memset(drawing, false, sizeof(drawing));
             }
+
             line_color = nc;
         }
     }
@@ -2266,8 +2277,10 @@ static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const
             clr_bg =
               ColorRGB_from_RGBA(Vt_rune_bg(vt, &vt->lines.buf[ui->cursor->row].data.buf[col]));
             cursor_char = &vt->lines.buf[ui->cursor->row].data.buf[col];
-        } else
+        } else {
             clr = vt->colors.fg;
+        }
+
         if (!filled_block) {
             Shader_use(&gfx->line_shader);
             glBindTexture(GL_TEXTURE_2D, 0);
@@ -2376,6 +2389,7 @@ static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const
                 glDrawArrays(GL_QUADS, 0, 4);
             }
         }
+
         glDisable(GL_SCISSOR_TEST);
         glDisable(GL_BLEND);
     }
@@ -2440,6 +2454,7 @@ __attribute__((cold)) static void GfxOpenGL21_draw_unicode_input(GfxOpenGL21* gf
         }
         glDrawArrays(GL_QUADS, 0, 4);
     }
+
     for (size_t i = 0; i < vt->unicode_input.buffer.size; ++i) {
         ++col;
         glBindBuffer(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
@@ -2448,6 +2463,7 @@ __attribute__((cold)) static void GfxOpenGL21_draw_unicode_input(GfxOpenGL21* gf
             .combine = { 0 },
             .style   = VT_RUNE_NORMAL,
         };
+
         GlyphAtlasEntry* entry = GlyphAtlas_get(gfx, &gfx->glyph_atlas, &rune);
         float            h     = (float)entry->height * gfx->sy;
         float            w     = (float)entry->width * gfx->sx;
@@ -2468,6 +2484,7 @@ __attribute__((cold)) static void GfxOpenGL21_draw_unicode_input(GfxOpenGL21* gf
         glBindBuffer(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
         size_t newsize = sizeof(buf);
         ARRAY_BUFFER_SUB_OR_SWAP(buf, gfx->flex_vbo.size, newsize);
+
         switch (page->texture_format) {
             case TEX_FMT_RGB: {
                 glUseProgram(gfx->font_shader.id);
@@ -2513,6 +2530,7 @@ static void GfxOpenGL21_draw_scrollbar(GfxOpenGL21* self, const Scrollbar* scrol
         1.0f - width, 1.0f - begin,          1.0f,         1.0f - begin,
         1.0f,         1.0f - length - begin, 1.0f - width, 1.0f - length - begin,
     };
+
     glBindBuffer(GL_ARRAY_BUFFER, self->flex_vbo.vbo);
     ARRAY_BUFFER_SUB_OR_SWAP(vertex_data, self->flex_vbo.size, (sizeof vertex_data));
     glVertexAttribPointer(self->solid_fill_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
@@ -2587,9 +2605,11 @@ static void GfxOpenGL21_draw_overlays(GfxOpenGL21* self, const Vt* vt, const Ui*
     } else {
         GfxOpenGL21_draw_cursor(self, vt, ui);
     }
+
     if (ui->scrollbar.visible) {
         GfxOpenGL21_draw_scrollbar(self, &ui->scrollbar);
     }
+
     if (ui->hovered_link.active) {
         GfxOpenGL21_draw_hovered_link(self, vt, ui);
     }
@@ -2632,8 +2652,10 @@ static void GfxOpenGL21_draw_tint(GfxOpenGL21* self)
 
 static void GfxOpenGL21_load_image(GfxOpenGL21* self, VtImageSurface* surface)
 {
-    if (surface->state != VT_IMAGE_SURFACE_READY || surface->proxy.data[IMG_PROXY_INDEX_TEXTURE_ID])
+    if (surface->state != VT_IMAGE_SURFACE_READY ||
+        surface->proxy.data[IMG_PROXY_INDEX_TEXTURE_ID]) {
         return;
+    }
 
     GLuint tex = 0;
     glGenTextures(1, &tex);
@@ -2658,8 +2680,9 @@ static void GfxOpenGL21_load_image(GfxOpenGL21* self, VtImageSurface* surface)
 
 static void GfxOpenGL21_load_image_view(GfxOpenGL21* self, VtImageSurfaceView* view)
 {
-    if (view->proxy.data[IMG_VIEW_PROXY_INDEX_VBO_ID])
+    if (view->proxy.data[IMG_VIEW_PROXY_INDEX_VBO_ID]) {
         return;
+    }
 
     VtImageSurface* surf = RcPtr_get_VtImageSurface(&view->source_image_surface);
 
@@ -2724,12 +2747,86 @@ static void GfxOpenGL21_draw_image_view(GfxOpenGL21* self, const Vt* vt, VtImage
     glDrawArrays(GL_QUADS, 0, 4);
 }
 
+void GfxOpenGL21_load_sixel(GfxOpenGL21* self, Vt* vt, VtSixelSurface* srf)
+{
+    GLuint tex = 0;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D,
+                 0,
+                 GL_RGB,
+                 srf->width,
+                 srf->height,
+                 0,
+                 GL_RGB,
+                 GL_UNSIGNED_BYTE,
+                 srf->fragments.buf);
+    srf->proxy.data[SIXEL_PROXY_INDEX_TEXTURE_ID] = tex;
+
+    float w                = self->sx * srf->width;
+    float h                = self->sy * srf->height;
+    float vertex_data[][4] = {
+        { -1.0f, 1.0f - h, 0.0f, 1.0f },
+        { -1.0f + w, 1.0f - h, 1.0f, 1.0f },
+        { -1.0f + w, 1, 1.0f, 0.0f },
+        { -1.0f, 1, 0.0f, 0.0f },
+    };
+
+    GLuint vbo;
+    glGenBuffers(1, &vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_data), vertex_data, GL_STATIC_DRAW);
+    srf->proxy.data[SIXEL_PROXY_INDEX_VBO_ID] = vbo;
+}
+
+void GfxOpenGL21_draw_sixel(GfxOpenGL21* self, Vt* vt, VtSixelSurface* srf)
+{
+    if (unlikely(!srf->proxy.data[SIXEL_PROXY_INDEX_TEXTURE_ID])) {
+        GfxOpenGL21_load_sixel(self, vt, srf);
+    }
+    glDisable(GL_BLEND);
+    glDisable(GL_SCISSOR_TEST);
+    Shader_use(&self->image_shader);
+    glBindTexture(GL_TEXTURE_2D, srf->proxy.data[SIXEL_PROXY_INDEX_TEXTURE_ID]);
+
+    int64_t y_index  = srf->anchor_global_index - Vt_visual_top_line(vt);
+    float   offset_x = self->sx * (srf->anchor_cell_idx * self->glyph_width_pixels);
+    float   offset_y = -self->sy * (y_index * self->line_height_pixels);
+
+    glBindBuffer(GL_ARRAY_BUFFER, srf->proxy.data[SIXEL_PROXY_INDEX_VBO_ID]);
+    glVertexAttribPointer(self->image_shader.attribs->location, 4, GL_FLOAT, GL_FALSE, 0, 0);
+    glUniform2f(self->image_shader.uniforms[1].location, offset_x, offset_y);
+    glDrawArrays(GL_QUADS, 0, 4);
+}
+
+void GfxOpenGL21_draw_sixels(GfxOpenGL21* self, Vt* vt)
+{
+    for (RcPtr_VtSixelSurface* i = NULL;
+         (i = Vector_iter_RcPtr_VtSixelSurface(&vt->scrolled_sixels, i));) {
+        VtSixelSurface* ptr = RcPtr_get_VtSixelSurface(i);
+        if (!ptr) {
+            continue;
+        }
+
+        uint32_t six_ycells = Vt_pixels_to_cells(vt, 0, ptr->height).second + 1;
+        if (ptr->anchor_global_index < Vt_visual_bottom_line(vt) &&
+            ptr->anchor_global_index + six_ycells > Vt_visual_top_line(vt)) {
+            GfxOpenGL21_draw_sixel(self, vt, ptr);
+        }
+    }
+}
+
 void GfxOpenGL21_draw_images(GfxOpenGL21* self, const Vt* vt, bool up_to_zero_z)
 {
     for (VtLine* l = NULL; (l = Vector_iter_VtLine((Vector_VtLine*)&vt->lines, l));) {
-        if (l->images) {
+        if (l->graphic_attachments && l->graphic_attachments->images) {
             for (RcPtr_VtImageSurfaceView* i = NULL;
-                 (i = Vector_iter_RcPtr_VtImageSurfaceView(l->images, i));) {
+                 (i = Vector_iter_RcPtr_VtImageSurfaceView(l->graphic_attachments->images, i));) {
                 VtImageSurfaceView* view = RcPtr_get_VtImageSurfaceView(i);
                 VtImageSurface*     surf = RcPtr_get_VtImageSurface(&view->source_image_surface);
                 if (surf->state == VT_IMAGE_SURFACE_READY &&
@@ -2802,6 +2899,7 @@ void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
     }
 
     GfxOpenGL21_draw_images(gfx, vt, false);
+    GfxOpenGL21_draw_sixels(gfx, (Vt*)vt);
     GfxOpenGL21_draw_overlays(gfx, vt, ui);
 
     if (gfx->flash_fraction < 1.0f && gfx->flash_fraction > 0.0f) {
@@ -2832,23 +2930,6 @@ void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
         }
         repaint_indicator_visible = !repaint_indicator_visible;
     }
-
-    /* if (gfx->glyph_atlas.current_rgb_page) { */
-    /*     glEnable(GL_TEXTURE_2D); */
-    /*     glUseProgram(0); */
-    /*     glBindTexture(GL_TEXTURE_2D, gfx->glyph_atlas.current_rgb_page->texture_id); */
-    /*     glBegin(GL_QUADS); */
-    /*     glColor4f(1, 1, 1, 1); */
-    /*     glTexCoord2f(0, 1); */
-    /*     glVertex2f(-0.9, -0.9); */
-    /*     glTexCoord2f(1, 1); */
-    /*     glVertex2f(0.9, -0.9); */
-    /*     glTexCoord2f(1, 0); */
-    /*     glVertex2f(0.9, 0.9); */
-    /*     glTexCoord2f(0, 0); */
-    /*     glVertex2f(-0.9, 0.9); */
-    /*     glEnd(); */
-    /* } */
 }
 
 void GfxOpenGL21_destroy_recycled(GfxOpenGL21* self)
@@ -2907,8 +2988,18 @@ Pair_GLuint GfxOpenGL21_pop_recycled(GfxOpenGL21* self)
 void GfxOpenGL21_destroy_image_proxy(Gfx* self, uint32_t* proxy)
 {
     if (proxy[IMG_PROXY_INDEX_TEXTURE_ID]) {
-        glDeleteTextures(1, proxy);
+        glDeleteTextures(1, &proxy[IMG_PROXY_INDEX_TEXTURE_ID]);
         proxy[IMG_PROXY_INDEX_TEXTURE_ID] = 0;
+    }
+}
+
+void GfxOpenGL21_destroy_sixel_proxy(Gfx* self, uint32_t* proxy)
+{
+    if (proxy[SIXEL_PROXY_INDEX_TEXTURE_ID]) {
+        glDeleteTextures(1, &proxy[SIXEL_PROXY_INDEX_TEXTURE_ID]);
+        glDeleteBuffers(1, &proxy[SIXEL_PROXY_INDEX_VBO_ID]);
+        proxy[SIXEL_PROXY_INDEX_TEXTURE_ID] = 0;
+        proxy[SIXEL_PROXY_INDEX_VBO_ID]     = 0;
     }
 }
 

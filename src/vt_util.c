@@ -198,7 +198,7 @@ Vector_char rune_vec_to_string(Vector_VtRune* line, size_t begin, size_t end, co
 
 void generate_color_palette_entry(ColorRGB* color, int16_t idx)
 {
-    ASSERT(idx >= 0, "index not negative");
+    ASSERT(idx >= 0 && idx <= 256, "index in range");
     ASSERT(color, "got color*");
 
     if (idx < 16) {
@@ -697,11 +697,13 @@ __attribute__((cold)) void Vt_dump_info(Vt* self)
             }
         }
 
-        if (self->lines.buf[i].images) {
-            for (uint16_t j = 0; j < self->lines.buf[i].images->size; ++j) {
-                VtLine*             ln  = &self->lines.buf[i];
-                VtImageSurfaceView* vu  = RcPtr_get_VtImageSurfaceView(&ln->images->buf[j]);
-                VtImageSurface*     src = RcPtr_get_VtImageSurface(&vu->source_image_surface);
+        if (self->lines.buf[i].graphic_attachments &&
+            self->lines.buf[i].graphic_attachments->images) {
+            for (uint16_t j = 0; j < self->lines.buf[i].graphic_attachments->images->size; ++j) {
+                VtLine*             ln = &self->lines.buf[i];
+                VtImageSurfaceView* vu =
+                  RcPtr_get_VtImageSurfaceView(&ln->graphic_attachments->images->buf[j]);
+                VtImageSurface* src = RcPtr_get_VtImageSurface(&vu->source_image_surface);
                 printf("              image anchor[%u] id: %u %ux%u\n",
                        j,
                        src->id,

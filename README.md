@@ -129,7 +129,8 @@ bind-key-paste=Ctrl+Shift+p
 ```
 
 #### Shell integration
-Wayst can use [iTerm2 shell integration sequences](https://iterm2.com/documentation-shell-integration.html) to track command history.
+Wayst can use [iTerm2 shell integration sequences](https://iterm2.com/documentation-shell-integration.html) or
+[VTE prompt notifications](https://bugzilla.gnome.org/show_bug.cgi?id=711059) to track command history.
 
 #### Default Keybindings
 Keys|Action|

@@ -181,6 +181,12 @@ DEF_VECTOR(Vector_VtRune, Vector_destroy_VtRune);
 
 DEF_VECTOR(Vector_char, Vector_destroy_char);
 
+typedef struct
+{
+    ColorRGB palette[256];
+    ColorRGB active_color;
+} graphic_color_registers_t;
+
 typedef enum
 {
     VT_COMMAND_STATE_TYPING,
@@ -192,10 +198,10 @@ typedef struct
 {
     char*              command;
     size_t             command_start_row;
-    uint16_t           command_start_column;
     Pair_size_t        output_rows;
     TimeSpan           execution_time;
     int                exit_status;
+    uint16_t           command_start_column;
     vt_command_state_t state;
     bool               is_vte_protocol : 1;
 } VtCommand;
@@ -273,6 +279,27 @@ DEF_RC_PTR_DA(VtImageSurfaceView, VtImageSurfaceView_destroy, void);
 
 DEF_VECTOR(RcPtr_VtImageSurfaceView, RcPtr_destroy_VtImageSurfaceView);
 
+typedef struct
+{
+    uint32_t data[4];
+} VtSixelSurfaceProxy;
+
+typedef struct
+{
+    size_t   anchor_global_index;
+    uint16_t anchor_cell_idx;
+
+    uint32_t            width, height;
+    VtSixelSurfaceProxy proxy;
+    Vector_uint8_t      fragments;
+} VtSixelSurface;
+
+static void VtSixelSurface_destroy(void* _vt, VtSixelSurface* self);
+
+DEF_VECTOR_DA(VtSixelSurface, VtSixelSurface_destroy, void);
+DEF_RC_PTR_DA(VtSixelSurface, VtSixelSurface_destroy, void);
+DEF_VECTOR(RcPtr_VtSixelSurface, RcPtr_destroy_VtSixelSurface);
+
 /**
  * represents a clickable range of text linked to a URL */
 typedef struct
@@ -295,6 +322,27 @@ typedef struct
 
 typedef struct
 {
+    Vector_RcPtr_VtImageSurfaceView* images;
+    Vector_RcPtr_VtSixelSurface*     sixels;
+} VtGraphicLineAttachments;
+
+static void VtGraphicLineAttachments_destroy(VtGraphicLineAttachments* self)
+{
+    if (self->images) {
+        Vector_destroy_RcPtr_VtImageSurfaceView(self->images);
+        free(self->images);
+        self->images = NULL;
+    }
+
+    if (self->sixels) {
+        Vector_destroy_RcPtr_VtSixelSurface(self->sixels);
+        free(self->sixels);
+        self->sixels = NULL;
+    }
+}
+
+typedef struct
+{
     /* Characters */
     Vector_VtRune data;
 
@@ -304,7 +352,8 @@ typedef struct
     /* Clickable link adresses */
     Vector_VtUri* links;
 
-    Vector_RcPtr_VtImageSurfaceView* images;
+    /* Images attached to this line */
+    VtGraphicLineAttachments* graphic_attachments;
 
     /* Ref to command info if this is an output/invocation of a shell command */
     RcPtr_VtCommand linked_command;
@@ -373,6 +422,21 @@ static inline void VtLine_destroy(void* vt_, VtLine* self);
 
 DEF_VECTOR_DA(VtLine, VtLine_destroy, void);
 
+/* typedef struct */
+/* { */
+/*     Vector_VtLine                   lines; */
+/*     Vector_RcPtr_VtImageSurfaceView image_views; */
+/*     Vector_RcPtr_VtSixelSurface     scrolled_sixels; */
+/*     // TODO: Vector_VtSixelSurface           static_sixels; */
+/* } VtScreenBuffer; */
+
+/* static void VtScreenBuffer_destroy(VtScreenBuffer* self) */
+/* { */
+/*     Vector_destroy_VtLine(&self->lines); */
+/*     Vector_destroy_RcPtr_VtImageSurfaceView(&self->image_views); */
+/*     Vector_destroy_RcPtr_VtSixelSurface(&self->scrolled_sixels); */
+/* } */
+
 typedef struct
 {
     struct vt_callbacks_t
@@ -407,6 +471,9 @@ typedef struct
         void (*destroy_proxy)(void*, VtLineProxy*);
         void (*destroy_image_proxy)(void*, VtImageSurfaceProxy*);
         void (*destroy_image_view_proxy)(void*, VtImageSurfaceViewProxy*);
+        void (*destroy_sixel_proxy)(void*, VtSixelSurfaceProxy*);
+
+        void (*immediate_pty_write)(void*, char*, size_t);
     } callbacks;
 
     uint32_t last_click_x;
@@ -481,6 +548,7 @@ typedef struct
         bool      in_mb_seq;
         mbstate_t input_mbstate;
 
+        // TODO: SGR stack
         VtRune char_state; // records currently selected character properties
 
         Vector_char active_sequence;
@@ -526,7 +594,8 @@ typedef struct
 
     RcPtr_VtImageSurface            manipulated_image;
     Vector_RcPtr_VtImageSurface     images;
-    Vector_RcPtr_VtImageSurfaceView image_views;
+    Vector_RcPtr_VtImageSurfaceView image_views, alt_image_views;
+    Vector_RcPtr_VtSixelSurface     scrolled_sixels, alt_scrolled_sixels;
 
     Vector_RcPtr_VtCommand shell_commands;
 
@@ -560,6 +629,9 @@ typedef struct
         } highlight;
 
         ColorRGB palette_256[256];
+
+        graphic_color_registers_t global_graphic_color_registers;
+
     } colors;
 
     /**
@@ -649,6 +721,9 @@ typedef struct
          * is exited, the text cursor does not change from the position it was in when sixel mode
          * was entered. */
         uint8_t sixel_scrolling : 1;
+
+        /* Use private color registers for each sixel graphic */
+        uint8_t sixel_private_color_registers : 1;
 
         /* Sixel scrolling leaves cursor to right of graphic. */
         uint8_t sixel_scrolling_move_cursor_right : 1;
@@ -753,16 +828,28 @@ static ColorRGB Vt_rune_ln_clr(const Vt* self, const VtRune* rune)
 static inline void VtLine_destroy(void* vt_, VtLine* self)
 {
     Vt* vt = vt_;
-    if (self->links) {
+    if (unlikely(self->links)) {
         Vector_destroy_VtUri(self->links);
         free(self->links);
         self->links = NULL;
     }
-    if (self->images) {
-        Vector_destroy_RcPtr_VtImageSurfaceView(self->images);
-        free(self->images);
-        self->images = NULL;
+
+    if (unlikely(self->graphic_attachments)) {
+        if (self->graphic_attachments->images) {
+            Vector_destroy_RcPtr_VtImageSurfaceView(self->graphic_attachments->images);
+            free(self->graphic_attachments->images);
+            /* self->graphic_attachments->images = NULL; */
+        }
+        if (self->graphic_attachments->sixels) {
+            Vector_destroy_RcPtr_VtSixelSurface(self->graphic_attachments->sixels);
+            free(self->graphic_attachments->sixels);
+            /* self->graphic_attachments->sixels = NULL; */
+        }
+
+        free(self->graphic_attachments);
+        self->graphic_attachments = NULL;
     }
+
     CALL_FP(vt->callbacks.destroy_proxy, vt->callbacks.user_data, &self->proxy);
     Vector_destroy_VtRune(&self->data);
     RcPtr_destroy_VtCommand(&self->linked_command);
@@ -782,6 +869,13 @@ static void VtImageSurfaceView_destroy(void* vt_, VtImageSurfaceView* self)
     Vt* vt = vt_;
     RcPtr_destroy_VtImageSurface(&self->source_image_surface);
     CALL_FP(vt->callbacks.destroy_image_view_proxy, vt->callbacks.user_data, &self->proxy);
+}
+
+static void VtSixelSurface_destroy(void* _vt, VtSixelSurface* self)
+{
+    Vt* vt = _vt;
+    Vector_destroy_uint8_t(&self->fragments);
+    CALL_FP(vt->callbacks.destroy_sixel_proxy, vt->callbacks.user_data, &self->proxy);
 }
 
 static uint16_t VtLine_add_link(VtLine* self, const char* link)

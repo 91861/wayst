@@ -1,12 +1,16 @@
 /* See LICENSE for license information. */
 
 /**
- * App links Vt, Monitor, Window, Gfx modules together and deals with ui
+ * App links Vt, Monitor, Window, Gfx modules together and deals with updating ui
  *
  * TODO:
  * - It makes more sense for the unicode input prompt to be here
- * - Move flash animations here
+ * - Move bell animations here
+ * - Some way of dealing with multiple timers that set poll timeout
  * - Multiple vt instacnes within the same application
+ * - Move ui updates to ui.c
+ * - vt.size != window.size, because tabbar/splits, maybe wrap Vt in a VtWidget:IWidget class? Then
+ *   we can add a SpliterWidget:IWidget nesting other widgets and forwarding mouse/kbd events etc.
  */
 
 #define _GNU_SOURCE
@@ -61,6 +65,7 @@ typedef struct
 
     bool       swap_performed;
     TimePoint* closest_pending_wakeup;
+    TimePoint  interpreter_start_time;
 
     bool exit;
 
@@ -219,16 +224,6 @@ static void App_run(App* self)
 
         if (Monitor_are_window_system_events_pending(&self->monitor)) {
             Window_events(self->win);
-            char*        buf;
-            size_t       len;
-            Vector_char* out = Vt_get_output(&self->vt, PIPE_BUF - self->written_bytes, &buf, &len);
-            if (out) {
-                if (out->size) {
-                    Monitor_write(&self->monitor, out->buf, out->size);
-                }
-            } else if (len) {
-                Monitor_write(&self->monitor, buf, len);
-            }
         }
 
         TimePoint* pending_window_timer = Window_process_timers(self->win);
@@ -236,11 +231,15 @@ static void App_run(App* self)
             self->closest_pending_wakeup = pending_window_timer;
         }
 
-        ssize_t bytes = 0;
+        ssize_t bytes                = 0;
+        self->interpreter_start_time = TimePoint_now();
         do {
             if (unlikely(settings.debug_slow)) {
                 usleep(5000);
                 App_notify_content_change(self);
+            } else if (unlikely(TimePoint_is_ms_ahead(TimePoint_now()) >
+                                settings.pty_chunk_timeout_ms)) {
+                break;
             }
 
             self->written_bytes = 0;
@@ -249,8 +248,12 @@ static void App_run(App* self)
             if (bytes > 0) {
                 Vt_interpret(&self->vt, self->monitor.input_buffer, bytes);
                 Gfx_notify_action(self->gfx);
-            } else if (bytes < 0) {
+            } else {
                 break;
+            }
+
+            if (settings.pty_chunk_wait_delay_ns) {
+                usleep(settings.pty_chunk_wait_delay_ns);
             }
         } while (bytes && likely(!settings.debug_slow));
 
@@ -304,6 +307,12 @@ static void App_run(App* self)
     Window_destroy(self->win);
     Vector_destroy_char(&self->ksm_input_buf);
     free(self->hostname);
+}
+
+static void App_immediate_write_pty(void* self, char* buf, size_t size)
+{
+    App* app = self;
+    Monitor_write(&app->monitor, buf, size);
 }
 
 /* Whenever some other application sets primary selection while we are out of focus, upon focus gain
@@ -1534,6 +1543,12 @@ static void App_destroy_image_proxy_handler(void* self, VtImageSurfaceProxy* pro
     Gfx_destroy_image_proxy(app->gfx, proxy->data);
 }
 
+static void App_destroy_sixel_proxy_handler(void* self, VtSixelSurfaceProxy* proxy)
+{
+    App* app = self;
+    Gfx_destroy_sixel_proxy(app->gfx, proxy->data);
+}
+
 static void App_destroy_image_view_proxy_handler(void* self, VtImageSurfaceViewProxy* proxy)
 {
     App* app = self;
@@ -1674,7 +1689,9 @@ static void App_set_callbacks(App* self)
     self->vt.callbacks.destroy_proxy                       = App_destroy_proxy_handler;
     self->vt.callbacks.destroy_image_proxy                 = App_destroy_image_proxy_handler;
     self->vt.callbacks.destroy_image_view_proxy            = App_destroy_image_view_proxy_handler;
+    self->vt.callbacks.destroy_sixel_proxy                 = App_destroy_sixel_proxy_handler;
     self->vt.callbacks.on_select_end                       = App_selection_end_handler;
+    self->vt.callbacks.immediate_pty_write                 = App_immediate_write_pty;
 
     self->win->callbacks.user_data               = self;
     self->win->callbacks.key_handler             = App_key_handler;

@@ -251,6 +251,9 @@ typedef struct
     bool defer_font_loading;
     bool flush_ft_cache;
 
+    uint32_t pty_chunk_wait_delay_ns;
+    uint32_t pty_chunk_timeout_ms;
+
 } Settings;
 
 extern Settings settings;

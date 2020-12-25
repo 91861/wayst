@@ -10,10 +10,14 @@ static inline void Vt_move_cursor(Vt* self, uint16_t column, uint16_t rows);
 void Vt_output(Vt* self, const char* buf, size_t len);
 
 #define Vt_output_formated(vt, fmt, ...)                                                           \
-    char _tmp[64];                                                                                 \
+    char _tmp[256];                                                                                \
     int  _len = snprintf(_tmp, sizeof(_tmp), fmt, __VA_ARGS__);                                    \
     Vt_output((vt), _tmp, _len);
 
+#define Vt_immediate_output_formated(vt, fmt, ...)                                                 \
+    char _tmp[256];                                                                                \
+    int  _len = snprintf(_tmp, sizeof(_tmp), fmt, __VA_ARGS__);                                    \
+    vt->callbacks.immediate_pty_write(vt->callbacks.user_data, _tmp, _len);
 
 static inline void Vt_mark_line_proxy_fully_damaged(Vt* self, VtLine* line)
 {

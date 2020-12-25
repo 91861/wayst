@@ -39,6 +39,8 @@
 #include <xkbcommon/xkbcommon-keysyms.h>
 #include <xkbcommon/xkbcommon.h>
 
+#define WL_DEFAULT_CURSOR_SIZE 16
+
 static WindowStatic* global;
 
 DEF_VECTOR(char, NULL);
@@ -1534,7 +1536,14 @@ static struct wl_registry_listener registry_listener = {
 /* cursor */
 static void setup_cursor(struct WindowBase* self)
 {
-    if (!(globalWl->cursor_theme = wl_cursor_theme_load(NULL, 16, globalWl->shm))) {
+    char* ssize = getenv("XCURSOR_SIZE");
+    int   size  = WL_DEFAULT_CURSOR_SIZE;
+
+    if (ssize && !(size = atoi(ssize))) {
+        size = WL_DEFAULT_CURSOR_SIZE;
+    }
+
+    if (!(globalWl->cursor_theme = wl_cursor_theme_load(NULL, size, globalWl->shm))) {
         WRN("Failed to load cursor theme\n");
         return;
     }
@@ -1559,10 +1568,12 @@ static void cursor_set(struct wl_cursor* what, uint32_t serial)
 {
     globalWl->serial = serial;
     struct wl_buffer*       b;
-    struct wl_cursor_image* img = (what ? what : globalWl->cursor_arrow)->images[0];
+    struct wl_cursor_image* img = OR(what, globalWl->cursor_arrow)->images[0];
+
     if (what) {
         b = wl_cursor_image_get_buffer(img);
     }
+
     wl_pointer_set_cursor(globalWl->pointer,
                           serial,
                           globalWl->cursor_surface,
@@ -1755,11 +1766,11 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h)
 
 struct WindowBase* Window_new_wayland(Pair_uint32_t res)
 {
-
     struct WindowBase* win = WindowWl_new(res.first, res.second);
 
-    if (!win)
+    if (!win) {
         return NULL;
+    }
 
     win->title = NULL;
     WindowWl_set_title(win, settings.title.str);

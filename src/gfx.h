@@ -79,6 +79,7 @@ struct IGfx
     void (*destroy_proxy)(Gfx* self, uint32_t proxy[static 6]);
     void (*destroy_image_proxy)(Gfx* self, uint32_t proxy[static 6]);
     void (*destroy_image_view_proxy)(Gfx* self, uint32_t proxy[static 6]);
+    void (*destroy_sixel_proxy)(Gfx* self, uint32_t proxy[static 6]);
 };
 
 static void Gfx_draw(Gfx* self, const Vt* vt, Ui* ui)
@@ -160,4 +161,9 @@ static void Gfx_destroy_image_proxy(Gfx* self, uint32_t proxy[static 4])
 static void Gfx_destroy_image_view_proxy(Gfx* self, uint32_t proxy[static 4])
 {
     self->interface->destroy_image_view_proxy(self, proxy);
+}
+
+static void Gfx_destroy_sixel_proxy(Gfx* self, uint32_t proxy[static 4])
+{
+    self->interface->destroy_sixel_proxy(self, proxy);
 }

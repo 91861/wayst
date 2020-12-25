@@ -14,6 +14,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
+#include <threads.h>
 
 /* Colors */
 typedef struct
@@ -31,6 +32,20 @@ typedef struct
 
 #define COLOR_RGBA_FMT   "rgb(%d, %d, %d, %f)"
 #define COLOR_RGBA_AP(c) (c.r), (c.g), (c.b), (ColorRGBA_get_float(c, 3))
+
+_Thread_local static char _termcolorbuf[64];
+
+static char* termcolor_fg_rgb(uint8_t r, uint8_t g, uint8_t b)
+{
+    sprintf(_termcolorbuf, "\e[38;2;%u;%u;%um", r, g, b);
+    return _termcolorbuf;
+}
+
+static char* termcolor_bg_rgb(uint8_t r, uint8_t g, uint8_t b)
+{
+    sprintf(_termcolorbuf, "\e[48;2;%u;%u;%um", r, g, b);
+    return _termcolorbuf;
+}
 
 static inline bool ColorRGBA_eq(ColorRGBA a, ColorRGBA b)
 {
@@ -152,6 +167,40 @@ static ColorRGB ColorRGB_new_from_blend(ColorRGB base, ColorRGB blend, float fac
         .g = CLAMP(base.g * (1.0f - factor) + factor * blend.g, 0, 255),
         .b = CLAMP(base.b * (1.0f - factor) + factor * blend.b, 0, 255),
     };
+}
+
+static double _hue_to_color_component(double p, double q, double t)
+{
+    if (t < 0) {
+        t += 1;
+    } else if (t > 1) {
+        t -= 1;
+    }
+
+    if (t < 1 / 6.0) {
+        return p + (q - p) * 6 * t;
+    } else if (t < 1 / 2.0) {
+        return q;
+    } else if (t < 2 / 3.0) {
+        return p + (q - p) * (2 / 3.0 - t) * 6;
+    } else {
+        return p;
+    }
+}
+
+static ColorRGB ColorRGB_new_from_hsl(float h, float s, float l)
+{
+    if (s == 0.0) {
+        return (ColorRGB){ .r = l, .g = l, .b = l };
+    } else {
+        double q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+        double p = 2 * l - q;
+        return (ColorRGB){
+            .r = _hue_to_color_component(p, q, h + 1.0 / 3.0) * 255,
+            .g = _hue_to_color_component(p, q, h) * 255,
+            .b = _hue_to_color_component(p, q, h - 1.0 / 3.0) * 255,
+        };
+    }
 }
 
 static inline float ColorRGB_get_float(const ColorRGB c, const size_t idx)

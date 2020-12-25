@@ -29,7 +29,9 @@ static void Vt_shell_integration_begin_command(Vt* self)
     self->shell_integration_state = VT_SHELL_INTEG_STATE_COMMAND;
 }
 
-static void Vt_shell_integration_begin_execution(Vt* self, bool no_name_search)
+static void Vt_shell_integration_begin_execution(Vt*  self,
+                                                 bool no_name_search,
+                                                 bool is_vte_protocol)
 {
     RcPtr_VtCommand* cmd_ptr = Vector_last_RcPtr_VtCommand(&self->shell_commands);
     VtCommand*       cmd     = NULL;
@@ -46,7 +48,8 @@ static void Vt_shell_integration_begin_execution(Vt* self, bool no_name_search)
         return;
     }
 
-    cmd->state = VT_COMMAND_STATE_RUNNING;
+    cmd->state           = VT_COMMAND_STATE_RUNNING;
+    cmd->is_vte_protocol = is_vte_protocol;
 
     for (size_t i = cmd->command_start_row; i < self->cursor.row; ++i) {
         Vt_line_at(self, i)->mark_command_invoke = true;
@@ -190,4 +193,15 @@ static void Vt_shell_integration_end_execution(Vt* self, const char* opt_exit_st
     }
 
     self->shell_integration_state = VT_SHELL_INTEG_STATE_NONE;
+}
+
+
+static VtCommand* Vt_shell_integration_get_active_command(Vt* self)
+{
+    RcPtr_VtCommand* cmd_ptr = Vector_last_RcPtr_VtCommand(&self->shell_commands);
+    VtCommand* cmd = NULL;
+    if (!cmd_ptr || !(cmd = RcPtr_get_VtCommand(cmd_ptr))) {
+        return NULL;
+    }
+    return cmd->state == VT_COMMAND_STATE_RUNNING ? cmd : NULL;
 }

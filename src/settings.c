@@ -751,7 +751,7 @@ static void settings_make_default()
         .color_fonts  = Vector_new_with_capacity_UnstyledFontInfo(1),
 
         .term        = AString_new_static(DFT_TERM),
-        .vte_version = AString_new_static("5602"),
+        .vte_version = AString_new_static("6201"),
         
         .locale      = AString_new_uninitialized(),
         .title       = AString_new_static(APPLICATION_NAME),
@@ -830,6 +830,9 @@ static void settings_make_default()
 
         .defer_font_loading = true,
         .flush_ft_cache     = false,
+
+        .pty_chunk_wait_delay_ns = 0,
+        .pty_chunk_timeout_ms    = 5,
     };
 }
 
@@ -1070,6 +1073,17 @@ static void handle_option(const char opt, const int array_index, const char* val
         case OPT_SCROLLBACK_IDX:
             settings.scrollback = MAX(strtol(value, NULL, 10), 0);
             break;
+
+        case OPT_IO_CHUNK_DELAY: {
+            L_PROCESS_MULTI_ARG_PACK_BEGIN(value)
+            case 0:
+                settings.pty_chunk_wait_delay_ns = MAX(strtol(buf.buf, NULL, 10), 0);
+                break;
+            case 1:
+                settings.pty_chunk_timeout_ms = MAX(strtol(buf.buf, NULL, 10), 0);
+                break;
+                L_PROCESS_MULTI_ARG_PACK_END
+        } break;
 
         case OPT_VERSION_IDX:
             print_version_and_exit();

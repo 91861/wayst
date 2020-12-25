@@ -515,9 +515,13 @@ static const char* Vt_img_proto_display(Vt* self, uint32_t id, vt_image_proto_di
     uint16_t anchor_cell = self->cursor.col;
     VtLine*  ln          = Vt_cursor_line(self);
 
-    if (!ln->images) {
-        ln->images  = malloc(sizeof(Vector_RcPtr_VtImageSurfaceView));
-        *ln->images = Vector_new_RcPtr_VtImageSurfaceView();
+    if (!ln->graphic_attachments) {
+        ln->graphic_attachments = calloc(1, sizeof(VtGraphicLineAttachments));
+    }
+
+    if (!ln->graphic_attachments->images) {
+        ln->graphic_attachments->images  = malloc(sizeof(Vector_RcPtr_VtImageSurfaceView));
+        *ln->graphic_attachments->images = Vector_new_RcPtr_VtImageSurfaceView();
     }
 
     VtImageSurfaceView image_view;
@@ -541,7 +545,7 @@ static const char* Vt_img_proto_display(Vt* self, uint32_t id, vt_image_proto_di
     *RcPtr_get_VtImageSurfaceView(&iv_ptr) = image_view;
     RcPtr_VtImageSurfaceView iv_ptr2       = RcPtr_new_shared_VtImageSurfaceView(&iv_ptr);
 
-    Vector_push_RcPtr_VtImageSurfaceView(ln->images, iv_ptr);
+    Vector_push_RcPtr_VtImageSurfaceView(ln->graphic_attachments->images, iv_ptr);
     Vector_push_RcPtr_VtImageSurfaceView(&self->image_views, iv_ptr2);
 
     for (int i = 1; i < image_view.cell_size.second; ++i) {

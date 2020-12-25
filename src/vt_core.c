@@ -8,6 +8,7 @@
 #include "vt.h"
 #include "vt_private.h"
 #include "vt_shell.h"
+#include "vt_sixel.h"
 
 #include <fcntl.h>
 #include <limits.h>
@@ -319,9 +320,9 @@ static inline void Vt_about_to_delete_line_by_scroll_up(Vt* self, size_t idx)
     VtLine* src = &self->lines.buf[idx];
     VtLine* tgt = &self->lines.buf[idx + 1];
 
-    if (unlikely(src->images)) {
+    if (unlikely(src->graphic_attachments && src->graphic_attachments->images)) {
         for (RcPtr_VtImageSurfaceView* i = NULL;
-             (i = Vector_iter_RcPtr_VtImageSurfaceView(src->images, i));) {
+             (i = Vector_iter_RcPtr_VtImageSurfaceView(src->graphic_attachments->images, i));) {
             VtImageSurfaceView* view = RcPtr_get_VtImageSurfaceView(i);
             if (view && view->cell_size.second > 1) {
                 VtImageSurfaceView new_view  = Vt_crop_VtImageSurfaceView_top_by_line(self, view);
@@ -330,12 +331,17 @@ static inline void Vt_about_to_delete_line_by_scroll_up(Vt* self, size_t idx)
                 *RcPtr_get_VtImageSurfaceView(&new_ptr) = new_view;
                 RcPtr_VtImageSurfaceView new_ptr2 = RcPtr_new_shared_VtImageSurfaceView(&new_ptr);
 
-                if (!tgt->images) {
-                    tgt->images  = malloc(sizeof(Vector_RcPtr_VtImageSurfaceView));
-                    *tgt->images = Vector_new_RcPtr_VtImageSurfaceView();
+                if (!tgt->graphic_attachments) {
+                    tgt->graphic_attachments = calloc(1, sizeof(VtGraphicLineAttachments));
                 }
 
-                Vector_push_RcPtr_VtImageSurfaceView(tgt->images, new_ptr);
+                if (!tgt->graphic_attachments->images) {
+                    tgt->graphic_attachments->images =
+                      malloc(sizeof(Vector_RcPtr_VtImageSurfaceView));
+                    *tgt->graphic_attachments->images = Vector_new_RcPtr_VtImageSurfaceView();
+                }
+
+                Vector_push_RcPtr_VtImageSurfaceView(tgt->graphic_attachments->images, new_ptr);
                 Vector_push_RcPtr_VtImageSurfaceView(&self->image_views, new_ptr2);
             }
         }
@@ -461,6 +467,12 @@ void Vt_clear_all_image_proxies(Vt* self)
         VtImageSurfaceView* srf = RcPtr_get_VtImageSurfaceView(i);
         CALL_FP(self->callbacks.destroy_image_view_proxy, self->callbacks.user_data, &srf->proxy);
     }
+
+    for (RcPtr_VtSixelSurface* i = NULL;
+         (i = Vector_iter_RcPtr_VtSixelSurface(&self->scrolled_sixels, i));) {
+        VtSixelSurface* srf = RcPtr_get_VtSixelSurface(i);
+        CALL_FP(self->callbacks.destroy_sixel_proxy, self->callbacks.user_data, &srf->proxy);
+    }
 }
 
 Vector_char Vt_region_to_string(Vt* self, size_t begin_line, size_t end_line)
@@ -468,7 +480,7 @@ Vector_char Vt_region_to_string(Vt* self, size_t begin_line, size_t end_line)
     Vector_char tmp, ret = Vt_line_to_string(self,
                                              begin_line,
                                              0,
-                                             Vt_col(self),
+                                             Vt_col(self) - 1,
                                              Vt_line_at(self, begin_line)->was_reflown ? "" : "\n");
     Vector_pop_char(&ret);
     for (size_t i = begin_line + 1; i < end_line; ++i) {
@@ -916,6 +928,9 @@ void Vt_init(Vt* self, uint32_t cols, uint32_t rows)
     self->images      = Vector_new_RcPtr_VtImageSurface();
     self->image_views = Vector_new_RcPtr_VtImageSurfaceView();
 
+    // self->static_sixels   = Vector_new_VtSixelSurface(self);
+    self->scrolled_sixels = Vector_new_RcPtr_VtSixelSurface();
+
     self->shell_commands = Vector_new_RcPtr_VtCommand();
 
     self->unicode_input.buffer = Vector_new_char();
@@ -1352,6 +1367,9 @@ static inline void Vt_report_dec_mode(Vt* self, int code)
         case 25:
             value = self->cursor.hidden;
             break;
+        case 80:
+            value = self->modes.sixel_scrolling;
+            break;
         case 1000:
             value = self->modes.mouse_btn_report;
             break;
@@ -1383,6 +1401,12 @@ static inline void Vt_report_dec_mode(Vt* self, int code)
         case 1047:
         case 1049:
             value = Vt_alt_buffer_enabled(self);
+            break;
+        case 1070:
+            value = self->modes.sixel_private_color_registers;
+            break;
+        case 8452:
+            value = self->modes.sixel_scrolling_move_cursor_right;
             break;
         default: {
             Vt_output_formated(self, "\e[%d;0$y", code);
@@ -1531,6 +1555,11 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
             STUB("DECLRMM");
             break;
 
+        /* Enable Sixel Scrolling (DECSDM) */
+        case 80:
+            self->modes.sixel_scrolling = on;
+            break;
+
         /* X11 xterm mouse protocol. */
         case 1000:
             self->modes.mouse_btn_report = on;
@@ -1640,6 +1669,14 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
             STUB("VT220 keyboard emulation");
             break;
 
+        case 1070: /* use private color registers for each graphic */
+            self->modes.sixel_private_color_registers = on;
+            break;
+
+        case 8452: /* Sixel scrolling leaves cursor to right of graphic */
+            self->modes.sixel_scrolling_move_cursor_right = on;
+            break;
+
         default:
             WRN("Unknown DECSET/DECRST code: %d\n", code);
     }
@@ -1703,7 +1740,8 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                              */
                             case 'p': {
                                 /* Not recognized */
-                                STUB("DECRQM");
+                                int arg = short_sequence_get_int_argument(seq);
+                                Vt_report_dec_mode(self, arg);
                             } break;
 
                             default:
@@ -1738,6 +1776,71 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                             /* <ESC>[? Ps i -  Media Copy (MC), DEC-specific */
                             case 'i':
                                 break;
+
+                                /* <ESC>[? Ps S - Set or request graphics attribute (XTSMGRAPHICS),
+                                 * xterm/VT340+ */
+                            case 'S': {
+                                int32_t args[3];
+                                char *  s = seq + 1, *arg = NULL;
+
+                                for (int i = 0; i < 3; ++i) {
+                                    arg     = strsep(&s, ";");
+                                    args[i] = atoi(arg);
+                                }
+
+                                int32_t status = 0, value = 0, value2 = 0;
+
+                                switch (args[0]) {
+                                    case 1: /* number of color registers */
+                                        switch (args[1]) {
+                                            case 1: /* read */
+                                            case 2: /* reset */
+                                            case 4: /* get max value */
+                                                value = 256;
+                                                break;
+                                            case 3: /* set to args[2] */
+                                                value = 256;
+                                                break;
+                                            default:
+                                                status = 2;
+                                        }
+                                        break;
+                                    case 2: /* sixel pixels */
+                                        switch (args[1]) {
+                                            case 1: /* read */
+                                            case 2: /* reset */
+                                            case 4: /* get max value */
+                                                value  = self->ws.ws_xpixel;
+                                                value2 = self->ws.ws_ypixel;
+                                                break;
+                                            case 3: /* set to args[2] */
+                                                break;
+                                            default:
+                                                status = 2;
+                                        }
+                                        break;
+                                    case 3: /* regis pixels */
+                                        status = 3;
+                                        break;
+                                    default:
+                                        status = 1;
+                                }
+
+                                if (value2) {
+                                    Vt_immediate_output_formated(self,
+                                                                 "\e[?%d;%d;%d;%dS",
+                                                                 args[0],
+                                                                 status,
+                                                                 value,
+                                                                 value2);
+                                } else {
+                                    Vt_immediate_output_formated(self,
+                                                                 "\e[?%d;%d;%dS",
+                                                                 args[0],
+                                                                 status,
+                                                                 value);
+                                }
+                            } break;
 
                                 /* <ESC>[? Ps n Device Status Report (DSR, DEC-specific) */
                             case 'n': {
@@ -2563,10 +2666,29 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                 Vt_move_cursor(self, x, y);
                             } break;
 
-                            /* <ESC>[...c - Send device attributes (Primary DA) */
+                            /* <ESC>[...c - Send device attributes (Primary DA)
+                             *
+                             * 1        132 columns
+                             * 2        Printer port
+                             * 4        Sixel
+                             * 6        Selective erase
+                             * 7        Soft character set (DRCS)
+                             * 8        User-defined keys (UDKs)
+                             * 9        National replacement character sets (NRCS) (International
+                             *terminal only) 12       Yugoslavian (SCS) 15       Technical character
+                             *set 18       Windowing capability 21       Horizontal scrolling 23
+                             *Greek 24       Turkish 42       ISO Latin-2 character set 44 PCTerm 45
+                             *Soft key map 46       ASCII emulation
+                             *
+                             **/
                             case 'c': {
-                                /* report VT 102 */
-                                Vt_output(self, "\e[?6c", 5);
+                                /* report vt340 type device with sixel ,132column, and window system
+                                 * support */
+                                CALL_FP(self->callbacks.immediate_pty_write,
+                                        self->callbacks.user_data,
+                                        "\e[?63;1;4c",
+                                        10);
+                                /* Vt_immediate_output(self, "\e[?64;1;4;18c", 11); */
                             } break;
 
                             /* <ESC>[...n - Device status report (DSR) */
@@ -3043,9 +3165,13 @@ static inline void Vt_alt_buffer_on(Vt* self, bool save_mouse)
     Vt_clear_all_proxies(self);
     Vt_visual_scroll_reset(self);
     Vt_select_end(self);
-    self->last_interted = NULL;
-    self->alt_lines     = self->lines;
-    self->lines         = Vector_new_VtLine(self);
+    self->last_interted       = NULL;
+    self->alt_lines           = self->lines;
+    self->alt_image_views     = self->image_views;
+    self->alt_scrolled_sixels = self->scrolled_sixels;
+    self->lines               = Vector_new_VtLine(self);
+    self->image_views         = Vector_new_RcPtr_VtImageSurfaceView();
+    self->scrolled_sixels     = Vector_new_RcPtr_VtSixelSurface();
     for (uint16_t i = 0; i < Vt_row(self); ++i) {
         Vector_push_VtLine(&self->lines, VtLine_new());
     }
@@ -3063,9 +3189,13 @@ static inline void Vt_alt_buffer_off(Vt* self, bool save_mouse)
         self->last_interted = NULL;
         Vt_select_end(self);
         Vector_destroy_VtLine(&self->lines);
-        self->lines          = self->alt_lines;
-        self->alt_lines.buf  = NULL;
-        self->alt_lines.size = 0;
+        Vector_destroy_RcPtr_VtImageSurfaceView(&self->image_views);
+        Vector_destroy_RcPtr_VtSixelSurface(&self->scrolled_sixels);
+        self->lines           = self->alt_lines;
+        self->image_views     = self->alt_image_views;
+        self->scrolled_sixels = self->alt_scrolled_sixels;
+        self->alt_lines.buf   = NULL;
+        self->alt_lines.size  = 0;
         if (save_mouse) {
             self->cursor.col = self->alt_cursor_pos;
             self->cursor.row = self->alt_active_line;
@@ -3541,21 +3671,26 @@ static void Vt_handle_APC(Vt* self, char c)
     for (vt_image_surface_view_delete_action_t* i = NULL;                                          \
          (i = Vector_iter_vt_image_surface_view_delete_action_t(&dels, i));) {                     \
         VtLine* ln = &self->lines.buf[i->line];                                                    \
-        if (ln->images) {                                                                          \
+        if (ln->graphic_attachments && ln->graphic_attachments->images) {                          \
             for (RcPtr_VtImageSurfaceView* p = NULL;                                               \
-                 (p = Vector_iter_RcPtr_VtImageSurfaceView(ln->images, p));) {                     \
+                 (p =                                                                              \
+                    Vector_iter_RcPtr_VtImageSurfaceView(ln->graphic_attachments->images, p));) {  \
                 VtImageSurfaceView* v = RcPtr_get_VtImageSurfaceView(p);                           \
                 if (v == i->view) {                                                                \
                     Vector_remove_at_RcPtr_VtImageSurfaceView(                                     \
-                      ln->images,                                                                  \
-                      Vector_index_RcPtr_VtImageSurfaceView(ln->images, p),                        \
+                      ln->graphic_attachments->images,                                             \
+                      Vector_index_RcPtr_VtImageSurfaceView(ln->graphic_attachments->images, p),   \
                       1);                                                                          \
                 }                                                                                  \
             }                                                                                      \
-            if (!ln->images->size) {                                                               \
-                Vector_destroy_RcPtr_VtImageSurfaceView(ln->images);                               \
-                free(ln->images);                                                                  \
-                ln->images = NULL;                                                                 \
+            if (!ln->graphic_attachments->images->size) {                                          \
+                Vector_destroy_RcPtr_VtImageSurfaceView(ln->graphic_attachments->images);          \
+                free(ln->graphic_attachments->images);                                             \
+                ln->graphic_attachments->images = NULL;                                            \
+            }                                                                                      \
+            if (!ln->graphic_attachments->sixels) {                                                \
+                free(ln->graphic_attachments);                                                     \
+                ln->graphic_attachments = NULL;                                                    \
             }                                                                                      \
         }                                                                                          \
     }                                                                                              \
@@ -3657,9 +3792,23 @@ static void Vt_handle_DCS(Vt* self, char c)
 
     if (is_string_sequence_terminated(self->parser.active_sequence.buf,
                                       self->parser.active_sequence.size)) {
+
+        if (*Vector_last_char(&self->parser.active_sequence) == '\\') {
+            Vector_pop_char(&self->parser.active_sequence);
+            if (*Vector_last_char(&self->parser.active_sequence) == '\e') {
+                Vector_pop_char(&self->parser.active_sequence);
+            }
+        }
+
+        if (*Vector_last_char(&self->parser.active_sequence) == '\a') {
+            Vector_pop_char(&self->parser.active_sequence);
+        }
+
         Vector_push_char(&self->parser.active_sequence, '\0');
 
-        const char* seq = self->parser.active_sequence.buf;
+        const char*  seq     = self->parser.active_sequence.buf;
+        const size_t seq_len = self->parser.active_sequence.size;
+
         switch (*seq) {
             /* Synchronized update */
             case '=':
@@ -3679,13 +3828,125 @@ static void Vt_handle_DCS(Vt* self, char c)
                     }
                 }
                 return;
-            default:;
-        }
+            default: {
+                char *graphic_data, *fst_non_arg = (char*)seq;
 
-        char* str =
-          pty_string_prettyfy(self->parser.active_sequence.buf, self->parser.active_sequence.size);
-        WRN("Unknown DCS: %s\n", str);
-        free(str);
+                while ((isdigit(*fst_non_arg) || *fst_non_arg == ';')) {
+                    ++fst_non_arg;
+                }
+
+                if ((graphic_data = strstr(seq, "q")) == fst_non_arg && seq_len > 4) {
+                    WRN("sixel graphics support is incomplete and unstable!\n");
+                    int32_t pixel_aspect_ratio = 0, p2_param = 0, horizontal_grid_size = 0;
+                    bool    zero_pos_retains_color = false;
+                    sscanf(seq, "%d;%d;%d", &pixel_aspect_ratio, &p2_param, &horizontal_grid_size);
+                    if (pixel_aspect_ratio) {
+                        WRN("sixel pixel aspect ratio set via DCS instead of raster attributes "
+                            "command\n");
+                    }
+
+                    switch (pixel_aspect_ratio) {
+                        case 0:
+                        case 1:
+                        case 5:
+                        case 6:
+                            pixel_aspect_ratio = 2;
+                            break;
+                        case 2:
+                            pixel_aspect_ratio = 5;
+                            break;
+                        case 3:
+                        case 4:
+                            pixel_aspect_ratio = 3;
+                            break;
+                        case 7:
+                        case 8:
+                        case 9:
+                            pixel_aspect_ratio = 1;
+                            break;
+                        default:
+                            WRN("incorect sixel pixel aspect ratio parameter \'%d\'\n",
+                                pixel_aspect_ratio);
+                    }
+
+                    if (p2_param == 1) {
+                        zero_pos_retains_color = true;
+                    }
+
+                    if (horizontal_grid_size) {
+                        WRN("sixel horizontal grid size parameter ignored\n");
+                    }
+
+                    graphic_color_registers_t private_color_regs;
+                    if (self->modes.sixel_private_color_registers) {
+                        memset(&private_color_regs, 0, sizeof(private_color_regs));
+                    }
+
+                    VtSixelSurface surf = VtSixelSurface_new_from_data(
+                      pixel_aspect_ratio,
+                      !zero_pos_retains_color,
+                      (uint8_t*)graphic_data + 1,
+                      self->modes.sixel_private_color_registers
+                        ? &private_color_regs
+                        : &self->colors.global_graphic_color_registers);
+
+                    if (surf.width && surf.height) {
+                        surf.anchor_cell_idx     = self->cursor.col;
+                        surf.anchor_global_index = self->cursor.row;
+
+                        Pair_uint32_t cellsize =
+                          CALL_FP(self->callbacks.on_window_size_from_cells_requested,
+                                  self->callbacks.user_data,
+                                  1,
+                                  1);
+
+                        for (uint32_t i = 0; i <= (surf.height - 1) / cellsize.second; ++i) {
+                            Vt_insert_new_line(self);
+                        }
+
+                        if (self->modes.sixel_scrolling) {
+                            VtLine* ln = Vt_cursor_line(self);
+                            if (!ln->graphic_attachments) {
+                                ln->graphic_attachments =
+                                  calloc(1, sizeof(VtGraphicLineAttachments));
+                            }
+                            if (!ln->graphic_attachments->sixels) {
+                                ln->graphic_attachments->sixels =
+                                  malloc(sizeof(Vector_RcPtr_VtSixelSurface));
+                                *ln->graphic_attachments->sixels =
+                                  Vector_new_RcPtr_VtSixelSurface();
+                            }
+
+                            if (self->modes.sixel_scrolling_move_cursor_right) {
+                                self->cursor.col =
+                                  MIN((surf.width - 1 / cellsize.first) + 1, Vt_col(self));
+                            }
+
+                            RcPtr_VtSixelSurface sp        = RcPtr_new_VtSixelSurface(self);
+                            *RcPtr_get_VtSixelSurface(&sp) = surf;
+                            RcPtr_VtSixelSurface sp2       = RcPtr_new_shared_VtSixelSurface(&sp);
+
+                            Vector_push_RcPtr_VtSixelSurface(ln->graphic_attachments->sixels, sp);
+                            Vector_push_RcPtr_VtSixelSurface(&self->scrolled_sixels, sp2);
+                        } else {
+                            VtSixelSurface_destroy(self, &surf);
+                            // Vector_push_VtSixelSurface(&self->static_sixels, surf);
+                        }
+                    } else {
+                        VtSixelSurface_destroy(self, &surf);
+                    }
+
+                } else if (strstr(seq, "p") == fst_non_arg && seq_len > 4) {
+                    // TODO: Primary DA Ps = 5 - regis support
+                    STUB("ReGIS graphics");
+                } else {
+                    char* str = pty_string_prettyfy(self->parser.active_sequence.buf,
+                                                    self->parser.active_sequence.size);
+                    WRN("Unknown DCS: %s\n", str);
+                    free(str);
+                }
+            }
+        }
 
         Vector_destroy_char(&self->parser.active_sequence);
         self->parser.active_sequence = Vector_new_char();
@@ -3890,42 +4151,42 @@ static void Vt_handle_OSC(Vt* self, char c)
                     switch (arg) {
                         /* VT100 text foreground color */
                         case 10: {
-                            Vt_output_formated(self,
-                                               "\e]%u;rgb:%3u/%3u/%3u\a",
-                                               arg,
-                                               self->colors.fg.r,
-                                               self->colors.fg.g,
-                                               self->colors.fg.b);
+                            Vt_immediate_output_formated(self,
+                                                         "\e]%u;rgb:%x/%x/%x\e\\",
+                                                         arg,
+                                                         self->colors.fg.r,
+                                                         self->colors.fg.g,
+                                                         self->colors.fg.b);
                         } break;
 
                         /* VT100 text background color */
                         case 11: {
-                            Vt_output_formated(self,
-                                               "\e]%u;rgb:%3u/%3u/%3u\a",
-                                               arg,
-                                               self->colors.bg.r,
-                                               self->colors.bg.g,
-                                               self->colors.bg.b);
+                            Vt_immediate_output_formated(self,
+                                                         "\e]%u;rgb:%x/%x/%x\e\\",
+                                                         arg,
+                                                         self->colors.bg.r,
+                                                         self->colors.bg.g,
+                                                         self->colors.bg.b);
                         } break;
 
                         /* highlight background color */
                         case 17: {
-                            Vt_output_formated(self,
-                                               "\e]%u;rgb:%3u/%3u/%3u\a",
-                                               arg,
-                                               self->colors.highlight.bg.r,
-                                               self->colors.highlight.bg.g,
-                                               self->colors.highlight.bg.b);
+                            Vt_immediate_output_formated(self,
+                                                         "\e]%u;rgb:%3u/%3u/%3u\e\\",
+                                                         arg,
+                                                         self->colors.highlight.bg.r,
+                                                         self->colors.highlight.bg.g,
+                                                         self->colors.highlight.bg.b);
                         } break;
 
                         /* highlight foreground color */
                         case 19: {
-                            Vt_output_formated(self,
-                                               "\e]%u;rgb:%3u/%3u/%3u\a",
-                                               arg,
-                                               self->colors.highlight.fg.r,
-                                               self->colors.highlight.fg.g,
-                                               self->colors.highlight.fg.b);
+                            Vt_immediate_output_formated(self,
+                                                         "\e]%u;rgb:%3u/%3u/%3u\e\\",
+                                                         arg,
+                                                         self->colors.highlight.fg.r,
+                                                         self->colors.highlight.fg.g,
+                                                         self->colors.highlight.fg.b);
                         } break;
 
                         /* Tektronix background color */
@@ -4086,7 +4347,7 @@ static void Vt_handle_OSC(Vt* self, char c)
 
                     /* COMMAND_EXECUTED */
                     case 'C':
-                        Vt_shell_integration_begin_execution(self, false);
+                        Vt_shell_integration_begin_execution(self, false, false);
                         break;
 
                     /* COMMAND_FINISHED */
@@ -4143,8 +4404,21 @@ static void Vt_handle_OSC(Vt* self, char c)
                 }
             } break;
 
-            /* Send desktop notification (rxvt extension)
-             * OSC 777;notify;title;body ST */
+            /* Send desktop notification (rxvt)
+             *     OSC 777;notify;title;body ST
+             *
+             * or command integration notification sequence (VTE)
+             *     OSC 777;precmd ST [user@host:~] $ ls -l OSC 777;preexec ST
+             *     total 1
+             *     drwxr-xr-x  6 user user  4096 Dec 12 15:37 Stuff
+             *     OSC 777;notify;Command completed;ls -l ST
+             *
+             *     Ending 'notify' should only send the notification when the terminal is minimized.
+             *     We need to check if the actively running command was inited by VTE sequences, so
+             *     we don't break normal OSC 777 behaviour.
+             *     There is no distinction between the prompt and command invocation, so we don't
+             *     know what we're running until it completes.
+             * */
             case 777: {
                 Vector_Vector_char tokens = string_split_on(seq + 4 /* 777; */, ";", NULL, NULL);
                 if (tokens.size >= 2) {
@@ -4155,7 +4429,9 @@ static void Vt_handle_OSC(Vt* self, char c)
                                     NULL,
                                     tokens.buf[1].buf + 1);
                         } else if (tokens.size == 3) {
-                            if (!strcmp(tokens.buf[1].buf + 1, "Command completed")) {
+                            VtCommand* cmd = Vt_shell_integration_get_active_command(self);
+                            if (cmd && cmd->is_vte_protocol &&
+                                !strcmp(tokens.buf[1].buf + 1, "Command completed")) {
                                 Vt_shell_integration_active_command_name_changed(self,
                                                                                  tokens.buf[2].buf +
                                                                                    1);
@@ -4170,7 +4446,7 @@ static void Vt_handle_OSC(Vt* self, char c)
                             WRN("Unexpected argument in OSC 777 \'%s\'\n", seq);
                         }
                     } else {
-                        WRN("Second argument to OSC 777 \'%s\' is not \'notify\'\n", seq);
+                        WRN("Second argument to OSC 777 \'%s\' is not recognized\n", seq);
                     }
                 } else {
                     if (tokens.size) {
@@ -4178,12 +4454,11 @@ static void Vt_handle_OSC(Vt* self, char c)
                             Vt_shell_integration_begin_prompt(self);
                             Vt_shell_integration_begin_command(self);
                         } else if (!strcmp(tokens.buf[0].buf + 1, "preexec")) {
-                            Vt_shell_integration_begin_execution(self, true);
+                            Vt_shell_integration_begin_execution(self, true, true);
                         } else {
-                            WRN("OSC 777 \'%s\' not enough arguments\n", seq);
+                            WRN("OSC 777 \'%s\' unknown argument\n", seq);
                         }
                     }
-
                     Vector_destroy_Vector_char(&tokens);
                 }
             } break;
@@ -4514,7 +4789,8 @@ __attribute__((hot)) static void Vt_insert_char_at_cursor(Vt* self, VtRune c)
     CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
 
     if (self->wrap_next && !self->modes.no_wraparound) {
-        self->cursor.col = 0;
+        self->cursor.col                  = 0;
+        Vt_cursor_line(self)->was_reflown = true;
         Vt_insert_new_line(self);
         Vt_cursor_line(self)->rejoinable = true;
     }
@@ -5103,6 +5379,10 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
                     self->parser.state = PARSER_STATE_LITERAL;
                     break;
 
+                /* ST */
+                case '\\':
+                    return;
+
                 case '\e':
                     return;
 
@@ -5297,6 +5577,14 @@ static void Vt_shift_global_line_index_refs(Vt* self, size_t point, int64_t chan
         }
     }
 
+    for (RcPtr_VtSixelSurface* rp = NULL;
+         (rp = Vector_iter_RcPtr_VtSixelSurface(&self->scrolled_sixels, rp));) {
+        VtSixelSurface* ss = RcPtr_get_VtSixelSurface(rp);
+        if (ss && ss->anchor_global_index >= point) {
+            ss->anchor_global_index += change;
+        }
+    }
+
     for (RcPtr_VtCommand* rp = NULL;
          (rp = Vector_iter_RcPtr_VtCommand(&self->shell_commands, rp));) {
         VtCommand* cmd = RcPtr_get_VtCommand(rp);
@@ -5356,6 +5644,27 @@ static void Vt_remove_scrollback(Vt* self, size_t lines)
             } else {
                 break;
             }
+        }
+    }
+
+    while (self->scrolled_sixels.size) {
+        bool removed = false;
+        for (RcPtr_VtSixelSurface* i = NULL;
+             (i = Vector_iter_RcPtr_VtSixelSurface(&self->scrolled_sixels, i));) {
+            if (RcPtr_is_unique_VtSixelSurface(i)) {
+                Vector_remove_at_RcPtr_VtSixelSurface(
+                  &self->scrolled_sixels,
+                  Vector_index_RcPtr_VtSixelSurface(&self->scrolled_sixels, i),
+                  1);
+                RcPtr_destroy_VtSixelSurface(i);
+                removed = true;
+                break;
+            }
+        }
+        if (removed) {
+            continue;
+        } else {
+            break;
         }
     }
 }
@@ -5557,6 +5866,8 @@ void Vt_destroy(Vt* self)
 
     if (Vt_alt_buffer_enabled(self)) {
         Vector_destroy_VtLine(&self->alt_lines);
+        Vector_destroy_RcPtr_VtImageSurfaceView(&self->alt_image_views);
+        Vector_destroy_RcPtr_VtSixelSurface(&self->alt_scrolled_sixels);
     }
 
     Vector_destroy_char(&self->parser.active_sequence);
@@ -5565,13 +5876,11 @@ void Vt_destroy(Vt* self)
     Vector_destroy_char(&self->output);
     Vector_destroy_char(&self->staged_output);
     Vector_destroy_char(&self->uri_matcher.match);
-
     Vector_destroy_RcPtr_VtImageSurface(&self->images);
     Vector_destroy_RcPtr_VtImageSurfaceView(&self->image_views);
     Vector_destroy_RcPtr_VtCommand(&self->shell_commands);
-
+    Vector_destroy_RcPtr_VtSixelSurface(&self->scrolled_sixels);
     RcPtr_destroy_VtImageSurface(&self->manipulated_image);
-
     free(self->title);
     free(self->active_hyperlink);
     free(self->work_dir);

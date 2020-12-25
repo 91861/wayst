@@ -197,3 +197,4 @@ float ColorRGB_get_hue(const ColorRGB c)
     hue *= 60.0f;
     return hue > 0.0f ? hue : hue + 360.0f;
 }
+
