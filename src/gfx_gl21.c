@@ -827,6 +827,10 @@ __attribute__((cold)) GlyphAtlasEntry* GlyphAtlas_get_combined(GfxOpenGL21* gfx,
     }
 
     GlyphAtlasPage* tgt_page;
+
+    if (!output) {
+        return NULL;
+    }
     switch (output->type) {
         case FT_OUTPUT_RGB_H:
         case FT_OUTPUT_BGR_H:

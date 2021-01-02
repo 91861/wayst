@@ -227,7 +227,7 @@ static void Vt_uri_next_char(Vt* self, char32_t c)
 {
     switch (self->uri_matcher.state) {
         case VT_URI_MATCHER_EMPTY: {
-            if (isalpha(c)) {
+            if (c <= CHAR_MAX && isalpha(c)) {
                 Vector_push_char(&self->uri_matcher.match, c);
                 self->uri_matcher.state        = VT_URI_MATCHER_SCHEME;
                 self->uri_matcher.start_column = self->cursor.col;

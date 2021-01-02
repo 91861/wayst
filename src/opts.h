@@ -336,7 +336,7 @@ static const char* long_options_descriptions[][2] = {
     [OPT_H_BG_COLOR_IDX] = { arg_color_a, "Highlighted text background color" },
     [OPT_H_FG_COLOR_IDX] = { arg_color, "Highlighted text foreground color" },
 
-    [OPT_VISUAL_BELL]          = { "#RRGGBBAA/name", "Visual bell efect - overlay color/none" },
+    [OPT_VISUAL_BELL]          = { "#RRGGBBAA/name", "Visual bell effect - overlay color/none" },
     [OPT_COLORSCHEME_IDX]      = { "name/int",
                               "Colorscheme name/index: wayst, linux, xterm, rxvt, yaru, tango, "
                               "orchis, "
