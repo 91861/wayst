@@ -114,13 +114,23 @@ visual-bell = none
 term = "xterm-256color"
 
 title = "Terminal"
-title-format = "%2$s - %1$s"  # <set by program> - Terminal
-# title-format = "%s [%s]"    # Terminal [<set by program>]
-# title-format = "%2$s"       # <set by program>
+
+# You can format the window title using variables: sAppTitle, sVtTitle, bCommandIsRunning,
+# i32CommandTimeSec, sRunningCommand, i32Rows, i32Cols, i32Width, i32Height.
+# To interpolate a variable use '{variableName}'. Variables can be used to define simple conditionals
+# eg: '{?i32Width > 80:the window is wider than 80px}'
+# The default format string displays the reported command if its running longer than a second
+# title-format = "{sVtTitle}{?bCommandIsRunning && i32CommandTimeSec > 1: ({sRunningCommand})} - {sAppTitle}"
+# Other examples:
+# title-format = "{sAppTitle} - [{sVtTitle}]"                                         # Terminal - [zsh:~]
+# title-format = "{sVtTitle} [{i32Cols}x{i32Rows}]"                                   # zsh:~ [80x24]
+# title-format = "{sVtTitle}{?i32Cols != 80 || i32Rows != 24: [{i32Cols}x{i32Rows}]}" # zsh:~ [132x54]
+
+title-format = "{sVtTitle}" # <set by program>
 
 scrollback = 1000
 
-# xorg keysym names are case sensitive!
+# key names are the same as xorg keysym names (case sensitive!)
 bind-key-debug=Ctrl+Shift+Return
 bind-key-enlarge=Ctrl+Shift+equal
 bind-key-shrink=Ctrl+Shift+minus

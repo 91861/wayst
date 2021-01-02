@@ -466,6 +466,7 @@ typedef struct
         void (*on_clipboard_sent)(void*, const char*);
         void (*on_urgency_set)(void*);
         void (*on_restack_to_front)(void*);
+        void (*on_command_state_changed)(void*);
         const char* (*on_application_hostname_requested)(void*);
 
         void (*destroy_proxy)(void*, VtLineProxy*);
@@ -1347,4 +1348,14 @@ static bool Vt_ImageSurfaceView_is_visual_visible(const Vt* self, VtImageSurface
 {
     return Vt_visual_top_line(self) <= view->anchor_global_index + view->cell_size.second &&
            Vt_visual_bottom_line(self) >= view->anchor_global_index;
+}
+
+static VtCommand* Vt_shell_integration_get_active_command(Vt* self)
+{
+    RcPtr_VtCommand* cmd_ptr = Vector_last_RcPtr_VtCommand(&self->shell_commands);
+    VtCommand*       cmd     = NULL;
+    if (!cmd_ptr || !(cmd = RcPtr_get_VtCommand(cmd_ptr))) {
+        return NULL;
+    }
+    return cmd->state == VT_COMMAND_STATE_RUNNING ? cmd : NULL;
 }

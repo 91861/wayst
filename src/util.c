@@ -63,7 +63,10 @@ int spawn_process(const char* opt_work_directory,
     int pipefd[2] = { 0 };
 
     if (open_pipe_to_stdin) {
-        pipe(pipefd);
+        if (pipe(pipefd) == -1) {
+            WRN("cannot start new process, failed to open pipe: %s\n", strerror(errno));
+            return 0;
+        }
     }
 
     pid_t pid = fork();
@@ -77,7 +80,9 @@ int spawn_process(const char* opt_work_directory,
             close(pipefd[1]);
         }
         if (opt_work_directory) {
-            chdir(opt_work_directory);
+            if (chdir(opt_work_directory) == -1) {
+                WRN("forked process failed to change work directory: %s\n", strerror(errno));
+            }
         }
         if (!opt_argv) {
             opt_argv    = calloc(2, sizeof(char*));
@@ -97,7 +102,9 @@ int spawn_process(const char* opt_work_directory,
         }
 
         if (opt_work_directory) {
-            chdir(opt_work_directory);
+            if (chdir(opt_work_directory) == -1) {
+                WRN("forked process failed to change work directory: %s\n", strerror(errno));
+            }
         }
 
         umask(0);

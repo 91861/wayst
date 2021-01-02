@@ -112,9 +112,7 @@ typedef struct WindowBase
 static void Window_update_title(struct WindowBase* self, const char* title)
 {
     if (settings.dynamic_title) {
-        char* tmp = asprintf(settings.title_format.str, settings.title.str, title);
-        self->interface->set_title(self, tmp);
-        free(tmp);
+        self->interface->set_title(self, title);
     }
 }
 

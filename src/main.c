@@ -29,6 +29,7 @@
 #include "x.h"
 #endif
 
+#include "fmt.h"
 #include "freetype.h"
 #include "html.h"
 #include "key.h"
@@ -98,7 +99,12 @@ typedef struct
 
     TimePoint ksm_last_input;
 
+    bool      do_title_refresh;
+    TimePoint next_title_refresh;
+
     Ui ui;
+
+    char* vt_title;
 
     Vector_char queued_output_buffer;
 
@@ -124,6 +130,7 @@ static void App_maybe_resize(App* self, Pair_uint32_t newres);
 static void App_handle_uri(App* self, const char* uri);
 static void App_update_hover(App* self, int32_t x, int32_t y);
 static void App_update_padding(App* self);
+static void App_set_title(void* self);
 
 static void* App_load_extension_proc_address(void* self, const char* name)
 {
@@ -203,7 +210,20 @@ static void App_init(App* self)
 
     Window_events(self->win);
 
+    /* kwin ignores the initial egl surface size and every window resize request before the first
+     * event dispatch */
+    char *xdg_current_desktop = getenv("XDG_CURRENT_DESKTOP"),
+         *xdg_session_type    = getenv("XDG_SESSION_TYPE");
+    if (xdg_current_desktop && xdg_session_type && !strcmp(xdg_current_desktop, "KDE") &&
+        !strcmp(xdg_session_type, "wayland")) {
+        Window_resize(self->win, size.first, size.second);
+    }
+
     App_update_padding(self);
+
+    if (!settings.dynamic_title) {
+        Window_update_title(self->win, settings.title.str);
+    }
 }
 
 static void App_run(App* self)
@@ -279,6 +299,10 @@ static void App_run(App* self)
 
         App_update_cursor(self);
 
+        if (self->do_title_refresh && TimePoint_passed(self->next_title_refresh)) {
+            App_set_title(self);
+        }
+
         TimePoint* closest_gfx_timer;
         if (!!Gfx_update_timers(self->gfx, &self->vt, &self->ui, &closest_gfx_timer) +
             !!Gfx_set_focus(self->gfx, FLAG_IS_SET(self->win->state_flags, WINDOW_IS_IN_FOCUS))) {
@@ -297,6 +321,12 @@ static void App_run(App* self)
             self->closest_pending_wakeup = &self->autoscroll_next_step;
         }
 
+        if ((self->do_title_refresh && !self->closest_pending_wakeup) ||
+            (self->do_title_refresh && self->closest_pending_wakeup &&
+             TimePoint_is_earlier(self->next_title_refresh, *self->closest_pending_wakeup))) {
+            self->closest_pending_wakeup = &self->next_title_refresh;
+        }
+
         self->swap_performed = Window_maybe_swap(self->win);
     }
 
@@ -307,6 +337,7 @@ static void App_run(App* self)
     Window_destroy(self->win);
     Vector_destroy_char(&self->ksm_input_buf);
     free(self->hostname);
+    free(self->vt_title);
 }
 
 static void App_immediate_write_pty(void* self, char* buf, size_t size)
@@ -364,6 +395,10 @@ static void App_maybe_resize(App* self, Pair_uint32_t newres)
         App_clamp_cursor(self, chars);
         Window_notify_content_change(self->win);
         Vt_resize(&self->vt, chars.first, chars.second);
+
+        if (settings.dynamic_title) {
+            App_set_title(self);
+        }
     }
 }
 
@@ -429,9 +464,69 @@ static Pair_uint32_t App_get_char_size(void* self)
     return Gfx_get_char_size(((App*)self)->gfx);
 }
 
+static void App_set_title(void* self)
+{
+    App* app = self;
+
+    if (!settings.dynamic_title) {
+        return;
+    }
+
+    const VtCommand* c         = Vt_shell_integration_get_active_command(&app->vt);
+    char*            sAppTitle = settings.title.str;
+    char*            sVtTitle  = app->vt_title;
+    /* we do not know what command is running if its using the VTE prompts */
+    bool      bCommandIsRunning = c && c->command;
+    char*     sRunningCommand   = c ? c->command : "";
+    TimePoint now               = TimePoint_now();
+    if (c) {
+        TimePoint_subtract(&now, c->execution_time.start);
+        app->next_title_refresh = TimePoint_s_from_now(1);
+        app->do_title_refresh   = true;
+    } else {
+        app->do_title_refresh = false;
+    }
+    int32_t i32CommandTimeSec = !c ? 0.0 : TimePoint_get_secs(&now);
+    int32_t i32Rows           = Vt_row(&app->vt);
+    int32_t i32Cols           = Vt_col(&app->vt);
+    int32_t i32Width          = app->win->w;
+    int32_t i32Height         = app->win->h;
+
+    char* err        = NULL;
+    char* fmtd_title = fmt_new_interpolated(settings.title_format.str,
+                                            &err,
+                                            &FMT_ARG_STR(sAppTitle),
+                                            &FMT_ARG_STR(sVtTitle),
+                                            &FMT_ARG_BOOL(bCommandIsRunning),
+                                            &FMT_ARG_I32(i32CommandTimeSec),
+                                            &FMT_ARG_STR(sRunningCommand),
+                                            &FMT_ARG_I32(i32Rows),
+                                            &FMT_ARG_I32(i32Cols),
+                                            &FMT_ARG_I32(i32Width),
+                                            &FMT_ARG_I32(i32Height),
+                                            NULL);
+
+    static bool threw_warn = false;
+    if (err && !threw_warn) {
+        threw_warn = true;
+        WRN("error in title format string: %s\n", err);
+    }
+
+    Window_update_title(app->win, fmtd_title);
+    free(fmtd_title);
+}
+
 static void App_update_title(void* self, const char* title)
 {
-    Window_update_title(((App*)self)->win, title);
+    App* app = self;
+    free(app->vt_title);
+    app->vt_title = strdup(title);
+    App_set_title(self);
+}
+
+static void App_command_changed(void* self)
+{
+    App_set_title(self);
 }
 
 static void App_flash(void* self)
@@ -885,8 +980,12 @@ static void App_do_extern_pipe(App* self)
         argv[argc++] = NULL;
 
         int pipe_input_fd = spawn_process(NULL, argv[0], argv, true, true);
-        write(pipe_input_fd, content.buf, content.size - 1);
-        close(pipe_input_fd);
+        if (pipe_input_fd) {
+            if (write(pipe_input_fd, content.buf, content.size - 1) == -1) {
+                WRN("extern pipe write failed: %s\n", strerror(errno));
+            }
+            close(pipe_input_fd);
+        }
     } else
         App_flash(self);
 
@@ -1692,6 +1791,7 @@ static void App_set_callbacks(App* self)
     self->vt.callbacks.destroy_sixel_proxy                 = App_destroy_sixel_proxy_handler;
     self->vt.callbacks.on_select_end                       = App_selection_end_handler;
     self->vt.callbacks.immediate_pty_write                 = App_immediate_write_pty;
+    self->vt.callbacks.on_command_state_changed            = App_command_changed;
 
     self->win->callbacks.user_data               = self;
     self->win->callbacks.key_handler             = App_key_handler;

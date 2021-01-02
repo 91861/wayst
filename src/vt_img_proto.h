@@ -169,8 +169,18 @@ static uint8_t* data_from_base64_file_name(char*                        file_nam
     opt_size         = OR(opt_size, (size_file - opt_offset));
     uint8_t* pixels  = malloc(opt_size);
     fseek(file, opt_offset, SEEK_SET);
-    fread(pixels, 1, opt_size, file);
+    size_t rd = fread(pixels, 1, opt_size, file);
     fclose(file);
+
+    if (!rd) {
+        WRN("failed to read from file\n");
+        free(pixels);
+        return NULL;
+
+        if (tmp) {
+            maybe_unlink_tmp_file(decoded_name);
+        }
+    }
 
     switch (compression_type) {
         case VT_IMAGE_PROTO_COMPRESSION_ZLIB: {

@@ -37,7 +37,8 @@
 #endif
 
 #ifndef DFT_TITLE_FMT
-#define DFT_TITLE_FMT "%2$s - %1$s"
+#define DFT_TITLE_FMT                                                                              \
+    "{sVtTitle}{?bCommandIsRunning && i32CommandTimeSec > 1: ({sRunningCommand})} - {sAppTitle}"
 #endif
 
 #ifndef DFT_TERM
@@ -281,10 +282,14 @@ static bool find_font_cached()
     }
 
     for (StyledFontInfo* i = NULL; (i = Vector_iter_StyledFontInfo(&settings.styled_fonts, i));) {
-        fscanf(file, "\n%c%511[^\n]", &type, family_name);
+        if (fscanf(file, "\n%c%511[^\n]", &type, family_name) != 2) {
+            goto abort;
+        }
         for (uint_fast8_t j = 0; j < 4; ++j) {
             file_names[j][0] = '\0';
-            fscanf(file, "\t%511[^\n]", file_names[j]);
+            if (fscanf(file, "\t%511[^\n]", file_names[j]) != 1) {
+                goto abort;
+            }
         }
         if (type == 'S' && !strcmp(family_name, i->family_name) &&
             (file_names[0][0] != '-' || file_names[0][1] != 0)) {
@@ -319,10 +324,15 @@ static bool find_font_cached()
     if (settings.symbol_fonts.size) {
         for (UnstyledFontInfo* i = NULL;
              (i = Vector_iter_UnstyledFontInfo(&settings.symbol_fonts, i));) {
-            fscanf(file, "\n%c%511[^\n]", &type, family_name);
+            if (fscanf(file, "\n%c%511[^\n]", &type, family_name) != 2) {
+                goto abort;
+            }
+
             if (type == 'Y' && !strcmp(family_name, i->family_name) &&
                 (file_names[0][0] != '-' || file_names[0][1] != 0)) {
-                fscanf(file, "\t%511[^\n]", file_names[0]);
+                if (fscanf(file, "\t%511[^\n]", file_names[0]) != 1) {
+                    goto abort;
+                }
                 i->file_name              = strdup(file_names[0]);
                 settings.has_symbol_fonts = true;
             } else {
@@ -335,10 +345,14 @@ static bool find_font_cached()
     if (settings.color_fonts.size) {
         for (UnstyledFontInfo* i = NULL;
              (i = Vector_iter_UnstyledFontInfo(&settings.color_fonts, i));) {
-            fscanf(file, "\n%c%511[^\n]", &type, family_name);
+            if (fscanf(file, "\n%c%511[^\n]", &type, family_name) != 2) {
+                goto abort;
+            }
             if (type == 'C' && !strcmp(family_name, i->family_name) &&
                 (file_names[0][0] != '-' || file_names[0][1] != 0)) {
-                fscanf(file, "\t%511[^\n]", file_names[0]);
+                if (fscanf(file, "\t%511[^\n]", file_names[0]) != 1) {
+                    goto abort;
+                }
                 i->file_name             = strdup(file_names[0]);
                 settings.has_color_fonts = true;
             } else {

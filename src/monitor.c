@@ -174,7 +174,7 @@ ssize_t Monitor_write(Monitor* self, char* buffer, size_t bytes)
 void Monitor_kill(Monitor* self)
 {
     if (self->child_pid > 1) {
-        kill(self->child_pid, SIGKILL);
+        kill(self->child_pid, SIGHUP);
     }
     self->child_pid = 0;
 }

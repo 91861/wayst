@@ -117,6 +117,7 @@ static void Vt_shell_integration_begin_execution(Vt*  self,
     }
 
     self->shell_integration_state = VT_SHELL_INTEG_STATE_OUTPUT;
+    CALL_FP(self->callbacks.on_command_state_changed, self->callbacks.user_data);
 }
 
 static void Vt_shell_integration_active_command_name_changed(Vt* self, const char* command)
@@ -193,15 +194,6 @@ static void Vt_shell_integration_end_execution(Vt* self, const char* opt_exit_st
     }
 
     self->shell_integration_state = VT_SHELL_INTEG_STATE_NONE;
+    CALL_FP(self->callbacks.on_command_state_changed, self->callbacks.user_data);
 }
 
-
-static VtCommand* Vt_shell_integration_get_active_command(Vt* self)
-{
-    RcPtr_VtCommand* cmd_ptr = Vector_last_RcPtr_VtCommand(&self->shell_commands);
-    VtCommand* cmd = NULL;
-    if (!cmd_ptr || !(cmd = RcPtr_get_VtCommand(cmd_ptr))) {
-        return NULL;
-    }
-    return cmd->state == VT_COMMAND_STATE_RUNNING ? cmd : NULL;
-}
