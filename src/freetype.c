@@ -220,11 +220,32 @@ FreetypeOutput* FreetypeFace_load_and_render_glyph(Freetype*     freetype,
 
     FT_Error e;
 
-    if ((e = FT_Load_Char(self->face, codepoint, self->load_flags))) {
+    int                            load_flags  = self->load_flags;
+    int                            render_mode = self->render_mode;
+    enum FreetypeOutputTextureType output_type = self->output_type;
+
+    bool disable_lcd_for_this_glyph = false;
+    if (settings.lcd_exclude_ranges.size) {
+        for (Pair_char32_t* i = NULL;
+             (i = Vector_iter_Pair_char32_t(&settings.lcd_exclude_ranges, i));) {
+            if (i->first <= codepoint && i->second >= codepoint) {
+                disable_lcd_for_this_glyph = true;
+                break;
+            }
+        }
+    }
+
+    if (unlikely(disable_lcd_for_this_glyph)) {
+        load_flags  = load_flags_for_output(FT_OUTPUT_GRAYSCALE);
+        render_mode = render_mode_for_output(FT_OUTPUT_GRAYSCALE);
+        output_type = FT_OUTPUT_GRAYSCALE;
+    }
+
+    if ((e = FT_Load_Char(self->face, codepoint, load_flags))) {
         WRN("glyph load error %c(%d) %s\n", codepoint, codepoint, ft_error_to_string(e));
     }
 
-    if ((e = FT_Render_Glyph(self->face->glyph, self->render_mode))) {
+    if ((e = FT_Render_Glyph(self->face->glyph, render_mode))) {
         WRN("glyph render error %c(%d) %s\n", codepoint, codepoint, ft_error_to_string(e));
     }
 
@@ -236,23 +257,23 @@ FreetypeOutput* FreetypeFace_load_and_render_glyph(Freetype*     freetype,
     if (is_packed) {
         Freetype_convert_mono_bitmap_to_grayscale(freetype, &self->face->glyph->bitmap);
         freetype->output.width =
-          freetype->converted_output_bitmap.width / width_factor_for_output(self->output_type);
+          freetype->converted_output_bitmap.width / width_factor_for_output(output_type);
         freetype->output.height =
-          freetype->converted_output_bitmap.rows / height_factor_for_output(self->output_type);
+          freetype->converted_output_bitmap.rows / height_factor_for_output(output_type);
         freetype->output.pixels = freetype->converted_output_bitmap.buffer;
     } else {
         freetype->output.ft_slot = self->face->glyph;
         freetype->output.width =
-          self->face->glyph->bitmap.width / width_factor_for_output(self->output_type);
+          self->face->glyph->bitmap.width / width_factor_for_output(output_type);
         freetype->output.height =
-          self->face->glyph->bitmap.rows / height_factor_for_output(self->output_type);
+          self->face->glyph->bitmap.rows / height_factor_for_output(output_type);
         freetype->output.pixels = self->face->glyph->bitmap.buffer;
     }
 
     freetype->output.left = self->face->glyph->bitmap_left;
     freetype->output.top  = self->face->glyph->bitmap_top;
 
-    if (is_packed || self->output_type == FT_OUTPUT_GRAYSCALE) {
+    if (is_packed || output_type == FT_OUTPUT_GRAYSCALE) {
         freetype->output.type      = FT_OUTPUT_GRAYSCALE;
         freetype->output.alignment = 1;
     } else if (self->face->glyph->bitmap.pixel_mode == FT_PIXEL_MODE_BGRA) {
@@ -267,6 +288,7 @@ FreetypeOutput* FreetypeFace_load_and_render_glyph(Freetype*     freetype,
         freetype->output.type      = self->output_type;
         freetype->output.alignment = 4;
     }
+
     return &freetype->output;
 }
 

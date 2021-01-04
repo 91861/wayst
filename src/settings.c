@@ -780,6 +780,8 @@ static void settings_make_default()
         .font_style_italic      = AString_new_uninitialized(),
         .font_style_bold_italic = AString_new_uninitialized(),
 
+        .lcd_exclude_ranges = Vector_new_Pair_char32_t(),
+
         .bsp_sends_del      = true,
         .font_size          = 9,
         .font_size_fallback = 0,
@@ -847,6 +849,8 @@ static void settings_make_default()
 
         .pty_chunk_wait_delay_ns = 0,
         .pty_chunk_timeout_ms    = 5,
+
+        .lcd_ranges_set_by_user = false,
     };
 }
 
@@ -854,6 +858,20 @@ static void settings_complete_defaults()
 {
     if (unlikely(settings.flush_ft_cache || settings.debug_font || find_font_cached())) {
         find_font();
+    }
+
+    if (!settings.lcd_ranges_set_by_user && !settings.lcd_exclude_ranges.size) {
+        Vector_push_Pair_char32_t(&settings.lcd_exclude_ranges,
+                                  (Pair_char32_t){
+                                    .first  = 0x2500, /* Box drawing block begin */
+                                    .second = 0x25ff  /* Geometric shapes block end */
+                                  });
+        Vector_push_Pair_char32_t(
+          &settings.lcd_exclude_ranges,
+          (Pair_char32_t){
+            .first  = 0xe0b0, /* private use area powerline symbols 'graphic' characters start */
+            .second = 0xe0bf  /* private use area powerline symbols 'graphic' characters end */
+          });
     }
 
     // set up locale
@@ -1308,6 +1326,24 @@ static void handle_option(const char opt, const int array_index, const char* val
             Vector_destroy_Vector_char(&values);
         } break;
 
+        case OPT_EXCLUDE_LCD_IDX: {
+            settings.lcd_ranges_set_by_user = true;
+            Vector_clear_Pair_char32_t(&settings.lcd_exclude_ranges);
+            Vector_Vector_char values = expand_list_value(value, on_list_expand_syntax_error);
+
+            if (values.size && values.buf->size > 3) {
+                for (Vector_char* i = NULL; (i = Vector_iter_Vector_char(&values, i));) {
+                    Pair_char32_t r = parse_codepoint_range(i->buf);
+                    if (r.second < r.first) {
+                        WRN("invalid codepoint range in %s\n", long_options[array_index].name);
+                        continue;
+                    }
+                    Vector_push_Pair_char32_t(&settings.lcd_exclude_ranges, r);
+                }
+            }
+            Vector_destroy_Vector_char(&values);
+        } break;
+
         case OPT_FONT_SIZE_IDX: {
             L_PROCESS_MULTI_ARG_PACK_BEGIN(value)
             case 0:
@@ -1744,7 +1780,7 @@ static FILE* open_config(const char* path)
 
 bool on_settings_file_parse_syntax_error(uint32_t line, const char* msg_format, va_list msg_args)
 {
-    WRN("Error in config on line %u: ", line);
+    WRN("error in config on line %u: ", line);
     vfprintf(stderr, msg_format, msg_args);
     fputc('\n', stderr);
     return false;
@@ -1757,6 +1793,7 @@ void settings_init(int argc, char** argv)
     settings.argv = argv;
     settings_get_opts(argc, argv, true);
     find_config_path();
+
     if (!settings.skip_config && settings.config_path.str) {
         FILE* cfg = open_config(settings.config_path.str);
         if (cfg) {
@@ -1764,6 +1801,7 @@ void settings_init(int argc, char** argv)
             fclose(cfg);
         }
     }
+
     settings_get_opts(argc, argv, false);
     settings_complete_defaults();
 }
@@ -1773,6 +1811,7 @@ void settings_cleanup()
     Vector_destroy_StyledFontInfo(&settings.styled_fonts);
     Vector_destroy_UnstyledFontInfo(&settings.symbol_fonts);
     Vector_destroy_UnstyledFontInfo(&settings.color_fonts);
+    Vector_destroy_Pair_char32_t(&settings.lcd_exclude_ranges);
 
     AString_destroy(&settings.config_path);
     AString_destroy(&settings.title_format);

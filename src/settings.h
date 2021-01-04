@@ -175,6 +175,9 @@ typedef struct
 
     bool has_bold_fonts, has_italic_fonts, has_bold_italic_fonts, has_symbol_fonts, has_color_fonts;
 
+    bool                 lcd_ranges_set_by_user;
+    Vector_Pair_char32_t lcd_exclude_ranges;
+
     AString term, vte_version, locale, title, directory, uri_handler, extern_pipe_handler;
 
     char* user_app_id;
