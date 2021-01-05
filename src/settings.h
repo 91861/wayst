@@ -234,6 +234,7 @@ typedef struct
     int32_t cursor_blink_end_s;
 
     bool initial_cursor_blinking;
+    bool bold_is_bright;
 
     enum decoration_style_e
     {

@@ -817,6 +817,8 @@ static void settings_make_default()
         .windowops_manip = true,
         .windowops_info  = true,
 
+        .bold_is_bright = true,
+
         .colorscheme_preset   = 0,
         ._explicit_colors_set = calloc(1, 21),
 
@@ -1233,6 +1235,10 @@ static void handle_option(const char opt, const int array_index, const char* val
                 break;
                 L_PROCESS_MULTI_ARG_PACK_END
         } break;
+
+        case OPT_BOLD_IS_BRIGHT:
+            settings.bold_is_bright = strtob(value);
+            break;
 
         case OPT_HELP_IDX:
             print_help_and_exit();

@@ -800,7 +800,10 @@ static ColorRGB Vt_rune_fg_no_invert(const Vt* self, const VtRune* rune)
     } else if (rune->fg_data.index == VT_RUNE_PALETTE_INDEX_TERM_DEFAULT) {
         return self->colors.fg;
     } else {
-        return self->colors.palette_256[rune->fg_data.index];
+        int16_t idx =
+          rune->fg_data.index +
+          8 * (settings.bold_is_bright && rune->fg_data.index <= 7 && rune->fg_data.index >= 0);
+        return self->colors.palette_256[idx];
     }
 }
 
@@ -1228,7 +1231,7 @@ void Vt_select_set_end_cell(Vt* self, int32_t x, int32_t y);
 void Vt_select_end(Vt* self);
 
 /**
- * Terminal listens for scroll wheel button presses */
+ * Terminal listens for scroll wheel or button presses */
 static bool Vt_reports_mouse(Vt* self)
 {
     return self->modes.extended_report || self->modes.mouse_motion_on_btn_report ||
