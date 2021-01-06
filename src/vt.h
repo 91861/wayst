@@ -801,8 +801,8 @@ static ColorRGB Vt_rune_fg_no_invert(const Vt* self, const VtRune* rune)
         return self->colors.fg;
     } else {
         int16_t idx =
-          rune->fg_data.index +
-          8 * (settings.bold_is_bright && rune->fg_data.index <= 7 && rune->fg_data.index >= 0);
+          rune->fg_data.index + 8 * (settings.bold_is_bright && rune->rune.style == VT_RUNE_BOLD &&
+                                     rune->fg_data.index <= 7 && rune->fg_data.index >= 0);
         return self->colors.palette_256[idx];
     }
 }
