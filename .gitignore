@@ -9,3 +9,7 @@ TAGS*
 src/TAGS
 src/TAGS*
 wayst.desktop
+.cache
+.cache/*
+src/.cache
+src/.cache/*
