@@ -38,7 +38,9 @@
 
 #ifndef DFT_TITLE_FMT
 #define DFT_TITLE_FMT                                                                              \
-    "{sVtTitle}{?bCommandIsRunning && i32CommandTimeSec > 1: ({sRunningCommand})} - {sAppTitle}"
+    "{sVtTitle}{?bCommandIsRunning && !bIsAltBufferEnabled && "                                    \
+    "i32CommandTimeSec > 1: "                                                                      \
+    "({sRunningCommand})} - {sAppTitle}"
 #endif
 
 #ifndef DFT_TERM

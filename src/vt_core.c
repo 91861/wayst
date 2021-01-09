@@ -98,7 +98,7 @@ static inline void VtLine_strip_blanks(VtLine* self)
     }
 }
 
-void Vt_output(Vt* self, const char* buf, size_t len)
+void Vt_buffered_output(Vt* self, const char* buf, size_t len)
 {
     Vector_pushv_char(&self->output, buf, len);
 }
@@ -1364,6 +1364,10 @@ static inline void Vt_report_dec_mode(Vt* self, int code)
         case 8:
             value = self->modes.auto_repeat;
             break;
+        case 12:
+        case 13:
+            value = self->cursor.blinking;
+            break;
         case 25:
             value = self->cursor.hidden;
             break;
@@ -1409,11 +1413,12 @@ static inline void Vt_report_dec_mode(Vt* self, int code)
             value = self->modes.sixel_scrolling_move_cursor_right;
             break;
         default: {
-            Vt_output_formated(self, "\e[%d;0$y", code);
+            WRN("Unknown DECRQM mode: %d\n", code);
+            Vt_immediate_output_formated(self, "\e[?%d;0$y", code);
             return;
         }
     }
-    Vt_output_formated(self, "\e[%d;%c$y", code, value ? '1' : '2');
+    Vt_immediate_output_formated(self, "\e[?%d;%c$y", code, value ? '1' : '2');
 }
 
 static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
@@ -1440,21 +1445,11 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
              */
         case 3: {
             if (self->modes.allow_column_size_switching && settings.windowops_manip) {
-                Pair_uint32_t target_text_area_dims;
-                if (on) {
-                    target_text_area_dims =
-                      CALL_FP(self->callbacks.on_window_size_from_cells_requested,
-                              self->callbacks.user_data,
-                              132,
-                              26);
-
-                } else {
-                    target_text_area_dims =
-                      CALL_FP(self->callbacks.on_window_size_from_cells_requested,
-                              self->callbacks.user_data,
-                              80,
-                              24);
-                }
+                Pair_uint32_t target_text_area_dims =
+                  CALL_FP(self->callbacks.on_window_size_from_cells_requested,
+                          self->callbacks.user_data,
+                          on ? 132 : 80,
+                          on ? 26 : 24);
                 CALL_FP(self->callbacks.on_text_area_dimensions_set,
                         self->callbacks.user_data,
                         target_text_area_dims.first,
@@ -1497,17 +1492,15 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
 
         /* Start Blinking Cursor (AT&T 610) */
         case 12:
-            self->cursor.blinking = true;
+        /* Start blinking cursor (xterm non-standard) */
+        case 13:
+            self->cursor.blinking = on;
             break;
-
-        /* Very visible cursor (CVVIS) */
-        /* case 12: */
-        /* break; */
 
         /* Printer status request (DSR) */
         case 15:
             /* Printer not connected. */
-            Vt_output(self, "\e[?13n", 6);
+            Vt_immediate_output(self, "\e[?13n", 6);
             break;
 
         /* hide/show cursor (DECTCEM) */
@@ -1740,8 +1733,10 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                              */
                             case 'p': {
                                 /* Not recognized */
-                                int arg = short_sequence_get_int_argument(seq);
-                                Vt_report_dec_mode(self, arg);
+                                int code;
+                                if (sscanf(seq, "?%d$p", &code) == 1) {
+                                    Vt_report_dec_mode(self, code);
+                                }
                             } break;
 
                             default:
@@ -1847,35 +1842,35 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                 int arg = short_sequence_get_int_argument(seq);
                                 switch (arg) {
                                     case 6: { /* report cursor position */
-                                        Vt_output_formated(self,
-                                                           "\e[?%u;%uR",
-                                                           Vt_cursor_row(self) + 1,
-                                                           self->cursor.col + 1);
+                                        Vt_immediate_output_formated(self,
+                                                                     "\e[?%u;%uR",
+                                                                     Vt_cursor_row(self) + 1,
+                                                                     self->cursor.col + 1);
                                     } break;
 
                                     case 15: /* Report Printer status */
                                              /* not ready */
-                                        Vt_output(self, "\e[?11n", 6);
+                                        Vt_immediate_output(self, "\e[?11n", 6);
                                         break;
 
                                     case 26: /* Report keyboard status */
                                              /* always report US */
-                                        Vt_output(self, "\e[?27;1;0;0n", 12);
+                                        Vt_immediate_output(self, "\e[?27;1;0;0n", 12);
                                         break;
 
                                     case 53: /* Report locator status */
                                              /* No locator (xterm not compiled-in) */
-                                        Vt_output(self, "\e[?50n", 6);
+                                        Vt_immediate_output(self, "\e[?50n", 6);
                                         break;
 
                                     case 56: /* Report locator type */
                                              /* Cannot identify (xterm not compiled-in) */
-                                        Vt_output(self, "\e[?57;0n", 8);
+                                        Vt_immediate_output(self, "\e[?57;0n", 8);
                                         break;
 
                                     case 85: /* Report multi-session configuration */
                                         /* Device not configured for multi-session operation */
-                                        Vt_output(self, "\e[?83n", 6);
+                                        Vt_immediate_output(self, "\e[?83n", 6);
                                         break;
 
                                     default:
@@ -1977,7 +1972,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                         int arg = short_sequence_get_int_argument(seq);
                         if (arg == 0) {
                             /* report VT100, firmware ver. 0, ROM number 0 */
-                            Vt_output(self, "\e[>0;0;0c", 9);
+                            Vt_immediate_output_formated(self, "%s", "\e[>0;0;0c");
                         }
                     } break;
 
@@ -1994,7 +1989,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                         MULTI_ARG_IS_ERROR
                         int arg = short_sequence_get_int_argument(seq);
                         if (arg == 0) {
-                            Vt_output(self, "\e[?6c", 5);
+                            Vt_immediate_output(self, "\e[?6c", 5);
                         }
                     } break;
 
@@ -2266,7 +2261,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                              */
                             case '|': {
                                 /* locator unavailable */
-                                Vt_output(self, "\e[0&w", 5);
+                                Vt_immediate_output(self, "\e[0&w", 5);
                             } break;
 
                             /* <ESC>['} - Insert Ps Column(s) (default = 1) (DECIC), VT420 and up */
@@ -2684,10 +2679,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                             case 'c': {
                                 /* report vt340 type device with sixel ,132column, and window system
                                  * support */
-                                CALL_FP(self->callbacks.immediate_pty_write,
-                                        self->callbacks.user_data,
-                                        "\e[?63;1;4c",
-                                        10);
+                                Vt_immediate_output(self, "\e[?63;1;4c", 10);
                                 /* Vt_immediate_output(self, "\e[?64;1;4;18c", 11); */
                             } break;
 
@@ -2698,13 +2690,13 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                 if (arg == 5) {
                                     /* 5 - is terminal ok
                                      *  ok - 0, not ok - 3 */
-                                    Vt_output(self, "\e[0n", 4);
+                                    Vt_immediate_output(self, "\e[0n", 4);
                                 } else if (arg == 6) {
                                     /* 6 - report cursor position */
-                                    Vt_output_formated(self,
-                                                       "\e[%u;%uR",
-                                                       Vt_cursor_row(self) + 1,
-                                                       self->cursor.col + 1);
+                                    Vt_immediate_output_formated(self,
+                                                                 "\e[%u;%uR",
+                                                                 Vt_cursor_row(self) + 1,
+                                                                 self->cursor.col + 1);
                                 } else {
                                     WRN("Unimplemented DSR code: %d\n", arg);
                                 }
@@ -3051,7 +3043,9 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                         bool is_minimized =
                                           CALL_FP(self->callbacks.on_minimized_state_requested,
                                                   self->callbacks.user_data);
-                                        Vt_output_formated(self, "\e[%d", is_minimized ? 1 : 2);
+                                        Vt_immediate_output_formated(self,
+                                                                     "\e[%d",
+                                                                     is_minimized ? 1 : 2);
 
                                     } break;
 
@@ -3063,10 +3057,10 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                         Pair_uint32_t pos =
                                           CALL_FP(self->callbacks.on_window_position_requested,
                                                   self->callbacks.user_data);
-                                        Vt_output_formated(self,
-                                                           "\e[3;%d;%d;t",
-                                                           pos.first,
-                                                           pos.second);
+                                        Vt_immediate_output_formated(self,
+                                                                     "\e[3;%d;%d;t",
+                                                                     pos.first,
+                                                                     pos.second);
                                     } break;
 
                                     /* Report window size in pixels */
@@ -3074,10 +3068,10 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                         if (!settings.windowops_info) {
                                             break;
                                         }
-                                        Vt_output_formated(self,
-                                                           "\e[4;%d;%d;t",
-                                                           self->ws.ws_xpixel,
-                                                           self->ws.ws_ypixel);
+                                        Vt_immediate_output_formated(self,
+                                                                     "\e[4;%d;%d;t",
+                                                                     self->ws.ws_xpixel,
+                                                                     self->ws.ws_ypixel);
                                     } break;
 
                                     /* Report text area size in chars */
@@ -3085,10 +3079,10 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                         if (!settings.windowops_info) {
                                             break;
                                         }
-                                        Vt_output_formated(self,
-                                                           "\e[8;%d;%d;t",
-                                                           Vt_col(self),
-                                                           Vt_row(self));
+                                        Vt_immediate_output_formated(self,
+                                                                     "\e[8;%d;%d;t",
+                                                                     Vt_col(self),
+                                                                     Vt_row(self));
 
                                     } break;
 
@@ -3097,10 +3091,10 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                         if (!settings.windowops_info) {
                                             break;
                                         }
-                                        Vt_output_formated(self,
-                                                           "\e[9;%d;%d;t",
-                                                           Vt_col(self),
-                                                           Vt_row(self));
+                                        Vt_immediate_output_formated(self,
+                                                                     "\e[9;%d;%d;t",
+                                                                     Vt_col(self),
+                                                                     Vt_row(self));
 
                                     } break;
 
@@ -3111,7 +3105,9 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                         if (!settings.windowops_info) {
                                             break;
                                         }
-                                        Vt_output_formated(self, "\e]L%s\e\\", self->title);
+                                        Vt_immediate_output_formated(self,
+                                                                     "\e]L%s\e\\",
+                                                                     self->title);
                                     } break;
 
                                     /* push title to stack */
@@ -3181,6 +3177,8 @@ static inline void Vt_alt_buffer_on(Vt* self, bool save_mouse)
     }
     self->cursor.row = 0;
     Vt_command_output_interrupted(self);
+
+    CALL_FP(self->callbacks.on_buffer_changed, self->callbacks.user_data);
 }
 
 static inline void Vt_alt_buffer_off(Vt* self, bool save_mouse)
@@ -3204,6 +3202,8 @@ static inline void Vt_alt_buffer_off(Vt* self, bool save_mouse)
         self->scroll_region_bottom = Vt_row(self) - 1;
         Vt_visual_scroll_reset(self);
         Vt_command_output_interrupted(self);
+
+        CALL_FP(self->callbacks.on_buffer_changed, self->callbacks.user_data);
     }
 }
 
@@ -3643,13 +3643,19 @@ static void Vt_handle_APC(Vt* self, char c)
                           payload);
 
                         if (id) {
-                            Vt_output_formated(self, "\e_Gi=%u;%s\e\\", id, OR(error_string, "OK"));
+                            Vt_immediate_output_formated(self,
+                                                         "\e_Gi=%u;%s\e\\",
+                                                         id,
+                                                         OR(error_string, "OK"));
                         }
                     } break;
                     case VT_IMAGE_PROTO_ACTION_DISPLAY: {
                         Vt_img_proto_display(self, id, display_args);
                         if (id) {
-                            Vt_output_formated(self, "\e_Gi=%u;%s\e\\", id, OR(error_string, "OK"));
+                            Vt_immediate_output_formated(self,
+                                                         "\e_Gi=%u;%s\e\\",
+                                                         id,
+                                                         OR(error_string, "OK"));
                         }
                     } break;
                     case VT_IMAGE_PROTO_ACTION_DELETE: {
@@ -3768,7 +3774,10 @@ static void Vt_handle_APC(Vt* self, char c)
                     case VT_IMAGE_PROTO_ACTION_QUERY: {
                         error_string =
                           Vt_img_proto_validate(self, transmission, compression, format);
-                        Vt_output_formated(self, "\e_Gi=%u;%s\e\\", id, OR(error_string, "OK"));
+                        Vt_immediate_output_formated(self,
+                                                     "\e_Gi=%u;%s\e\\",
+                                                     id,
+                                                     OR(error_string, "OK"));
                     } break;
                 }
 
@@ -4031,12 +4040,12 @@ static void Vt_handle_OSC(Vt* self, char c)
                     }
                     if (*arg_clr == '?') {
                         ColorRGB color = self->colors.palette_256[index];
-                        Vt_output_formated(self,
-                                           "\e]4;%u;rgb:%x/%x/%x\a",
-                                           index,
-                                           color.r,
-                                           color.g,
-                                           color.b);
+                        Vt_immediate_output_formated(self,
+                                                     "\e]4;%u;rgb:%x/%x/%x\a",
+                                                     index,
+                                                     color.r,
+                                                     color.g,
+                                                     color.b);
                     } else {
                         set_rgb_color_from_xterm_string(&self->colors.palette_256[index], arg_clr);
                     }
@@ -4514,6 +4523,10 @@ static void Vt_carriage_return(Vt* self)
  * make a new empty line at cursor position, scroll down contents below */
 static void Vt_insert_line(Vt* self)
 {
+    if (unlikely(self->selection.mode)) {
+        Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
+    }
+
     self->last_interted = NULL;
     Vector_insert_at_VtLine(&self->lines, self->cursor.row, VtLine_new());
     Vt_shift_global_line_index_refs(self, self->cursor.row, 1, true);
@@ -4532,6 +4545,10 @@ static void Vt_insert_line(Vt* self)
  * the same as insert line, but adds before cursor line */
 static void Vt_reverse_line_feed(Vt* self)
 {
+    if (unlikely(self->selection.mode)) {
+        Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
+    }
+
     self->last_interted = NULL;
     if (self->cursor.row == Vt_get_scroll_region_top(self)) {
         Vt_about_to_delete_line_by_scroll_down(self, Vt_get_scroll_region_bottom(self));
@@ -4552,6 +4569,10 @@ static void Vt_reverse_line_feed(Vt* self)
  * delete active line, content below scrolls up */
 static void Vt_delete_line(Vt* self)
 {
+    if (unlikely(self->selection.mode)) {
+        Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
+    }
+
     self->last_interted = NULL;
 
     Vt_about_to_delete_line_by_scroll_up(self, self->cursor.row);
@@ -4568,6 +4589,10 @@ static void Vt_delete_line(Vt* self)
 
 static void Vt_scroll_up(Vt* self)
 {
+    if (unlikely(self->selection.mode)) {
+        Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
+    }
+
     self->last_interted = NULL;
     size_t insert_idx   = MIN(Vt_bottom_line(self), Vt_get_scroll_region_bottom(self)) + 1;
     Vector_insert_at_VtLine(&self->lines, insert_idx, VtLine_new());
@@ -4584,6 +4609,10 @@ static void Vt_scroll_up(Vt* self)
 
 static void Vt_scroll_down(Vt* self)
 {
+    if (unlikely(self->selection.mode)) {
+        Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
+    }
+
     self->last_interted = NULL;
     Vector_insert_at_VtLine(&self->lines, Vt_get_scroll_region_top(self), VtLine_new());
     Vt_shift_global_line_index_refs(self, Vt_get_scroll_region_top(self), 1, true);
@@ -4688,6 +4717,10 @@ static void Vt_delete_chars(Vt* self, size_t n)
 
 static inline void Vt_scroll_out_all_content(Vt* self)
 {
+    if (unlikely(self->selection.mode)) {
+        Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
+    }
+
     int64_t to_add = 0;
     for (size_t i = Vt_visual_bottom_line(self); i >= Vt_visual_top_line(self); --i) {
         if (self->lines.buf[i].data.size) {
@@ -4709,6 +4742,10 @@ static inline void Vt_scroll_out_all_content(Vt* self)
 
 static inline void Vt_scroll_out_above(Vt* self)
 {
+    if (unlikely(self->selection.mode)) {
+        Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
+    }
+
     size_t to_add = Vt_cursor_row(self);
     for (size_t i = 0; i <= to_add; ++i) {
         size_t insert_point = self->cursor.row;
@@ -4869,6 +4906,10 @@ static inline void Vt_empty_line_fill_bg(Vt* self, size_t idx)
  * Move one line down or insert a new one, scrolls if region is set */
 static inline void Vt_insert_new_line(Vt* self)
 {
+    if (unlikely(self->selection.mode)) {
+        Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
+    }
+
     if (self->cursor.row == Vt_get_scroll_region_bottom(self) &&
         Vt_scroll_region_not_default(self)) {
         Vt_about_to_delete_line_by_scroll_up(self, Vt_get_scroll_region_top(self));
@@ -5557,21 +5598,27 @@ static void Vt_shift_global_line_index_refs(Vt* self, size_t point, int64_t chan
     LOG("Vt::shift_idx{ pt: %zu, delta: %ld }\n", point, change);
 
     if (!refs_only) {
-        if (self->cursor.row >= point)
+        if (self->cursor.row >= point) {
             self->cursor.row += change;
+        }
 
-        if (self->visual_scroll_top >= point)
+        if (self->visual_scroll_top >= point) {
             self->visual_scroll_top += change;
+        }
 
-        if (self->scroll_region_top >= point)
+        if (self->scroll_region_top >= point) {
             self->scroll_region_top += change;
-        if (self->scroll_region_bottom >= point)
+        }
+
+        if (self->scroll_region_bottom >= point) {
             self->scroll_region_bottom += change;
+        }
     }
 
     for (RcPtr_VtImageSurfaceView* rp = NULL;
          (rp = Vector_iter_RcPtr_VtImageSurfaceView(&self->image_views, rp));) {
         VtImageSurfaceView* sv = RcPtr_get_VtImageSurfaceView(rp);
+
         if (sv && sv->anchor_global_index >= point) {
             sv->anchor_global_index += change;
         }
@@ -5580,6 +5627,7 @@ static void Vt_shift_global_line_index_refs(Vt* self, size_t point, int64_t chan
     for (RcPtr_VtSixelSurface* rp = NULL;
          (rp = Vector_iter_RcPtr_VtSixelSurface(&self->scrolled_sixels, rp));) {
         VtSixelSurface* ss = RcPtr_get_VtSixelSurface(rp);
+
         if (ss && ss->anchor_global_index >= point) {
             ss->anchor_global_index += change;
         }
@@ -5588,19 +5636,28 @@ static void Vt_shift_global_line_index_refs(Vt* self, size_t point, int64_t chan
     for (RcPtr_VtCommand* rp = NULL;
          (rp = Vector_iter_RcPtr_VtCommand(&self->shell_commands, rp));) {
         VtCommand* cmd = RcPtr_get_VtCommand(rp);
-        if (cmd->command_start_row >= point)
+
+        if (cmd->command_start_row >= point) {
             cmd->command_start_row += change;
-        if (cmd->output_rows.first >= point)
+        }
+
+        if (cmd->output_rows.first >= point) {
             cmd->output_rows.first += change;
-        if (cmd->output_rows.second >= point)
+        }
+
+        if (cmd->output_rows.second >= point) {
             cmd->output_rows.second += change;
+        }
     }
 
     if (self->selection.mode == SELECT_MODE_NORMAL) {
-        if (self->selection.begin_line >= point)
+        if (self->selection.begin_line >= point) {
             self->selection.begin_line += change;
-        if (self->selection.end_line >= point)
+        }
+
+        if (self->selection.end_line >= point) {
             self->selection.end_line += change;
+        }
     }
 }
 
@@ -5639,6 +5696,7 @@ static void Vt_remove_scrollback(Vt* self, size_t lines)
                 removed = true;
                 break;
             }
+
             if (removed) {
                 continue;
             } else {
@@ -5661,6 +5719,7 @@ static void Vt_remove_scrollback(Vt* self, size_t lines)
                 break;
             }
         }
+
         if (removed) {
             continue;
         } else {
@@ -5674,6 +5733,7 @@ void Vt_clear_scrollback(Vt* self)
     if (Vt_alt_buffer_enabled(self)) {
         return;
     }
+
     Vt_remove_scrollback(self, self->lines.size);
 }
 
@@ -5682,6 +5742,7 @@ static void Vt_shrink_scrollback(Vt* self)
     if (Vt_alt_buffer_enabled(self)) {
         return;
     }
+
     int64_t ln_cnt = self->lines.size;
     if (unlikely(ln_cnt > MAX(settings.scrollback * 1.1, Vt_row(self)))) {
         int64_t to_remove = ln_cnt - settings.scrollback - Vt_row(self);
@@ -5757,18 +5818,18 @@ void Vt_handle_button(void*    _self,
                           (FLAG_IS_SET(mods, MODIFIER_CONTROL) ? 16 : 0);
             }
             if (self->modes.extended_report) {
-                Vt_output_formated(self,
-                                   "\e[<%u;%d;%d%c",
-                                   button - 1,
-                                   self->last_click_x + 1,
-                                   self->last_click_y + 1,
-                                   state ? 'M' : 'm');
+                Vt_immediate_output_formated(self,
+                                             "\e[<%u;%d;%d%c",
+                                             button - 1,
+                                             self->last_click_x + 1,
+                                             self->last_click_y + 1,
+                                             state ? 'M' : 'm');
             } else if (self->modes.mouse_btn_report) {
-                Vt_output_formated(self,
-                                   "\e[M%c%c%c",
-                                   32 + button - 1 + !state * 3,
-                                   (char)(32 + self->last_click_x + 1),
-                                   (char)(32 + self->last_click_y + 1));
+                Vt_immediate_output_formated(self,
+                                             "\e[M%c%c%c",
+                                             32 + button - 1 + !state * 3,
+                                             (char)(32 + self->last_click_x + 1),
+                                             (char)(32 + self->last_click_y + 1));
             }
         }
     }
@@ -5787,11 +5848,11 @@ void Vt_handle_motion(void* _self, uint32_t button, int32_t x, int32_t y)
             if (click_x != self->last_click_x || click_y != self->last_click_y) {
                 self->last_click_x = click_x;
                 self->last_click_y = click_y;
-                Vt_output_formated(self,
-                                   "\e[<%d;%zu;%zuM",
-                                   (int)button - 1 + 32,
-                                   click_x + 1,
-                                   click_y + 1);
+                Vt_immediate_output_formated(self,
+                                             "\e[<%d;%zu;%zuM",
+                                             (int)button - 1 + 32,
+                                             click_x + 1,
+                                             click_y + 1);
             }
         }
     }
@@ -5808,7 +5869,7 @@ void Vt_handle_clipboard(void* self, const char* text)
     size_t len = strlen(text);
 
     if (vt->modes.bracketed_paste) {
-        Vt_output(vt, "\e[200~", 6);
+        Vt_buffered_output(vt, "\e[200~", 6);
     }
 
     char last = '\0';
@@ -5825,7 +5886,7 @@ void Vt_handle_clipboard(void* self, const char* text)
     }
 
     if (vt->modes.bracketed_paste) {
-        Vt_output(vt, "\e[201~", 6);
+        Vt_buffered_output(vt, "\e[201~", 6);
     }
 }
 
@@ -5842,6 +5903,11 @@ Vector_char* Vt_get_output(Vt* self, size_t len, char** out_buf, size_t* out_siz
         ASSERT(out_buf && out_size, "has output ptrs");
         *out_buf  = self->output.buf;
         *out_size = self->output.size;
+        if (unlikely(settings.debug_pty) && self->output.size) {
+            char* str = pty_string_prettyfy(self->output.buf, self->output.size);
+            fprintf(stderr, "pty.write(%3zu) <= { %s }\n\n", self->output.size, str);
+            free(str);
+        }
         Vector_clear_char(&self->output);
         return NULL;
     } else {
@@ -5849,9 +5915,9 @@ Vector_char* Vt_get_output(Vt* self, size_t len, char** out_buf, size_t* out_siz
         Vector_clear_char(&self->staged_output);
         Vector_pushv_char(&self->staged_output, self->output.buf, len);
 
-        if (unlikely(settings.debug_pty) && self->output.size) {
-            char* str = pty_string_prettyfy(self->output.buf, len);
-            fprintf(stderr, "pty.write(%3zu) <~ { %s }\n\n", len, str);
+        if (unlikely(settings.debug_pty) && self->staged_output.size) {
+            char* str = pty_string_prettyfy(self->staged_output.buf, len);
+            fprintf(stderr, "pty.write(%3zu) <- { %s }\n\n", self->staged_output.size, str);
             free(str);
         }
 

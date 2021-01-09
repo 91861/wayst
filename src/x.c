@@ -798,12 +798,12 @@ struct WindowBase* Window_new_x11(Pair_uint32_t res)
 
 static inline void WindowX11_set_urgent(struct WindowBase* self)
 {
-    XEvent e = {
+    XClientMessageEvent e = {
         .type                 = ClientMessage,
-        .xclient.window       = windowX11(self)->window,
-        .xclient.message_type = globalX11->atom.wm_state,
-        .xclient.format       = 32,
-        .xclient.data.l = {
+        .window       = windowX11(self)->window,
+        .message_type = globalX11->atom.wm_state,
+        .format       = 32,
+        .data.l = {
             [0] = _NET_WM_STATE_ADD,
             [1] = globalX11->atom.wm_demands_attention,
             [2] = 0,

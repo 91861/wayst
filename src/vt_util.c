@@ -14,6 +14,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#define VT_DIM_FACTOR 0.4f
+
 Vector_char Vt_command_to_string(const Vt* self, const VtCommand* command, size_t opt_limit_lines)
 {
     ASSERT(command->state == VT_COMMAND_STATE_COMPLETED, "is completed");
@@ -262,6 +264,43 @@ bool Vt_is_cell_selected(const Vt* const self, int32_t x, int32_t y)
             return false;
     }
     return false;
+}
+
+ColorRGB Vt_rune_final_fg_apply_dim(const Vt* self, const VtRune* rune, ColorRGBA bg_color)
+{
+    if (unlikely(rune->dim)) {
+        return ColorRGB_new_from_blend(Vt_rune_fg(self, rune),
+                                       ColorRGB_from_RGBA(bg_color),
+                                       VT_DIM_FACTOR);
+    } else {
+        return Vt_rune_fg(self, rune);
+    }
+}
+
+ColorRGB Vt_rune_final_fg(const Vt*     self,
+                          const VtRune* rune,
+                          int32_t       x,
+                          int32_t       y,
+                          ColorRGBA     bg_color)
+{
+    if (!settings.highlight_change_fg) {
+        return Vt_rune_final_fg_apply_dim(self, rune, bg_color);
+    } else {
+        if (unlikely(Vt_is_cell_selected(self, x, y))) {
+            return self->colors.highlight.fg;
+        } else {
+            return Vt_rune_final_fg_apply_dim(self, rune, bg_color);
+        }
+    }
+}
+
+ColorRGBA Vt_rune_final_bg(const Vt* self, const VtRune* rune, int32_t x, int32_t y)
+{
+    if (unlikely(Vt_is_cell_selected(self, x, y))) {
+        return self->colors.highlight.bg;
+    } else {
+        return Vt_rune_bg(self, rune);
+    }
 }
 
 static const char* const color_palette_names[] = {
@@ -545,6 +584,58 @@ __attribute__((cold)) void Vt_dump_info(Vt* self)
 {
     static int dump_index = 0;
     printf("\n====================[ STATE DUMP %2d ]====================\n", dump_index++);
+    printf("parser state: ");
+    if (self->parser.in_mb_seq) {
+        puts("in multi-byte sequence");
+    } else {
+        switch (self->parser.state) {
+            case PARSER_STATE_APC:
+                puts("in application program command");
+                break;
+            case PARSER_STATE_CSI:
+                puts("in control sequence");
+                break;
+            case PARSER_STATE_DCS:
+                puts("in device control string");
+                break;
+            case PARSER_STATE_LITERAL:
+                puts("character literal");
+                break;
+            case PARSER_STATE_PM:
+                puts("privacy message");
+                break;
+            case PARSER_STATE_ESCAPED:
+                puts("escape code");
+                break;
+            case PARSER_STATE_ESCAPED_CSI:
+                puts("in control sequence escape code");
+                break;
+            case PARSER_STATE_DEC_SPECIAL:
+                puts("DEC special command");
+                break;
+            case PARSER_STATE_OSC:
+                puts("operating system command");
+                break;
+            case PARSER_STATE_TITLE:
+                puts("legacy title select");
+                break;
+            case PARSER_STATE_CHARSET:
+                puts("character set select");
+                break;
+            case PARSER_STATE_CHARSET_G0:
+                puts("character set G0");
+                break;
+            case PARSER_STATE_CHARSET_G1:
+                puts("character set G1");
+                break;
+            case PARSER_STATE_CHARSET_G2:
+                puts("character set G2");
+                break;
+            case PARSER_STATE_CHARSET_G3:
+                puts("character set G3");
+                break;
+        }
+    }
     printf("Active character attributes:\n");
     printf("  foreground color:   " COLOR_RGB_FMT "\n",
            COLOR_RGB_AP((Vt_rune_fg(self, &self->parser.char_state))));

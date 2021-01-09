@@ -11,6 +11,7 @@
 
 #include "util.h"
 #include <ctype.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -277,3 +278,8 @@ static inline float ColorRGB_get_saturation(const ColorRGB c)
     float lightness = (float)(max + min) / 2.0f;
     return ((float)delta / 255.0f) / (1 - ABS(2 * lightness - 1.0));
 }
+
+
+float ColorRGB_get_readability_WCAG(const ColorRGB* color1, const ColorRGB* color2);
+
+bool ColorRGB_is_readable_WCAG(const ColorRGB* color1, const ColorRGB* color2);

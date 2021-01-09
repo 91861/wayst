@@ -2,11 +2,9 @@
 
 #define _GNU_SOURCE
 
+#include "key.h"
 #include "vt.h"
 #include "vt_private.h"
-#include "key.h"
-
-
 
 /**
  *  Substitute keypad keys with normal ones */
@@ -75,7 +73,6 @@ static uint32_t numpad_key_convert(uint32_t key)
     }
 }
 
-
 /**
  * Respond to key event for unicode input
  * @return keypress was consumed */
@@ -98,7 +95,7 @@ static bool Vt_maybe_handle_unicode_input_key(Vt*      self,
                 static mbstate_t mbstate;
                 int              mb_len = c32rtomb(tmp, result, &mbstate);
                 if (mb_len) {
-                    Vt_output(self, tmp, mb_len);
+                    Vt_buffered_output(self, tmp, mb_len);
                 }
             } else {
                 WRN("Failed to parse \'%s\'\n", self->unicode_input.buffer.buf);
@@ -132,7 +129,6 @@ static bool Vt_maybe_handle_unicode_input_key(Vt*      self,
     return false;
 }
 
-
 /**
  * Respond to key event if it is a function key
  * @return keypress was consumed */
@@ -142,60 +138,60 @@ static bool Vt_maybe_handle_function_key(Vt* self, uint32_t key, uint32_t mods)
         int f_num = (key + 1) - KEY(F1);
         if (mods) {
             if (f_num < 5) {
-                Vt_output_formated(self, "\e[1;%u%c", mods + 1, f_num + 'O');
+                Vt_buffered_output_formated(self, "\e[1;%u%c", mods + 1, f_num + 'O');
             } else if (f_num == 5) {
-                Vt_output_formated(self, "\e[%d;%u~", f_num + 10, mods + 1);
+                Vt_buffered_output_formated(self, "\e[%d;%u~", f_num + 10, mods + 1);
             } else if (f_num < 11) {
-                Vt_output_formated(self, "\e[%d;%u~", f_num + 11, mods + 1);
+                Vt_buffered_output_formated(self, "\e[%d;%u~", f_num + 11, mods + 1);
             } else {
-                Vt_output_formated(self, "\e[%d;%u~", f_num + 12, mods + 1);
+                Vt_buffered_output_formated(self, "\e[%d;%u~", f_num + 12, mods + 1);
             }
         } else {
             if (f_num < 5) {
-                Vt_output_formated(self, "\eO%c", f_num + 'O');
+                Vt_buffered_output_formated(self, "\eO%c", f_num + 'O');
             } else if (f_num == 5) {
-                Vt_output_formated(self, "\e[%d~", f_num + 10);
+                Vt_buffered_output_formated(self, "\e[%d~", f_num + 10);
             } else if (f_num < 11) {
-                Vt_output_formated(self, "\e[%d~", f_num + 11);
+                Vt_buffered_output_formated(self, "\e[%d~", f_num + 11);
             } else {
-                Vt_output_formated(self, "\e[%d~", f_num + 12);
+                Vt_buffered_output_formated(self, "\e[%d~", f_num + 12);
             }
         }
         return true;
     } else /* not f-key */ {
         if (mods) {
             if (key == KEY(Insert)) {
-                Vt_output_formated(self, "\e[2;%u~", mods + 1);
+                Vt_buffered_output_formated(self, "\e[2;%u~", mods + 1);
                 return true;
             } else if (key == KEY(Delete)) {
-                Vt_output_formated(self, "\e[3;%u~", mods + 1);
+                Vt_buffered_output_formated(self, "\e[3;%u~", mods + 1);
                 return true;
             } else if (key == KEY(Home)) {
-                Vt_output_formated(self, "\e[1;%u~", mods + 1);
+                Vt_buffered_output_formated(self, "\e[1;%u~", mods + 1);
                 return true;
             } else if (key == KEY(End)) {
-                Vt_output_formated(self, "\e[4;%u~", mods + 1);
+                Vt_buffered_output_formated(self, "\e[4;%u~", mods + 1);
                 return true;
             } else if (key == KEY(Page_Up)) {
-                Vt_output_formated(self, "\e[5;%u~", mods + 1);
+                Vt_buffered_output_formated(self, "\e[5;%u~", mods + 1);
                 return true;
             } else if (key == KEY(Page_Down)) {
-                Vt_output_formated(self, "\e[6;%u~", mods + 1);
+                Vt_buffered_output_formated(self, "\e[6;%u~", mods + 1);
                 return true;
             }
 
         } else /* no mods */ {
             if (key == KEY(Insert)) {
-                Vt_output(self, "\e[2~", 4);
+                Vt_buffered_output(self, "\e[2~", 4);
                 return true;
             } else if (key == KEY(Delete)) {
-                Vt_output(self, "\e[3~", 4);
+                Vt_buffered_output(self, "\e[3~", 4);
                 return true;
             } else if (key == KEY(Page_Up)) {
-                Vt_output(self, "\e[5~", 4);
+                Vt_buffered_output(self, "\e[5~", 4);
                 return true;
             } else if (key == KEY(Page_Down)) {
-                Vt_output(self, "\e[6~", 4);
+                Vt_buffered_output(self, "\e[6~", 4);
                 return true;
             }
         }
@@ -203,7 +199,6 @@ static bool Vt_maybe_handle_function_key(Vt* self, uint32_t key, uint32_t mods)
 
     return false;
 }
-
 
 static const char* application_cursor_key_response(const uint32_t key)
 {
@@ -226,7 +221,6 @@ static const char* application_cursor_key_response(const uint32_t key)
             return NULL;
     }
 }
-
 
 static const char* Vt_get_normal_cursor_key_response(Vt* self, const uint32_t key)
 {
@@ -254,7 +248,6 @@ static const char* Vt_get_normal_cursor_key_response(Vt* self, const uint32_t ke
     }
 }
 
-
 /**
  * Get response format string in normal keypad mode */
 static const char* mod_cursor_key_response(const uint32_t key)
@@ -279,7 +272,6 @@ static const char* mod_cursor_key_response(const uint32_t key)
     }
 }
 
-
 /**
  * Respond to key event if it is a keypad key
  * @return keypress was consumed */
@@ -289,20 +281,19 @@ static bool Vt_maybe_handle_keypad_key(Vt* self, uint32_t key, uint32_t mods)
     if (mods) {
         resp = mod_cursor_key_response(key);
         if (resp) {
-            Vt_output_formated(self, resp, mods + 1);
+            Vt_buffered_output_formated(self, resp, mods + 1);
             return true;
         }
     } else {
         resp = Vt_get_normal_cursor_key_response(self, key);
         if (resp) {
-            Vt_output(self, resp, strlen(resp));
+            Vt_buffered_output(self, resp, strlen(resp));
             return true;
         }
     }
 
     return false;
 }
-
 
 /**
  * Respond to key event */
@@ -334,7 +325,7 @@ void Vt_handle_key(void* _self, uint32_t key, uint32_t rawkey, uint32_t mods)
         static mbstate_t mbstate;
         size_t           mb_len = c32rtomb(tmp, key, &mbstate);
         if (mb_len) {
-            Vt_output(self, tmp, mb_len);
+            Vt_buffered_output(self, tmp, mb_len);
         }
     }
 
@@ -342,4 +333,3 @@ void Vt_handle_key(void* _self, uint32_t key, uint32_t rawkey, uint32_t mods)
         Vt_visual_scroll_reset(self);
     }
 }
-

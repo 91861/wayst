@@ -1653,11 +1653,15 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
             }
         }
 
-#define L_CALC_BG_COLOR                                                                            \
-    Vt_is_cell_selected(vt, idx_each_rune, visual_line_index) ? vt->colors.highlight.bg            \
-                                                              : Vt_rune_bg(vt, each_rune)
+        /* #define L_CALC_BG_COLOR \ */
+        /*     Vt_is_cell_selected(vt, idx_each_rune, visual_line_index) ? vt->colors.highlight.bg
+         * \ */
+        /*                                                               : Vt_rune_bg(vt, each_rune)
+         */
 
-        if (idx_each_rune == range.second || !ColorRGBA_eq(L_CALC_BG_COLOR, active_bg_color)) {
+        if (idx_each_rune == range.second ||
+            !ColorRGBA_eq(Vt_rune_final_bg(vt, each_rune, idx_each_rune, visual_line_index),
+                          active_bg_color)) {
             int32_t extra_width = 0;
 
             if (idx_each_rune > 1) {
@@ -1683,21 +1687,27 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                      each_rune_same_bg != each_rune + 1;
                      ++each_rune_same_bg) {
 
-#define L_CALC_DIM_BLEND_COLOR                                                                     \
-    (unlikely(each_rune_same_bg->dim)                                                              \
-       ? ColorRGB_new_from_blend(Vt_rune_fg(vt, each_rune_same_bg),                                \
-                                 ColorRGB_from_RGBA(active_bg_color),                              \
-                                 DIM_COLOR_BLEND_FACTOR)                                           \
-       : Vt_rune_fg(vt, each_rune_same_bg))
+                    /* #define L_CALC_DIM_BLEND_COLOR \ */
+                    /*     (unlikely(each_rune_same_bg->dim) \ */
+                    /*        ? ColorRGB_new_from_blend(Vt_rune_fg(vt, each_rune_same_bg), \ */
+                    /*                                  ColorRGB_from_RGBA(active_bg_color), \ */
+                    /*                                  DIM_COLOR_BLEND_FACTOR) \ */
+                    /*        : Vt_rune_fg(vt, each_rune_same_bg)) */
 
-#define L_CALC_FG_COLOR                                                                            \
-    !settings.highlight_change_fg ? L_CALC_DIM_BLEND_COLOR                                         \
-    : unlikely(Vt_is_cell_selected(vt, each_rune_same_bg - vt_line->data.buf, visual_line_index))  \
-      ? vt->colors.highlight.fg                                                                    \
-      : L_CALC_DIM_BLEND_COLOR
+                    /* #define L_CALC_FG_COLOR \ */
+                    /*     !settings.highlight_change_fg ? L_CALC_DIM_BLEND_COLOR \ */
+                    /*     : unlikely(Vt_is_cell_selected(vt, each_rune_same_bg - vt_line->data.buf,
+                     * visual_line_index))  \ */
+                    /*       ? vt->colors.highlight.fg \ */
+                    /*       : L_CALC_DIM_BLEND_COLOR */
 
                     if (each_rune_same_bg == each_rune ||
-                        !ColorRGB_eq(L_CALC_FG_COLOR, active_fg_color)) {
+                        !ColorRGB_eq(Vt_rune_final_fg(vt,
+                                                      each_rune_same_bg,
+                                                      each_rune_same_bg - vt_line->data.buf,
+                                                      visual_line_index,
+                                                      active_bg_color),
+                                     active_fg_color)) {
 
                         /* Dummy value with we can point to to filter out a character */
                         VtRune        same_color_blank_space;
@@ -1866,7 +1876,9 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                                                              visual_line_index))) {
                                 active_fg_color = vt->colors.highlight.fg;
                             } else {
-                                active_fg_color = L_CALC_DIM_BLEND_COLOR;
+                                active_fg_color = Vt_rune_final_fg_apply_dim(vt,
+                                                                             each_rune_same_bg,
+                                                                             active_bg_color);
                             }
                         }
 

@@ -4,15 +4,26 @@
 
 #include "vt.h"
 
-static void        Vt_insert_new_line(Vt* self);
-static inline void Vt_move_cursor(Vt* self, uint16_t column, uint16_t rows);
+static void                 Vt_insert_new_line(Vt* self);
+static inline void          Vt_move_cursor(Vt* self, uint16_t column, uint16_t rows);
+__attribute__((cold)) char* pty_string_prettyfy(const char* str, int32_t max);
 
-void Vt_output(Vt* self, const char* buf, size_t len);
+void Vt_buffered_output(Vt* self, const char* buf, size_t len);
 
-#define Vt_output_formated(vt, fmt, ...)                                                           \
+#define Vt_buffered_output_formated(vt, fmt, ...)                                                  \
     char _tmp[256];                                                                                \
     int  _len = snprintf(_tmp, sizeof(_tmp), fmt, __VA_ARGS__);                                    \
-    Vt_output((vt), _tmp, _len);
+    Vt_buffered_output((vt), _tmp, _len);
+
+static inline void Vt_immediate_output(Vt* self, char* str, size_t len)
+{
+    if (unlikely(settings.debug_pty)) {
+        char* p = pty_string_prettyfy(str, len);
+        printf("pty.write(%.3zu) <~ { %s }\n\n", len, p);
+        free(p);
+    }
+    self->callbacks.immediate_pty_write(self->callbacks.user_data, str, len);
+}
 
 #define Vt_immediate_output_formated(vt, fmt, ...)                                                 \
     char _tmp[256];                                                                                \

@@ -467,6 +467,8 @@ typedef struct
         void (*on_urgency_set)(void*);
         void (*on_restack_to_front)(void*);
         void (*on_command_state_changed)(void*);
+        void (*on_buffer_changed)(void*);
+        void (*on_mouse_report_state_changed)(void*);
         const char* (*on_application_hostname_requested)(void*);
 
         void (*destroy_proxy)(void*, VtLineProxy*);
@@ -728,6 +730,14 @@ typedef struct
 
         /* Sixel scrolling leaves cursor to right of graphic. */
         uint8_t sixel_scrolling_move_cursor_right : 1;
+
+        /* SRM (Send/Receive) aka local echo mode
+         *
+         * When local echo is on, the terminal sends keyboard characters to the screen. The host
+         * does not have to send (echo) the characters back to the terminal display. When local echo
+         * is off, the terminal only sends characters to the host. It is up to the host to echo
+         * characters back to the screen.  */
+        uint8_t send_receive_mode : 1;
     } modes;
 
 #define VT_XT_MODIFY_KEYBOARD_DFT 0
@@ -1361,4 +1371,18 @@ static VtCommand* Vt_shell_integration_get_active_command(Vt* self)
         return NULL;
     }
     return cmd->state == VT_COMMAND_STATE_RUNNING ? cmd : NULL;
+}
+
+ColorRGBA Vt_rune_final_bg(const Vt* self, const VtRune* rune, int32_t x, int32_t y);
+ColorRGB  Vt_rune_final_fg(const Vt*     self,
+                           const VtRune* rune,
+                           int32_t       x,
+                           int32_t       y,
+                           ColorRGBA     bg_color);
+ColorRGB  Vt_rune_final_fg_apply_dim(const Vt* self, const VtRune* rune, ColorRGBA bg_color);
+
+static bool Vt_is_reporting_mouse(Vt* self)
+{
+    return self->modes.mouse_btn_report || self->modes.mouse_motion_report ||
+           self->modes.mouse_motion_on_btn_report || self->modes.extended_report;
 }

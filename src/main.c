@@ -60,7 +60,9 @@ typedef struct
     Vt       vt;
     Freetype freetype;
     Monitor  monitor;
-    int      written_bytes;
+
+    /* Bytes written since reading from pty */
+    int written_bytes;
 
     Pair_uint32_t resolution;
 
@@ -343,6 +345,7 @@ static void App_run(App* self)
 static void App_immediate_write_pty(void* self, char* buf, size_t size)
 {
     App* app = self;
+    app->written_bytes += size;
     Monitor_write(&app->monitor, buf, size);
 }
 
@@ -472,9 +475,11 @@ static void App_set_title(void* self)
         return;
     }
 
-    const VtCommand* c         = Vt_shell_integration_get_active_command(&app->vt);
-    char*            sAppTitle = settings.title.str;
-    char*            sVtTitle  = app->vt_title;
+    const VtCommand* c                   = Vt_shell_integration_get_active_command(&app->vt);
+    char*            sAppTitle           = settings.title.str;
+    char*            sVtTitle            = app->vt_title;
+    bool             bIsReportingMouse   = Vt_is_reporting_mouse(&app->vt);
+    bool             bIsAltBufferEnabled = Vt_alt_buffer_enabled(&app->vt);
     /* we do not know what command is running if its using the VTE prompts */
     bool      bCommandIsRunning = c && c->command;
     char*     sRunningCommand   = c ? c->command : "";
@@ -498,6 +503,8 @@ static void App_set_title(void* self)
                                             &FMT_ARG_STR(sAppTitle),
                                             &FMT_ARG_STR(sVtTitle),
                                             &FMT_ARG_BOOL(bCommandIsRunning),
+                                            &FMT_ARG_BOOL(bIsReportingMouse),
+                                            &FMT_ARG_BOOL(bIsAltBufferEnabled),
                                             &FMT_ARG_I32(i32CommandTimeSec),
                                             &FMT_ARG_STR(sRunningCommand),
                                             &FMT_ARG_I32(i32Rows),
@@ -525,6 +532,16 @@ static void App_update_title(void* self, const char* title)
 }
 
 static void App_command_changed(void* self)
+{
+    App_set_title(self);
+}
+
+static void App_buffer_changed(void* self)
+{
+    App_set_title(self);
+}
+
+static void App_mouse_report_changed(void* self)
 {
     App_set_title(self);
 }
@@ -1792,6 +1809,8 @@ static void App_set_callbacks(App* self)
     self->vt.callbacks.on_select_end                       = App_selection_end_handler;
     self->vt.callbacks.immediate_pty_write                 = App_immediate_write_pty;
     self->vt.callbacks.on_command_state_changed            = App_command_changed;
+    self->vt.callbacks.on_mouse_report_state_changed       = App_mouse_report_changed;
+    self->vt.callbacks.on_buffer_changed                   = App_buffer_changed;
 
     self->win->callbacks.user_data               = self;
     self->win->callbacks.key_handler             = App_key_handler;

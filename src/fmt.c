@@ -62,11 +62,14 @@ static void drop_whitespace(Vector_char* expr)
 
 static double _fmt_eval_operand(Map_size_t_fmt_arg_t* vars, Vector_char* expr, char** e)
 {
-    bool negate = false;
+    bool negate = false, b_normalize = false;
     drop_whitespace(expr);
-    if (*Vector_first_char(expr) == '!') {
+    while (expr->size && *Vector_first_char(expr) == '!') {
         Vector_remove_at_char(expr, 0, 1);
-        negate = true;
+        if (negate) {
+            b_normalize = true;
+        }
+        negate = !negate;
     }
     if (!strcasecmp(expr->buf, "true")) {
         return !negate;
@@ -87,7 +90,7 @@ static double _fmt_eval_operand(Map_size_t_fmt_arg_t* vars, Vector_char* expr, c
                 if (negate) {
                     return v == 0.0 ? 1.0 : 0.0;
                 } else {
-                    return v;
+                    return !b_normalize ? v : !!((int)v);
                 }
             }
             case FMT_ARG_TYPE_UINT32: {
@@ -95,7 +98,7 @@ static double _fmt_eval_operand(Map_size_t_fmt_arg_t* vars, Vector_char* expr, c
                 if (negate) {
                     return v == 0.0 ? 1.0 : 0.0;
                 } else {
-                    return v;
+                    return !b_normalize ? v : !!((int)v);
                 }
             }
             case FMT_ARG_TYPE_DOUBLE:
@@ -383,6 +386,8 @@ __attribute__((sentinel)) char* fmt_new_interpolated(const char* fmt,
                                                      fmt_arg_t*  arg,
                                                      ...)
 {
+    LOG("fmt::new{ vars:[");
+
     char*                e    = NULL;
     Map_size_t_fmt_arg_t vars = Map_new_size_t_fmt_arg_t(32);
     {
@@ -393,6 +398,12 @@ __attribute__((sentinel)) char* fmt_new_interpolated(const char* fmt,
         do {
             if ((a = va_arg(ap, fmt_arg_t*))) {
                 Map_insert_size_t_fmt_arg_t(&vars, (size_t)a->name, *a);
+
+#ifdef DEBUG
+#endif
+                char* vf = fmt_to_string(a);
+                LOG(" %s:%s", a->name, vf);
+                free(vf);
             }
         } while (a);
         va_end(ap);
@@ -454,6 +465,8 @@ __attribute__((sentinel)) char* fmt_new_interpolated(const char* fmt,
     if (err) {
         *err = e;
     }
+
+    LOG(" ] %s => %s }\n", fmt, buf.buf);
 
     return buf.buf;
 }
