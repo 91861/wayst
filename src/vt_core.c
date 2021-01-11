@@ -5238,7 +5238,7 @@ __attribute__((always_inline, hot, flatten)) static inline void Vt_handle_litera
 
 __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, char c)
 {
-    switch (self->parser.state) {
+    switch (expect(self->parser.state, PARSER_STATE_LITERAL)) {
 
         case PARSER_STATE_LITERAL:
             Vt_handle_literal(self, c);

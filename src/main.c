@@ -120,20 +120,23 @@ typedef struct
 
 } App;
 
-static void App_update_scrollbar_dims(App* self);
-static void App_update_scrollbar_vis(App* self);
-static void App_update_cursor(App* self);
-static void App_do_autoscroll(App* self);
-static void App_notify_content_change(void* self);
-static void App_clamp_cursor(App* self, Pair_uint32_t chars);
-static void App_set_monitor_callbacks(App* self);
-static void App_set_callbacks(App* self);
-static void App_maybe_resize(App* self, Pair_uint32_t newres);
-static void App_handle_uri(App* self, const char* uri);
-static void App_update_hover(App* self, int32_t x, int32_t y);
-static void App_update_padding(App* self);
-static void App_set_title(void* self);
-static void App_focus_changed(void* self, bool current_state);
+static void      App_update_scrollbar_dims(App* self);
+static void      App_update_scrollbar_vis(App* self);
+static void      App_update_cursor(App* self);
+static void      App_do_autoscroll(App* self);
+static void      App_notify_content_change(void* self);
+static void      App_clamp_cursor(App* self, Pair_uint32_t chars);
+static void      App_set_monitor_callbacks(App* self);
+static void      App_set_callbacks(App* self);
+static void      App_maybe_resize(App* self, Pair_uint32_t newres);
+static void      App_handle_uri(App* self, const char* uri);
+static void      App_update_hover(App* self, int32_t x, int32_t y);
+static void      App_update_padding(App* self);
+static void      App_set_title(void* self);
+static void      App_focus_changed(void* self, bool current_state);
+static TimePoint App_scrollbar_anim_start_time(App* self);
+static bool      App_scrollbar_anim_pending(App* self);
+static bool      App_scrollbar_is_animating(App* self);
 
 static void* App_load_extension_proc_address(void* self, const char* name)
 {
@@ -237,7 +240,8 @@ static void App_run(App* self)
     while (!(self->exit || Window_is_closed(self->win))) {
         int timeout_ms = 0;
 
-        if (!self->swap_performed && self->vt.output.size == 0) {
+        if (!self->swap_performed && self->vt.output.size == 0 &&
+            !App_scrollbar_is_animating(self)) {
             if (self->closest_pending_wakeup) {
                 timeout_ms = TimePoint_is_ms_ahead(*(self->closest_pending_wakeup));
             } else {
@@ -331,6 +335,14 @@ static void App_run(App* self)
             (self->do_title_refresh && self->closest_pending_wakeup &&
              TimePoint_is_earlier(self->next_title_refresh, *self->closest_pending_wakeup))) {
             self->closest_pending_wakeup = &self->next_title_refresh;
+        }
+
+        static TimePoint sat;
+        if ((App_scrollbar_anim_pending(self) && !self->closest_pending_wakeup) ||
+            (App_scrollbar_anim_pending(self) && self->closest_pending_wakeup &&
+             TimePoint_is_earlier((sat = App_scrollbar_anim_start_time(self)),
+                                  *self->closest_pending_wakeup))) {
+            self->closest_pending_wakeup = &sat;
         }
 
         self->swap_performed = Window_maybe_swap(self->win);
@@ -1228,6 +1240,27 @@ static void App_update_cursor(App* self)
     }
 }
 
+static bool App_scrollbar_is_animating(App* self)
+{
+    int64_t ms = TimePoint_is_ms_ahead(self->scrollbar_hide_time);
+    return ms > 0 && ms < settings.scrollbar_fade_time_ms && !self->vt.scrolling_visual;
+}
+
+static bool App_scrollbar_anim_pending(App* self)
+{
+    int64_t ms = TimePoint_is_ms_ahead(self->scrollbar_hide_time);
+    return ms > 0 && !self->vt.scrolling_visual;
+}
+
+static TimePoint App_scrollbar_anim_start_time(App* self)
+{
+    TimePoint ret = self->scrollbar_hide_time;
+    TimePoint off = { 0, 0 };
+    off.tv_nsec   = settings.scrollbar_fade_time_ms * MS_IN_NSECS;
+    TimePoint_subtract(&ret, off);
+    return ret;
+}
+
 /**
  * Update gui scrollbar dimensions */
 static void App_update_scrollbar_dims(App* self)
@@ -1243,7 +1276,7 @@ static void App_update_scrollbar_dims(App* self)
     self->ui.scrollbar.top    = (2.0 - length - extra_length) * fraction_scrolled;
     int64_t ms                = TimePoint_is_ms_ahead(self->scrollbar_hide_time);
 
-    if (ms > 0 && ms < settings.scrollbar_fade_time_ms && !self->vt.scrolling_visual) {
+    if (App_scrollbar_is_animating(self)) {
         self->ui.scrollbar.opacity = ((float)ms / settings.scrollbar_fade_time_ms);
         App_notify_content_change(self);
     } else {

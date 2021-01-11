@@ -971,12 +971,22 @@ static Pair_char32_t parse_codepoint_range(char* arg)
     if (strnlen(arg, 3) < 3) {
         return range;
     }
-    if (*arg != '.') {
-        range.first = strtoul(arg, &arg, (arg[0] == 'u' || arg[0] == 'U') ? 16 : 10);
-    }
-    arg += 2;
-    if (*arg) {
-        range.second = strtoul(arg, NULL, arg[0] == 'u' ? 16 : 10);
+    char *s = arg, *a_fst = NULL, *a_snd = NULL;
+    if ((a_fst = strsep(&s, ".."))) {
+        if (a_fst[0]) {
+            if ((a_fst[0] == 'u' || a_fst[0] == 'U') && a_fst[1] == '+') {
+                range.first = strtoul(a_fst + 2, NULL, 16);
+            } else {
+                range.first = strtoul(a_fst, NULL, 10);
+            }
+        }
+        if ((strsep(&s, "..")) && (a_snd = strsep(&s, "..")) && a_snd[0]) {
+            if ((a_snd[0] == 'u' || a_snd[0] == 'U') && a_snd[1] == '+') {
+                range.second = strtoul(a_snd + 2, NULL, 16);
+            } else {
+                range.second = strtoul(a_snd, NULL, 10);
+            }
+        }
     }
     return range;
 }
