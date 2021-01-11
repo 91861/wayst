@@ -117,7 +117,7 @@ static void Vt_shell_integration_begin_execution(Vt*  self,
     }
 
     self->shell_integration_state = VT_SHELL_INTEG_STATE_OUTPUT;
-    CALL_FP(self->callbacks.on_command_state_changed, self->callbacks.user_data);
+    CALL(self->callbacks.on_command_state_changed, self->callbacks.user_data);
 }
 
 static void Vt_shell_integration_active_command_name_changed(Vt* self, const char* command)
@@ -154,7 +154,7 @@ static void Vt_shell_integration_end_execution(Vt* self, const char* opt_exit_st
         ln->mark_command_output_end = true;
 
         bool minimized =
-          CALL_FP(self->callbacks.on_minimized_state_requested, self->callbacks.user_data);
+          CALL(self->callbacks.on_minimized_state_requested, self->callbacks.user_data);
 
         LOG("Vt::command_finished{ command: \'%s\' [%u:%zu], status: %d, output: "
             "%zu..%zu }\n",
@@ -165,7 +165,7 @@ static void Vt_shell_integration_end_execution(Vt* self, const char* opt_exit_st
             cmd->output_rows.first,
             cmd->output_rows.second);
 
-        CALL_FP(self->callbacks.on_urgency_set, self->callbacks.user_data);
+        CALL(self->callbacks.on_urgency_set, self->callbacks.user_data);
         if (minimized && cmd->command) {
             char* tm_str = TimeSpan_duration_string_approx(&cmd->execution_time);
             char* notification_title =
@@ -182,10 +182,10 @@ static void Vt_shell_integration_end_execution(Vt* self, const char* opt_exit_st
                 Vector_pushv_char(&output, "…", strlen("…") + 1);
             }
 
-            CALL_FP(self->callbacks.on_desktop_notification_sent,
-                    self->callbacks.user_data,
-                    notification_title,
-                    output.buf);
+            CALL(self->callbacks.on_desktop_notification_sent,
+                 self->callbacks.user_data,
+                 notification_title,
+                 output.buf);
 
             Vector_destroy_char(&output);
             free(notification_title);
@@ -194,6 +194,5 @@ static void Vt_shell_integration_end_execution(Vt* self, const char* opt_exit_st
     }
 
     self->shell_integration_state = VT_SHELL_INTEG_STATE_NONE;
-    CALL_FP(self->callbacks.on_command_state_changed, self->callbacks.user_data);
+    CALL(self->callbacks.on_command_state_changed, self->callbacks.user_data);
 }
-

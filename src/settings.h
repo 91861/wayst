@@ -243,6 +243,15 @@ typedef struct
         DECORATION_STYLE_NONE,
     } decoration_style;
 
+    enum initial_gui_pointer_mode_e
+    {
+        GUI_POINTER_MODE_FORCE_SHOW,
+        GUI_POINTER_MODE_FORCE_HIDE,
+        GUI_POINTER_MODE_HIDE,
+        GUI_POINTER_MODE_SHOW,
+        GUI_POINTER_MODE_SHOW_IF_REPORTING,
+    } initial_gui_pointer_mode;
+
     enum initial_cursor_style_e
     {
         CURSOR_STYLE_BLOCK,
@@ -281,9 +290,8 @@ void settings_cleanup();
 static inline void KeyCommand_name_to_code(KeyCommand* cmd)
 {
     if (cmd->is_name) {
-        uint32_t code = CALL_FP(settings.callbacks.keycode_from_string,
-                                settings.callbacks.user_data,
-                                cmd->key.name);
+        uint32_t code =
+          CALL(settings.callbacks.keycode_from_string, settings.callbacks.user_data, cmd->key.name);
         if (!code) {
             WRN("Invalid key name \'%s\'\n", cmd->key.name);
         } else {

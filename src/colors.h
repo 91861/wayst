@@ -34,16 +34,16 @@ typedef struct
 #define COLOR_RGBA_FMT   "rgb(%d, %d, %d, %f)"
 #define COLOR_RGBA_AP(c) (c.r), (c.g), (c.b), (ColorRGBA_get_float(c, 3))
 
-_Thread_local static char _termcolorbuf[64];
-
 static char* termcolor_fg_rgb(uint8_t r, uint8_t g, uint8_t b)
 {
+    _Thread_local static char _termcolorbuf[64];
     sprintf(_termcolorbuf, "\e[38;2;%u;%u;%um", r, g, b);
     return _termcolorbuf;
 }
 
 static char* termcolor_bg_rgb(uint8_t r, uint8_t g, uint8_t b)
 {
+    _Thread_local static char _termcolorbuf[64];
     sprintf(_termcolorbuf, "\e[48;2;%u;%u;%um", r, g, b);
     return _termcolorbuf;
 }
@@ -279,7 +279,24 @@ static inline float ColorRGB_get_saturation(const ColorRGB c)
     return ((float)delta / 255.0f) / (1 - ABS(2 * lightness - 1.0));
 }
 
-
 float ColorRGB_get_readability_WCAG(const ColorRGB* color1, const ColorRGB* color2);
 
 bool ColorRGB_is_readable_WCAG(const ColorRGB* color1, const ColorRGB* color2);
+
+_Thread_local static char _ColorRGB_term_string[128];
+static char*              ColorRGB_to_term_string(ColorRGB color)
+{
+    uint8_t fg_cmp = ColorRGB_get_luma(color) < 0.5 ? 255 : 0;
+    char*   t_bg   = termcolor_bg_rgb(color.r, color.g, color.b);
+    size_t  off    = strlen(t_bg);
+    memccpy(_ColorRGB_term_string, t_bg, 1, off);
+    off += snprintf(_ColorRGB_term_string + off,
+                    ARRAY_SIZE(_ColorRGB_term_string) - off,
+                    "%s",
+                    termcolor_fg_rgb(fg_cmp, fg_cmp, fg_cmp));
+    snprintf(_ColorRGB_term_string + off,
+             ARRAY_SIZE(_ColorRGB_term_string) - off,
+             COLOR_RGB_FMT,
+             COLOR_RGB_AP(color));
+    return _ColorRGB_term_string;
+}

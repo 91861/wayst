@@ -270,7 +270,7 @@ const char* Vt_img_proto_transmit(Vt*                           self,
 
     if (surface && surface->state != VT_IMAGE_SURFACE_INCOMPLETE) {
         Vector_clear_uint8_t(&surface->fragments);
-        CALL_FP(self->callbacks.destroy_image_proxy, self->callbacks.user_data, &surface->proxy);
+        CALL(self->callbacks.destroy_image_proxy, self->callbacks.user_data, &surface->proxy);
         surface->state = VT_IMAGE_SURFACE_INCOMPLETE;
     }
 
@@ -465,7 +465,7 @@ static void Vt_crop_VtImageSurfaceView_bottom_by_line(Vt* self, VtImageSurfaceVi
 {
     --view->cell_size.second;
     view->sample_dims_px.second -= self->pixels_per_cell_y;
-    CALL_FP(self->callbacks.destroy_image_view_proxy, self->callbacks.user_data, &view->proxy);
+    CALL(self->callbacks.destroy_image_view_proxy, self->callbacks.user_data, &view->proxy);
 }
 
 static VtImageSurfaceView Vt_crop_VtImageSurfaceView_top_by_line(Vt* self, VtImageSurfaceView* view)

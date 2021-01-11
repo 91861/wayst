@@ -315,7 +315,7 @@ static void WindowWl_drain_pipe_to_clipboard(struct WindowBase* self,
         text = conv;
     }
 
-    CALL_FP(self->callbacks.clipboard_handler, self->callbacks.user_data, text.buf);
+    TRY_CALL(self->callbacks.clipboard_handler, self->callbacks.user_data, text.buf);
     Vector_destroy_char(&text);
 }
 
@@ -393,7 +393,7 @@ void primary_selection_offer_handle_offer(void*                                 
     if (w->new_primary_offer_mime_idx == -1) {
         LOG(" - REJECTED(not supported) }\n");
     } else {
-        LOG(" - REJECTED(\'%s\' is prefferable) }\n",
+        LOG(" - REJECTED(\'%s\' is preffered) }\n",
             ACCEPTED_MIMES[w->new_primary_offer_mime_idx]);
     }
 }
@@ -424,7 +424,7 @@ static void primary_selection_device_handle_selection(
     struct WindowBase* self = data;
 
     if (offer) {
-        CALL_FP(self->callbacks.on_primary_changed, self->callbacks.user_data);
+        TRY_CALL(self->callbacks.on_primary_changed, self->callbacks.user_data);
     }
 
     LOG("wl::primary_selection_offer::selection{ mime_type: %s }\n",
@@ -635,7 +635,7 @@ static void pointer_handle_enter(void*              data,
     cursor_set(globalWl->cursor_arrow, serial);
     win->pointer_x = wl_fixed_to_int(x);
     win->pointer_y = wl_fixed_to_int(y);
-    win->callbacks.activity_notify_handler(win->callbacks.user_data);
+    TRY_CALL(win->callbacks.activity_notify_handler, win->callbacks.user_data);
     globalWl->serial = serial;
     Window_notify_content_change(data);
 }
@@ -663,10 +663,11 @@ static void pointer_handle_motion(void*              data,
         FLAG_UNSET(win->state_flags, WINDOW_IS_POINTER_HIDDEN);
     }
 
-    win->callbacks.motion_handler(win->callbacks.user_data,
-                                  globalWl->last_button_pressed,
-                                  win->pointer_x,
-                                  win->pointer_y);
+    TRY_CALL(win->callbacks.motion_handler,
+             win->callbacks.user_data,
+             globalWl->last_button_pressed,
+             win->pointer_x,
+             win->pointer_y);
 }
 
 static void pointer_handle_button(void*              data,
@@ -696,14 +697,14 @@ static void pointer_handle_button(void*              data,
     button                        = button == 2 + 271 ? 3 : button == 3 + 271 ? 2 : button - 271;
     globalWl->last_button_pressed = state ? button : 0;
 
-    CALL_FP(win->callbacks.button_handler,
-            win->callbacks.user_data,
-            button,
-            state,
-            win->pointer_x,
-            win->pointer_y,
-            0,
-            final_mods);
+    TRY_CALL(win->callbacks.button_handler,
+             win->callbacks.user_data,
+             button,
+             state,
+             win->pointer_x,
+             win->pointer_y,
+             0,
+             final_mods);
 }
 
 static void pointer_handle_axis(void*              data,
@@ -716,14 +717,14 @@ static void pointer_handle_axis(void*              data,
     int32_t            v   = wl_fixed_to_int(value);
 
     if (v && !windowWl(win)->got_discrete_axis_event) {
-        CALL_FP(win->callbacks.button_handler,
-                win->callbacks.user_data,
-                v < 0 ? 65 : 66,
-                1,
-                win->pointer_x,
-                win->pointer_y,
-                v < 0 ? -v : v,
-                0);
+        TRY_CALL(win->callbacks.button_handler,
+                 win->callbacks.user_data,
+                 v < 0 ? 65 : 66,
+                 1,
+                 win->pointer_x,
+                 win->pointer_y,
+                 v < 0 ? -v : v,
+                 0);
     }
 
     windowWl(win)->got_discrete_axis_event = false;
@@ -751,14 +752,14 @@ static void pointer_handle_axis_discrete(void*              data,
     /* this is sent before a coresponding axis event, tell it to do nothing */
     windowWl(win)->got_discrete_axis_event = true;
 
-    CALL_FP(win->callbacks.button_handler,
-            win->callbacks.user_data,
-            discrete < 0 ? 65 : 66,
-            1,
-            win->pointer_x,
-            win->pointer_y,
-            0,
-            0);
+    TRY_CALL(win->callbacks.button_handler,
+             win->callbacks.user_data,
+             discrete < 0 ? 65 : 66,
+             1,
+             win->pointer_x,
+             win->pointer_y,
+             0,
+             0);
 }
 
 static struct wl_pointer_listener pointer_listener = {
@@ -871,9 +872,9 @@ static void keyboard_handle_enter(void*               data,
                                   struct wl_surface*  surface,
                                   struct wl_array*    keys)
 {
-    globalWl->serial = serial;
-    ((struct WindowBase*)data)
-      ->callbacks.on_focus_changed(((struct WindowBase*)data)->callbacks.user_data, true);
+    globalWl->serial       = serial;
+    struct WindowBase* win = data;
+    TRY_CALL(win->callbacks.on_focus_changed, win->callbacks.user_data, true);
     FLAG_SET(((struct WindowBase*)data)->state_flags, WINDOW_IS_IN_FOCUS);
 }
 
@@ -882,10 +883,9 @@ static void keyboard_handle_leave(void*               data,
                                   uint32_t            serial,
                                   struct wl_surface*  surface)
 {
-    globalWl->serial = serial;
-    ((struct WindowBase*)data)
-      ->callbacks.on_focus_changed(((struct WindowBase*)data)->callbacks.user_data, false);
-    FLAG_UNSET(((struct WindowBase*)data)->state_flags, WINDOW_IS_IN_FOCUS);
+    globalWl->serial       = serial;
+    struct WindowBase* win = data;
+    TRY_CALL(win->callbacks.on_focus_changed, win->callbacks.user_data, false);
     globalWl->keycode_to_repeat = 0;
 }
 
@@ -961,9 +961,7 @@ static void keyboard_handle_key(void*               data,
         if (!is_repeat_event) {
             globalWl->repeat_point = TimePoint_ms_from_now(globalWl->kbd_repeat_dealy);
         }
-        if (win->callbacks.key_handler) {
-            win->callbacks.key_handler(win->callbacks.user_data, final, rawsym, final_mods);
-        }
+        TRY_CALL(win->callbacks.key_handler, win->callbacks.user_data, final, rawsym, final_mods);
     } else if (globalWl->keycode_to_repeat == key) {
         globalWl->keycode_to_repeat = 0;
     }
@@ -1903,10 +1901,7 @@ static void WindowWl_swap_buffers(struct WindowBase* self)
 {
     self->paint                     = false;
     windowWl(self)->draw_next_frame = false;
-
-    if (likely(self->callbacks.on_redraw_requested)) {
-        self->callbacks.on_redraw_requested(self->callbacks.user_data);
-    }
+    TRY_CALL(self->callbacks.on_redraw_requested, self->callbacks.user_data);
     if (unlikely(eglSwapBuffers(globalWl->egl_display, windowWl(self)->egl_surface) != EGL_TRUE)) {
         ERR("buffer swap failed EGL Error %s\n", egl_get_error_string(eglGetError()));
     }

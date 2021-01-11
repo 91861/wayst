@@ -838,6 +838,8 @@ static void settings_make_default()
         .debug_pty = false,
         .debug_gfx = false,
 
+        .initial_gui_pointer_mode = GUI_POINTER_MODE_HIDE,
+
         .enable_cursor_blink      = true,
         .cursor_blink_interval_ms = 750,
         .cursor_blink_suspend_ms  = 500,

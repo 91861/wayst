@@ -298,7 +298,7 @@ static void WindowX11_primary_get(struct WindowBase* self)
 
         if (cc && cc->data) {
             LOG("X::clipboard_get{ we own the PRIMARY selection }\n");
-            CALL_FP(self->callbacks.clipboard_handler, self->callbacks.user_data, cc->data);
+            CALL(self->callbacks.clipboard_handler, self->callbacks.user_data, cc->data);
         } else {
             LOG("X::clipboard_get{ we own the PRIMARY selection, but have no data }\n");
         }
@@ -345,7 +345,7 @@ static void WindowX11_clipboard_get(struct WindowBase* self)
 
         if (cc && cc->data) {
             LOG("X::clipboard_get{ we own the CLIPBOARD selection }\n");
-            CALL_FP(self->callbacks.clipboard_handler, self->callbacks.user_data, cc->data);
+            CALL(self->callbacks.clipboard_handler, self->callbacks.user_data, cc->data);
         } else {
             LOG("X::clipboard_get{ we own the CLIPBOARD selection, but have no data }\n");
         }
@@ -957,7 +957,7 @@ static void WindowX11_event_focus_in(struct WindowBase* self, XFocusInEvent* e)
 {
     XSetICFocus(globalX11->ic);
     FLAG_SET(self->state_flags, WINDOW_IS_IN_FOCUS);
-    CALL_FP(self->callbacks.on_focus_changed, self->callbacks.user_data, true);
+    CALL(self->callbacks.on_focus_changed, self->callbacks.user_data, true);
     Window_notify_content_change(self);
 
     if (Window_is_pointer_hidden(self)) {
@@ -965,7 +965,7 @@ static void WindowX11_event_focus_in(struct WindowBase* self, XFocusInEvent* e)
     }
 
     if (XGetSelectionOwner(globalX11->display, XA_PRIMARY) != windowX11(self)->window) {
-        CALL_FP(self->callbacks.on_primary_changed, self->callbacks.user_data);
+        CALL(self->callbacks.on_primary_changed, self->callbacks.user_data);
     }
 }
 
@@ -973,7 +973,7 @@ static void WindowX11_event_focus_out(struct WindowBase* self, XFocusOutEvent* e
 {
     XUnsetICFocus(globalX11->ic);
     FLAG_UNSET(self->state_flags, WINDOW_IS_IN_FOCUS);
-    CALL_FP(self->callbacks.on_focus_changed, self->callbacks.user_data, false);
+    CALL(self->callbacks.on_focus_changed, self->callbacks.user_data, false);
     if (Window_is_pointer_hidden(self)) {
         WindowX11_set_pointer_style(self, MOUSE_POINTER_ARROW);
     }
@@ -1171,11 +1171,11 @@ static void WindowX11_event_key_press(struct WindowBase* self, XKeyPressedEvent*
 
     if (no_consume) {
         int32_t lower = XkbKeycodeToKeysym(globalX11->display, e->keycode, 0, 0);
-        CALL_FP(self->callbacks.key_handler,
-                self->callbacks.user_data,
-                stat == 4 ? code : ret,
-                lower,
-                convert_modifier_mask(e->state));
+        CALL(self->callbacks.key_handler,
+             self->callbacks.user_data,
+             stat == 4 ? code : ret,
+             lower,
+             convert_modifier_mask(e->state));
     }
 }
 
@@ -1195,27 +1195,27 @@ static void WindowX11_event_button_press(struct WindowBase* self, XButtonPressed
             windowX11(self)->last_button_pressed = btn = e->button;
     }
 
-    CALL_FP(self->callbacks.button_handler,
-            self->callbacks.user_data,
-            btn,
-            true,
-            e->x,
-            e->y,
-            0,
-            convert_modifier_mask(e->state));
+    CALL(self->callbacks.button_handler,
+         self->callbacks.user_data,
+         btn,
+         true,
+         e->x,
+         e->y,
+         0,
+         convert_modifier_mask(e->state));
 }
 
 static void WindowX11_event_button_release(struct WindowBase* self, XButtonReleasedEvent* e)
 {
     if (e->button != 4 && e->button != 5 && e->button) {
-        CALL_FP(self->callbacks.button_handler,
-                self->callbacks.user_data,
-                e->button,
-                false,
-                e->x,
-                e->y,
-                0,
-                convert_modifier_mask(e->state));
+        CALL(self->callbacks.button_handler,
+             self->callbacks.user_data,
+             e->button,
+             false,
+             e->x,
+             e->y,
+             0,
+             convert_modifier_mask(e->state));
     }
     windowX11(self)->last_button_pressed = 0;
 }
@@ -1226,11 +1226,11 @@ static void WindowX11_event_motion(struct WindowBase* self, XMotionEvent* e)
         WindowX11_set_pointer_style(self, MOUSE_POINTER_ARROW);
     }
 
-    CALL_FP(self->callbacks.motion_handler,
-            self->callbacks.user_data,
-            windowX11(self)->last_button_pressed,
-            e->x,
-            e->y);
+    CALL(self->callbacks.motion_handler,
+         self->callbacks.user_data,
+         windowX11(self)->last_button_pressed,
+         e->x,
+         e->y);
 }
 
 static void WindowX11_event_selection_clear(struct WindowBase* self, XSelectionClearEvent* e)
@@ -1478,9 +1478,9 @@ static void WindowX11_event_property_notify(struct WindowBase* self, XPropertyEv
 #endif
                 Vector_push_char(&globalX11->incr_transfer_in.data, '\0');
 
-                CALL_FP(self->callbacks.clipboard_handler,
-                        self->callbacks.user_data,
-                        globalX11->incr_transfer_in.data.buf);
+                CALL(self->callbacks.clipboard_handler,
+                     self->callbacks.user_data,
+                     globalX11->incr_transfer_in.data.buf);
 
                 Vector_clear_char(&globalX11->incr_transfer_in.data);
                 globalX11->incr_transfer_in.listen_property = 0;
@@ -1676,7 +1676,7 @@ static bool WindowX11_maybe_swap(struct WindowBase* self)
 {
     if (self->paint && !FLAG_IS_SET(self->state_flags, WINDOW_IS_MINIMIZED)) {
         self->paint = false;
-        CALL_FP(self->callbacks.on_redraw_requested, self->callbacks.user_data);
+        CALL(self->callbacks.on_redraw_requested, self->callbacks.user_data);
         glXSwapBuffers(globalX11->display, windowX11(self)->window);
         return true;
     } else {

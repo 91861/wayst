@@ -106,11 +106,11 @@ void Vt_buffered_output(Vt* self, const char* buf, size_t len)
 static void Vt_bell(Vt* self)
 {
     if (!settings.no_flash)
-        CALL_FP(self->callbacks.on_visual_bell, self->callbacks.user_data);
+        CALL(self->callbacks.on_visual_bell, self->callbacks.user_data);
     if (self->modes.pop_on_bell)
-        CALL_FP(self->callbacks.on_restack_to_front, self->callbacks.user_data);
+        CALL(self->callbacks.on_restack_to_front, self->callbacks.user_data);
     if (self->modes.urgency_on_bell)
-        CALL_FP(self->callbacks.on_urgency_set, self->callbacks.user_data);
+        CALL(self->callbacks.on_urgency_set, self->callbacks.user_data);
 }
 
 static inline size_t Vt_top_line_alt(const Vt* const self)
@@ -465,13 +465,13 @@ void Vt_clear_all_image_proxies(Vt* self)
     for (RcPtr_VtImageSurfaceView* i = NULL;
          (i = Vector_iter_RcPtr_VtImageSurfaceView(&self->image_views, i));) {
         VtImageSurfaceView* srf = RcPtr_get_VtImageSurfaceView(i);
-        CALL_FP(self->callbacks.destroy_image_view_proxy, self->callbacks.user_data, &srf->proxy);
+        CALL(self->callbacks.destroy_image_view_proxy, self->callbacks.user_data, &srf->proxy);
     }
 
     for (RcPtr_VtSixelSurface* i = NULL;
          (i = Vector_iter_RcPtr_VtSixelSurface(&self->scrolled_sixels, i));) {
         VtSixelSurface* srf = RcPtr_get_VtSixelSurface(i);
-        CALL_FP(self->callbacks.destroy_sixel_proxy, self->callbacks.user_data, &srf->proxy);
+        CALL(self->callbacks.destroy_sixel_proxy, self->callbacks.user_data, &srf->proxy);
     }
 }
 
@@ -913,6 +913,26 @@ void Vt_init(Vt* self, uint32_t cols, uint32_t rows)
             break;
     }
 
+    switch (settings.initial_gui_pointer_mode) {
+        case GUI_POINTER_MODE_FORCE_HIDE:
+            self->gui_pointer_mode = VT_GUI_POINTER_MODE_FORCE_HIDE;
+            break;
+        case GUI_POINTER_MODE_FORCE_SHOW:
+            self->gui_pointer_mode = VT_GUI_POINTER_MODE_FORCE_SHOW;
+            break;
+        case GUI_POINTER_MODE_HIDE:
+            self->gui_pointer_mode = VT_GUI_POINTER_MODE_HIDE;
+            break;
+        case GUI_POINTER_MODE_SHOW:
+            self->gui_pointer_mode = VT_GUI_POINTER_MODE_SHOW;
+            break;
+        case GUI_POINTER_MODE_SHOW_IF_REPORTING:
+            self->gui_pointer_mode = VT_GUI_POINTER_MODE_SHOW_IF_REPORTING;
+            break;
+        default:
+            ASSERT_UNREACHABLE;
+    }
+
     self->cursor.blinking = settings.initial_cursor_blinking;
     self->cursor.col      = 0;
 
@@ -1221,9 +1241,9 @@ static void Vt_trim_columns(Vt* self)
         if (self->lines.buf[i].data.size > Vt_col(self)) {
             Vt_mark_proxy_fully_damaged(self, i);
 
-            CALL_FP(self->callbacks.destroy_proxy,
-                    self->callbacks.user_data,
-                    &self->lines.buf[i].proxy);
+            CALL(self->callbacks.destroy_proxy,
+                 self->callbacks.user_data,
+                 &self->lines.buf[i].proxy);
 
             size_t blanks = 0;
 
@@ -1304,7 +1324,7 @@ void Vt_resize(Vt* self, uint32_t x, uint32_t y)
     }
 
     Pair_uint32_t px =
-      CALL_FP(self->callbacks.on_window_size_from_cells_requested, self->callbacks.user_data, x, y);
+      CALL(self->callbacks.on_window_size_from_cells_requested, self->callbacks.user_data, x, y);
 
     Vt_clear_all_image_proxies(self);
 
@@ -1446,14 +1466,14 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
         case 3: {
             if (self->modes.allow_column_size_switching && settings.windowops_manip) {
                 Pair_uint32_t target_text_area_dims =
-                  CALL_FP(self->callbacks.on_window_size_from_cells_requested,
-                          self->callbacks.user_data,
-                          on ? 132 : 80,
-                          on ? 26 : 24);
-                CALL_FP(self->callbacks.on_text_area_dimensions_set,
-                        self->callbacks.user_data,
-                        target_text_area_dims.first,
-                        target_text_area_dims.second);
+                  CALL(self->callbacks.on_window_size_from_cells_requested,
+                       self->callbacks.user_data,
+                       on ? 132 : 80,
+                       on ? 26 : 24);
+                CALL(self->callbacks.on_text_area_dimensions_set,
+                     self->callbacks.user_data,
+                     target_text_area_dims.first,
+                     target_text_area_dims.second);
             }
             Vt_move_cursor(self, 0, 0);
             Vt_clear_display_and_scrollback(self);
@@ -1681,7 +1701,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
 
     if (is_csi_sequence_terminated(self->parser.active_sequence.buf,
                                    self->parser.active_sequence.size)) {
-        CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
+        CALL(self->callbacks.on_repaint_required, self->callbacks.user_data);
         Vector_push_char(&self->parser.active_sequence, '\0');
         char* seq        = self->parser.active_sequence.buf;
         char  first_char = *seq;
@@ -1976,6 +1996,37 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                         }
                     } break;
 
+                    /* <ESC>[ > Ps p - Set resource value pointerMode XTSMPOINTER (xterm)
+                     * 0 - never hide the pointer.
+                     * 1 - hide if the mouse tracking mode is not enabled.
+                     * 2 - always hide the pointer, except when leaving the window.
+                     * 3 - always hide the pointer, even if leaving/entering the window.
+                     */
+                    case 'p': {
+                        MULTI_ARG_IS_ERROR
+                        int arg = short_sequence_get_int_argument(seq);
+                        if (self->gui_pointer_mode != VT_GUI_POINTER_MODE_FORCE_HIDE &&
+                            self->gui_pointer_mode != VT_GUI_POINTER_MODE_FORCE_SHOW) {
+                            switch (arg) {
+                                case 0:
+                                    self->gui_pointer_mode = VT_GUI_POINTER_MODE_SHOW;
+                                    break;
+                                case 1:
+                                    self->gui_pointer_mode = VT_GUI_POINTER_MODE_SHOW_IF_REPORTING;
+                                    break;
+                                case 2:
+                                /* We don't control the pointer outside of the window anyway */
+                                case 3:
+                                    self->gui_pointer_mode = VT_GUI_POINTER_MODE_HIDE;
+                                    break;
+                                default:
+                                    WRN("unknown XTSMPOINTER parameter \'%d\'\n", arg);
+                            }
+                        } else {
+                            WRN("XTSMPOINTER ignored because of user setting\n");
+                        }
+                    } break;
+
                     default:
                         WRN("Unknown CSI sequence: %s\n", seq);
                 }
@@ -2013,7 +2064,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                             /* <ESC>[ Ps SP A - Shift right Ps columns(s) (default = 1) (SR),
                              * ECMA-48 */
                             case 'A': {
-                                STUB("SP");
+                                STUB("SR");
                             } break;
 
                             /* <ESC>[ Ps SP q - Set cursor style (DECSCUSR) */
@@ -2587,8 +2638,8 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                     --bottom;
                                 } else {
                                     top    = 0;
-                                    bottom = CALL_FP(self->callbacks.on_number_of_cells_requested,
-                                                     self->callbacks.user_data)
+                                    bottom = CALL(self->callbacks.on_number_of_cells_requested,
+                                                  self->callbacks.user_data)
                                                .second -
                                              1;
                                 }
@@ -2857,8 +2908,8 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
 
                                             if (target_w == -1 || target_h == -1) {
                                                 Pair_uint32_t current_dims =
-                                                  CALL_FP(self->callbacks.on_window_size_requested,
-                                                          self->callbacks.user_data);
+                                                  CALL(self->callbacks.on_window_size_requested,
+                                                       self->callbacks.user_data);
 
                                                 if (target_w == -1) {
                                                     target_w = current_dims.first;
@@ -2873,10 +2924,10 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                                 break;
                                             }
 
-                                            CALL_FP(self->callbacks.on_window_dimensions_set,
-                                                    self->callbacks.user_data,
-                                                    target_w,
-                                                    target_h);
+                                            CALL(self->callbacks.on_window_dimensions_set,
+                                                 self->callbacks.user_data,
+                                                 target_w,
+                                                 target_h);
                                         } else {
                                             WRN("Invalid XTWINOPS sequence: %s\n", seq);
                                         }
@@ -2897,10 +2948,10 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                         if (!settings.windowops_manip) {
                                             break;
                                         }
-                                        CALL_FP(self->callbacks.on_action_performed,
-                                                self->callbacks.user_data);
-                                        CALL_FP(self->callbacks.on_repaint_required,
-                                                self->callbacks.user_data);
+                                        CALL(self->callbacks.on_action_performed,
+                                             self->callbacks.user_data);
+                                        CALL(self->callbacks.on_repaint_required,
+                                             self->callbacks.user_data);
                                         break;
 
                                     /* Resize in cells */
@@ -2912,15 +2963,15 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                             int32_t target_rows = args[1];
                                             int32_t target_cols = nargs >= 3 ? args[2] : -1;
 
-                                            Pair_uint32_t target_text_area_dims = CALL_FP(
+                                            Pair_uint32_t target_text_area_dims = CALL(
                                               self->callbacks.on_window_size_from_cells_requested,
                                               self->callbacks.user_data,
                                               target_cols > 0 ? target_cols : 1,
                                               target_rows > 0 ? target_rows : 1);
 
                                             Pair_uint32_t currnet_text_area_dims =
-                                              CALL_FP(self->callbacks.on_text_area_size_requested,
-                                                      self->callbacks.user_data);
+                                              CALL(self->callbacks.on_text_area_size_requested,
+                                                   self->callbacks.user_data);
 
                                             if (target_cols == -1) {
                                                 target_text_area_dims.first =
@@ -2935,10 +2986,10 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                                 break;
                                             }
 
-                                            CALL_FP(self->callbacks.on_text_area_dimensions_set,
-                                                    self->callbacks.user_data,
-                                                    target_text_area_dims.first,
-                                                    target_text_area_dims.second);
+                                            CALL(self->callbacks.on_text_area_dimensions_set,
+                                                 self->callbacks.user_data,
+                                                 target_text_area_dims.first,
+                                                 target_text_area_dims.second);
                                         } else {
                                             WRN("Invalid XTWINOPS sequence: %s\n", seq);
                                         }
@@ -2953,7 +3004,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                             switch (args[1]) {
                                                 /* Unmaximize */
                                                 case 0:
-                                                    CALL_FP(
+                                                    CALL(
                                                       self->callbacks.on_window_maximize_state_set,
                                                       self->callbacks.user_data,
                                                       false);
@@ -2978,7 +3029,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                                 case 2:
                                                 /* Maximize horizontally */
                                                 case 3:
-                                                    CALL_FP(
+                                                    CALL(
                                                       self->callbacks.on_window_maximize_state_set,
                                                       self->callbacks.user_data,
                                                       true);
@@ -3001,29 +3052,29 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                             switch (args[1]) {
                                                 /* Disable */
                                                 case 0:
-                                                    CALL_FP(self->callbacks
-                                                              .on_window_fullscreen_state_set,
-                                                            self->callbacks.user_data,
-                                                            false);
+                                                    CALL(self->callbacks
+                                                           .on_window_fullscreen_state_set,
+                                                         self->callbacks.user_data,
+                                                         false);
                                                     break;
 
                                                 /* Enable */
                                                 case 1:
-                                                    CALL_FP(self->callbacks
-                                                              .on_window_fullscreen_state_set,
-                                                            self->callbacks.user_data,
-                                                            true);
+                                                    CALL(self->callbacks
+                                                           .on_window_fullscreen_state_set,
+                                                         self->callbacks.user_data,
+                                                         true);
                                                     break;
 
                                                     /* Toggle */
                                                 case 2: {
-                                                    bool current_state = CALL_FP(
+                                                    bool current_state = CALL(
                                                       self->callbacks.on_fullscreen_state_requested,
                                                       self->callbacks.user_data);
-                                                    CALL_FP(self->callbacks
-                                                              .on_window_fullscreen_state_set,
-                                                            self->callbacks.user_data,
-                                                            !current_state);
+                                                    CALL(self->callbacks
+                                                           .on_window_fullscreen_state_set,
+                                                         self->callbacks.user_data,
+                                                         !current_state);
                                                 } break;
 
                                                 default:
@@ -3041,8 +3092,8 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                             break;
                                         }
                                         bool is_minimized =
-                                          CALL_FP(self->callbacks.on_minimized_state_requested,
-                                                  self->callbacks.user_data);
+                                          CALL(self->callbacks.on_minimized_state_requested,
+                                               self->callbacks.user_data);
                                         Vt_immediate_output_formated(self,
                                                                      "\e[%d",
                                                                      is_minimized ? 1 : 2);
@@ -3055,8 +3106,8 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                             break;
                                         }
                                         Pair_uint32_t pos =
-                                          CALL_FP(self->callbacks.on_window_position_requested,
-                                                  self->callbacks.user_data);
+                                          CALL(self->callbacks.on_window_position_requested,
+                                               self->callbacks.user_data);
                                         Vt_immediate_output_formated(self,
                                                                      "\e[3;%d;%d;t",
                                                                      pos.first,
@@ -3124,16 +3175,16 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
 
                                     /* Resize window to args[1] lines (DECSLPP) */
                                     default: {
-                                        Pair_uint32_t target_dims = CALL_FP(
-                                          self->callbacks.on_window_size_from_cells_requested,
-                                          self->callbacks.user_data,
-                                          Vt_col(self),
-                                          short_sequence_get_int_argument(seq));
+                                        Pair_uint32_t target_dims =
+                                          CALL(self->callbacks.on_window_size_from_cells_requested,
+                                               self->callbacks.user_data,
+                                               Vt_col(self),
+                                               short_sequence_get_int_argument(seq));
 
-                                        CALL_FP(self->callbacks.on_window_dimensions_set,
-                                                self->callbacks.user_data,
-                                                target_dims.first,
-                                                target_dims.second);
+                                        CALL(self->callbacks.on_window_dimensions_set,
+                                             self->callbacks.user_data,
+                                             target_dims.first,
+                                             target_dims.second);
                                     }
                                 }
 
@@ -3178,7 +3229,7 @@ static inline void Vt_alt_buffer_on(Vt* self, bool save_mouse)
     self->cursor.row = 0;
     Vt_command_output_interrupted(self);
 
-    CALL_FP(self->callbacks.on_buffer_changed, self->callbacks.user_data);
+    CALL(self->callbacks.on_buffer_changed, self->callbacks.user_data);
 }
 
 static inline void Vt_alt_buffer_off(Vt* self, bool save_mouse)
@@ -3203,7 +3254,7 @@ static inline void Vt_alt_buffer_off(Vt* self, bool save_mouse)
         Vt_visual_scroll_reset(self);
         Vt_command_output_interrupted(self);
 
-        CALL_FP(self->callbacks.on_buffer_changed, self->callbacks.user_data);
+        CALL(self->callbacks.on_buffer_changed, self->callbacks.user_data);
     }
 }
 
@@ -3904,10 +3955,10 @@ static void Vt_handle_DCS(Vt* self, char c)
                         surf.anchor_global_index = self->cursor.row;
 
                         Pair_uint32_t cellsize =
-                          CALL_FP(self->callbacks.on_window_size_from_cells_requested,
-                                  self->callbacks.user_data,
-                                  1,
-                                  1);
+                          CALL(self->callbacks.on_window_size_from_cells_requested,
+                               self->callbacks.user_data,
+                               1,
+                               1);
 
                         for (uint32_t i = 0; i <= (surf.height - 1) / cellsize.second; ++i) {
                             Vt_insert_new_line(self);
@@ -4018,7 +4069,7 @@ static void Vt_handle_OSC(Vt* self, char c)
 
             /* Set X property on top-level window (prop=val) */
             case 3:
-                // TODO: CALL_FP(self->callbacs.on_xproperty_set, self->callbacks.user_data, seq +2,
+                // TODO: CALL(self->callbacs.on_xproperty_set, self->callbacks.user_data, seq +2,
                 // strstr(seq+2,"=") + 1);
                 WRN("OSC 3 not implemented\n");
                 break;
@@ -4051,7 +4102,7 @@ static void Vt_handle_OSC(Vt* self, char c)
                     }
                 }
                 Vt_clear_all_proxies(self);
-                CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
+                CALL(self->callbacks.on_repaint_required, self->callbacks.user_data);
             } break;
 
             /* 104 ; c Reset Color Number
@@ -4075,7 +4126,7 @@ static void Vt_handle_OSC(Vt* self, char c)
                     }
                 }
                 Vt_clear_all_proxies(self);
-                CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
+                CALL(self->callbacks.on_repaint_required, self->callbacks.user_data);
             } break;
 
             /* Modify special color palette */
@@ -4138,10 +4189,10 @@ static void Vt_handle_OSC(Vt* self, char c)
 
             /* Send Growl(some kind of notification daemon for OSX) notification (iTerm2) */
             case 9:
-                CALL_FP(self->callbacks.on_desktop_notification_sent,
-                        self->callbacks.user_data,
-                        NULL,
-                        seq + 2 /* 9; */);
+                CALL(self->callbacks.on_desktop_notification_sent,
+                     self->callbacks.user_data,
+                     NULL,
+                     seq + 2 /* 9; */);
                 break;
 
             /* Set title for tab (konsole extension) */
@@ -4271,7 +4322,7 @@ static void Vt_handle_OSC(Vt* self, char c)
                         ++arg;
                     }
                     Vt_clear_all_proxies(self);
-                    CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
+                    CALL(self->callbacks.on_repaint_required, self->callbacks.user_data);
                 }
             } break;
 
@@ -4402,9 +4453,9 @@ static void Vt_handle_OSC(Vt* self, char c)
                     } else if (strstr(a, "SetMark")) {
                         Vt_cursor_line(self)->mark_explicit = true;
                     } else if (strstr(a, "RequestAttention")) {
-                        CALL_FP(self->callbacks.on_urgency_set, self->callbacks.user_data);
+                        CALL(self->callbacks.on_urgency_set, self->callbacks.user_data);
                     } else if (strstr(a, "StealFocus")) {
-                        CALL_FP(self->callbacks.on_restack_to_front, self->callbacks.user_data);
+                        CALL(self->callbacks.on_restack_to_front, self->callbacks.user_data);
                     }
                     // TODO: ReportCellSize
                     // TODO: Copy
@@ -4433,10 +4484,10 @@ static void Vt_handle_OSC(Vt* self, char c)
                 if (tokens.size >= 2) {
                     if (!strcmp(tokens.buf[0].buf + 1, "notify")) {
                         if (tokens.size == 2) {
-                            CALL_FP(self->callbacks.on_desktop_notification_sent,
-                                    self->callbacks.user_data,
-                                    NULL,
-                                    tokens.buf[1].buf + 1);
+                            CALL(self->callbacks.on_desktop_notification_sent,
+                                 self->callbacks.user_data,
+                                 NULL,
+                                 tokens.buf[1].buf + 1);
                         } else if (tokens.size == 3) {
                             VtCommand* cmd = Vt_shell_integration_get_active_command(self);
                             if (cmd && cmd->is_vte_protocol &&
@@ -4446,10 +4497,10 @@ static void Vt_handle_OSC(Vt* self, char c)
                                                                                    1);
                                 Vt_shell_integration_end_execution(self, NULL);
                             } else {
-                                CALL_FP(self->callbacks.on_desktop_notification_sent,
-                                        self->callbacks.user_data,
-                                        tokens.buf[1].buf + 1,
-                                        tokens.buf[2].buf + 1);
+                                CALL(self->callbacks.on_desktop_notification_sent,
+                                     self->callbacks.user_data,
+                                     tokens.buf[1].buf + 1,
+                                     tokens.buf[2].buf + 1);
                             }
                         } else {
                             WRN("Unexpected argument in OSC 777 \'%s\'\n", seq);
@@ -4823,7 +4874,7 @@ static void Vt_overwrite_char_at(Vt* self, size_t column, size_t row, VtRune c)
  * Insert character literal at cursor position, deal with reaching column limit */
 __attribute__((hot)) static void Vt_insert_char_at_cursor(Vt* self, VtRune c)
 {
-    CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
+    CALL(self->callbacks.on_repaint_required, self->callbacks.user_data);
 
     if (self->wrap_next && !self->modes.no_wraparound) {
         self->cursor.col                  = 0;
@@ -4960,7 +5011,7 @@ static inline void Vt_move_cursor(Vt* self, uint16_t column, uint16_t rows)
         }
     }
 
-    CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
+    CALL(self->callbacks.on_repaint_required, self->callbacks.user_data);
 }
 
 /**
@@ -5792,7 +5843,7 @@ void Vt_get_visible_lines(const Vt* self, VtLine** out_begin, VtLine** out_end)
 void Vt_start_unicode_input(Vt* self)
 {
     self->unicode_input.active = true;
-    CALL_FP(self->callbacks.on_repaint_required, self->callbacks.user_data);
+    CALL(self->callbacks.on_repaint_required, self->callbacks.user_data);
 }
 
 void Vt_handle_button(void*    _self,
@@ -5894,7 +5945,7 @@ static void Vt_set_title(Vt* self, const char* title)
 {
     free(self->title);
     self->title = strdup(title);
-    CALL_FP(self->callbacks.on_title_changed, self->callbacks.user_data, self->title);
+    CALL(self->callbacks.on_title_changed, self->callbacks.user_data, self->title);
 }
 
 Vector_char* Vt_get_output(Vt* self, size_t len, char** out_buf, size_t* out_size)

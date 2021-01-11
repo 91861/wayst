@@ -32,7 +32,7 @@ static inline void Vt_immediate_output(Vt* self, char* str, size_t len)
 
 static inline void Vt_mark_line_proxy_fully_damaged(Vt* self, VtLine* line)
 {
-    CALL_FP(self->callbacks.on_action_performed, self->callbacks.user_data);
+    CALL(self->callbacks.on_action_performed, self->callbacks.user_data);
     line->damage.type = VT_LINE_DAMAGE_FULL;
 }
 
@@ -43,7 +43,7 @@ static inline void Vt_mark_proxy_fully_damaged(Vt* self, size_t idx)
 
 static inline void Vt_mark_proxy_damaged_cell(Vt* self, size_t line, size_t rune)
 {
-    CALL_FP(self->callbacks.on_action_performed, self->callbacks.user_data);
+    CALL(self->callbacks.on_action_performed, self->callbacks.user_data);
     switch (self->lines.buf[line].damage.type) {
         case VT_LINE_DAMAGE_NONE:
             self->lines.buf[line].damage.type  = VT_LINE_DAMAGE_RANGE;
@@ -80,7 +80,7 @@ static inline void Vt_mark_proxies_damaged_in_region(Vt* self, size_t begin, siz
 static inline void Vt_clear_line_proxy(Vt* self, VtLine* line)
 {
     Vt_mark_line_proxy_fully_damaged(self, line);
-    CALL_FP(self->callbacks.destroy_proxy, self->callbacks.user_data, &line->proxy);
+    CALL(self->callbacks.destroy_proxy, self->callbacks.user_data, &line->proxy);
 }
 
 static inline void Vt_clear_proxy(Vt* self, size_t idx)

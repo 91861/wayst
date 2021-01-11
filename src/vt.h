@@ -77,6 +77,15 @@ typedef enum
     VT_IMAGE_SURFACE_DESTROYED,
 } vt_image_surface_state_t;
 
+typedef enum
+{
+    VT_GUI_POINTER_MODE_FORCE_HIDE,
+    VT_GUI_POINTER_MODE_FORCE_SHOW,
+    VT_GUI_POINTER_MODE_HIDE,
+    VT_GUI_POINTER_MODE_SHOW,
+    VT_GUI_POINTER_MODE_SHOW_IF_REPORTING,
+} vt_gui_pointer_mode_t;
+
 #ifndef VT_RUNE_MAX_COMBINE
 #define VT_RUNE_MAX_COMBINE 2
 #endif
@@ -467,6 +476,7 @@ typedef struct
         void (*on_urgency_set)(void*);
         void (*on_restack_to_front)(void*);
         void (*on_command_state_changed)(void*);
+        void (*on_gui_pointer_mode_changed)(void*);
         void (*on_buffer_changed)(void*);
         void (*on_mouse_report_state_changed)(void*);
         const char* (*on_application_hostname_requested)(void*);
@@ -611,6 +621,8 @@ typedef struct
     char*         client_host;
     char*         work_dir;
     Vector_DynStr title_stack;
+
+    vt_gui_pointer_mode_t gui_pointer_mode;
 
     struct terminal_colors_t
     {
@@ -864,7 +876,7 @@ static inline void VtLine_destroy(void* vt_, VtLine* self)
         self->graphic_attachments = NULL;
     }
 
-    CALL_FP(vt->callbacks.destroy_proxy, vt->callbacks.user_data, &self->proxy);
+    CALL(vt->callbacks.destroy_proxy, vt->callbacks.user_data, &self->proxy);
     Vector_destroy_VtRune(&self->data);
     RcPtr_destroy_VtCommand(&self->linked_command);
 }
@@ -875,21 +887,21 @@ static void VtImageSurface_destroy(void* vt_, VtImageSurface* self)
     Vector_destroy_uint8_t(&self->fragments);
     self->id    = 0;
     self->state = VT_IMAGE_SURFACE_DESTROYED;
-    CALL_FP(vt->callbacks.destroy_image_proxy, vt->callbacks.user_data, &self->proxy);
+    CALL(vt->callbacks.destroy_image_proxy, vt->callbacks.user_data, &self->proxy);
 }
 
 static void VtImageSurfaceView_destroy(void* vt_, VtImageSurfaceView* self)
 {
     Vt* vt = vt_;
     RcPtr_destroy_VtImageSurface(&self->source_image_surface);
-    CALL_FP(vt->callbacks.destroy_image_view_proxy, vt->callbacks.user_data, &self->proxy);
+    CALL(vt->callbacks.destroy_image_view_proxy, vt->callbacks.user_data, &self->proxy);
 }
 
 static void VtSixelSurface_destroy(void* _vt, VtSixelSurface* self)
 {
     Vt* vt = _vt;
     Vector_destroy_uint8_t(&self->fragments);
-    CALL_FP(vt->callbacks.destroy_sixel_proxy, vt->callbacks.user_data, &self->proxy);
+    CALL(vt->callbacks.destroy_sixel_proxy, vt->callbacks.user_data, &self->proxy);
 }
 
 static uint16_t VtLine_add_link(VtLine* self, const char* link)
@@ -1345,7 +1357,7 @@ static const char* Vt_get_client_host(const Vt* self)
 static bool Vt_client_host_is_local(const Vt* self)
 {
     const char* application_host =
-      CALL_FP(self->callbacks.on_application_hostname_requested, self->callbacks.user_data);
+      CALL(self->callbacks.on_application_hostname_requested, self->callbacks.user_data);
     const char* client_host = Vt_get_client_host(self);
 
     LOG("Vt::host_is_local{ application: %s, client: %s }\n", application_host, client_host);

@@ -637,14 +637,15 @@ __attribute__((cold)) void Vt_dump_info(Vt* self)
         }
     }
     printf("Active character attributes:\n");
-    printf("  foreground color:   " COLOR_RGB_FMT "\n",
-           COLOR_RGB_AP((Vt_rune_fg(self, &self->parser.char_state))));
-    printf("  background color:   " COLOR_RGBA_FMT "\n",
-           COLOR_RGBA_AP((Vt_rune_bg(self, &self->parser.char_state))));
+
+    printf("  foreground color:   %s" TERMCOLOR_RESET "\n",
+           ColorRGB_to_term_string(Vt_rune_fg(self, &self->parser.char_state)));
+    printf("  background color:   %s" TERMCOLOR_RESET "\n",
+           ColorRGB_to_term_string(ColorRGB_from_RGBA(Vt_rune_bg(self, &self->parser.char_state))));
     printf("  line color uses fg: " BOOL_FMT "\n",
            BOOL_AP(!self->parser.char_state.line_color_not_default));
-    printf("  line color:         " COLOR_RGB_FMT "\n",
-           COLOR_RGB_AP((Vt_rune_ln_clr(self, &self->parser.char_state))));
+    printf("  line color:         %s" TERMCOLOR_RESET "\n",
+           ColorRGB_to_term_string(ColorRGB_from_RGBA(Vt_rune_bg(self, &self->parser.char_state))));
     printf("  dim:                " BOOL_FMT "\n", BOOL_AP(self->parser.char_state.dim));
     printf("  hidden:             " BOOL_FMT "\n", BOOL_AP(self->parser.char_state.hidden));
     printf("  blinking:           " BOOL_FMT "\n", BOOL_AP(self->parser.char_state.blinkng));

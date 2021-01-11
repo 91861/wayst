@@ -133,6 +133,7 @@ static void App_handle_uri(App* self, const char* uri);
 static void App_update_hover(App* self, int32_t x, int32_t y);
 static void App_update_padding(App* self);
 static void App_set_title(void* self);
+static void App_focus_changed(void* self, bool current_state);
 
 static void* App_load_extension_proc_address(void* self, const char* name)
 {
@@ -192,6 +193,9 @@ static void App_init(App* self)
 
     App_create_window(self, Gfx_pixels(self->gfx, settings.cols, settings.rows));
     App_set_callbacks(self);
+
+    /* We may have gotten events during initialization. We can ignore everything except for focus */
+    App_focus_changed(self, FLAG_IS_SET(self->win->state_flags, WINDOW_IS_IN_FOCUS));
 
     settings_after_window_system_connected();
     Window_set_swap_interval(self->win, 0);
@@ -1165,11 +1169,52 @@ static bool App_maybe_handle_application_key(App*     self,
     return false;
 }
 
+void App_gui_pointer_mode_change_handler(void* self)
+{
+#define L_SET_POINTER_STYLE                                                                        \
+    if (app->selection_dragging_left || app->selection_dragging_right) {                           \
+        Window_set_pointer_style(app->win, MOUSE_POINTER_I_BEAM);                                  \
+    } else {                                                                                       \
+        Window_set_pointer_style(app->win, MOUSE_POINTER_ARROW);                                   \
+    }
+
+    App* app = self;
+    switch (app->vt.gui_pointer_mode) {
+        case VT_GUI_POINTER_MODE_FORCE_HIDE:
+        case VT_GUI_POINTER_MODE_HIDE:
+            Window_set_pointer_style(app->win, MOUSE_POINTER_HIDDEN);
+            break;
+        case VT_GUI_POINTER_MODE_FORCE_SHOW:
+        case VT_GUI_POINTER_MODE_SHOW:
+            L_SET_POINTER_STYLE;
+            break;
+        case VT_GUI_POINTER_MODE_SHOW_IF_REPORTING:
+            if (Vt_is_reporting_mouse(&app->vt)) {
+                L_SET_POINTER_STYLE;
+            } else {
+                Window_set_pointer_style(app->win, MOUSE_POINTER_HIDDEN);
+            }
+            break;
+    }
+}
+
 void App_key_handler(void* self, uint32_t key, uint32_t rawkey, uint32_t mods)
 {
     if (!App_maybe_handle_application_key(self, key, rawkey, mods)) {
         App* app = self;
-        Window_set_pointer_style(app->win, MOUSE_POINTER_HIDDEN);
+        switch (app->vt.gui_pointer_mode) {
+            case VT_GUI_POINTER_MODE_FORCE_HIDE:
+            case VT_GUI_POINTER_MODE_HIDE:
+                Window_set_pointer_style(app->win, MOUSE_POINTER_HIDDEN);
+                break;
+
+            case VT_GUI_POINTER_MODE_SHOW_IF_REPORTING:
+                if (!Vt_reports_mouse(&app->vt)) {
+                    Window_set_pointer_style(app->win, MOUSE_POINTER_HIDDEN);
+                }
+                break;
+            default:;
+        }
         Vt_handle_key(&app->vt, key, rawkey, mods);
     }
 }
@@ -1811,6 +1856,7 @@ static void App_set_callbacks(App* self)
     self->vt.callbacks.on_command_state_changed            = App_command_changed;
     self->vt.callbacks.on_mouse_report_state_changed       = App_mouse_report_changed;
     self->vt.callbacks.on_buffer_changed                   = App_buffer_changed;
+    self->vt.callbacks.on_gui_pointer_mode_changed         = App_gui_pointer_mode_change_handler;
 
     self->win->callbacks.user_data               = self;
     self->win->callbacks.key_handler             = App_key_handler;

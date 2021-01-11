@@ -60,7 +60,6 @@
 #define TERMCOLOR_BG_CYAN_LIGHT    "\e[106m"
 #define TERMCOLOR_BG_WHITE         "\e[107m"
 
-
 #define likely(_x)     __builtin_expect((bool)(_x), 1)
 #define unlikely(_x)   __builtin_expect((bool)(_x), 0)
 #define expect(_x, _y) __builtin_expect((_x), (_y))
@@ -80,6 +79,10 @@
 #define BOOL_AP(_b) ((_b) ? ("true") : ("false"))
 
 #define STATIC_ASSERT(cond, msg) typedef char static_assertion_##msg[(cond) ? 1 : -1]
+
+#define TRY_CALL(_func, ...)                                                                       \
+    if (likely((_func)))                                                                           \
+    (_func)(__VA_ARGS__)
 
 #define STUB(_feature)                                                                             \
     {                                                                                              \
@@ -137,7 +140,7 @@ static inline void* _call_fp_helper(const char* const msg,
 }
 
 // call function pointer matching T(*)(void*, ...), error if NULL
-#define CALL_FP(_func, _void_ptr, ...)                                                             \
+#define CALL(_func, _void_ptr, ...)                                                                \
     (_func)((_func)                                                                                \
               ? (_void_ptr)                                                                        \
               : _call_fp_helper("function \'" #_func "\' is NULL.", __FILE__, __func__, __LINE__), \
@@ -165,7 +168,7 @@ static inline void* _call_fp_helper(const char* const msg,
         exit(EXIT_FAILURE);                                                                        \
     }
 
-#define CALL_FP(_func, _void_ptr, ...) ((_func)((_void_ptr), ##__VA_ARGS__))
+#define CALL(_func, _void_ptr, ...) ((_func)((_void_ptr), ##__VA_ARGS__))
 
 #endif
 
