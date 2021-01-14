@@ -393,8 +393,7 @@ void primary_selection_offer_handle_offer(void*                                 
     if (w->new_primary_offer_mime_idx == -1) {
         LOG(" - REJECTED(not supported) }\n");
     } else {
-        LOG(" - REJECTED(\'%s\' is preffered) }\n",
-            ACCEPTED_MIMES[w->new_primary_offer_mime_idx]);
+        LOG(" - REJECTED(\'%s\' is preffered) }\n", ACCEPTED_MIMES[w->new_primary_offer_mime_idx]);
     }
 }
 
@@ -874,8 +873,8 @@ static void keyboard_handle_enter(void*               data,
 {
     globalWl->serial       = serial;
     struct WindowBase* win = data;
-    TRY_CALL(win->callbacks.on_focus_changed, win->callbacks.user_data, true);
     FLAG_SET(((struct WindowBase*)data)->state_flags, WINDOW_IS_IN_FOCUS);
+    TRY_CALL(win->callbacks.on_focus_changed, win->callbacks.user_data, true);
 }
 
 static void keyboard_handle_leave(void*               data,
@@ -885,6 +884,7 @@ static void keyboard_handle_leave(void*               data,
 {
     globalWl->serial       = serial;
     struct WindowBase* win = data;
+    FLAG_UNSET(((struct WindowBase*)data)->state_flags, WINDOW_IS_IN_FOCUS);
     TRY_CALL(win->callbacks.on_focus_changed, win->callbacks.user_data, false);
     globalWl->keycode_to_repeat = 0;
 }
