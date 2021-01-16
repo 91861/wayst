@@ -4,11 +4,15 @@
 #include <stdio.h>
 #include <uchar.h>
 
+#include "stb_image/stb_image.h"
+#include "stb_image/stb_image_write.h"
 #include "wcwidth/wcwidth.h"
 
+#include "base64.h"
 #include "colors.h"
 #include "util.h"
 #include "vt.h"
+#include "vt_sixel.h"
 
 typedef enum
 {
@@ -146,10 +150,63 @@ static void end_span(Vector_char* lines)
     Vector_pushv_char(lines, "</span>", strlen("</span>"));
 }
 
+static void png_write_to_vec_as_b64_func(void* context, void* data, int size)
+{
+    if (data) {
+        size_t sz  = 0;
+        char*  b64 = base64_encode_alloc(data, size, &sz);
+        Vector_pushv_char(context, b64, sz);
+        free(b64);
+    } else {
+        WRN("failed to convert sixel image to png\n");
+    }
+}
+
 void write_html_screen_dump(const Vt* vt, FILE* file)
 {
     if (!file || !vt) {
         return;
+    }
+
+    static const char* const sixel_css = "\n"
+                                         "  .sixel {\n"
+                                         "    position: absolute;\n"
+                                         "    overflow: hidden;\n"
+                                         "  }\n";
+
+    Vector_char sixel_html = Vector_new_char();
+
+    for (const RcPtr_VtSixelSurface* i = NULL;
+         (i = Vector_iter_const_RcPtr_VtSixelSurface(&vt->scrolled_sixels, i));) {
+
+        const VtSixelSurface* srf = RcPtr_get_const_VtSixelSurface(i);
+
+        if (!srf || !VtSixelSurface_is_visible(vt, srf)) {
+            continue;
+        }
+
+        int32_t top = srf->anchor_global_index - Vt_top_line(vt), left = srf->anchor_cell_idx,
+            height = Vt_row(vt) - (top < 0 ? top : 0), width = Vt_col(vt) - (left < 0 ? left : 0);
+
+        static const char* sixel_image_begin_format =
+          "<div z-index=2 class=\"sixel\" style=\"top: %dem; left: %dem height %dem; width: "
+          "%dem;\"><img src=\"data:image/png;base64,";
+
+        char* sixel_image_begin = asprintf(sixel_image_begin_format, top, left, height, width);
+        Vector_pushv_char(&sixel_html, sixel_image_begin, strlen(sixel_image_begin));
+        free(sixel_image_begin);
+
+        stbi_write_png_compression_level = 9;
+        stbi_write_png_to_func(png_write_to_vec_as_b64_func,
+                               &sixel_html,
+                               srf->width,
+                               srf->height,
+                               3,
+                               srf->fragments.buf,
+                               0);
+
+        static const char* sixel_image_end = "\"></div>";
+        Vector_pushv_char(&sixel_html, sixel_image_end, strlen(sixel_image_end));
     }
 
     static const char* const page_template =
@@ -190,12 +247,14 @@ void write_html_screen_dump(const Vt* vt, FILE* file)
       "    background-color: " COLOR_RGB_FMT ";\n"
       "    color: " COLOR_RGB_FMT ";\n"
       "  }\n"
+      "%s"
       "</style>\n"
       "\n"
       "<body>\n"
       "  <div id=\"vt\">\n"
       "    <pre>%s</pre>\n"
       "  </div>\n"
+      "%s"
       "</body>\n"
       "\n"
       "</html>\n";
@@ -277,6 +336,7 @@ void write_html_screen_dump(const Vt* vt, FILE* file)
     }
 
     Vector_push_char(&lines, '\0');
+    Vector_push_char(&sixel_html, '\0');
 
     fprintf(file,
             page_template,
@@ -285,7 +345,10 @@ void write_html_screen_dump(const Vt* vt, FILE* file)
             settings.font_size,
             COLOR_RGB_AP(vt->colors.bg),
             COLOR_RGB_AP(vt->colors.fg),
-            lines.buf);
+            sixel_html.size > 1 ? sixel_css : "",
+            lines.buf,
+            sixel_html.size > 1 ? sixel_html.buf : "");
 
     Vector_destroy_char(&lines);
+    Vector_destroy_char(&sixel_html);
 }

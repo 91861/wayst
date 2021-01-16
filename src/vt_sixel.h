@@ -37,6 +37,18 @@ __attribute__((always_inline)) static inline void _sixel_surface_new_from_data_p
     }
 }
 
+static inline bool VtSixelSurface_is_visible(const Vt* vt, const VtSixelSurface* self)
+{
+    return self->anchor_global_index <= Vt_bottom_line(vt) &&
+           self->anchor_global_index + Vt_row(vt) >= Vt_top_line(vt);
+}
+
+static inline bool VtSixelSurface_is_visual_visible(const Vt* vt, const VtSixelSurface* self)
+{
+    return self->anchor_global_index <= Vt_visual_bottom_line(vt) &&
+           self->anchor_global_index + Vt_row(vt) >= Vt_visual_top_line(vt);
+}
+
 static VtSixelSurface VtSixelSurface_new_from_data(uint8_t                    pixel_aspect,
                                                    bool                       zero_overwrites_color,
                                                    uint8_t*                   data,

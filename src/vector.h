@@ -140,6 +140,14 @@
         return self->buf + idx;                                                                    \
     }                                                                                              \
                                                                                                    \
+    static inline const t* Vector_iter_const_##t(const Vector_##t* self, const t* i)               \
+    {                                                                                              \
+        return unlikely(!self->size)                      ? NULL                                   \
+               : !i                                       ? self->buf                              \
+               : (size_t)(i - self->buf) + 1 < self->size ? i + 1                                  \
+                                                          : NULL;                                  \
+    }                                                                                              \
+                                                                                                   \
     static inline t* Vector_iter_##t(Vector_##t* self, t* i)                                       \
     {                                                                                              \
         return unlikely(!self->size)                      ? NULL                                   \
@@ -149,6 +157,14 @@
     }                                                                                              \
                                                                                                    \
     static inline t* Vector_iter_back_##t(Vector_##t* self, t* i)                                  \
+    {                                                                                              \
+        return unlikely(!self->size) ? NULL                                                        \
+               : !i                  ? &self->buf[self->size - 1]                                  \
+               : (i == self->buf)    ? NULL                                                        \
+                                     : i - 1;                                                         \
+    }                                                                                              \
+                                                                                                   \
+    static inline const t* Vector_iter_back_const_##t(const Vector_##t* self, const t* i)          \
     {                                                                                              \
         return unlikely(!self->size) ? NULL                                                        \
                : !i                  ? &self->buf[self->size - 1]                                  \
@@ -206,6 +222,8 @@
     }                                                                                              \
                                                                                                    \
     static inline t* Vector_first_##t(Vector_##t* self) { return self->buf; }                      \
+                                                                                                   \
+    static inline const t* Vector_first_const_##t(const Vector_##t* self) { return self->buf; }    \
                                                                                                    \
     static inline void Vector_clear_##t(Vector_##t* self)                                          \
     {                                                                                              \
@@ -348,6 +366,14 @@
                                                           : NULL;                                  \
     }                                                                                              \
                                                                                                    \
+    static inline const t* Vector_iter_const_##t(const Vector_##t* self, const t* i)               \
+    {                                                                                              \
+        return unlikely(!self->size)                      ? NULL                                   \
+               : !i                                       ? self->buf                              \
+               : (size_t)(i - self->buf) + 1 < self->size ? i + 1                                  \
+                                                          : NULL;                                  \
+    }                                                                                              \
+                                                                                                   \
     static inline t* Vector_iter_back_##t(Vector_##t* self, t* i)                                  \
     {                                                                                              \
         return unlikely(!self->size) ? NULL                                                        \
@@ -356,6 +382,13 @@
                                      : i - 1;                                                         \
     }                                                                                              \
                                                                                                    \
+    static inline const t* Vector_iter_back_const_##t(const Vector_##t* self, const t* i)          \
+    {                                                                                              \
+        return unlikely(!self->size) ? NULL                                                        \
+               : !i                  ? &self->buf[self->size - 1]                                  \
+               : (i == self->buf)    ? NULL                                                        \
+                                     : i - 1;                                                         \
+    }                                                                                              \
     static inline t* Vector_insert_##t(Vector_##t* self, t* i, t arg)                              \
     {                                                                                              \
         if (unlikely(!self->size)) {                                                               \
@@ -406,6 +439,8 @@
     }                                                                                              \
                                                                                                    \
     static inline t* Vector_first_##t(Vector_##t* self) { return self->buf; }                      \
+                                                                                                   \
+    static inline const t* Vector_first_const_##t(const Vector_##t* self) { return self->buf; }    \
                                                                                                    \
     static inline void Vector_clear_##t(Vector_##t* self)                                          \
     {                                                                                              \
