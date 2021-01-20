@@ -2542,9 +2542,10 @@ static void GfxOpenGL21_draw_scrollbar(GfxOpenGL21* self, const Scrollbar* scrol
     float begin  = scrollbar->top;
     float width  = self->sx * scrollbar->width;
 
+    float slide = (1.0f - scrollbar->opacity) * scrollbar->width * self->sx;
     float vertex_data[] = {
-        1.0f - width, 1.0f - begin,          1.0f,         1.0f - begin,
-        1.0f,         1.0f - length - begin, 1.0f - width, 1.0f - length - begin,
+        1.0f - width + slide, 1.0f - begin,          1.0f,         1.0f - begin,
+        1.0f,         1.0f - length - begin, 1.0f - width + slide, 1.0f - length - begin,
     };
 
     glBindBuffer(GL_ARRAY_BUFFER, self->flex_vbo.vbo);

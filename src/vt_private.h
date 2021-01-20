@@ -4,9 +4,10 @@
 
 #include "vt.h"
 
-static void                 Vt_insert_new_line(Vt* self);
-static inline void          Vt_move_cursor(Vt* self, uint16_t column, uint16_t rows);
-__attribute__((cold)) char* pty_string_prettyfy(const char* str, int32_t max);
+static void                        Vt_insert_new_line(Vt* self);
+static inline void                 Vt_move_cursor(Vt* self, uint16_t column, uint16_t rows);
+__attribute__((hot, flatten)) void Vt_handle_literal(Vt* self, char c);
+__attribute__((cold)) char*        pty_string_prettyfy(const char* str, int32_t max);
 
 void Vt_buffered_output(Vt* self, const char* buf, size_t len);
 

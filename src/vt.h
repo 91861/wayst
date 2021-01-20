@@ -720,7 +720,7 @@ typedef struct
         uint8_t application_keypad_cursor : 1;
         uint8_t pop_on_bell : 1;
         uint8_t urgency_on_bell : 1;
-
+        uint8_t no_insert_replace_mode : 1;
         uint8_t left_and_right_margin : 1;
         uint8_t margin_bell : 1;
 

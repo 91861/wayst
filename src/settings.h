@@ -224,7 +224,8 @@ typedef struct
 
     bool allow_multiple_underlines;
 
-    bool debug_pty, debug_gfx, debug_font, debug_slow;
+    bool debug_pty, debug_gfx, debug_font, debug_vt;
+    uint32_t vt_debug_delay_usec;
 
     uint32_t scrollback;
 
@@ -266,6 +267,7 @@ typedef struct
 
     uint32_t pty_chunk_wait_delay_ns;
     uint32_t pty_chunk_timeout_ms;
+
 
 } Settings;
 

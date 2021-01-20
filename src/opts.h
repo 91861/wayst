@@ -277,7 +277,7 @@ static struct option long_options[] = {
     [OPT_DEBUG_PTY_IDX] = { "debug-pty", no_argument, 0, 'D' },
 
 #define OPT_DEBUG_VT_IDX 84
-    [OPT_DEBUG_VT_IDX] = { "debug-vt", no_argument, 0, 0 },
+    [OPT_DEBUG_VT_IDX] = { "debug-vt", required_argument, 0, 0 },
 
 #define OPT_DEBUG_GFX_IDX 85
     [OPT_DEBUG_GFX_IDX] = { "debug-gfx", no_argument, 0, 'G' },
@@ -441,7 +441,7 @@ static const char* long_options_descriptions[][2] = {
     [OPT_BIND_KEY_QUIT_IDX]  = { arg_key, "Quit key command" },
 
     [OPT_DEBUG_PTY_IDX]  = { NULL, "Output pty communication to stderr" },
-    [OPT_DEBUG_VT_IDX]   = { NULL, "Slow down the interpreter" },
+    [OPT_DEBUG_VT_IDX]   = { "int?", "Slow down the interpreter to usec/byte (default: 5000)" },
     [OPT_DEBUG_GFX_IDX]  = { NULL, "Run renderer in debug mode" },
     [OPT_DEBUG_FONT_IDX] = { NULL, "Show font information" },
     [OPT_VERSION_IDX]    = { NULL, "Show version" },

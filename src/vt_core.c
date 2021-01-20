@@ -1441,6 +1441,45 @@ static inline void Vt_report_dec_mode(Vt* self, int code)
     Vt_immediate_output_formated(self, "\e[?%d;%c$y", code, value ? '1' : '2');
 }
 
+static inline void Vt_handle_regular_mode(Vt* self, int code, bool on)
+{
+    switch (code) {
+        case 2:
+            STUB("KAM");
+            break;
+
+        /* Insert/replace mode - IRM (VT102)
+         *
+         * The terminal displays received characters at the cursor position. Insert/Replace mode
+         * determines how the terminal adds characters to the screen. Insert mode displays the
+         * new character and moves previously displayed characters to the right. Replace mode
+         * adds characters by replacing the character at the cursor position. Characters moved past
+         * the right margin are lost. This mode is enabled by default.
+         */
+        case 4:
+            self->modes.no_insert_replace_mode = !on;
+            break;
+
+        /* Send/receive mode aka local echo mode - SRM (VT102)
+         *
+         * This control function turns local echo on or off. When local echo is on, the
+         * terminal sends keyboard characters to the screen. The host does not have
+         * to send (echo) the characters back to the terminal display. When local
+         * echo is off, the terminal only sends characters to the host. It is up to the
+         * host to echo characters back to the screen.
+         */
+        case 12:
+            self->modes.send_receive_mode = on;
+            break;
+
+        case 20:
+            STUB("LNM");
+            break;
+        default:
+            WRN("unknown SM mode: %d\n", code);
+    }
+}
+
 static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
 {
     switch (code) {
@@ -1457,7 +1496,6 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
         case 1:
             self->modes.application_keypad_cursor = on;
             break;
-
             /* Column mode 132/80 (DECCOLM)
              *
              * The reset state causes a maximum of 80 columns on the screen. The set state causes a
@@ -1525,7 +1563,7 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
 
         /* hide/show cursor (DECTCEM) */
         case 25:
-            if (likely(!settings.debug_slow)) {
+            if (likely(!settings.debug_vt)) {
                 self->cursor.hidden = !on;
             }
             break;
@@ -2676,6 +2714,27 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                 Vt_move_cursor(self, self->cursor.col - lt, Vt_cursor_row(self));
                             } break;
 
+                            /* <ESC>[ Pm ... h - Set mode (SM) */
+                            case 'h':
+                            /* <ESC>[ Pm ... l - Reset Mode (RM) */
+                            case 'l': {
+                                bool               is_enable = last_char == 'h';
+                                Vector_Vector_char tokens = string_split_on(seq, ";:", NULL, NULL);
+                                for (Vector_char* token = NULL;
+                                     (token = Vector_iter_Vector_char(&tokens, token));) {
+                                    errno         = 0;
+                                    uint32_t code = atoi(token->buf + 1);
+                                    if (code && !errno) {
+                                        Vt_handle_regular_mode(self, code, is_enable);
+                                    } else {
+                                        WRN("Invalid %s argument: \'%s\'\n",
+                                            is_enable ? "SM" : "RM",
+                                            token->buf + 1);
+                                    }
+                                }
+                                Vector_destroy_Vector_char(&tokens);
+                            } break;
+
                             /* <ESC>[ Pn g - tabulation clear (TBC) */
                             case 'g': {
                                 MULTI_ARG_IS_ERROR
@@ -2820,16 +2879,6 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                             /* <ESC>[ Ps i -  Media Copy (MC) Local printing related commands */
                             case 'i':
                                 break;
-
-                            /* <ESC>[  Pm... l - Reset Mode (RM) */
-                            case 'l': {
-                                MULTI_ARG_IS_ERROR
-                                switch (short_sequence_get_int_argument(seq)) {
-                                    case 4:
-                                        // TODO: turn off IRM
-                                        break;
-                                }
-                            } break;
 
                             /* <ESC>[u - Restore cursor (SCORC, also ANSI.SYS) */
                             /* <ESC>[Ps SP u - Set margin-bell volume (DECSMBV), VT520 */
@@ -4889,8 +4938,18 @@ __attribute__((hot)) static void Vt_insert_char_at_cursor(Vt* self, VtRune c)
 
     VtRune* insert_point = &self->lines.buf[self->cursor.row].data.buf[self->cursor.col];
     if (likely(memcmp(insert_point, &c, sizeof(VtRune)))) {
-        Vt_mark_proxy_damaged_cell(self, self->cursor.row, self->cursor.col);
-        *Vt_cursor_cell(self) = c;
+
+        if (self->modes.no_insert_replace_mode) {
+            // TODO: Vt_mark_proxy_damaged_shift()
+            Vt_mark_proxy_fully_damaged(self, self->cursor.row);
+            Vector_insert_at_VtRune(&Vt_cursor_line(self)->data, self->cursor.col, c);
+            if (Vt_cursor_line(self)->data.size >= Vt_col(self)) {
+                Vector_pop_VtRune(&Vt_cursor_line(self)->data);
+            }
+        } else {
+            Vt_mark_proxy_damaged_cell(self, self->cursor.row, self->cursor.col);
+            *Vt_cursor_cell(self) = c;
+        }
     }
 
     self->last_interted = Vt_cursor_cell(self);
@@ -4911,11 +4970,20 @@ __attribute__((hot)) static void Vt_insert_char_at_cursor(Vt* self, VtRune c)
             if (Vt_cursor_line(self)->data.size <= self->cursor.col) {
                 Vector_push_VtRune(&Vt_cursor_line(self)->data, tmp);
             } else {
-                *Vt_cursor_cell(self) = tmp;
+                if (self->modes.no_insert_replace_mode) {
+                    Vector_insert_at_VtRune(&Vt_cursor_line(self)->data, self->cursor.col, tmp);
+                } else {
+                    *Vt_cursor_cell(self) = tmp;
+                }
             }
 
             ++self->cursor.col;
-            Vt_mark_proxy_damaged_cell(self, self->cursor.row, self->cursor.col);
+
+            if (self->modes.no_insert_replace_mode) {
+                Vt_mark_proxy_fully_damaged(self, self->cursor.row);
+            } else {
+                Vt_mark_proxy_damaged_cell(self, self->cursor.row, self->cursor.col);
+            }
         }
     } else if (unlikely(unicode_is_ambiguous_width(c.rune.code))) {
         Vector_push_VtRune(&Vt_cursor_line(self)->data, self->blank_space);
@@ -5101,7 +5169,7 @@ static void Vt_handle_combinable(Vt* self, char32_t c)
     }
 }
 
-__attribute__((always_inline, hot, flatten)) static inline void Vt_handle_literal(Vt* self, char c)
+__attribute__((hot, flatten)) void Vt_handle_literal(Vt* self, char c)
 {
     if (self->parser.in_mb_seq) {
         char32_t res;

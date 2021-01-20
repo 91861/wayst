@@ -857,6 +857,8 @@ static void settings_make_default()
         .pty_chunk_timeout_ms    = 5,
 
         .lcd_ranges_set_by_user = false,
+
+        .vt_debug_delay_usec = 5000,
     };
 }
 
@@ -1107,7 +1109,10 @@ static void handle_option(const char opt, const int array_index, const char* val
             break;
 
         case OPT_DEBUG_VT_IDX:
-            settings.debug_slow = true;
+            settings.debug_vt = true;
+            if (value) {
+                settings.vt_debug_delay_usec = atoi(value);
+            }
             break;
 
         case OPT_DEBUG_GFX_IDX:

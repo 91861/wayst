@@ -327,6 +327,12 @@ void Vt_handle_key(void* _self, uint32_t key, uint32_t rawkey, uint32_t mods)
         if (mb_len) {
             Vt_buffered_output(self, tmp, mb_len);
         }
+
+        if (self->modes.send_receive_mode) {
+            for (uint32_t i = 0; i < mb_len; ++i) {
+                Vt_handle_literal(self, tmp[i]);
+            }
+        }
     }
 
     if (settings.scroll_on_key) {

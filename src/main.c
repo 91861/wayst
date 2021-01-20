@@ -244,6 +244,9 @@ static void App_run(App* self)
             !App_scrollbar_is_animating(self)) {
             if (self->closest_pending_wakeup) {
                 timeout_ms = TimePoint_is_ms_ahead(*(self->closest_pending_wakeup));
+                if (timeout_ms < 0) {
+                    timeout_ms = 0;
+                }
             } else {
                 timeout_ms = -1;
             }
@@ -264,8 +267,8 @@ static void App_run(App* self)
         ssize_t bytes                = 0;
         self->interpreter_start_time = TimePoint_now();
         do {
-            if (unlikely(settings.debug_slow)) {
-                usleep(5000);
+            if (unlikely(settings.debug_vt)) {
+                usleep(settings.vt_debug_delay_usec);
                 App_notify_content_change(self);
             } else if (unlikely(TimePoint_is_ms_ahead(TimePoint_now()) >
                                 settings.pty_chunk_timeout_ms)) {
@@ -285,7 +288,7 @@ static void App_run(App* self)
             if (settings.pty_chunk_wait_delay_ns) {
                 usleep(settings.pty_chunk_wait_delay_ns);
             }
-        } while (bytes && likely(!settings.debug_slow));
+        } while (bytes && likely(!settings.debug_vt));
 
         char*        buf;
         size_t       len;
@@ -343,6 +346,10 @@ static void App_run(App* self)
              TimePoint_is_earlier((sat = App_scrollbar_anim_start_time(self)),
                                   *self->closest_pending_wakeup))) {
             self->closest_pending_wakeup = &sat;
+        }
+
+        if (App_scrollbar_is_animating(self)) {
+            Window_notify_content_change(self->win);
         }
 
         self->swap_performed = Window_maybe_swap(self->win);
