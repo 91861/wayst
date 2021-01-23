@@ -446,6 +446,78 @@ DEF_VECTOR_DA(VtLine, VtLine_destroy, void);
 /*     Vector_destroy_RcPtr_VtSixelSurface(&self->scrolled_sixels); */
 /* } */
 
+/* 'reverse' some modes so default is 0  */
+typedef struct
+{
+    uint8_t no_wraparound : 1;
+    uint8_t reverse_wraparound : 1;
+    uint8_t origin : 1;
+    uint8_t allow_column_size_switching : 1;
+    uint8_t bracketed_paste : 1;
+    uint8_t del_sends_del : 1;
+    uint8_t no_alt_sends_esc : 1;
+    uint8_t x10_mouse_compat : 1;
+    uint8_t mouse_btn_report : 1;
+    uint8_t mouse_motion_on_btn_report : 1;
+    uint8_t mouse_motion_report : 1;
+    uint8_t window_focus_events_report : 1;
+    uint8_t extended_report : 1;
+    uint8_t video_reverse : 1;
+    uint8_t auto_repeat : 1;
+    uint8_t application_keypad : 1;
+    uint8_t application_keypad_cursor : 1;
+    uint8_t pop_on_bell : 1;
+    uint8_t urgency_on_bell : 1;
+    uint8_t no_insert_replace_mode : 1;
+    uint8_t margin_bell : 1;
+
+    /* VT300:
+     * When sixel display mode is enabled, the sixel active position begins at the upper-left
+     * corner of the ANSI text active position. Scrolling occurs when the sixel active position
+     * reaches the bottom margin of the graphics page. When sixel mode is exited, the text
+     * cursor is set to the current sixel cursor position.
+     *
+     * When sixel scrolling is disabled, the sixel active position begins at the upper-left
+     * corner of the active graphics page. The terminal ignores any commands that attempt to
+     * advance the active position below the bottom margin of the graphics page. When sixel mode
+     * is exited, the text cursor does not change from the position it was in when sixel mode
+     * was entered. */
+    uint8_t sixel_scrolling : 1;
+
+    /* Use private color registers for each sixel graphic */
+    uint8_t sixel_private_color_registers : 1;
+
+    /* Sixel scrolling leaves cursor to right of graphic. */
+    uint8_t sixel_scrolling_move_cursor_right : 1;
+
+    /* Send/receive mode aka local echo mode - SRM (VT102)
+     *
+     * This control function turns local echo on or off. When local echo is on, the
+     * terminal sends keyboard characters to the screen. The host does not have
+     * to send (echo) the characters back to the terminal display. When local
+     * echo is off, the terminal only sends characters to the host. It is up to the
+     * host to echo characters back to the screen.
+     */
+    uint8_t send_receive_mode : 1;
+
+    /* New Line Mode - NLM (VT102)
+     *
+     * If LNM is set, then the cursor moves to the first column on the next line when the terminal
+     * receives an LF, FF, or VT character. When you press Return, the terminal sends both a
+     * carriage return (CR) and line feed (LF). If LNM is reset, then the cursor moves to the
+     * current column on the next line when the terminal receives an LF, FF, or VT character. When
+     * you press Return, the terminal sends only a carriage return (CR) character.
+     */
+    uint8_t new_line_mode : 1;
+
+    /* Vertical Split Screen Mode - DECVSSM (VT400)
+     *
+     * This control function defines whether or not the set left and right margins
+     * (DECSLRM) control function can set margins.
+     */
+    uint8_t vertical_split_screen_mode : 1;
+} vt_modes_t;
+
 typedef struct
 {
     struct vt_callbacks_t
@@ -691,66 +763,16 @@ typedef struct
 
     Cursor cursor;
 
-    size_t alt_cursor_pos;
-    size_t saved_cursor_pos;
-    size_t alt_active_line;
-    size_t saved_active_line;
-    size_t scroll_region_top;
-    size_t scroll_region_bottom;
+    size_t   alt_cursor_pos;
+    size_t   saved_cursor_pos;
+    size_t   alt_active_line;
+    size_t   saved_active_line;
+    size_t   scroll_region_top;
+    size_t   scroll_region_bottom;
+    uint16_t scroll_region_left;
+    uint16_t scroll_region_right;
 
-    /* 'reverse' some modes so default is 0  */
-    struct VtModes
-    {
-        uint8_t no_wraparound : 1;
-        uint8_t reverse_wraparound : 1;
-        uint8_t origin : 1;
-        uint8_t allow_column_size_switching : 1;
-        uint8_t bracketed_paste : 1;
-        uint8_t del_sends_del : 1;
-        uint8_t no_alt_sends_esc : 1;
-        uint8_t x10_mouse_compat : 1;
-        uint8_t mouse_btn_report : 1;
-        uint8_t mouse_motion_on_btn_report : 1;
-        uint8_t mouse_motion_report : 1;
-        uint8_t window_focus_events_report : 1;
-        uint8_t extended_report : 1;
-        uint8_t video_reverse : 1;
-        uint8_t auto_repeat : 1;
-        uint8_t application_keypad : 1;
-        uint8_t application_keypad_cursor : 1;
-        uint8_t pop_on_bell : 1;
-        uint8_t urgency_on_bell : 1;
-        uint8_t no_insert_replace_mode : 1;
-        uint8_t left_and_right_margin : 1;
-        uint8_t margin_bell : 1;
-
-        /* VT300:
-         * When sixel display mode is enabled, the sixel active position begins at the upper-left
-         * corner of the ANSI text active position. Scrolling occurs when the sixel active position
-         * reaches the bottom margin of the graphics page. When sixel mode is exited, the text
-         * cursor is set to the current sixel cursor position.
-         *
-         * When sixel scrolling is disabled, the sixel active position begins at the upper-left
-         * corner of the active graphics page. The terminal ignores any commands that attempt to
-         * advance the active position below the bottom margin of the graphics page. When sixel mode
-         * is exited, the text cursor does not change from the position it was in when sixel mode
-         * was entered. */
-        uint8_t sixel_scrolling : 1;
-
-        /* Use private color registers for each sixel graphic */
-        uint8_t sixel_private_color_registers : 1;
-
-        /* Sixel scrolling leaves cursor to right of graphic. */
-        uint8_t sixel_scrolling_move_cursor_right : 1;
-
-        /* SRM (Send/Receive) aka local echo mode
-         *
-         * When local echo is on, the terminal sends keyboard characters to the screen. The host
-         * does not have to send (echo) the characters back to the terminal display. When local echo
-         * is off, the terminal only sends characters to the host. It is up to the host to echo
-         * characters back to the screen.  */
-        uint8_t send_receive_mode : 1;
-    } modes;
+    vt_modes_t modes;
 
 #define VT_XT_MODIFY_KEYBOARD_DFT 0
     int8_t xterm_modify_keyboard;

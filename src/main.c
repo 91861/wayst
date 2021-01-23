@@ -340,16 +340,18 @@ static void App_run(App* self)
             self->closest_pending_wakeup = &self->next_title_refresh;
         }
 
-        static TimePoint sat;
-        if ((App_scrollbar_anim_pending(self) && !self->closest_pending_wakeup) ||
-            (App_scrollbar_anim_pending(self) && self->closest_pending_wakeup &&
-             TimePoint_is_earlier((sat = App_scrollbar_anim_start_time(self)),
-                                  *self->closest_pending_wakeup))) {
-            self->closest_pending_wakeup = &sat;
-        }
+        if (self->ui.scrollbar.visible) {
+            static TimePoint sat;
+            if ((App_scrollbar_anim_pending(self) && !self->closest_pending_wakeup) ||
+                (App_scrollbar_anim_pending(self) && self->closest_pending_wakeup &&
+                 TimePoint_is_earlier((sat = App_scrollbar_anim_start_time(self)),
+                                      *self->closest_pending_wakeup))) {
+                self->closest_pending_wakeup = &sat;
+            }
 
-        if (App_scrollbar_is_animating(self)) {
-            Window_notify_content_change(self->win);
+            if (App_scrollbar_is_animating(self)) {
+                Window_notify_content_change(self->win);
+            }
         }
 
         self->swap_performed = Window_maybe_swap(self->win);
@@ -1249,6 +1251,8 @@ static void App_update_cursor(App* self)
 
 static bool App_scrollbar_is_animating(App* self)
 {
+    if (!self->ui.scrollbar.visible)
+        return false;
     int64_t ms = TimePoint_is_ms_ahead(self->scrollbar_hide_time);
     return ms > 0 && ms < settings.scrollbar_fade_time_ms && !self->vt.scrolling_visual;
 }

@@ -833,6 +833,8 @@ static void Vt_hard_reset(Vt* self)
 
     self->scroll_region_top    = 0;
     self->scroll_region_bottom = Vt_row(self) - 1;
+    self->scroll_region_left   = 0;
+    self->scroll_region_right  = Vt_col(self) - 1;
 
     Vector_clear_DynStr(&self->title_stack);
     free(self->title);
@@ -868,6 +870,8 @@ static void Vt_soft_reset(Vt* self)
     self->last_interted        = NULL;
     self->scroll_region_top    = 0;
     self->scroll_region_bottom = Vt_row(self) - 1;
+    self->scroll_region_left   = 0;
+    self->scroll_region_right  = Vt_col(self) - 1;
     Vt_uri_break_match(self);
     Vector_clear_DynStr(&self->title_stack);
 }
@@ -878,6 +882,7 @@ void Vt_init(Vt* self, uint32_t cols, uint32_t rows)
     self->ws = (struct winsize){ .ws_col = cols, .ws_row = rows };
 
     self->scroll_region_bottom = rows - 1;
+    self->scroll_region_right  = cols - 1;
     self->parser.state         = PARSER_STATE_LITERAL;
     self->parser.in_mb_seq     = false;
 
@@ -1354,6 +1359,8 @@ void Vt_resize(Vt* self, uint32_t x, uint32_t y)
 
     self->scroll_region_top    = 0;
     self->scroll_region_bottom = Vt_row(self) - 1;
+    self->scroll_region_left   = 0;
+    self->scroll_region_right  = Vt_col(self) - 1;
 
     Vt_init_tab_ruler(self);
 }
@@ -1447,31 +1454,12 @@ static inline void Vt_handle_regular_mode(Vt* self, int code, bool on)
         case 2:
             STUB("KAM");
             break;
-
-        /* Insert/replace mode - IRM (VT102)
-         *
-         * The terminal displays received characters at the cursor position. Insert/Replace mode
-         * determines how the terminal adds characters to the screen. Insert mode displays the
-         * new character and moves previously displayed characters to the right. Replace mode
-         * adds characters by replacing the character at the cursor position. Characters moved past
-         * the right margin are lost. This mode is enabled by default.
-         */
         case 4:
-            self->modes.no_insert_replace_mode = !on;
+            self->modes.no_insert_replace_mode = on;
             break;
-
-        /* Send/receive mode aka local echo mode - SRM (VT102)
-         *
-         * This control function turns local echo on or off. When local echo is on, the
-         * terminal sends keyboard characters to the screen. The host does not have
-         * to send (echo) the characters back to the terminal display. When local
-         * echo is off, the terminal only sends characters to the host. It is up to the
-         * host to echo characters back to the screen.
-         */
         case 12:
             self->modes.send_receive_mode = on;
             break;
-
         case 20:
             STUB("LNM");
             break;
@@ -1600,10 +1588,9 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
             STUB("DECKBUM");
             break;
 
-        /* Enable left and right margin mode (DECLRMM) */
+        /* Enable left and right margin mode (DECVSSM) */
         case 69:
-            self->modes.left_and_right_margin = on;
-            STUB("DECLRMM");
+            self->modes.vertical_split_screen_mode = on;
             break;
 
         /* Enable Sixel Scrolling (DECSDM) */
@@ -2355,11 +2342,13 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
 
                             /* <ESC>['} - Insert Ps Column(s) (default = 1) (DECIC), VT420 and up */
                             case '}': {
+                                // TODO: vmargins
                                 STUB("DECIC");
                             } break;
 
                             /* <ESC>['~ - Delete Ps Column(s) (default = 1) (DECDC), VT420 and up */
                             case '~': {
+                                // TODO: vmargins
                                 STUB("DECDC");
                             } break;
 
@@ -2529,6 +2518,10 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
 
                             /* <ECS>[ Ps @ - Insert Ps Chars (ICH) */
                             case '@': {
+                                // the normal character
+                                // attribute. The cursor remains at the beginning of the blank
+                                // characters. Text between the cursor and right margin moves to the
+                                // right.
                                 MULTI_ARG_IS_ERROR
                                 int arg = short_sequence_get_int_argument(seq);
                                 for (int i = 0; i < arg; ++i) {
@@ -2853,6 +2846,9 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
 
                                 /* <ESC>[ Ps P - Delete Ps Character(s) (default = 1) (DCH) */
                             case 'P': {
+                                // As characters are deleted, the remaining
+                                // characters between the cursor
+                                // and right margin move to the left.
                                 MULTI_ARG_IS_ERROR
                                 int arg = short_sequence_get_int_argument(seq);
                                 if (arg <= 0)
@@ -2890,14 +2886,30 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                 }
                             } break;
 
-                            /* <ESC>[s - Save cursor (SCOSC, also ANSI.SYS) available only when
-                             * DECLRMM is disabled */
-                            /* CSI Pl ; Pr s Set left and right margins (DECSLRM), VT420 and up.
-                             * This is available only when DECLRMM is enabled. */
                             case 's': {
-                                if (*seq == 's') {
+                                /* CSI Pl ; Pr s Set left and right margins (DECSLRM), VT420 and up.
+                                 * This is available only when DECLRMM is enabled.
+                                 * `If the left and right margins are set to columns other than
+                                 * 1 and 80 (or 132), the terminal cannot scroll smoothly.' */
+                                if (self->modes.vertical_split_screen_mode) {
+                                    uint16_t lmargin = 1, rmargin = Vt_col(self);
+                                    sscanf(seq, "%hu;%hus", &lmargin, &rmargin);
+                                    rmargin = MIN(rmargin, Vt_col(self));
+                                    if (rmargin > lmargin + 1) {
+                                        self->scroll_region_left  = lmargin - 1;
+                                        self->scroll_region_right = rmargin - 1;
+                                    } else {
+                                        WRN("invalid DECSLRM values\n");
+                                    }
+
+                                    /* DECSLRM moves the cursor to column 1, line 1 of the page */
+                                    self->cursor.col = 0;
+                                    self->cursor.row = Vt_top_line(self);
 
                                 } else {
+                                    /* <ESC>[s - Save cursor (SCOSC, also ANSI.SYS) available only
+                                     * when DECLRMM is disabled */
+                                    STUB("SCOSC");
                                 }
                             } break;
 
@@ -4791,7 +4803,7 @@ static void Vt_delete_chars(Vt* self, size_t n)
     }
 
     uint16_t st = Vt_cursor_line(self)->data.size ? Vt_cursor_line(self)->data.size - 1 : 0;
-    for (uint16_t i = st; i < Vt_col(self); ++i) {
+    for (size_t i = st; i < Vt_col(self); ++i) {
         Vector_push_VtRune(&Vt_cursor_line(self)->data, self->parser.char_state);
     }
 
@@ -4802,9 +4814,15 @@ static void Vt_delete_chars(Vt* self, size_t n)
                             Vt_cursor_line(self)->data.size - Vt_col(self));
     }
 
-    /* ...add n spaces with currently set attributes to the end */
-    for (size_t i = 0; i < n && self->cursor.col + i < Vt_col(self); ++i) {
-        Vector_push_VtRune(&Vt_cursor_line(self)->data, self->parser.char_state);
+    /* ...add n spaces with currently set attributes to the end (right margin) */
+    for (uint16_t i = 0; i < n && self->cursor.col + i < self->scroll_region_right + 1; ++i) {
+        if (i == Vt_cursor_line(self)->data.size) {
+            Vector_push_VtRune(&Vt_cursor_line(self)->data, self->parser.char_state);
+        } else {
+            Vector_insert_at_VtRune(&Vt_cursor_line(self)->data,
+                                    self->scroll_region_right,
+                                    self->parser.char_state);
+        }
     }
 
     /* Trim to screen size again */
@@ -5005,7 +5023,14 @@ static void Vt_insert_char_at_cursor_with_shift(Vt* self, VtRune c)
             Vt_cursor_line(self)->rejoinable = true;
         }
     }
+
+    if (self->scroll_region_right != Vt_col(self) - 1 &&
+        self->scroll_region_right > self->cursor.col) {
+        Vector_remove_at_VtRune(&Vt_cursor_line(self)->data, self->scroll_region_right, 1);
+    }
+
     Vector_insert_at_VtRune(&Vt_cursor_line(self)->data, self->cursor.col, c);
+
     Vt_mark_proxy_fully_damaged(self, self->cursor.row);
 }
 
@@ -5241,6 +5266,9 @@ __attribute__((hot, flatten)) void Vt_handle_literal(Vt* self, char c)
                 Vt_grapheme_break(self);
                 Vt_uri_break_match(self);
                 Vt_insert_new_line(self);
+                if (self->modes.new_line_mode) {
+                    // Vt_carriage_return(self);
+                }
                 break;
 
             case '\e':
@@ -5327,6 +5355,9 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
                 case '\v':
                 case '\n':
                     Vt_insert_new_line(self);
+                    if (self->modes.new_line_mode) {
+                        // Vt_carriage_return(self);
+                    }
                     break;
                 default:
                     Vt_handle_CSI(self, c);
@@ -5676,8 +5707,18 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
 
         case PARSER_STATE_DEC_SPECIAL:
             switch (c) {
-                /* DEC Screen Alignment Test (DECALN), VT100. */
+                /* DEC Screen Alignment Test (DECALN), VT100.
+                 *
+                 * note:
+                 * DECALN sets the margins to the extremes of the page, and moves
+                 * the cursor to the home position.
+                 */
                 case '8': {
+                    self->scroll_region_left   = 0;
+                    self->scroll_region_right  = Vt_col(self) - 1;
+                    self->scroll_region_top    = 0;
+                    self->scroll_region_bottom = Vt_row(self) - 1;
+                    Vt_move_cursor(self, 0, 0);
                     VtRune blank_E    = self->blank_space;
                     blank_E.rune.code = 'E';
                     for (size_t cl = 0; cl < Vt_col(self); ++cl) {
