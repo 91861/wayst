@@ -32,4 +32,8 @@ typedef struct
     struct Cursor* cursor;
     hovered_link_t hovered_link;
     bool           draw_out_of_focus_tint;
+    bool           window_in_focus;
+    double         flash_fraction;
+    bool           draw_cursor_blinking;
+    bool           draw_text_blinking;
 } Ui;

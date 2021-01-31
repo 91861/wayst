@@ -811,7 +811,7 @@ static void settings_make_default()
         .scrollbar_width_px      = 10,
         .scrollbar_length_px     = 20,
         .scrollbar_fade_time_ms  = 150,
-        .scrollbar_hide_delay_ms = 1500,
+        .scrollbar_hide_delay_ms = 2000,
 
         .cols = 80,
         .rows = 24,
@@ -824,7 +824,7 @@ static void settings_make_default()
         .colorscheme_preset   = 0,
         ._explicit_colors_set = calloc(1, 21),
 
-        .bell_flash = { .r = 20, .g = 20, .b = 20, .a = 240 },
+        .bell_flash = { .r = 200, .g = 200, .b = 200, .a = 30 },
 
         .allow_scrollback_clear = false,
         .scroll_on_output       = false,

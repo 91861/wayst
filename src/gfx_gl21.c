@@ -31,10 +31,6 @@ DEF_PAIR(GLuint);
 #define ATLAS_SIZE_LIMIT INT32_MAX
 #endif
 
-#ifndef FLASH_DURATION_MS
-#define FLASH_DURATION_MS 300
-#endif
-
 #ifndef DIM_COLOR_BLEND_FACTOR
 #define DIM_COLOR_BLEND_FACTOR 0.4f
 #endif
@@ -315,29 +311,19 @@ typedef struct _GfxOpenGL21
 
     Texture squiggle_texture;
 
-    bool has_blinking_text;
-
     TimePoint blink_switch;
     TimePoint blink_switch_text;
     TimePoint action;
     TimePoint inactive;
 
-    bool in_focus;
-    bool draw_blinking;
-    bool draw_blinking_text;
-    bool recent_action;
-    bool is_inactive;
     bool is_main_font_rgb;
-
-    int      scrollbar_fade;
-    TimeSpan flash_timer;
-    float    flash_fraction;
 
     Freetype* freetype;
 
 } GfxOpenGL21;
 
 #define gfxOpenGL21(gfx) ((GfxOpenGL21*)&gfx->extend_data)
+#define gfxBase(gfxGl21) ((Gfx*)(((uint8_t*)(gfxGl21)) - offsetof(Gfx, extend_data)))
 
 Pair_GLuint GfxOpenGL21_pop_recycled(GfxOpenGL21* self);
 void        GfxOpenGL21_load_font(Gfx* self);
@@ -348,10 +334,7 @@ void          GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui);
 Pair_uint32_t GfxOpenGL21_get_char_size(Gfx* self);
 void          GfxOpenGL21_resize(Gfx* self, uint32_t w, uint32_t h);
 void          GfxOpenGL21_init_with_context_activated(Gfx* self);
-bool          GfxOpenGL21_update_timers(Gfx* self, Vt* vt, Ui* ui, TimePoint** out_pending);
-void          GfxOpenGL21_notify_action(Gfx* self);
 bool          GfxOpenGL21_set_focus(Gfx* self, bool focus);
-void          GfxOpenGL21_flash(Gfx* self);
 Pair_uint32_t GfxOpenGL21_pixels(Gfx* self, uint32_t c, uint32_t r);
 void          GfxOpenGL21_reload_font(Gfx* self);
 void          GfxOpenGL21_destroy_proxy(Gfx* self, uint32_t* proxy);
@@ -365,10 +348,6 @@ static struct IGfx gfx_interface_opengl21 = {
     .get_char_size               = GfxOpenGL21_get_char_size,
     .init_with_context_activated = GfxOpenGL21_init_with_context_activated,
     .reload_font                 = GfxOpenGL21_reload_font,
-    .update_timers               = GfxOpenGL21_update_timers,
-    .notify_action               = GfxOpenGL21_notify_action,
-    .set_focus                   = GfxOpenGL21_set_focus,
-    .flash                       = GfxOpenGL21_flash,
     .pixels                      = GfxOpenGL21_pixels,
     .destroy                     = GfxOpenGL21_destroy,
     .destroy_proxy               = GfxOpenGL21_destroy_proxy,
@@ -394,12 +373,6 @@ Gfx* Gfx_new_OpenGL21(Freetype* freetype)
     } else {                                                                                       \
         glBufferSubData(GL_ARRAY_BUFFER, 0, (_newsize), (_buf));                                   \
     }
-
-void GfxOpenGL21_flash(Gfx* self)
-{
-    if (!settings.no_flash)
-        gfxOpenGL21(self)->flash_timer = TimeSpan_from_now_to_ms_from_now(FLASH_DURATION_MS);
-}
 
 static GlyphAtlasPage GlyphAtlasPage_new(GfxOpenGL21*       gfx,
                                          uint32_t           page_id,
@@ -1231,17 +1204,10 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
 
     glGenFramebuffers(1, &gl21->line_framebuffer);
 
-    gl21->in_focus           = true;
-    gl21->recent_action      = true;
-    gl21->draw_blinking      = true;
-    gl21->draw_blinking_text = true;
     gl21->blink_switch       = TimePoint_ms_from_now(settings.cursor_blink_interval_ms);
     gl21->blink_switch_text  = TimePoint_now();
-
     gl21->vec_vertex_buffer  = Vector_new_vertex_t();
     gl21->vec_vertex_buffer2 = Vector_new_vertex_t();
-
-    GfxOpenGL21_notify_action(self);
 
     Freetype* ft = gl21->freetype;
 
@@ -1267,89 +1233,6 @@ void GfxOpenGL21_reload_font(Gfx* self)
     uint32_t t_height = CLAMP(gl21->line_height_pixels / 8.0 + 2, 4, UINT8_MAX);
     gl21->squiggle_texture =
       create_squiggle_texture(t_height * M_PI / 2.0, t_height, CLAMP(t_height / 4, 1, 20));
-
-    GfxOpenGL21_notify_action(self);
-}
-
-bool GfxOpenGL21_set_focus(Gfx* self, bool focus)
-{
-    bool ret = false;
-    if (gfxOpenGL21(self)->in_focus && !focus) {
-        ret = true;
-    }
-    gfxOpenGL21(self)->in_focus = focus;
-    return ret;
-}
-
-void GfxOpenGL21_notify_action(Gfx* self)
-{
-    gfxOpenGL21(self)->blink_switch  = TimePoint_ms_from_now(settings.cursor_blink_interval_ms);
-    gfxOpenGL21(self)->draw_blinking = true;
-    gfxOpenGL21(self)->recent_action = true;
-    gfxOpenGL21(self)->action =
-      TimePoint_ms_from_now(settings.cursor_blink_interval_ms + settings.cursor_blink_suspend_ms);
-    gfxOpenGL21(self)->inactive = TimePoint_s_from_now(settings.cursor_blink_end_s);
-}
-
-bool GfxOpenGL21_update_timers(Gfx* self, Vt* vt, Ui* ui, TimePoint** out_pending)
-{
-    bool repaint = false;
-
-    GfxOpenGL21* gl21 = gfxOpenGL21(self);
-
-    TimePoint* closest = NULL;
-    if (gl21->has_blinking_text) {
-        closest = &gl21->blink_switch_text;
-    }
-    if (!(gl21->recent_action && !gl21->draw_blinking) && settings.enable_cursor_blink) {
-        if (!closest || (!TimePoint_passed(gl21->blink_switch) &&
-                         TimePoint_is_earlier(gl21->blink_switch, *closest))) {
-            closest = &gl21->blink_switch;
-        }
-    }
-    *out_pending = closest;
-
-    if (TimePoint_passed(gl21->blink_switch_text)) {
-        if (unlikely(gl21->has_blinking_text)) {
-            gl21->draw_blinking_text = !gl21->draw_blinking_text;
-            gl21->blink_switch_text  = TimePoint_ms_from_now(settings.cursor_blink_interval_ms);
-            repaint                  = true;
-        }
-    }
-
-    if (!gl21->in_focus && !gl21->has_blinking_text) {
-        return false;
-    }
-
-    float fraction = TimeSpan_get_fraction_clamped_now(&gl21->flash_timer);
-    if (fraction != gl21->flash_fraction) {
-        gl21->flash_fraction = fraction;
-        repaint              = true;
-    }
-
-    if (gl21->recent_action && TimePoint_passed(gfxOpenGL21(self)->action)) {
-        // start blinking cursor
-        gl21->recent_action = false;
-        gl21->blink_switch  = TimePoint_ms_from_now(settings.cursor_blink_interval_ms);
-        gl21->draw_blinking = !gl21->draw_blinking;
-        repaint             = true;
-    }
-
-    if (TimePoint_passed(gl21->inactive) && gl21->draw_blinking &&
-        settings.cursor_blink_end_s >= 0) {
-        gl21->is_inactive = true;
-    } else {
-        if (TimePoint_passed(gl21->blink_switch)) {
-            gl21->blink_switch  = TimePoint_ms_from_now(settings.cursor_blink_interval_ms);
-            gl21->draw_blinking = !gl21->draw_blinking;
-
-            if (!(gl21->recent_action && !gl21->draw_blinking) && settings.enable_cursor_blink) {
-                repaint = true;
-            }
-        }
-    }
-
-    return repaint;
 }
 
 /**
@@ -1362,7 +1245,7 @@ static void GfxOpenGL21_generate_line_quads(GfxOpenGL21*  gfx,
         vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK]) {
 
         if (vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK]) {
-            gfx->has_blinking_text = true;
+            gfxBase(gfx)->has_blinking_text = true;
         }
 
         float tex_end_x   = -1.0f + vt_line->proxy.data[PROXY_INDEX_SIZE] * gfx->sx;
@@ -1386,15 +1269,16 @@ static void GfxOpenGL21_generate_line_quads(GfxOpenGL21*  gfx,
 /**
  * Draw lines generated by GfxOpenGL21_generate_line_quads() */
 static uint_fast32_t GfxOpenGL21_draw_line_quads(GfxOpenGL21*  gfx,
+                                                 Ui*           ui,
                                                  VtLine* const vt_line,
                                                  uint_fast32_t quad_index)
 {
     if (vt_line->proxy.data[PROXY_INDEX_TEXTURE] ||
         vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK]) {
 
-        if (vt_line->proxy.data[PROXY_INDEX_TEXTURE] || !gfx->draw_blinking_text) {
+        if (vt_line->proxy.data[PROXY_INDEX_TEXTURE] || !ui->draw_text_blinking) {
             glBindTexture(GL_TEXTURE_2D,
-                          vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK] && !gfx->draw_blinking_text
+                          vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK] && !ui->draw_text_blinking
                             ? vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK]
                             : vt_line->proxy.data[PROXY_INDEX_TEXTURE]);
             glDrawArrays(GL_QUADS, quad_index * 4, 4);
@@ -1686,20 +1570,6 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
                 for (const VtRune* each_rune_same_bg = same_bg_block_begin_rune;
                      each_rune_same_bg != each_rune + 1;
                      ++each_rune_same_bg) {
-
-                    /* #define L_CALC_DIM_BLEND_COLOR \ */
-                    /*     (unlikely(each_rune_same_bg->dim) \ */
-                    /*        ? ColorRGB_new_from_blend(Vt_rune_fg(vt, each_rune_same_bg), \ */
-                    /*                                  ColorRGB_from_RGBA(active_bg_color), \ */
-                    /*                                  DIM_COLOR_BLEND_FACTOR) \ */
-                    /*        : Vt_rune_fg(vt, each_rune_same_bg)) */
-
-                    /* #define L_CALC_FG_COLOR \ */
-                    /*     !settings.highlight_change_fg ? L_CALC_DIM_BLEND_COLOR \ */
-                    /*     : unlikely(Vt_is_cell_selected(vt, each_rune_same_bg - vt_line->data.buf,
-                     * visual_line_index))  \ */
-                    /*       ? vt->colors.highlight.fg \ */
-                    /*       : L_CALC_DIM_BLEND_COLOR */
 
                     if (each_rune_same_bg == each_rune ||
                         !ColorRGB_eq(Vt_rune_final_fg(vt,
@@ -2237,9 +2107,8 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(GfxOpenGL21* 
 
 static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const Ui* ui)
 {
-    bool show_blink =
-      !settings.enable_cursor_blink ||
-      ((ui->cursor->blinking && gfx->in_focus) ? gfx->draw_blinking : true || gfx->recent_action);
+    bool show_blink = !settings.enable_cursor_blink || !ui->window_in_focus ||
+                      !ui->cursor->blinking || (ui->cursor->blinking && ui->draw_cursor_blinking);
 
     if (show_blink && !ui->cursor->hidden) {
         bool   filled_block = false;
@@ -2267,7 +2136,7 @@ static inline void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const
                   2);
                 break;
             case CURSOR_BLOCK:
-                if (!gfx->in_focus)
+                if (!ui->window_in_focus)
                     Vector_pushv_vertex_t(
                       &gfx->vec_vertex_buffer,
                       (vertex_t[4]){
@@ -2542,10 +2411,16 @@ static void GfxOpenGL21_draw_scrollbar(GfxOpenGL21* self, const Scrollbar* scrol
     float begin  = scrollbar->top;
     float width  = self->sx * scrollbar->width;
 
-    float slide = (1.0f - scrollbar->opacity) * scrollbar->width * self->sx;
+    float slide         = (1.0f - scrollbar->opacity) * scrollbar->width * self->sx;
     float vertex_data[] = {
-        1.0f - width + slide, 1.0f - begin,          1.0f,         1.0f - begin,
-        1.0f,         1.0f - length - begin, 1.0f - width + slide, 1.0f - length - begin,
+        1.0f - width + slide,
+        1.0f - begin,
+        1.0f,
+        1.0f - begin,
+        1.0f,
+        1.0f - length - begin,
+        1.0f - width + slide,
+        1.0f - length - begin,
     };
 
     glBindBuffer(GL_ARRAY_BUFFER, self->flex_vbo.vbo);
@@ -2632,19 +2507,18 @@ static void GfxOpenGL21_draw_overlays(GfxOpenGL21* self, const Vt* vt, const Ui*
     }
 }
 
-static void GfxOpenGL21_draw_flash(GfxOpenGL21* self, float fraction)
+static void GfxOpenGL21_draw_flash(GfxOpenGL21* self, double fraction)
 {
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glDisable(GL_SCISSOR_TEST);
     glBindTexture(GL_TEXTURE_2D, 0);
     Shader_use(&self->solid_fill_shader);
-    float alpha = sinf((1.0 - fraction) * M_1_PI) / 1.0;
     glUniform4f(self->solid_fill_shader.uniforms[0].location,
                 ColorRGBA_get_float(settings.bell_flash, 0),
                 ColorRGBA_get_float(settings.bell_flash, 1),
                 ColorRGBA_get_float(settings.bell_flash, 2),
-                ColorRGBA_get_float(settings.bell_flash, 3) * alpha);
+                (double)ColorRGBA_get_float(settings.bell_flash, 3) * fraction);
     glBindBuffer(GL_ARRAY_BUFFER, self->full_framebuffer_quad_vbo);
     glVertexAttribPointer(self->solid_fill_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
     glDrawArrays(GL_QUADS, 0, 4);
@@ -2895,7 +2769,7 @@ void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
     GfxOpenGL21_draw_images(gfx, vt, true);
 
     Vector_clear_float(&gfx->float_vec.buf[0]);
-    gfxOpenGL21(self)->has_blinking_text = false;
+    self->has_blinking_text = false;
     for (VtLine* i = begin; i < end; ++i) {
         GfxOpenGL21_generate_line_quads(gfx, i, i - begin);
     }
@@ -2911,7 +2785,7 @@ void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
         glVertexAttribPointer(gfx->image_shader.attribs->location, 4, GL_FLOAT, GL_FALSE, 0, 0);
         uint_fast32_t quad_index = 0;
         for (VtLine* i = begin; i < end; ++i) {
-            quad_index = GfxOpenGL21_draw_line_quads(gfx, i, quad_index);
+            quad_index = GfxOpenGL21_draw_line_quads(gfx, ui, i, quad_index);
         }
     }
 
@@ -2919,9 +2793,9 @@ void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
     GfxOpenGL21_draw_sixels(gfx, (Vt*)vt);
     GfxOpenGL21_draw_overlays(gfx, vt, ui);
 
-    if (gfx->flash_fraction < 1.0f && gfx->flash_fraction > 0.0f) {
+    if (ui->flash_fraction != 0.0) {
         glViewport(0, 0, gfx->win_w, gfx->win_h);
-        GfxOpenGL21_draw_flash(gfx, gfx->flash_fraction);
+        GfxOpenGL21_draw_flash(gfx, ui->flash_fraction);
     }
 
     if (unlikely(ui->draw_out_of_focus_tint && settings.dim_tint.a)) {

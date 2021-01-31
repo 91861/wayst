@@ -5,8 +5,6 @@
  *
  * TODO:
  * - It makes more sense for the unicode input prompt to be here
- * - Move bell animations here
- * - Some way of dealing with multiple timers that set poll timeout
  * - Multiple vt instacnes within the same application
  * - Move ui updates to ui.c
  * - vt.size != window.size, because tabbar/splits, maybe wrap Vt in a VtWidget:IWidget class? Then
@@ -41,8 +39,12 @@
 #define DOUBLE_CLICK_DELAY_MS 300
 #endif
 
+#ifndef VISUAL_BELL_FLASH_DURATION_MS
+#define VISUAL_BELL_FLASH_DURATION_MS 300
+#endif
+
 #ifndef AUTOSCROLL_DELAY_MS
-#define AUTOSCROLL_DELAY_MS 50
+#define AUTOSCROLL_DELAY_MS 30
 #endif
 
 #ifndef KSM_CLEAR_INPUT_BUFFER_DELAY_MS
@@ -55,60 +57,29 @@
 
 typedef struct
 {
-    Window_* win;
-    Gfx*     gfx;
-    Vt       vt;
-    Freetype freetype;
-    Monitor  monitor;
+    Window_*     win;
+    Gfx*         gfx;
+    Vt           vt;
+    Freetype     freetype;
+    Monitor      monitor;
+    Ui           ui;
+    TimerManager timer_manager;
 
-    /* Bytes written since reading from pty */
-    int written_bytes;
-
+    Vector_char   queued_output_buffer;
+    int           written_bytes; /* Bytes written since reading from pty */
+    Pair_int32_t  autoscroll_autoselect;
     Pair_uint32_t resolution;
 
-    bool       swap_performed;
     TimePoint* closest_pending_wakeup;
     TimePoint  interpreter_start_time;
+    TimePoint  next_click_limit;
 
-    bool exit;
+    Timer autoscroll_timer, scrollbar_hide_timer, visual_bell_timer, cursor_blink_end_timer,
+      cursor_blink_switch_timer, cursor_blink_suspend_timer, text_blink_switch_timer,
+      title_update_timer;
 
     char* hostname;
-
-    // selection
-    uint8_t   click_count;
-    TimePoint next_click_limit;
-    bool      selection_dragging_left;
-
-    enum SelectionDragRight
-    {
-        SELECT_DRAG_RIGHT_NONE = 0,
-        SELECT_DRAG_RIGHT_FORNT,
-        SELECT_DRAG_RIGHT_BACK
-    } selection_dragging_right;
-    bool keyboard_select_mode;
-
-    // scrollbar
-    TimePoint    scrollbar_hide_time;
-    TimePoint    autoscroll_next_step;
-    float        scrollbar_drag_position;
-    bool         last_scrolling;
-    bool         autoselect;
-    Pair_int32_t autoscroll_autoselect;
-
-    Cursor ksm_cursor;
-
-    Vector_char ksm_input_buf;
-
-    TimePoint ksm_last_input;
-
-    bool      do_title_refresh;
-    TimePoint next_title_refresh;
-
-    Ui ui;
-
     char* vt_title;
-
-    Vector_char queued_output_buffer;
 
     enum AutoscrollDir
     {
@@ -118,25 +89,42 @@ typedef struct
 
     } autoscroll;
 
+    enum SelectionDragRight
+    {
+        SELECT_DRAG_RIGHT_NONE = 0,
+        SELECT_DRAG_RIGHT_FORNT,
+        SELECT_DRAG_RIGHT_BACK
+    } selection_dragging_right;
+
+    float       scrollbar_drag_position;
+    uint8_t     click_count;
+    bool        selection_dragging_left;
+    bool        keyboard_select_mode;
+    bool        last_scrolling;
+    bool        autoselect;
+    bool        exit;
+    bool        cursor_blink_animation_should_play;
+    bool        tex_blink_animation_should_play;
+    Cursor      ksm_cursor;
+    Vector_char ksm_input_buf;
+    TimePoint   ksm_last_input;
 } App;
 
-static void      App_update_scrollbar_dims(App* self);
-static void      App_update_scrollbar_vis(App* self);
-static void      App_update_cursor(App* self);
-static void      App_do_autoscroll(App* self);
-static void      App_notify_content_change(void* self);
-static void      App_clamp_cursor(App* self, Pair_uint32_t chars);
-static void      App_set_monitor_callbacks(App* self);
-static void      App_set_callbacks(App* self);
-static void      App_maybe_resize(App* self, Pair_uint32_t newres);
-static void      App_handle_uri(App* self, const char* uri);
-static void      App_update_hover(App* self, int32_t x, int32_t y);
-static void      App_update_padding(App* self);
-static void      App_set_title(void* self);
-static void      App_focus_changed(void* self, bool current_state);
-static TimePoint App_scrollbar_anim_start_time(App* self);
-static bool      App_scrollbar_anim_pending(App* self);
-static bool      App_scrollbar_is_animating(App* self);
+static void App_update_scrollbar_dims(App* self);
+static void App_update_cursor(App* self);
+static void App_do_autoscroll(App* self);
+static void App_notify_content_change(void* self);
+static void App_clamp_cursor(App* self, Pair_uint32_t chars);
+static void App_set_monitor_callbacks(App* self);
+static void App_set_callbacks(App* self);
+static void App_set_up_timers(App* self);
+static void App_maybe_resize(App* self, Pair_uint32_t newres);
+static void App_handle_uri(App* self, const char* uri);
+static void App_update_hover(App* self, int32_t x, int32_t y);
+static void App_update_padding(App* self);
+static void App_set_title(void* self);
+static void App_focus_changed(void* self, bool current_state);
+static void App_action(void* self);
 
 static void* App_load_extension_proc_address(void* self, const char* name)
 {
@@ -171,14 +159,105 @@ static void App_create_window(App* self, Pair_uint32_t res)
     }
 }
 
+static void App_show_scrollbar(App* self)
+{
+    TimerManager_schedule_tween(
+      &self->timer_manager,
+      self->scrollbar_hide_timer,
+      TimePoint_ms_from_now(settings.scrollbar_hide_delay_ms),
+      TimePoint_ms_from_now(settings.scrollbar_hide_delay_ms + settings.scrollbar_fade_time_ms));
+    self->ui.scrollbar.visible = true;
+    self->ui.scrollbar.opacity = 1.0f;
+    App_notify_content_change(self);
+}
+
+static void App_autoscroll_timer_handler(void* self)
+{
+    App_do_autoscroll(self);
+    App_update_scrollbar_dims(self);
+    App_notify_content_change(self);
+}
+
+static void App_scrollbar_hide_timer_handler(void* self, double fraction, bool completed)
+{
+    App* app = self;
+
+    if (Vt_is_scrolling_visual(&((App*)self)->vt)) {
+        App_show_scrollbar(self);
+        return;
+    }
+
+    if (completed) {
+        app->ui.scrollbar.visible = false;
+    } else {
+        App_notify_content_change(self);
+        app->ui.scrollbar.visible = true;
+        app->ui.scrollbar.opacity = 1.0 - fraction;
+    }
+
+    App_update_scrollbar_dims(app);
+}
+
+static void App_cursor_blink_suspend_timer_handler(void* self)
+{
+    App* app                                = self;
+    app->cursor_blink_animation_should_play = true;
+    app->ui.draw_cursor_blinking            = false;
+    TimerManager_schedule_point(&app->timer_manager,
+                                app->cursor_blink_switch_timer,
+                                TimePoint_ms_from_now(settings.cursor_blink_interval_ms));
+    App_notify_content_change(self);
+}
+
+static void App_cursor_blink_end_timer_handler(void* self)
+{
+    App* app                                = self;
+    app->cursor_blink_animation_should_play = false;
+}
+
+static void App_cursor_blink_switch_timer_handler(void* self)
+{
+    App* app = self;
+    if (app->cursor_blink_animation_should_play || !app->ui.draw_cursor_blinking) {
+        app->ui.draw_cursor_blinking = !app->ui.draw_cursor_blinking;
+        TimerManager_schedule_point(&app->timer_manager,
+                                    app->cursor_blink_switch_timer,
+                                    TimePoint_ms_from_now(settings.cursor_blink_interval_ms));
+    } else {
+        app->ui.draw_cursor_blinking = true;
+    }
+    App_notify_content_change(self);
+}
+
+static void App_text_blink_switch_timer_handler(void* self)
+{
+    App* app = self;
+    if (app->gfx->has_blinking_text) {
+        Window_notify_content_change(app->win);
+        app->ui.draw_text_blinking = !app->ui.draw_text_blinking;
+        TimerManager_schedule_point(&app->timer_manager,
+                                    app->text_blink_switch_timer,
+                                    TimePoint_ms_from_now(settings.cursor_blink_interval_ms));
+    }
+}
+
+static void App_title_update_timer_handler(void* self)
+{
+    App_set_title(self);
+}
+
+static void App_bell_timer_handler(void* self, double fraction, bool completed)
+{
+    ((App*)self)->ui.flash_fraction = completed ? 0.0 : (1.0 - fraction);
+    App_notify_content_change(self);
+}
+
 static void App_init(App* self)
 {
     memset(self, 0, sizeof(App));
 
     self->ksm_input_buf = Vector_new_char();
-
-    self->monitor = Monitor_new();
-
+    self->monitor       = Monitor_new();
     App_set_monitor_callbacks(self);
 
     if (settings.directory.str) {
@@ -212,10 +291,12 @@ static void App_init(App* self)
 
     Monitor_watch_window_system_fd(&self->monitor, Window_get_connection_fd(self->win));
 
-    self->ui.scrollbar.width     = settings.scrollbar_width_px;
-    self->ui.hovered_link.active = false;
-    self->swap_performed         = false;
-    self->resolution             = size;
+    self->ui.scrollbar.width                 = settings.scrollbar_width_px;
+    self->ui.hovered_link.active             = false;
+    self->ui.draw_cursor_blinking            = true;
+    self->cursor_blink_animation_should_play = false;
+    self->tex_blink_animation_should_play    = true;
+    self->resolution                         = size;
 
     Window_events(self->win);
 
@@ -228,29 +309,24 @@ static void App_init(App* self)
         Window_resize(self->win, size.first, size.second);
     }
 
-    App_update_padding(self);
-
     if (!settings.dynamic_title) {
         Window_update_title(self->win, settings.title.str);
     }
+
+    App_update_padding(self);
+    App_set_up_timers(self);
+    App_action(self);
 }
 
 static void App_run(App* self)
 {
     while (!(self->exit || Window_is_closed(self->win))) {
-        int timeout_ms = 0;
-
-        if (!self->swap_performed && self->vt.output.size == 0 &&
-            !App_scrollbar_is_animating(self)) {
-            if (self->closest_pending_wakeup) {
-                timeout_ms = TimePoint_is_ms_ahead(*(self->closest_pending_wakeup));
-                if (timeout_ms < 0) {
-                    timeout_ms = 0;
-                }
-            } else {
-                timeout_ms = -1;
-            }
-        }
+        int timeout_ms =
+          (self->vt.output.size)
+            ? 0
+            : TimerManager_get_next_frame_ms(&self->timer_manager,
+                                             TIME_POINT_PTR(self->closest_pending_wakeup),
+                                             NULL);
 
         Monitor_wait(&self->monitor, timeout_ms);
         self->closest_pending_wakeup = NULL;
@@ -280,7 +356,7 @@ static void App_run(App* self)
 
             if (bytes > 0) {
                 Vt_interpret(&self->vt, self->monitor.input_buffer, bytes);
-                Gfx_notify_action(self->gfx);
+                App_action(self);
             } else {
                 break;
             }
@@ -302,59 +378,23 @@ static void App_run(App* self)
         }
 
         App_maybe_resize(self, Window_size(self->win));
-
-        if (self->ui.scrollbar.visible || self->vt.scrolling_visual ||
-            self->autoscroll != AUTOSCROLL_NONE) {
-            App_do_autoscroll(self);
-            App_update_scrollbar_vis(self);
-            App_update_scrollbar_dims(self);
-        }
-
+        TimerManager_update(&self->timer_manager);
         App_update_cursor(self);
 
-        if (self->do_title_refresh && TimePoint_passed(self->next_title_refresh)) {
-            App_set_title(self);
-        }
-
-        TimePoint* closest_gfx_timer;
-        if (!!Gfx_update_timers(self->gfx, &self->vt, &self->ui, &closest_gfx_timer) +
-            !!Gfx_set_focus(self->gfx, FLAG_IS_SET(self->win->state_flags, WINDOW_IS_IN_FOCUS))) {
-            Window_notify_content_change(self->win);
-        }
-
-        if ((closest_gfx_timer && !self->closest_pending_wakeup) ||
-            (closest_gfx_timer && self->closest_pending_wakeup &&
-             TimePoint_is_earlier(*closest_gfx_timer, *self->closest_pending_wakeup))) {
-            self->closest_pending_wakeup = closest_gfx_timer;
-        }
-
-        if ((self->autoscroll && !self->closest_pending_wakeup) ||
-            (self->autoscroll && self->closest_pending_wakeup &&
-             TimePoint_is_earlier(self->autoscroll_next_step, *self->closest_pending_wakeup))) {
-            self->closest_pending_wakeup = &self->autoscroll_next_step;
-        }
-
-        if ((self->do_title_refresh && !self->closest_pending_wakeup) ||
-            (self->do_title_refresh && self->closest_pending_wakeup &&
-             TimePoint_is_earlier(self->next_title_refresh, *self->closest_pending_wakeup))) {
-            self->closest_pending_wakeup = &self->next_title_refresh;
-        }
-
-        if (self->ui.scrollbar.visible) {
-            static TimePoint sat;
-            if ((App_scrollbar_anim_pending(self) && !self->closest_pending_wakeup) ||
-                (App_scrollbar_anim_pending(self) && self->closest_pending_wakeup &&
-                 TimePoint_is_earlier((sat = App_scrollbar_anim_start_time(self)),
-                                      *self->closest_pending_wakeup))) {
-                self->closest_pending_wakeup = &sat;
+        if (self->gfx->has_blinking_text) {
+            if (!self->tex_blink_animation_should_play) {
+                self->tex_blink_animation_should_play = true;
+                TimerManager_schedule_point(
+                  &self->timer_manager,
+                  self->text_blink_switch_timer,
+                  TimePoint_ms_from_now(settings.cursor_blink_interval_ms));
             }
-
-            if (App_scrollbar_is_animating(self)) {
-                Window_notify_content_change(self->win);
-            }
+        } else if (self->tex_blink_animation_should_play) {
+            self->tex_blink_animation_should_play = false;
+            TimerManager_mark_completed(&self->timer_manager, self->text_blink_switch_timer);
         }
 
-        self->swap_performed = Window_maybe_swap(self->win);
+        Window_maybe_swap(self->win);
     }
 
     Monitor_kill(&self->monitor);
@@ -362,6 +402,7 @@ static void App_run(App* self)
     Gfx_destroy(self->gfx);
     Freetype_destroy(&self->freetype);
     Window_destroy(self->win);
+    TimerManager_destroy(&self->timer_manager);
     Vector_destroy_char(&self->ksm_input_buf);
     free(self->hostname);
     free(self->vt_title);
@@ -511,10 +552,10 @@ static void App_set_title(void* self)
     TimePoint now               = TimePoint_now();
     if (c) {
         TimePoint_subtract(&now, c->execution_time.start);
-        app->next_title_refresh = TimePoint_s_from_now(1);
-        app->do_title_refresh   = true;
-    } else {
-        app->do_title_refresh = false;
+        TimePoint next_title_refresh = TimePoint_s_from_now(1);
+        TimerManager_schedule_point(&app->timer_manager,
+                                    app->title_update_timer,
+                                    next_title_refresh);
     }
     int32_t i32CommandTimeSec = !c ? 0.0 : TimePoint_get_secs(&now);
     int32_t i32Rows           = Vt_row(&app->vt);
@@ -573,13 +614,24 @@ static void App_mouse_report_changed(void* self)
 
 static void App_flash(void* self)
 {
-    Gfx_flash(((App*)self)->gfx);
+    App* app = self;
+    TimerManager_schedule_tween_to_ms(&app->timer_manager,
+                                      app->visual_bell_timer,
+                                      VISUAL_BELL_FLASH_DURATION_MS);
 }
 
 static void App_action(void* self)
 {
-    App* app = self;
-    Gfx_notify_action(app->gfx);
+    App* app                                = self;
+    app->cursor_blink_animation_should_play = false;
+    app->ui.draw_cursor_blinking            = true;
+    TimerManager_schedule_point(&app->timer_manager,
+                                app->cursor_blink_suspend_timer,
+                                TimePoint_ms_from_now(settings.cursor_blink_suspend_ms));
+    TimerManager_schedule_point(&app->timer_manager,
+                                app->cursor_blink_end_timer,
+                                TimePoint_s_from_now(settings.cursor_blink_end_s));
+    TimerManager_mark_completed(&app->timer_manager, app->cursor_blink_switch_timer);
 
     if (!Window_is_pointer_hidden(app->win)) {
         App_update_hover(
@@ -644,21 +696,26 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
         case KEY(Escape):
             Vt_select_end(vt);
             App_notify_content_change(self);
+            App_show_scrollbar(self);
             self->keyboard_select_mode = false;
             Vt_visual_scroll_reset(vt);
-            Gfx_notify_action(self->gfx);
+            App_update_scrollbar_dims(self);
+            App_action(self);
             return true;
 
         case KEY(m):
             App_notify_content_change(self);
+            App_show_scrollbar(self);
             self->ksm_cursor.row = Vt_visual_top_line(vt) + Vt_row(vt) / 2;
             L_UPDATE_SELECT_END
+            App_update_scrollbar_dims(self);
             Vector_clear_char(&self->ksm_input_buf);
             break;
 
         case KEY(Left):
         case KEY(h):
             App_notify_content_change(self);
+            App_show_scrollbar(self);
             if (rawkey == KEY(h) && FLAG_IS_SET(mods, MODIFIER_SHIFT)) {
                 self->ksm_cursor.row = Vt_visual_top_line(vt);
             } else {
@@ -676,6 +733,7 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
         case KEY(Down):
         case KEY(j):
             App_notify_content_change(self);
+            App_show_scrollbar(self);
             int p = App_get_ksm_number(self);
             for (int i = MAX(1, p); i > 0; --i) {
                 if (self->ksm_cursor.row < Vt_max_line(vt)) {
@@ -691,6 +749,7 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
                     }
                 }
             }
+            App_update_scrollbar_dims(self);
             L_UPDATE_SELECT_END
             Vector_clear_char(&self->ksm_input_buf);
             break;
@@ -698,6 +757,7 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
         case KEY(Up):
         case KEY(k): {
             App_notify_content_change(self);
+            App_show_scrollbar(self);
             int p = App_get_ksm_number(self);
             for (int i = MAX(1, p); i > 0; --i) {
                 if (self->ksm_cursor.row) {
@@ -709,6 +769,7 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
                     }
                 }
             }
+            App_update_scrollbar_dims(self);
             L_UPDATE_SELECT_END
             Vector_clear_char(&self->ksm_input_buf);
         } break;
@@ -716,6 +777,7 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
         case KEY(Right):
         case KEY(l):
             App_notify_content_change(self);
+            App_show_scrollbar(self);
             if (rawkey == KEY(l) && FLAG_IS_SET(mods, MODIFIER_SHIFT)) {
                 self->ksm_cursor.row = Vt_visual_bottom_line(vt);
             } else {
@@ -726,6 +788,7 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
                     }
                 }
             }
+            App_update_scrollbar_dims(self);
             L_UPDATE_SELECT_END
             Vector_clear_char(&self->ksm_input_buf);
             break;
@@ -789,8 +852,10 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
                     }
                     --self->ksm_cursor.col;
                     App_notify_content_change(self);
+                    App_show_scrollbar(self);
                 }
             }
+            App_update_scrollbar_dims(self);
             L_UPDATE_SELECT_END
             Vector_clear_char(&self->ksm_input_buf);
         } break;
@@ -813,11 +878,13 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
                     char32_t code = rune->rune.code, next_code = next_rune->rune.code;
                     ++self->ksm_cursor.col;
                     App_notify_content_change(self);
+                    App_show_scrollbar(self);
                     if ((isblank(code) && !isblank(next_code)) && !initial) {
                         break;
                     }
                 }
             }
+            App_update_scrollbar_dims(self);
             L_UPDATE_SELECT_END
             Vector_clear_char(&self->ksm_input_buf);
         } break;
@@ -842,6 +909,8 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
                 }
             }
             App_notify_content_change(self);
+            App_show_scrollbar(self);
+            App_update_scrollbar_dims(self);
             L_UPDATE_SELECT_END
             Vector_clear_char(&self->ksm_input_buf);
         } break;
@@ -867,6 +936,8 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
                 self->ksm_cursor.row = 0;
             }
             App_notify_content_change(self);
+            App_show_scrollbar(self);
+            App_update_scrollbar_dims(self);
             L_UPDATE_SELECT_END
             break;
 
@@ -877,6 +948,8 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
                 }
             } else {
                 App_notify_content_change(self);
+                App_show_scrollbar(self);
+                App_update_scrollbar_dims(self);
                 self->ksm_cursor.col = 0;
                 L_UPDATE_SELECT_END
             }
@@ -886,6 +959,7 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
             // jump to last non-blank in line
             if (FLAG_IS_SET(mods, MODIFIER_SHIFT)) {
                 App_notify_content_change(self);
+                App_show_scrollbar(self);
                 size_t last          = Vt_line_at(vt, self->ksm_cursor.row)->data.size - 1;
                 self->ksm_cursor.col = 0;
                 for (size_t i = last; i > 0; --i) {
@@ -905,6 +979,7 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
                     Vector_push_char(&self->ksm_input_buf, '4');
                 }
             }
+            App_update_scrollbar_dims(self);
             break;
 
             // TODO: case KEY(5):
@@ -913,6 +988,7 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
             // jump to first non-blank in line
             if (FLAG_IS_SET(mods, MODIFIER_SHIFT)) {
                 App_notify_content_change(self);
+                App_show_scrollbar(self);
                 self->ksm_cursor.col = 0;
                 for (size_t i = 0; i < Vt_line_at(vt, self->ksm_cursor.row)->data.size; ++i) {
                     VtRune* rune = Vt_at(vt, i, self->ksm_cursor.row);
@@ -931,6 +1007,7 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
                     Vector_push_char(&self->ksm_input_buf, '6');
                 }
             }
+            App_update_scrollbar_dims(self);
             break;
 
         case KEY(1)... KEY(3):
@@ -941,8 +1018,7 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
             }
             break;
 
-        default:
-            LOG("KSM key: %d(%d)\n", key, rawkey);
+        default:;
     }
     return false;
 }
@@ -1121,34 +1197,34 @@ static bool App_maybe_handle_application_key(App*     self,
         return true;
     } else if (KeyCommand_is_active(&cmd[KCMD_LINE_SCROLL_UP], key, rawkey, mods)) {
         Vt_visual_scroll_up(vt);
-        self->ui.scrollbar.visible = true;
+        App_show_scrollbar(self);
         App_notify_content_change(self);
         return true;
     } else if (KeyCommand_is_active(&cmd[KCMD_LINE_SCROLL_DN], key, rawkey, mods)) {
         Vt_visual_scroll_down(vt);
-        self->ui.scrollbar.visible = true;
+        App_show_scrollbar(self);
         App_notify_content_change(self);
         return true;
     } else if (KeyCommand_is_active(&cmd[KCMD_PAGE_SCROLL_UP], key, rawkey, mods)) {
         Vt_visual_scroll_page_up(vt);
-        self->ui.scrollbar.visible = true;
+        App_show_scrollbar(self);
         App_notify_content_change(self);
         return true;
     } else if (KeyCommand_is_active(&cmd[KCMD_PAGE_SCROLL_DN], key, rawkey, mods)) {
         Vt_visual_scroll_page_down(vt);
-        self->ui.scrollbar.visible = true;
+        App_show_scrollbar(self);
         App_notify_content_change(self);
         return true;
     } else if (KeyCommand_is_active(&cmd[KCMD_MARK_SCROLL_UP], key, rawkey, mods)) {
         if (Vt_visual_scroll_mark_up(vt)) {
-            self->ui.scrollbar.visible = true;
+            App_show_scrollbar(self);
             App_notify_content_change(self);
         } else
             App_flash(self);
         return true;
     } else if (KeyCommand_is_active(&cmd[KCMD_MARK_SCROLL_DN], key, rawkey, mods)) {
         if (Vt_visual_scroll_mark_down(vt)) {
-            self->ui.scrollbar.visible = true;
+            App_show_scrollbar(self);
             App_notify_content_change(self);
         } else
             App_flash(self);
@@ -1249,29 +1325,6 @@ static void App_update_cursor(App* self)
     }
 }
 
-static bool App_scrollbar_is_animating(App* self)
-{
-    if (!self->ui.scrollbar.visible)
-        return false;
-    int64_t ms = TimePoint_is_ms_ahead(self->scrollbar_hide_time);
-    return ms > 0 && ms < settings.scrollbar_fade_time_ms && !self->vt.scrolling_visual;
-}
-
-static bool App_scrollbar_anim_pending(App* self)
-{
-    int64_t ms = TimePoint_is_ms_ahead(self->scrollbar_hide_time);
-    return ms > 0 && !self->vt.scrolling_visual;
-}
-
-static TimePoint App_scrollbar_anim_start_time(App* self)
-{
-    TimePoint ret = self->scrollbar_hide_time;
-    TimePoint off = { 0, 0 };
-    off.tv_nsec   = settings.scrollbar_fade_time_ms * MS_IN_NSECS;
-    TimePoint_subtract(&ret, off);
-    return ret;
-}
-
 /**
  * Update gui scrollbar dimensions */
 static void App_update_scrollbar_dims(App* self)
@@ -1285,14 +1338,6 @@ static void App_update_scrollbar_dims(App* self)
     double  fraction_scrolled = (double)lines_scrolled / scrollable_lines;
     self->ui.scrollbar.length = length + extra_length;
     self->ui.scrollbar.top    = (2.0 - length - extra_length) * fraction_scrolled;
-    int64_t ms                = TimePoint_is_ms_ahead(self->scrollbar_hide_time);
-
-    if (App_scrollbar_is_animating(self)) {
-        self->ui.scrollbar.opacity = ((float)ms / settings.scrollbar_fade_time_ms);
-        App_notify_content_change(self);
-    } else {
-        self->ui.scrollbar.opacity = 1.0f;
-    }
 }
 
 /**
@@ -1309,8 +1354,7 @@ static bool App_scrollbar_consume_drag(App* self, uint32_t button, int32_t x, in
     size_t target_line = Vt_top_line(vt) * CLAMP(dp, 0.0, range) / range;
     if (target_line != Vt_visual_top_line(vt)) {
         Vt_visual_scroll_to(vt, target_line);
-        App_update_scrollbar_dims(self);
-        App_notify_content_change(self);
+        App_show_scrollbar(self);
     }
     return true;
 }
@@ -1344,6 +1388,7 @@ static bool App_scrollbar_consume_click(App*     self,
             // inside scrollbar
             if (state && (button == MOUSE_BTN_LEFT || button == MOUSE_BTN_RIGHT ||
                           button == MOUSE_BTN_MIDDLE)) {
+                App_show_scrollbar(self);
                 self->ui.scrollbar.dragging   = true;
                 self->scrollbar_drag_position = dp - self->ui.scrollbar.top;
             }
@@ -1351,7 +1396,7 @@ static bool App_scrollbar_consume_click(App*     self,
             // outside of scrollbar
             if (state && button == MOUSE_BTN_LEFT) {
                 /* jump to that position and start dragging in the middle */
-                self->ui.scrollbar.dragging   = true;
+                App_show_scrollbar(self);
                 self->scrollbar_drag_position = self->ui.scrollbar.length / 2;
                 dp = 2.0f * ((float)y / (float)vt->ws.ws_ypixel) - self->scrollbar_drag_position;
                 float  range       = 2.0f - self->ui.scrollbar.length;
@@ -1360,14 +1405,18 @@ static bool App_scrollbar_consume_click(App*     self,
                     Vt_visual_scroll_to(vt, target_line);
                 }
             } else if (state && button == MOUSE_BTN_RIGHT) {
-                self->autoscroll_next_step = TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS);
+                App_show_scrollbar(self);
                 if (dp > self->ui.scrollbar.top + self->ui.scrollbar.length / 2) {
                     self->autoscroll = AUTOSCROLL_DN;
                 } else {
                     self->autoscroll = AUTOSCROLL_UP;
                 }
+                TimerManager_schedule_point(&self->timer_manager,
+                                            self->autoscroll_timer,
+                                            TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS));
             } else if (state && button == MOUSE_BTN_MIDDLE) {
                 /* jump one screen in that direction */
+                App_show_scrollbar(self);
                 if (dp > self->ui.scrollbar.top + self->ui.scrollbar.length / 2) {
                     Vt_visual_scroll_page_down(vt);
                 } else {
@@ -1385,50 +1434,27 @@ static bool App_scrollbar_consume_click(App*     self,
     return true;
 }
 
-/**
- * Update gui scrollbar visibility */
-static void App_update_scrollbar_vis(App* self)
-{
-    Vt* vt = &self->vt;
-    if (!vt->scrolling_visual) {
-        if (self->last_scrolling) {
-            self->scrollbar_hide_time = TimePoint_ms_from_now(settings.scrollbar_hide_delay_ms);
-        } else if (self->ui.scrollbar.dragging) {
-            self->scrollbar_hide_time = TimePoint_ms_from_now(settings.scrollbar_hide_delay_ms);
-        } else if (TimePoint_passed(self->scrollbar_hide_time)) {
-            if (self->ui.scrollbar.visible) {
-                self->ui.scrollbar.visible = false;
-                App_notify_content_change(self);
-            }
-        }
-    }
-    self->last_scrolling = vt->scrolling_visual;
-}
-
 static void App_do_autoscroll(App* self)
 {
     Vt* vt = &self->vt;
-    App_update_scrollbar_vis(self);
-
-    if (self->autoscroll == AUTOSCROLL_UP && TimePoint_passed(self->autoscroll_next_step)) {
-        LOG("App::do_autoscroll{ direction: up }\n");
-        self->ui.scrollbar.visible = true;
+    if (self->autoscroll == AUTOSCROLL_UP) {
         Vt_visual_scroll_up(vt);
-        self->autoscroll_next_step = TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS);
-        App_update_scrollbar_dims(self);
-        App_notify_content_change(self);
-    } else if (self->autoscroll == AUTOSCROLL_DN && TimePoint_passed(self->autoscroll_next_step)) {
-        LOG("App::do_autoscroll{ direction: down }\n");
+        App_show_scrollbar(self);
+    } else if (self->autoscroll == AUTOSCROLL_DN) {
         Vt_visual_scroll_down(vt);
-        self->autoscroll_next_step = TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS);
-        App_update_scrollbar_dims(self);
-        App_notify_content_change(self);
+        App_show_scrollbar(self);
     }
 
     if (self->autoselect) {
         Vt_select_set_end(&self->vt,
                           self->autoscroll_autoselect.first,
                           self->autoscroll_autoselect.second);
+    }
+
+    if (self->autoscroll) {
+        TimerManager_schedule_point(&self->timer_manager,
+                                    self->autoscroll_timer,
+                                    TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS));
     }
 }
 
@@ -1448,9 +1474,12 @@ static bool App_consume_drag(App* self, uint32_t button, int32_t x, int32_t y)
         if (y <= high_bound) {
             self->autoselect = true;
             if (!self->autoscroll) {
-                self->autoscroll_next_step = TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS);
+                App_show_scrollbar(self);
             }
             self->autoscroll = AUTOSCROLL_UP;
+            TimerManager_schedule_point(&self->timer_manager,
+                                        self->autoscroll_timer,
+                                        TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS));
             Vt_select_set_end(
               vt,
               (self->autoscroll_autoselect.first = x),
@@ -1461,9 +1490,13 @@ static bool App_consume_drag(App* self, uint32_t button, int32_t x, int32_t y)
         } else if (y >= low_bound) {
             self->autoselect = true;
             if (!self->autoscroll) {
-                self->autoscroll_next_step = TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS);
+                App_show_scrollbar(self);
             }
             self->autoscroll = AUTOSCROLL_DN;
+            TimerManager_schedule_point(&self->timer_manager,
+                                        self->autoscroll_timer,
+                                        TimePoint_ms_from_now(AUTOSCROLL_DELAY_MS));
+
             Vt_select_set_end(
               vt,
               (self->autoscroll_autoselect.first = x),
@@ -1514,9 +1547,11 @@ static bool App_maybe_consume_click(App*     self,
         self->selection_dragging_right = SELECT_DRAG_RIGHT_NONE;
         Window_set_pointer_style(self->win, MOUSE_POINTER_ARROW);
     }
+
     if (vt->modes.x10_mouse_compat) {
         return false;
     }
+
     bool no_left_report = (!(vt->modes.extended_report || vt->modes.mouse_btn_report ||
                              vt->modes.mouse_motion_on_btn_report) ||
                            FLAG_IS_SET(mods, MODIFIER_SHIFT));
@@ -1535,14 +1570,20 @@ static bool App_maybe_consume_click(App*     self,
             } else {
                 self->click_count = 0;
             }
+
             self->next_click_limit = TimePoint_ms_from_now(DOUBLE_CLICK_DELAY_MS);
+
             if (self->click_count == 0) {
+                if (vt->selection.mode != SELECT_MODE_NONE) {
+                    Window_set_pointer_style(self->win, MOUSE_POINTER_I_BEAM);
+                }
                 Vt_select_end(vt);
                 enum SelectMode mode =
                   FLAG_IS_SET(mods, MODIFIER_CONTROL) ? SELECT_MODE_BOX : SELECT_MODE_NORMAL;
+
+                App_notify_content_change(self);
                 Vt_select_init(vt, mode, x, y);
                 self->selection_dragging_left = true;
-                Window_set_pointer_style(self->win, MOUSE_POINTER_I_BEAM);
             } else if (self->click_count == 1) {
                 App_notify_content_change(self);
                 Vt_select_end(vt);
@@ -1625,30 +1666,19 @@ static void App_button_handler(void*    self,
     app->autoselect      = false;
 
     if (!vt_wants_scroll && (button == MOUSE_BTN_WHEEL_DOWN && state)) {
-        uint8_t lines             = ammount ? ammount : settings.scroll_discrete_lines;
-        app->ui.scrollbar.visible = true;
-
-        for (uint8_t i = 0; i < lines; ++i) {
-            if (Vt_visual_scroll_down(vt)) {
+        uint8_t lines = ammount ? ammount : settings.scroll_discrete_lines;
+        App_show_scrollbar(self);
+        for (uint8_t i = 0; i < lines; ++i)
+            if (Vt_visual_scroll_down(vt))
                 break;
-            }
-        }
-
         App_update_scrollbar_dims(self);
-        App_notify_content_change(self);
     } else if (!vt_wants_scroll && (button == MOUSE_BTN_WHEEL_UP && state)) {
-        uint8_t lines             = ammount ? ammount : settings.scroll_discrete_lines;
-        app->ui.scrollbar.visible = true;
-
-        for (uint8_t i = 0; i < lines; ++i) {
-            if (Vt_visual_scroll_up(vt)) {
+        uint8_t lines = ammount ? ammount : settings.scroll_discrete_lines;
+        App_show_scrollbar(self);
+        for (uint8_t i = 0; i < lines; ++i)
+            if (Vt_visual_scroll_up(vt))
                 break;
-            }
-        }
-
-        App_update_scrollbar_vis(self);
         App_update_scrollbar_dims(self);
-        App_notify_content_change(self);
     } else if (!App_scrollbar_consume_click(self, button, state, x, y) &&
                !App_maybe_consume_click(self, button, state, x, y, mods)) {
         /* Maybe theres a link there */
@@ -1697,15 +1727,6 @@ static void App_update_hover(App* self, int32_t x, int32_t y)
             if (memcmp(&new_hovered_link, &self->ui.hovered_link, sizeof(new_hovered_link))) {
                 self->ui.hovered_link = new_hovered_link;
                 App_notify_content_change(self);
-
-                LOG("App::link hover{ [%dx%d]:\'%s\': %ux%zu - %ux%zu}\n",
-                    x,
-                    y,
-                    uri,
-                    cols.first,
-                    rows.first,
-                    cols.second,
-                    rows.second);
             }
         }
     } else {
@@ -1731,6 +1752,11 @@ static void App_motion_handler(void* self, uint32_t button, int32_t x, int32_t y
             !App_consume_drag(self, button, x, y)) {
             Vt_handle_motion(&app->vt, button, x, y);
         }
+
+        if (app->selection_dragging_left) {
+            Window_set_pointer_style(app->win, MOUSE_POINTER_I_BEAM);
+        }
+
     } else {
         App_update_hover(app, x, y);
     }
@@ -1784,8 +1810,7 @@ static void App_focus_changed(void* self, bool current_state)
 {
     App* app = self;
     Window_notify_content_change(app->win);
-
-    app->ui.draw_out_of_focus_tint = !current_state;
+    app->ui.window_in_focus = current_state;
 
     if (!current_state && app->vt.selection.mode) {
         Vector_char txt = Vt_select_region_to_string(&app->vt);
@@ -1917,6 +1942,50 @@ static void App_set_callbacks(App* self)
 
     settings.callbacks.user_data           = self;
     settings.callbacks.keycode_from_string = App_get_key_code;
+}
+
+static void App_set_up_timers(App* self)
+{
+    self->timer_manager = TimerManager_new(self);
+
+    self->autoscroll_timer = TimerManager_create_timer(&self->timer_manager,
+                                                       TIMER_TYPE_POINT,
+                                                       App_autoscroll_timer_handler);
+
+    self->scrollbar_hide_timer = TimerManager_create_timer(&self->timer_manager,
+                                                           TIMER_TYPE_TWEEN,
+                                                           App_scrollbar_hide_timer_handler);
+    TimerManager_set_interpolation_func(&self->timer_manager,
+                                        self->scrollbar_hide_timer,
+                                        TWEEN_INTERPOLATION_TYPE_POW2);
+
+    self->visual_bell_timer =
+      TimerManager_create_timer(&self->timer_manager, TIMER_TYPE_TWEEN, App_bell_timer_handler);
+    TimerManager_set_interpolation_func(&self->timer_manager,
+                                        self->visual_bell_timer,
+                                        TWEEN_INTERPOLATION_TYPE_SIN_IN);
+
+    self->cursor_blink_suspend_timer =
+      TimerManager_create_timer(&self->timer_manager,
+                                TIMER_TYPE_POINT,
+                                App_cursor_blink_suspend_timer_handler);
+
+    self->cursor_blink_end_timer = TimerManager_create_timer(&self->timer_manager,
+                                                             TIMER_TYPE_POINT,
+                                                             App_cursor_blink_end_timer_handler);
+
+    self->cursor_blink_switch_timer =
+      TimerManager_create_timer(&self->timer_manager,
+                                TIMER_TYPE_POINT,
+                                App_cursor_blink_switch_timer_handler);
+
+    self->text_blink_switch_timer = TimerManager_create_timer(&self->timer_manager,
+                                                              TIMER_TYPE_POINT,
+                                                              App_text_blink_switch_timer_handler);
+
+    self->title_update_timer = TimerManager_create_timer(&self->timer_manager,
+                                                         TIMER_TYPE_POINT,
+                                                         App_title_update_timer_handler);
 }
 
 int main(int argc, char** argv)
