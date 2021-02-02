@@ -286,15 +286,15 @@ typedef struct
     {
         struct tween_timer_data
         {
-            void (*updated_callback)(void*, double fraction, bool completed);
-            TimeSpan                   time_span;
-            tween_interpolation_type_e interpolation;
+            tween_timer_updated_callback_func_t updated_callback;
+            TimeSpan                            time_span;
+            tween_interpolation_type_e          interpolation;
         } tween_data;
 
         struct point_timer_data
         {
-            void (*completed_callback)(void*);
-            TimePoint trigger_time;
+            point_timer_completed_callback_func_t completed_callback;
+            TimePoint                             trigger_time;
         } point_data;
     } data;
 
@@ -365,7 +365,7 @@ static bool TimerManager_is_pending(TimerManager* self, Timer timer)
     return !tmr->completed;
 }
 
-static void TimerManager_mark_completed(TimerManager* self, Timer timer)
+static void TimerManager_cancel(TimerManager* self, Timer timer)
 {
     ASSERT(self->timers.size > timer, "exists");
     timer_data_t* tmr = Vector_at_timer_data_t(&self->timers, timer);
@@ -471,7 +471,7 @@ typedef struct
 #define TIME_POINT_PTR(tp) (&(time_point_ptr_t){ .payload = tp })
 
 __attribute__((sentinel)) static int32_t
-TimerManager_get_next_frame_ms(TimerManager* self, time_point_ptr_t* external_frame, ...)
+TimerManager_get_next_action_ms(TimerManager* self, time_point_ptr_t* external_frame, ...)
 {
     int32_t   ret              = -1;
     TimePoint next_frame_point = { 0, 0 };
@@ -539,4 +539,3 @@ static void TimerManager_destroy(TimerManager* self)
 {
     Vector_destroy_timer_data_t(&self->timers);
 }
-

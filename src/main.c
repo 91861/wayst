@@ -259,6 +259,7 @@ static void App_init(App* self)
     self->ksm_input_buf = Vector_new_char();
     self->monitor       = Monitor_new();
     App_set_monitor_callbacks(self);
+    App_set_up_timers(self);
 
     if (settings.directory.str) {
         if (chdir(settings.directory.str)) {
@@ -314,7 +315,6 @@ static void App_init(App* self)
     }
 
     App_update_padding(self);
-    App_set_up_timers(self);
     App_action(self);
 }
 
@@ -324,9 +324,9 @@ static void App_run(App* self)
         int timeout_ms =
           (self->vt.output.size)
             ? 0
-            : TimerManager_get_next_frame_ms(&self->timer_manager,
-                                             TIME_POINT_PTR(self->closest_pending_wakeup),
-                                             NULL);
+            : TimerManager_get_next_action_ms(&self->timer_manager,
+                                              TIME_POINT_PTR(self->closest_pending_wakeup),
+                                              NULL);
 
         Monitor_wait(&self->monitor, timeout_ms);
         self->closest_pending_wakeup = NULL;
@@ -391,7 +391,7 @@ static void App_run(App* self)
             }
         } else if (self->tex_blink_animation_should_play) {
             self->tex_blink_animation_should_play = false;
-            TimerManager_mark_completed(&self->timer_manager, self->text_blink_switch_timer);
+            TimerManager_cancel(&self->timer_manager, self->text_blink_switch_timer);
         }
 
         Window_maybe_swap(self->win);
@@ -631,7 +631,7 @@ static void App_action(void* self)
     TimerManager_schedule_point(&app->timer_manager,
                                 app->cursor_blink_end_timer,
                                 TimePoint_s_from_now(settings.cursor_blink_end_s));
-    TimerManager_mark_completed(&app->timer_manager, app->cursor_blink_switch_timer);
+    TimerManager_cancel(&app->timer_manager, app->cursor_blink_switch_timer);
 
     if (!Window_is_pointer_hidden(app->win)) {
         App_update_hover(
