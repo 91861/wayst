@@ -859,6 +859,8 @@ static void settings_make_default()
         .lcd_ranges_set_by_user = false,
 
         .vt_debug_delay_usec = 5000,
+
+        .smooth_cursor = false,
     };
 }
 
@@ -1034,6 +1036,9 @@ static void handle_option(const char opt, const int array_index, const char* val
             case 'o':
                 settings.defer_font_loading = true;
                 break;
+            case 'a':
+                settings.smooth_cursor = true;
+                break;
         }
         return;
     }
@@ -1074,10 +1079,14 @@ static void handle_option(const char opt, const int array_index, const char* val
     WRN("Failed to parse \'%s\' as color for option \'%s\'%s.\n",                                  \
         value,                                                                                     \
         long_options[array_index].name,                                                            \
-        strlen(value) ? "" : ", hint: correct config syntax is =\"#rrggbb\" or =rrggbb");
+        strlen(value) ? "" : ", correct syntax is =\"#rrggbb\" or =rrggbb");
 
         case OPT_XORG_ONLY_IDX:
             settings.x11_is_default = value ? strtob(value) : true;
+            break;
+
+        case OPT_SMOOTH_CURSOR:
+            settings.smooth_cursor = value ? strtob(value) : true;
             break;
 
         case OPT_DYNAMIC_TITLE_IDX:
@@ -1703,7 +1712,7 @@ static void settings_get_opts(const int argc, char* const* argv, const bool cfg_
         /* print 'invalid option' error message only once */
         opterr   = cfg_file_check;
         int opid = 0;
-        o        = getopt_long(argc, argv, "XctDGFhvlo", long_options, &opid);
+        o        = getopt_long(argc, argv, "XctDGFhvloa", long_options, &opid);
         if (o == -1) {
             break;
         }

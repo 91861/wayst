@@ -81,6 +81,7 @@ typedef struct WindowBase
     uint16_t               state_flags;
     bool                   paint;
     enum MousePointerStyle current_pointer_style;
+    uint32_t               key_repeat_interval_ms;
 
     struct window_callbacks_t
     {

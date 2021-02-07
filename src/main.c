@@ -76,7 +76,7 @@ typedef struct
 
     Timer autoscroll_timer, scrollbar_hide_timer, visual_bell_timer, cursor_blink_end_timer,
       cursor_blink_switch_timer, cursor_blink_suspend_timer, text_blink_switch_timer,
-      title_update_timer;
+      title_update_timer, cursor_movement_timer;
 
     char* hostname;
     char* vt_title;
@@ -244,6 +244,16 @@ static void App_text_blink_switch_timer_handler(void* self)
 static void App_title_update_timer_handler(void* self)
 {
     App_set_title(self);
+}
+
+static void App_cursor_movement_timer_handler(void* self, double fraction, bool completed)
+{
+    App*   app                   = self;
+    double start                 = app->ui.cursor_cell_anim_start_point_cell_fraction;
+    double end                   = app->ui.cursor->col;
+    double diff                  = end - start;
+    app->ui.cursor_cell_fraction = completed ? end : start + diff * fraction;
+    App_notify_content_change(self);
 }
 
 static void App_bell_timer_handler(void* self, double fraction, bool completed)
@@ -459,6 +469,7 @@ static void App_maybe_resize(App* self, Pair_uint32_t newres)
     if (newres.first != self->resolution.first || newres.second != self->resolution.second) {
         self->resolution = newres;
         Gfx_resize(self->gfx, self->resolution.first, self->resolution.second);
+        Gfx_destroy_proxy(self->gfx, self->ui.cursor_proxy.data);
         Pair_uint32_t chars = Gfx_get_char_size(self->gfx);
         App_update_padding(self);
         App_clamp_cursor(self, chars);
@@ -1145,9 +1156,12 @@ static bool App_maybe_handle_application_key(App*     self,
         if (settings.font_size > 1) {
             --settings.font_size;
             Vt_clear_all_proxies(vt);
+            Gfx_destroy_proxy(self->gfx, self->ui.cursor_proxy.data);
             App_reload_font(self);
             Pair_uint32_t cells = App_get_char_size(self);
             Vt_resize(vt, cells.first, cells.second);
+            App_update_padding(self);
+            App_update_scrollbar_dims(self);
             App_notify_content_change(self);
         } else {
             App_flash(self);
@@ -1156,9 +1170,12 @@ static bool App_maybe_handle_application_key(App*     self,
     } else if (KeyCommand_is_active(&cmd[KCMD_FONT_ENLARGE], key, rawkey, mods)) {
         ++settings.font_size;
         Vt_clear_all_proxies(vt);
+        Gfx_destroy_proxy(self->gfx, self->ui.cursor_proxy.data);
         App_reload_font(self);
         Pair_uint32_t cells = App_get_char_size(self);
         Vt_resize(vt, cells.first, cells.second);
+        App_notify_content_change(self);
+        App_update_scrollbar_dims(self);
         App_notify_content_change(self);
         return true;
     } else if (KeyCommand_is_active(&cmd[KCMD_HTML_DUMP], key, rawkey, mods)) {
@@ -1323,6 +1340,29 @@ static void App_update_cursor(App* self)
     } else {
         self->ui.cursor = &self->vt.cursor;
     }
+
+    if (settings.smooth_cursor) {
+        uint16_t vis_row = Vt_visual_cursor_row(&self->vt);
+        if (self->ui.cursor->col != self->ui.last_cursor_cell_position) {
+            if (self->ui.last_cursor_row_position == vis_row) {
+                self->ui.last_cursor_cell_position                  = self->ui.cursor->col;
+                self->ui.cursor_cell_anim_start_point_cell_fraction = self->ui.cursor_cell_fraction;
+
+                if (likely(self->win->key_repeat_interval_ms)) {
+                    TimerManager_schedule_tween_to_ms(&self->timer_manager,
+                                                      self->cursor_movement_timer,
+                                                      self->win->key_repeat_interval_ms);
+                } else {
+                    self->ui.cursor_cell_fraction = self->ui.last_cursor_cell_position;
+                }
+            } else {
+                self->ui.cursor_cell_fraction = self->ui.cursor->col;
+            }
+        }
+        self->ui.last_cursor_row_position = vis_row;
+    } else {
+        self->ui.cursor_cell_fraction = self->ui.cursor->col;
+    }
 }
 
 /**
@@ -1355,6 +1395,8 @@ static bool App_scrollbar_consume_drag(App* self, uint32_t button, int32_t x, in
     if (target_line != Vt_visual_top_line(vt)) {
         Vt_visual_scroll_to(vt, target_line);
         App_show_scrollbar(self);
+        App_update_scrollbar_dims(self);
+        App_notify_content_change(self);
     }
     return true;
 }
@@ -1986,6 +2028,10 @@ static void App_set_up_timers(App* self)
     self->title_update_timer = TimerManager_create_timer(&self->timer_manager,
                                                          TIMER_TYPE_POINT,
                                                          App_title_update_timer_handler);
+
+    self->cursor_movement_timer = TimerManager_create_timer(&self->timer_manager,
+                                                            TIMER_TYPE_TWEEN,
+                                                            App_cursor_movement_timer_handler);
 }
 
 int main(int argc, char** argv)

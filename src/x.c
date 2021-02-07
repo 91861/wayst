@@ -457,6 +457,11 @@ static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
     }
     XSetICFocus(globalX11->ic);
 
+    uint32_t timeout_ms, interval_ms;
+    XkbGetAutoRepeatRate(globalX11->display, XkbUseCoreKbd, &timeout_ms, &interval_ms);
+    LOG("Detected Xkb autorepeat timeout: %u, interval: %u\n", timeout_ms, interval_ms);
+    win->key_repeat_interval_ms = interval_ms;
+
     win->w                            = w;
     win->h                            = h;
     win->interface                    = &window_interface_x11;

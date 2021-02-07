@@ -266,14 +266,18 @@ bool Vt_is_cell_selected(const Vt* const self, int32_t x, int32_t y)
     return false;
 }
 
-ColorRGB Vt_rune_final_fg_apply_dim(const Vt* self, const VtRune* rune, ColorRGBA bg_color)
+ColorRGB Vt_rune_final_fg_apply_dim(const Vt*     self,
+                                    const VtRune* rune,
+                                    ColorRGBA     bg_color,
+                                    bool          is_cursor)
 {
     if (unlikely(rune->dim)) {
-        return ColorRGB_new_from_blend(Vt_rune_fg(self, rune),
+        return ColorRGB_new_from_blend(is_cursor ? Vt_rune_cursor_fg(self, rune)
+                                                 : Vt_rune_fg(self, rune),
                                        ColorRGB_from_RGBA(bg_color),
                                        VT_DIM_FACTOR);
     } else {
-        return Vt_rune_fg(self, rune);
+        return is_cursor ? Vt_rune_cursor_fg(self, rune) : Vt_rune_fg(self, rune);
     }
 }
 
@@ -281,25 +285,26 @@ ColorRGB Vt_rune_final_fg(const Vt*     self,
                           const VtRune* rune,
                           int32_t       x,
                           int32_t       y,
-                          ColorRGBA     bg_color)
+                          ColorRGBA     bg_color,
+                          bool          is_cursor)
 {
     if (!settings.highlight_change_fg) {
-        return Vt_rune_final_fg_apply_dim(self, rune, bg_color);
+        return Vt_rune_final_fg_apply_dim(self, rune, bg_color, is_cursor);
     } else {
         if (unlikely(Vt_is_cell_selected(self, x, y))) {
             return self->colors.highlight.fg;
         } else {
-            return Vt_rune_final_fg_apply_dim(self, rune, bg_color);
+            return Vt_rune_final_fg_apply_dim(self, rune, bg_color, is_cursor);
         }
     }
 }
 
-ColorRGBA Vt_rune_final_bg(const Vt* self, const VtRune* rune, int32_t x, int32_t y)
+ColorRGBA Vt_rune_final_bg(const Vt* self, const VtRune* rune, int32_t x, int32_t y, bool is_cursor)
 {
     if (unlikely(Vt_is_cell_selected(self, x, y))) {
         return self->colors.highlight.bg;
     } else {
-        return Vt_rune_bg(self, rune);
+        return is_cursor ? Vt_rune_cursor_bg(self, rune) : Vt_rune_bg(self, rune);
     }
 }
 

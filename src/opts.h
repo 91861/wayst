@@ -63,235 +63,238 @@ static struct option long_options[] = {
 #define OPT_HIDE_POINTER 12
     [OPT_HIDE_POINTER] = { "hide-pointer", required_argument, 0, 0 },
 
-#define OPT_COLUMNS_IDX 13
+#define OPT_SMOOTH_CURSOR 13
+    [OPT_SMOOTH_CURSOR] = { "cursor-animations", optional_argument, 0, 'a' },
+
+#define OPT_COLUMNS_IDX 14
     [OPT_COLUMNS_IDX] = { "columns", required_argument, 0, 0 },
 
-#define OPT_DIRECTORY_IDX 14
+#define OPT_DIRECTORY_IDX 15
     [OPT_DIRECTORY_IDX] = { "directory", required_argument, 0, 0 },
 
-#define OPT_WINDOWOPS_IDX 15
+#define OPT_WINDOWOPS_IDX 16
     [OPT_WINDOWOPS_IDX] = { "windowops", required_argument, 0, 0 },
 
-#define OPT_IO_CHUNK_DELAY 16
+#define OPT_IO_CHUNK_DELAY 17
     [OPT_IO_CHUNK_DELAY] = { "io-chunk-delay", required_argument, 0, 0 },
 
-#define OPT_BG_COLOR_IDX 17
+#define OPT_BG_COLOR_IDX 18
     [OPT_BG_COLOR_IDX] = { "bg-color", required_argument, 0, 0 },
 
-#define OPT_FG_COLOR_IDX 18
+#define OPT_FG_COLOR_IDX 19
     [OPT_FG_COLOR_IDX] = { "fg-color", required_argument, 0, 0 },
 
-#define OPT_COLOR_0_IDX 19
+#define OPT_COLOR_0_IDX 20
     [OPT_COLOR_0_IDX] = { "color-0", required_argument, 0, 0 },
 
-#define OPT_COLOR_1_IDX 20
+#define OPT_COLOR_1_IDX 21
     [OPT_COLOR_1_IDX] = { "color-1", required_argument, 0, 0 },
 
-#define OPT_COLOR_2_IDX 21
+#define OPT_COLOR_2_IDX 22
     [OPT_COLOR_2_IDX] = { "color-2", required_argument, 0, 0 },
 
-#define OPT_COLOR_3_IDX 22
+#define OPT_COLOR_3_IDX 23
     [OPT_COLOR_3_IDX] = { "color-3", required_argument, 0, 0 },
 
-#define OPT_COLOR_4_IDX 23
+#define OPT_COLOR_4_IDX 24
     [OPT_COLOR_4_IDX] = { "color-4", required_argument, 0, 0 },
 
-#define OPT_COLOR_5_IDX 24
+#define OPT_COLOR_5_IDX 25
     [OPT_COLOR_5_IDX] = { "color-5", required_argument, 0, 0 },
 
-#define OPT_COLOR_6_IDX 25
+#define OPT_COLOR_6_IDX 26
     [OPT_COLOR_6_IDX] = { "color-6", required_argument, 0, 0 },
 
-#define OPT_COLOR_7_IDX 26
+#define OPT_COLOR_7_IDX 27
     [OPT_COLOR_7_IDX] = { "color-7", required_argument, 0, 0 },
 
-#define OPT_COLOR_8_IDX 27
+#define OPT_COLOR_8_IDX 28
     [OPT_COLOR_8_IDX] = { "color-8", required_argument, 0, 0 },
 
-#define OPT_COLOR_9_IDX 28
+#define OPT_COLOR_9_IDX 29
     [OPT_COLOR_9_IDX] = { "color-9", required_argument, 0, 0 },
 
-#define OPT_COLOR_10_IDX 29
+#define OPT_COLOR_10_IDX 30
     [OPT_COLOR_10_IDX] = { "color-10", required_argument, 0, 0 },
 
-#define OPT_COLOR_11_IDX 30
+#define OPT_COLOR_11_IDX 31
     [OPT_COLOR_11_IDX] = { "color-11", required_argument, 0, 0 },
 
-#define OPT_COLOR_12_IDX 31
+#define OPT_COLOR_12_IDX 32
     [OPT_COLOR_12_IDX] = { "color-12", required_argument, 0, 0 },
 
-#define OPT_COLOR_13_IDX 32
+#define OPT_COLOR_13_IDX 33
     [OPT_COLOR_13_IDX] = { "color-13", required_argument, 0, 0 },
 
-#define OPT_COLOR_14_IDX 33
+#define OPT_COLOR_14_IDX 34
     [OPT_COLOR_14_IDX] = { "color-14", required_argument, 0, 0 },
 
-#define OPT_COLOR_15_IDX 34
+#define OPT_COLOR_15_IDX 35
     [OPT_COLOR_15_IDX] = { "color-15", required_argument, 0, 0 },
 
-#define OPT_H_BG_COLOR_IDX 35
+#define OPT_H_BG_COLOR_IDX 36
     [OPT_H_BG_COLOR_IDX] = { "h-bg-color", required_argument, 0, 0 },
 
-#define OPT_H_FG_COLOR_IDX 36
+#define OPT_H_FG_COLOR_IDX 37
     [OPT_H_FG_COLOR_IDX] = { "h-fg-color", required_argument, 0, 0 },
 
-#define OPT_VISUAL_BELL 37
+#define OPT_VISUAL_BELL 38
     [OPT_VISUAL_BELL] = { "visual-bell", required_argument, 0, 0 },
 
-#define OPT_BOLD_IS_BRIGHT 38
+#define OPT_BOLD_IS_BRIGHT 39
     [OPT_BOLD_IS_BRIGHT] = { "bold-is-bright", required_argument, 0, 0 },
 
-#define OPT_COLORSCHEME_IDX 39
+#define OPT_COLORSCHEME_IDX 40
     [OPT_COLORSCHEME_IDX] = { "colorscheme", required_argument, 0, 0 },
 
-#define OPT_UNFOCUSED_TINT_COLOR 40
+#define OPT_UNFOCUSED_TINT_COLOR 41
     [OPT_UNFOCUSED_TINT_COLOR] = { "unfocused-tint", required_argument, 0, 0 },
 
-#define OPT_FONT_IDX 41
+#define OPT_FONT_IDX 42
     [OPT_FONT_IDX] = { "font", required_argument, 0, 0 },
 
-#define OPT_FONT_STYLE_REGULAR_IDX 42
+#define OPT_FONT_STYLE_REGULAR_IDX 43
     [OPT_FONT_STYLE_REGULAR_IDX] = { "style-regular", required_argument, 0, 0 },
 
-#define OPT_FONT_STYLE_BOLD_IDX 43
+#define OPT_FONT_STYLE_BOLD_IDX 44
     [OPT_FONT_STYLE_BOLD_IDX] = { "style-bold", required_argument, 0, 0 },
 
-#define OPT_FONT_STYLE_ITALIC_IDX 44
+#define OPT_FONT_STYLE_ITALIC_IDX 45
     [OPT_FONT_STYLE_ITALIC_IDX] = { "style-italic", required_argument, 0, 0 },
 
-#define OPT_FONT_STYLE_BOLD_ITALIC_IDX 45
+#define OPT_FONT_STYLE_BOLD_ITALIC_IDX 46
     [OPT_FONT_STYLE_BOLD_ITALIC_IDX] = { "style-bolditalic", required_argument, 0, 0 },
 
-#define OPT_FONT_FALLBACK_IDX 46
+#define OPT_FONT_FALLBACK_IDX 47
     [OPT_FONT_FALLBACK_IDX] = { "font-symbol", required_argument, 0, 0 },
 
-#define OPT_FONT_FALLBACK2_IDX 47
+#define OPT_FONT_FALLBACK2_IDX 48
     [OPT_FONT_FALLBACK2_IDX] = { "font-color", required_argument, 0, 0 },
 
-#define OPT_FLUSH_FC_CACHE_IDX 48
+#define OPT_FLUSH_FC_CACHE_IDX 49
     [OPT_FLUSH_FC_CACHE_IDX] = { "flush-fc-cache", no_argument, 0, 'l' },
 
-#define OPT_PRELOAD_ALL_FONTS_IDX 49
+#define OPT_PRELOAD_ALL_FONTS_IDX 50
     [OPT_PRELOAD_ALL_FONTS_IDX] = { "preload-all-fonts", no_argument, 0, 'o' },
 
-#define OPT_EXCLUDE_LCD_IDX 50
+#define OPT_EXCLUDE_LCD_IDX 51
     [OPT_EXCLUDE_LCD_IDX] = { "exclude-lcd", required_argument, 0, 0 },
 
-#define OPT_FONT_SIZE_IDX 51
+#define OPT_FONT_SIZE_IDX 52
     [OPT_FONT_SIZE_IDX] = { "font-size", required_argument, 0, 0 },
 
-#define OPT_DPI_IDX 52
+#define OPT_DPI_IDX 53
     [OPT_DPI_IDX] = { "dpi", required_argument, 0, 0 },
 
-#define OPT_GLYPH_PADDING_IDX 53
+#define OPT_GLYPH_PADDING_IDX 54
     [OPT_GLYPH_PADDING_IDX] = { "glyph-padding", required_argument, 0, 0 },
 
-#define OPT_GLYPH_ALIGN_IDX 54
+#define OPT_GLYPH_ALIGN_IDX 55
     [OPT_GLYPH_ALIGN_IDX] = { "glyph-align", required_argument, 0, 0 },
 
-#define OPT_LCD_ORDER_IDX 55
+#define OPT_LCD_ORDER_IDX 56
     [OPT_LCD_ORDER_IDX] = { "lcd-order", required_argument, 0, 0 },
 
-#define OPT_CURSOR_STYLE_IDX 56
+#define OPT_CURSOR_STYLE_IDX 57
     [OPT_CURSOR_STYLE_IDX] = { "cursor-style", required_argument, 0, 0 },
 
-#define OPT_BLINK_IDX 57
+#define OPT_BLINK_IDX 58
     [OPT_BLINK_IDX] = { "blink", required_argument, 0, 0 },
 
-#define OPT_PADDING_IDX 58
+#define OPT_PADDING_IDX 59
     [OPT_PADDING_IDX] = { "padding", required_argument, 0, 0 },
 
-#define OPT_SCROLLBAR_IDX 59
+#define OPT_SCROLLBAR_IDX 60
     [OPT_SCROLLBAR_IDX] = { "scrollbar", required_argument, 0, 0 },
 
-#define OPT_SCROLL_LINES_IDX 60
+#define OPT_SCROLL_LINES_IDX 61
     [OPT_SCROLL_LINES_IDX] = { "scroll-lines", required_argument, 0, 0 },
 
-#define OPT_SCROLLBACK_IDX 61
+#define OPT_SCROLLBACK_IDX 62
     [OPT_SCROLLBACK_IDX] = { "scrollback", required_argument, 0, 0 },
 
-#define OPT_URI_HANDLER_IDX 62
+#define OPT_URI_HANDLER_IDX 63
     [OPT_URI_HANDLER_IDX] = { "uri-handler", required_argument, 0, 0 },
 
-#define OPT_EXTERN_PIPE_HANDLER_IDX 63
+#define OPT_EXTERN_PIPE_HANDLER_IDX 64
     [OPT_EXTERN_PIPE_HANDLER_IDX] = { "extern-pipe", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_COPY_IDX 64
+#define OPT_BIND_KEY_COPY_IDX 65
     [OPT_BIND_KEY_COPY_IDX] = { "bind-key-copy", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_PASTE_IDX 65
+#define OPT_BIND_KEY_PASTE_IDX 66
     [OPT_BIND_KEY_PASTE_IDX] = { "bind-key-paste", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_ENLARGE_IDX 66
+#define OPT_BIND_KEY_ENLARGE_IDX 67
     [OPT_BIND_KEY_ENLARGE_IDX] = { "bind-key-enlarge", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_SHRINK_IDX 67
+#define OPT_BIND_KEY_SHRINK_IDX 68
     [OPT_BIND_KEY_SHRINK_IDX] = { "bind-key-shrink", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_UNI_IDX 68
+#define OPT_BIND_KEY_UNI_IDX 69
     [OPT_BIND_KEY_UNI_IDX] = { "bind-key-unicode", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_PG_UP_IDX 69
+#define OPT_BIND_KEY_PG_UP_IDX 70
     [OPT_BIND_KEY_PG_UP_IDX] = { "bind-key-pg-up", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_PG_DN_IDX 70
+#define OPT_BIND_KEY_PG_DN_IDX 71
     [OPT_BIND_KEY_PG_DN_IDX] = { "bind-key-pg-down", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_LN_UP_IDX 71
+#define OPT_BIND_KEY_LN_UP_IDX 72
     [OPT_BIND_KEY_LN_UP_IDX] = { "bind-key-ln-up", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_LN_DN_IDX 72
+#define OPT_BIND_KEY_LN_DN_IDX 73
     [OPT_BIND_KEY_LN_DN_IDX] = { "bind-key-ln-down", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_MRK_UP_IDX 73
+#define OPT_BIND_KEY_MRK_UP_IDX 74
     [OPT_BIND_KEY_MRK_UP_IDX] = { "bind-key-mark-up", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_MRK_DN_IDX 74
+#define OPT_BIND_KEY_MRK_DN_IDX 75
     [OPT_BIND_KEY_MRK_DN_IDX] = { "bind-key-mark-down", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_COPY_CMD_IDX 75
+#define OPT_BIND_KEY_COPY_CMD_IDX 76
     [OPT_BIND_KEY_COPY_CMD_IDX] = { "bind-key-copy-output", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_EXTERN_PIPE_IDX 76
+#define OPT_BIND_KEY_EXTERN_PIPE_IDX 77
     [OPT_BIND_KEY_EXTERN_PIPE_IDX] = { "bind-key-extern-pipe", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_KSM_IDX 77
+#define OPT_BIND_KEY_KSM_IDX 78
     [OPT_BIND_KEY_KSM_IDX] = { "bind-key-kbd-select", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_OPEN_PWD 78
+#define OPT_BIND_KEY_OPEN_PWD 79
     [OPT_BIND_KEY_OPEN_PWD] = { "bind-key-open-pwd", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_HTML_DUMP_IDX 79
+#define OPT_BIND_KEY_HTML_DUMP_IDX 80
     [OPT_BIND_KEY_HTML_DUMP_IDX] = { "bind-key-html-dump", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_DUP_IDX 80
+#define OPT_BIND_KEY_DUP_IDX 81
     [OPT_BIND_KEY_DUP_IDX] = { "bind-key-duplicate", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_DEBUG_IDX 81
+#define OPT_BIND_KEY_DEBUG_IDX 82
     [OPT_BIND_KEY_DEBUG_IDX] = { "bind-key-debug", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_QUIT_IDX 82
+#define OPT_BIND_KEY_QUIT_IDX 83
     [OPT_BIND_KEY_QUIT_IDX] = { "bind-key-quit", required_argument, 0, 0 },
 
-#define OPT_DEBUG_PTY_IDX 83
+#define OPT_DEBUG_PTY_IDX 84
     [OPT_DEBUG_PTY_IDX] = { "debug-pty", no_argument, 0, 'D' },
 
-#define OPT_DEBUG_VT_IDX 84
+#define OPT_DEBUG_VT_IDX 85
     [OPT_DEBUG_VT_IDX] = { "debug-vt", required_argument, 0, 0 },
 
-#define OPT_DEBUG_GFX_IDX 85
+#define OPT_DEBUG_GFX_IDX 86
     [OPT_DEBUG_GFX_IDX] = { "debug-gfx", no_argument, 0, 'G' },
 
-#define OPT_DEBUG_FONT_IDX 86
+#define OPT_DEBUG_FONT_IDX 87
     [OPT_DEBUG_FONT_IDX] = { "debug-font", no_argument, 0, 'F' },
 
-#define OPT_VERSION_IDX 87
+#define OPT_VERSION_IDX 88
     [OPT_VERSION_IDX] = { "version", no_argument, 0, 'v' },
 
-#define OPT_HELP_IDX 88
+#define OPT_HELP_IDX 89
     [OPT_HELP_IDX] = { "help", no_argument, 0, 'h' },
 
-#define OPT_SENTINEL_IDX 89
+#define OPT_SENTINEL_IDX 90
     [OPT_SENTINEL_IDX] = { 0 }
 };
 
@@ -318,6 +321,8 @@ static const char* long_options_descriptions[][2] = {
     [OPT_HIDE_POINTER] = { arg_name,
                            "Hide pointer: true, false, force_true, force_false, if_not_reporting "
                            "(default: true)" },
+
+    [OPT_SMOOTH_CURSOR] = { "bool?", "Use cursor animations" },
 
     [OPT_DIRECTORY_IDX] = { arg_path, "Start in directory" },
 

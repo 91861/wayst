@@ -350,6 +350,34 @@ static void VtGraphicLineAttachments_destroy(VtGraphicLineAttachments* self)
     }
 }
 
+typedef enum
+{
+    /* Proxy objects are up to date */
+    VT_LINE_DAMAGE_NONE = 0,
+
+    /* The entire line needs to be refreshed */
+    VT_LINE_DAMAGE_FULL,
+
+    /* Line contents were shifted 'shift' number of cells. Cells before 'front' and after
+        'end' may have changed */
+    VT_LINE_DAMAGE_SHIFT,
+
+    /* The characters between 'front' and 'end' need to be refreshed */
+    VT_LINE_DAMAGE_RANGE,
+} vt_line_damage_type_e;
+
+typedef struct
+{
+    /* Range of cells that should be repainted if type == RANGE or
+     * not repainted if type == SHIFT */
+    uint16_t front, end;
+
+    /* Number of cells the existing contents should be moved right */
+    int8_t shift;
+
+    vt_line_damage_type_e type;
+} vt_line_damage_t;
+
 typedef struct
 {
     /* Characters */
@@ -367,31 +395,7 @@ typedef struct
     /* Ref to command info if this is an output/invocation of a shell command */
     RcPtr_VtCommand linked_command;
 
-    struct VtLineDamage
-    {
-        /* Range of cells that should be repainted if type == RANGE or
-         * not repainted if type == SHIFT */
-        uint16_t front, end;
-
-        /* Number of cells the existing contents should be moved right */
-        int8_t shift;
-
-        enum VtLineDamageType
-        {
-            /* Proxy objects are up to date */
-            VT_LINE_DAMAGE_NONE = 0,
-
-            /* The entire line needs to be refreshed */
-            VT_LINE_DAMAGE_FULL,
-
-            /* Line contents were shifted 'shift' number of cells. Cells before 'front' and after
-               'end' may have changed */
-            VT_LINE_DAMAGE_SHIFT,
-
-            /* The characters between 'front' and 'end' need to be refreshed */
-            VT_LINE_DAMAGE_RANGE,
-        } type;
-    } damage;
+    vt_line_damage_t damage;
 
     /* Can be split by resizing window */
     bool reflowable : 1;
@@ -819,6 +823,10 @@ static ColorRGB Vt_rune_fg_no_invert(const Vt* self, const VtRune* rune);
 
 static ColorRGBA Vt_rune_bg_no_invert(const Vt* self, const VtRune* rune)
 {
+    if (!rune) {
+        return self->colors.bg;
+    }
+
     if (!rune->bg_is_palette_entry) {
         return rune->bg_data.rgba;
     } else if (rune->bg_data.index == VT_RUNE_PALETTE_INDEX_TERM_DEFAULT) {
@@ -830,6 +838,10 @@ static ColorRGBA Vt_rune_bg_no_invert(const Vt* self, const VtRune* rune)
 
 static ColorRGBA Vt_rune_bg(const Vt* self, const VtRune* rune)
 {
+    if (!rune) {
+        return self->colors.bg;
+    }
+
     if (rune->invert) {
         return ColorRGBA_from_RGB(Vt_rune_fg_no_invert(self, rune));
     } else {
@@ -839,6 +851,10 @@ static ColorRGBA Vt_rune_bg(const Vt* self, const VtRune* rune)
 
 static ColorRGB Vt_rune_fg_no_invert(const Vt* self, const VtRune* rune)
 {
+    if (!rune) {
+        return self->colors.fg;
+    }
+
     if (!rune->fg_is_palette_entry) {
         return rune->fg_data.rgb;
     } else if (rune->fg_data.index == VT_RUNE_PALETTE_INDEX_TERM_DEFAULT) {
@@ -853,6 +869,10 @@ static ColorRGB Vt_rune_fg_no_invert(const Vt* self, const VtRune* rune)
 
 static ColorRGB Vt_rune_fg(const Vt* self, const VtRune* rune)
 {
+    if (!rune) {
+        return self->colors.fg;
+    }
+
     if (rune->invert) {
         return ColorRGB_from_RGBA(Vt_rune_bg_no_invert(self, rune));
     } else {
@@ -862,6 +882,10 @@ static ColorRGB Vt_rune_fg(const Vt* self, const VtRune* rune)
 
 static ColorRGB Vt_rune_ln_clr(const Vt* self, const VtRune* rune)
 {
+    if (!rune) {
+        return self->colors.fg;
+    }
+
     if (rune->line_color_not_default) {
         if (rune->ln_clr_is_palette_entry) {
             return self->colors.palette_256[rune->ln_clr_data.index];
@@ -870,6 +894,31 @@ static ColorRGB Vt_rune_ln_clr(const Vt* self, const VtRune* rune)
         }
     } else {
         return Vt_rune_fg(self, rune);
+    }
+}
+
+static ColorRGB Vt_rune_cursor_fg(const Vt* self, const VtRune* rune)
+{
+    // TODO: custom cursor color
+    return ColorRGB_from_RGBA(rune ? Vt_rune_bg(self, rune) : self->colors.bg);
+}
+
+static ColorRGBA Vt_rune_cursor_bg(const Vt* self, const VtRune* rune)
+{
+    // TODO: custom cursor color
+    return ColorRGBA_from_RGB(Vt_rune_fg(self, rune));
+}
+
+static ColorRGB Vt_rune_cursor_ln_clr(const Vt* self, const VtRune* rune)
+{
+    if (rune->line_color_not_default) {
+        if (rune->ln_clr_is_palette_entry) {
+            return self->colors.palette_256[rune->ln_clr_data.index];
+        } else {
+            return rune->ln_clr_data.rgb;
+        }
+    } else {
+        return Vt_rune_cursor_fg(self, rune);
     }
 }
 
@@ -1026,14 +1075,14 @@ const char* Vt_uri_range_at(Vt*            self,
 
 /**
  * Get line under terminal cursor */
-static inline VtLine* Vt_cursor_line(Vt* self)
+static inline VtLine* Vt_cursor_line(const Vt* self)
 {
     return &self->lines.buf[self->cursor.row];
 }
 
 /**
  * Get cell under terminal cursor */
-static inline VtRune* Vt_cursor_cell(Vt* self)
+static inline VtRune* Vt_cursor_cell(const Vt* self)
 {
     VtLine* cursor_line = Vt_cursor_line(self);
     if (self->cursor.col >= cursor_line->data.size) {
@@ -1304,28 +1353,33 @@ bool Vt_is_cell_selected(const Vt* const self, int32_t x, int32_t y);
 
 /**
  * Get cursor row in screen coordinates */
-static inline uint16_t Vt_cursor_row(Vt* self)
+static inline uint16_t Vt_cursor_row(const Vt* self)
 {
     return self->cursor.row - Vt_top_line(self);
 }
 
+static inline uint16_t Vt_visual_cursor_row(const Vt* self)
+{
+    return self->cursor.row - Vt_visual_top_line(self);
+}
+
 /**
  * Get scroll region top line in global coordinates */
-static inline size_t Vt_get_scroll_region_top(Vt* self)
+static inline size_t Vt_get_scroll_region_top(const Vt* self)
 {
     return Vt_top_line(self) + self->scroll_region_top;
 }
 
 /**
  * Get scroll region bottom line in global coordinates */
-static inline size_t Vt_get_scroll_region_bottom(Vt* self)
+static inline size_t Vt_get_scroll_region_bottom(const Vt* self)
 {
     return Vt_top_line(self) + self->scroll_region_bottom;
 }
 
 /**
  * Is terminal scroll region set to default */
-static inline bool Vt_scroll_region_not_default(Vt* self)
+static inline bool Vt_scroll_region_not_default(const Vt* self)
 {
     return Vt_get_scroll_region_top(self) != Vt_top_line(self) ||
            Vt_get_scroll_region_bottom(self) != Vt_bottom_line(self);
@@ -1407,15 +1461,25 @@ static VtCommand* Vt_shell_integration_get_active_command(Vt* self)
     return cmd->state == VT_COMMAND_STATE_RUNNING ? cmd : NULL;
 }
 
-ColorRGBA Vt_rune_final_bg(const Vt* self, const VtRune* rune, int32_t x, int32_t y);
-ColorRGB  Vt_rune_final_fg(const Vt*     self,
+ColorRGBA Vt_rune_final_bg(const Vt*     self,
                            const VtRune* rune,
                            int32_t       x,
                            int32_t       y,
-                           ColorRGBA     bg_color);
-ColorRGB  Vt_rune_final_fg_apply_dim(const Vt* self, const VtRune* rune, ColorRGBA bg_color);
+                           bool          is_cursor);
 
-static bool Vt_is_reporting_mouse(Vt* self)
+ColorRGB Vt_rune_final_fg(const Vt*     self,
+                          const VtRune* rune,
+                          int32_t       x,
+                          int32_t       y,
+                          ColorRGBA     bg_color,
+                          bool          is_cursor);
+
+ColorRGB Vt_rune_final_fg_apply_dim(const Vt*     self,
+                                    const VtRune* rune,
+                                    ColorRGBA     bg_color,
+                                    bool          is_cursor);
+
+static bool Vt_is_reporting_mouse(const Vt* self)
 {
     return self->modes.mouse_btn_report || self->modes.mouse_motion_report ||
            self->modes.mouse_motion_on_btn_report || self->modes.extended_report;

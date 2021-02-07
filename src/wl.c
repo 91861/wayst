@@ -990,8 +990,10 @@ static void keyboard_handle_repeat_info(void*               data,
                                         int32_t             rate,
                                         int32_t             delay)
 {
-    globalWl->kbd_repeat_rate  = OR(rate, 33);
-    globalWl->kbd_repeat_dealy = OR(delay, 500);
+    struct WindowBase* win      = data;
+    globalWl->kbd_repeat_rate   = OR(rate, 33);
+    globalWl->kbd_repeat_dealy  = OR(delay, 500);
+    win->key_repeat_interval_ms = globalWl->kbd_repeat_rate;
 }
 
 static const struct wl_keyboard_listener keyboard_listener = { .keymap = keyboard_handle_keymap,

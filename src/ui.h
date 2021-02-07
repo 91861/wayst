@@ -8,6 +8,7 @@
 
 #include "timing.h"
 #include "util.h"
+#include "vt.h"
 
 struct Cursor;
 
@@ -27,13 +28,23 @@ typedef struct
 
 typedef struct
 {
-    uint8_t        pixel_offset_x, pixel_offset_y;
+    uint8_t pixel_offset_x, pixel_offset_y;
+
     Scrollbar      scrollbar;
     struct Cursor* cursor;
+    double         cursor_cell_fraction;
+    double         cursor_cell_anim_start_point_cell_fraction;
+    uint16_t       last_cursor_cell_position;
+    uint16_t       last_cursor_row_position;
+
     hovered_link_t hovered_link;
     bool           draw_out_of_focus_tint;
     bool           window_in_focus;
     double         flash_fraction;
-    bool           draw_cursor_blinking;
-    bool           draw_text_blinking;
+
+    bool draw_cursor_blinking;
+    bool draw_text_blinking;
+
+    VtLineProxy      cursor_proxy;
+    vt_line_damage_t cursor_damage;
 } Ui;

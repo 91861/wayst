@@ -35,9 +35,6 @@ static void Vt_shift_global_line_index_refs(Vt* self, size_t point, int64_t chan
 static inline size_t Vt_top_line(const Vt* const self);
 void                 Vt_visual_scroll_to(Vt* self, size_t line);
 void                 Vt_visual_scroll_reset(Vt* self);
-static inline size_t Vt_get_scroll_region_top(Vt* self);
-static inline size_t Vt_get_scroll_region_bottom(Vt* self);
-static inline bool   Vt_scroll_region_not_default(Vt* self);
 static void          Vt_alt_buffer_on(Vt* self, bool save_mouse);
 static void          Vt_alt_buffer_off(Vt* self, bool save_mouse);
 static void          Vt_handle_multi_argument_SGR(Vt* self, Vector_char seq, VtRune* opt_target);
