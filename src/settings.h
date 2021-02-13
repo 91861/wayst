@@ -189,8 +189,10 @@ typedef struct
     enum lcd_filter_e lcd_filter;
 
     /* colors - normal, highlight */
-    ColorRGBA bg, bghl;
-    ColorRGB  fg, fghl;
+    ColorRGBA bg, bghl, cursor_bg;
+    ColorRGB  fg, fghl, cursor_fg;
+
+    bool cursor_color_static_bg, cursor_color_static_fg;
 
     ColorRGBA dim_tint;
 
@@ -220,11 +222,12 @@ typedef struct
     bool    allow_scrollback_clear;
     bool    scroll_on_output;
     bool    scroll_on_key;
+    bool    hold_after_child_process_exit;
     uint8_t scroll_discrete_lines;
 
     bool allow_multiple_underlines;
 
-    bool debug_pty, debug_gfx, debug_font, debug_vt;
+    bool     debug_pty, debug_gfx, debug_font, debug_vt;
     uint32_t vt_debug_delay_usec;
 
     uint32_t scrollback;

@@ -554,6 +554,7 @@ typedef struct
         void (*on_command_state_changed)(void*);
         void (*on_gui_pointer_mode_changed)(void*);
         void (*on_buffer_changed)(void*);
+        void (*on_visual_scroll_reset)(void*);
         void (*on_mouse_report_state_changed)(void*);
         const char* (*on_application_hostname_requested)(void*);
 
@@ -899,14 +900,15 @@ static ColorRGB Vt_rune_ln_clr(const Vt* self, const VtRune* rune)
 
 static ColorRGB Vt_rune_cursor_fg(const Vt* self, const VtRune* rune)
 {
-    // TODO: custom cursor color
-    return ColorRGB_from_RGBA(rune ? Vt_rune_bg(self, rune) : self->colors.bg);
+    return settings.cursor_color_static_fg
+             ? settings.cursor_fg
+             : ColorRGB_from_RGBA(rune ? Vt_rune_bg(self, rune) : self->colors.bg);
 }
 
 static ColorRGBA Vt_rune_cursor_bg(const Vt* self, const VtRune* rune)
 {
-    // TODO: custom cursor color
-    return ColorRGBA_from_RGB(Vt_rune_fg(self, rune));
+    return settings.cursor_color_static_bg ? settings.cursor_bg
+                                           : ColorRGBA_from_RGB(Vt_rune_fg(self, rune));
 }
 
 static ColorRGB Vt_rune_cursor_ln_clr(const Vt* self, const VtRune* rune)

@@ -337,5 +337,6 @@ void Vt_handle_key(void* _self, uint32_t key, uint32_t rawkey, uint32_t mods)
 
     if (settings.scroll_on_key) {
         Vt_visual_scroll_reset(self);
+        self->callbacks.on_visual_scroll_reset(self->callbacks.user_data);
     }
 }

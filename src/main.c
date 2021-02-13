@@ -664,8 +664,10 @@ static void App_clamp_cursor(App* self, Pair_uint32_t chars)
 
 static void App_exit_handler(void* self)
 {
-    App* app  = self;
-    app->exit = true;
+    App* app = self;
+    if (!settings.hold_after_child_process_exit) {
+        app->exit = true;
+    }
 }
 
 static int App_get_ksm_number(App* self)
@@ -1902,19 +1904,28 @@ static void App_set_text_area_size(void* self, int32_t width, int32_t height)
 
 static Pair_uint32_t App_text_area_size(void* self)
 {
-    App* app = self;
-
+    App*          app      = self;
     Pair_uint32_t win_size = Window_size(app->win);
     win_size.first -= settings.padding;
     win_size.second -= settings.padding;
-
     return win_size;
+}
+
+static void App_visual_scroll_reset_handler(void* self)
+{
+    App* app = self;
+    if (app->ui.scrollbar.visible) {
+        App_update_scrollbar_dims(self);
+        App_show_scrollbar(self);
+    }
 }
 
 static void App_set_urgent(void* self)
 {
-    if (!Window_is_focused(((App*)self)->win))
-        Window_set_urgent(((App*)self)->win);
+    App* app = self;
+    if (!Window_is_focused(app->win)) {
+        Window_set_urgent(app->win);
+    }
 }
 
 static void App_restack_to_front(void* self)
@@ -1925,11 +1936,9 @@ static void App_restack_to_front(void* self)
 static const char* App_get_hostname(void* self)
 {
     App* app = self;
-
     if (!app->hostname) {
         app->hostname = get_hostname();
     }
-
     return app->hostname;
 }
 
@@ -1968,6 +1977,7 @@ static void App_set_callbacks(App* self)
     self->vt.callbacks.on_mouse_report_state_changed       = App_mouse_report_changed;
     self->vt.callbacks.on_buffer_changed                   = App_buffer_changed;
     self->vt.callbacks.on_gui_pointer_mode_changed         = App_gui_pointer_mode_change_handler;
+    self->vt.callbacks.on_visual_scroll_reset              = App_visual_scroll_reset_handler;
 
     self->win->callbacks.user_data               = self;
     self->win->callbacks.key_handler             = App_key_handler;

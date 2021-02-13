@@ -106,8 +106,7 @@ static double _fmt_eval_operand(Map_size_t_fmt_arg_t* vars, Vector_char* expr, c
             case FMT_ARG_TYPE_FLOAT:
                 return *((float*)arg->addr);
             case FMT_ARG_TYPE_STRING:
-                *e = "cannot cast string to numeric type";
-                return 0;
+                return *((const char**)arg->addr) ? strlen(*(const char**)arg->addr) : 0;
         }
     } else {
         bool fnd_alpha = false;

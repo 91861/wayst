@@ -38,9 +38,9 @@
 
 #ifndef DFT_TITLE_FMT
 #define DFT_TITLE_FMT                                                                              \
-    "{sVtTitle}{?bCommandIsRunning && !bIsAltBufferEnabled && "                                    \
+    "{?sVtTitle:{sVtTitle} - }{?bCommandIsRunning && !bIsAltBufferEnabled && "                     \
     "i32CommandTimeSec > 1: "                                                                      \
-    "({sRunningCommand})} - {sAppTitle}"
+    "({sRunningCommand}) }{sAppTitle}"
 #endif
 
 #ifndef DFT_TERM
@@ -790,10 +790,15 @@ static void settings_make_default()
         .font_dpi           = 96,
         .lcd_filter         = LCD_FILTER_H_RGB,
 
-        .bg     = { .r = 0,   .g = 0,   .b = 0,  .a = 240 },
-        .bghl   = { .r = 50,  .g = 50,  .b = 50, .a = 240 },
-        .fg     = { .r = 255, .g = 255, .b = 255 },
-        .fghl   = { .r = 255, .g = 255, .b = 255 },
+        .bg        = { .r = 0,   .g = 0,   .b = 0,   .a = 240 },
+        .bghl      = { .r = 50,  .g = 50,  .b = 50,  .a = 240 },
+        .cursor_bg = { .r = 255, .g = 255, .b = 255, .a = 255 },
+        .cursor_fg = { .r =   0, .g =   0, .b =   0 },
+        .fg        = { .r = 255, .g = 255, .b = 255 },
+        .fghl      = { .r = 255, .g = 255, .b = 255 },
+
+        .cursor_color_static_bg = false,
+        .cursor_color_static_fg = false,
 
         .dim_tint = { .r = 0, .g = 0, .b = 0, .a = 0 },
 
@@ -826,10 +831,11 @@ static void settings_make_default()
 
         .bell_flash = { .r = 200, .g = 200, .b = 200, .a = 30 },
 
-        .allow_scrollback_clear = false,
-        .scroll_on_output       = false,
-        .scroll_on_key          = true,
-        .scroll_discrete_lines  = 3,
+        .hold_after_child_process_exit = false,
+        .allow_scrollback_clear        = false,
+        .scroll_on_output              = false,
+        .scroll_on_key                 = true,
+        .scroll_discrete_lines         = 3,
 
         .allow_multiple_underlines = false,
 
@@ -915,7 +921,7 @@ static void print_help_and_exit()
            EXECUTABLE_FILE_NAME);
 
     for (uint32_t i = 0; i < OPT_SENTINEL_IDX; ++i) {
-        if (long_options[i].has_arg == no_argument && long_options[i].val) {
+        if (long_options[i].has_arg != required_argument && long_options[i].val) {
             printf(" " TERMCOLOR_BOLD "-%c" TERMCOLOR_RESET ", ", long_options[i].val);
         } else {
             printf("     ");
@@ -1039,6 +1045,9 @@ static void handle_option(const char opt, const int array_index, const char* val
             case 'a':
                 settings.smooth_cursor = true;
                 break;
+            case 'H':
+                settings.hold_after_child_process_exit = true;
+                break;
         }
         return;
     }
@@ -1122,6 +1131,10 @@ static void handle_option(const char opt, const int array_index, const char* val
             if (value) {
                 settings.vt_debug_delay_usec = atoi(value);
             }
+            break;
+
+        case OPT_HOLD:
+            settings.hold_after_child_process_exit = value ? strtob(value) : true;
             break;
 
         case OPT_DEBUG_GFX_IDX:
@@ -1574,6 +1587,36 @@ static void handle_option(const char opt, const int array_index, const char* val
             }
         } break;
 
+        case OPT_C_FG_COLOR_IDX: {
+            bool failed = false;
+            if (!strcasecmp(value, "none")) {
+                settings.cursor_color_static_fg = false;
+            } else {
+                ColorRGB parsed = ColorRGB_from_hex(value, &failed);
+                if (!failed) {
+                    settings.cursor_color_static_fg = true;
+                    settings.cursor_fg              = parsed;
+                } else {
+                    L_WARN_BAD_COLOR
+                }
+            }
+        } break;
+
+        case OPT_C_BG_COLOR_IDX: {
+            bool failed = false;
+            if (!strcasecmp(value, "none")) {
+                settings.cursor_color_static_bg = false;
+            } else {
+                ColorRGBA parsed = ColorRGBA_from_hex(value, &failed);
+                if (!failed) {
+                    settings.cursor_color_static_bg = true;
+                    settings.cursor_bg              = parsed;
+                } else {
+                    L_WARN_BAD_COLOR
+                }
+            }
+        } break;
+
         case OPT_COLOR_0_IDX ... OPT_COLOR_15_IDX: {
             bool     failed = false;
             ColorRGB parsed = ColorRGB_from_hex(value, &failed);
@@ -1712,7 +1755,7 @@ static void settings_get_opts(const int argc, char* const* argv, const bool cfg_
         /* print 'invalid option' error message only once */
         opterr   = cfg_file_check;
         int opid = 0;
-        o        = getopt_long(argc, argv, "XctDGFhvloa", long_options, &opid);
+        o        = getopt_long(argc, argv, "XctDGFhvloaH", long_options, &opid);
         if (o == -1) {
             break;
         }
