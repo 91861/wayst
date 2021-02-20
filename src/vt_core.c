@@ -4741,6 +4741,7 @@ static inline void Vt_erase_to_end(Vt* self)
         Vt_empty_line_fill_bg(self, i);
     }
     Vt_clear_right(self);
+    Vt_clear_proxies_in_region(self, self->cursor.row, Vt_bottom_line(self));
 }
 
 static inline void Vt_handle_backspace(Vt* self)

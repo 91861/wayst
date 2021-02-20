@@ -25,7 +25,7 @@
 
 DEF_PAIR(GLuint);
 
-#define NUM_BUCKETS 256
+#define NUM_BUCKETS 513
 
 #ifndef ATLAS_SIZE_LIMIT
 #define ATLAS_SIZE_LIMIT INT32_MAX
@@ -41,9 +41,8 @@ DEF_PAIR(GLuint);
 
 #define PROXY_INDEX_TEXTURE           0
 #define PROXY_INDEX_TEXTURE_BLINK     1
-#define PROXY_INDEX_SIZE              2
-#define PROXY_INDEX_DEPTHBUFFER       3
-#define PROXY_INDEX_DEPTHBUFFER_BLINK 4
+#define PROXY_INDEX_DEPTHBUFFER       2
+#define PROXY_INDEX_DEPTHBUFFER_BLINK 3
 
 #define IMG_PROXY_INDEX_TEXTURE_ID 0
 
@@ -51,6 +50,13 @@ DEF_PAIR(GLuint);
 
 #define SIXEL_PROXY_INDEX_TEXTURE_ID 0
 #define SIXEL_PROXY_INDEX_VBO_ID     1
+
+#define BOUND_RESOURCES_NONE      0
+#define BOUND_RESOURCES_BG        1
+#define BOUND_RESOURCES_FONT      2
+#define BOUND_RESOURCES_LINES     3
+#define BOUND_RESOURCES_IMAGE     4
+#define BOUND_RESOURCES_FONT_MONO 5
 
 #include "gl_exts/glext.h"
 
@@ -202,9 +208,8 @@ DEF_VECTOR(vertex_t, NULL);
 
 typedef struct
 {
-    GLuint   color_tex;
-    GLuint   depth_rb;
-    uint32_t width;
+    GLuint color_tex;
+    GLuint depth_rb;
 } LineTexture;
 
 static void LineTexture_destroy(LineTexture* self)
@@ -273,6 +278,7 @@ typedef struct _GfxOpenGL21
     VBO flex_vbo;
 
     GLuint full_framebuffer_quad_vbo;
+    GLuint line_quads_vbo;
 
     /* pen position to begin drawing font */
     float pen_begin_y;
@@ -320,6 +326,7 @@ typedef struct _GfxOpenGL21
 
     Freetype* freetype;
 
+    int_fast8_t bound_resources;
 } GfxOpenGL21;
 
 #define gfxOpenGL21(gfx) ((GfxOpenGL21*)&gfx->extend_data)
@@ -341,6 +348,7 @@ void          GfxOpenGL21_destroy_proxy(Gfx* self, uint32_t* proxy);
 void          GfxOpenGL21_destroy_image_proxy(Gfx* self, uint32_t* proxy);
 void          GfxOpenGL21_destroy_image_view_proxy(Gfx* self, uint32_t* proxy);
 void          GfxOpenGL21_destroy_sixel_proxy(Gfx* self, uint32_t* proxy);
+static void   GfxOpenGL21_regenerate_line_quad_vbo(GfxOpenGL21* gfx);
 
 static struct IGfx gfx_interface_opengl21 = {
     .draw                        = GfxOpenGL21_draw,
@@ -1097,10 +1105,8 @@ void GfxOpenGL21_resize(Gfx* self, uint32_t w, uint32_t h)
     gl21->glyph_width       = gl21->glyph_width_pixels * gl21->sx;
     gl21->max_cells_in_line = gl21->win_w / gl21->glyph_width_pixels;
 
-    Pair_uint32_t cells = GfxOpenGL21_get_char_size(self);
-    cells               = GfxOpenGL21_pixels(self, cells.first, cells.second);
-
     glViewport(0, 0, gl21->win_w, gl21->win_h);
+    GfxOpenGL21_regenerate_line_quad_vbo(gl21);
 }
 
 Pair_uint32_t GfxOpenGL21_get_char_size(Gfx* self)
@@ -1182,12 +1188,17 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
     gl21->flex_vbo = VBO_new(4, 1, gl21->font_shader.attribs);
     glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 4 * 4, NULL, GL_STREAM_DRAW);
 
-    glGenBuffers(1, &gl21->full_framebuffer_quad_vbo);
+    GLuint new_vbos[2];
+    glGenBuffers(2, new_vbos);
+    gl21->full_framebuffer_quad_vbo = new_vbos[0];
+    gl21->line_quads_vbo            = new_vbos[1];
+
     glBindBuffer(GL_ARRAY_BUFFER, gl21->full_framebuffer_quad_vbo);
     static const float vertex_data[] = {
         1.0f, 1.0f, -1.0f, 1.0f, -1.0f, -1.0f, 1.0f, -1.0f,
     };
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_data), vertex_data, GL_STATIC_DRAW);
+    GfxOpenGL21_regenerate_line_quad_vbo(gl21);
 
     glGetIntegerv(GL_MAX_TEXTURE_SIZE, &gl21->max_tex_res);
 
@@ -1228,6 +1239,8 @@ void GfxOpenGL21_reload_font(Gfx* self)
     GlyphAtlas_destroy(&gl21->glyph_atlas);
     gl21->glyph_atlas = GlyphAtlas_new(1024);
 
+    GfxOpenGL21_regenerate_line_quad_vbo(gl21);
+
     // regenerate the squiggle texture
     glDeleteTextures(1, &gl21->squiggle_texture.id);
     uint32_t t_height = CLAMP(gl21->line_height_pixels / 8.0 + 2, 4, UINT8_MAX);
@@ -1235,23 +1248,14 @@ void GfxOpenGL21_reload_font(Gfx* self)
       create_squiggle_texture(t_height * M_PI / 2.0, t_height, CLAMP(t_height / 4, 1, 20));
 }
 
-/**
- * Generate vertex data for drawing lines on the backbuffer */
-static void GfxOpenGL21_generate_line_quads(GfxOpenGL21*  gfx,
-                                            VtLine* const vt_line,
-                                            uint_fast16_t line_index)
+static void GfxOpenGL21_regenerate_line_quad_vbo(GfxOpenGL21* gfx)
 {
-    if (vt_line->proxy.data[PROXY_INDEX_TEXTURE] ||
-        vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK]) {
-
-        if (vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK]) {
-            gfxBase(gfx)->has_blinking_text = true;
-        }
-
-        float tex_end_x   = -1.0f + vt_line->proxy.data[PROXY_INDEX_SIZE] * gfx->sx;
-        float tex_begin_y = 1.0f - gfx->line_height_pixels * (line_index + 1) * gfx->sy;
-
-        float buf[] = {
+    uint32_t     n_lines  = GfxOpenGL21_get_char_size(gfxBase(gfx)).second;
+    Vector_float transfer = Vector_new_with_capacity_float(n_lines * 4 * 4);
+    for (uint32_t i = 0; i < n_lines; ++i) {
+        float tex_end_x   = -1.0f + gfx->max_cells_in_line * gfx->glyph_width_pixels * gfx->sx;
+        float tex_begin_y = 1.0f - gfx->line_height_pixels * (i + 1) * gfx->sy;
+        float buf[]       = {
             -1.0f,     tex_begin_y + gfx->line_height,
             0.0f,      0.0f,
             -1.0,      tex_begin_y,
@@ -1261,65 +1265,699 @@ static void GfxOpenGL21_generate_line_quads(GfxOpenGL21*  gfx,
             tex_end_x, tex_begin_y + gfx->line_height,
             1.0f,      0.0f,
         };
-
-        Vector_pushv_float(&gfx->float_vec.buf[0], buf, ARRAY_SIZE(buf));
+        Vector_pushv_float(&transfer, buf, ARRAY_SIZE(buf));
     }
+
+    glBindBuffer(GL_ARRAY_BUFFER, gfx->line_quads_vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * transfer.size, transfer.buf, GL_STATIC_DRAW);
+    Vector_destroy_float(&transfer);
 }
 
-/**
- * Draw lines generated by GfxOpenGL21_generate_line_quads() */
-static uint_fast32_t GfxOpenGL21_draw_line_quads(GfxOpenGL21*  gfx,
-                                                 Ui*           ui,
-                                                 VtLine* const vt_line,
-                                                 uint_fast32_t quad_index)
+static void GfxOpenGL21_draw_line_quads(GfxOpenGL21*  gfx,
+                                        Ui*           ui,
+                                        VtLine* const vt_line,
+                                        uint32_t      quad_index)
 {
-    if (vt_line->proxy.data[PROXY_INDEX_TEXTURE] ||
-        vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK]) {
-
-        if (vt_line->proxy.data[PROXY_INDEX_TEXTURE] || !ui->draw_text_blinking) {
-            glBindTexture(GL_TEXTURE_2D,
-                          vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK] && !ui->draw_text_blinking
-                            ? vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK]
-                            : vt_line->proxy.data[PROXY_INDEX_TEXTURE]);
-            glDrawArrays(GL_QUADS, quad_index * 4, 4);
+    if (likely(vt_line->proxy.data[PROXY_INDEX_TEXTURE] ||
+               (vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK]))) {
+        uint8_t tidx = PROXY_INDEX_TEXTURE;
+        if (unlikely(vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK] && !ui->draw_text_blinking)) {
+            tidx = PROXY_INDEX_TEXTURE_BLINK;
         }
-        ++quad_index;
-    }
 
-    return quad_index;
+        GLuint tex_id = vt_line->proxy.data[tidx];
+        glBindTexture(GL_TEXTURE_2D, tex_id);
+        glDrawArrays(GL_QUADS, quad_index * 4, 4);
+    }
 }
 
-#define BOUND_RESOURCES_NONE      0
-#define BOUND_RESOURCES_BG        1
-#define BOUND_RESOURCES_FONT      2
-#define BOUND_RESOURCES_LINES     3
-#define BOUND_RESOURCES_IMAGE     4
-#define BOUND_RESOURCES_FONT_MONO 5
+typedef struct
+{
+    GfxOpenGL21*      gl21;
+    const Vt* const   vt;
+    VtLine*           vt_line;
+    VtLineProxy*      proxy;
+    vt_line_damage_t* damage;
+    size_t            visual_index;
+    uint16_t          cnd_cursor_column;
+    bool              is_for_cursor;
+    bool              is_for_blinking;
+} line_render_pass_args_t;
 
-/**
- * Draw a range of character *lines of a given VtLine
- *
- * Should only be called by GfxOpenGL21_rasterize_line() */
-__attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_underline_range(
-  const Vt*    vt,
-  GfxOpenGL21* gfx,
-  VtLine*      vt_line,
-  Pair_size_t  range,
-  int_fast8_t* bound_resources,
-  Pair_int32_t texture_dims)
+typedef struct
+{
+    uint16_t render_range_begin;
+    uint16_t render_range_end;
+} line_render_subpass_args_t;
+
+typedef struct
+{
+    line_render_subpass_args_t* prepared_subpass;
+    line_render_pass_args_t     args;
+    GLuint                      final_texture;
+    GLuint                      final_depthbuffer;
+    line_render_subpass_args_t  subpass_args[2];
+    uint16_t                    length;
+    uint8_t                     n_queued_subpasses;
+    bool                        has_blinking_chars;
+    bool                        has_underlined_chars;
+    bool                        is_reusing;
+    uint32_t                    texture_width;
+    uint32_t                    texture_height;
+} line_render_pass_t;
+
+static void line_reder_pass_run(line_render_pass_t* self);
+
+static bool should_create_line_render_pass(const line_render_pass_args_t* args)
+{
+    vt_line_damage_t* dmg = OR(args->damage, &args->vt_line->damage);
+    return !likely(!args->vt_line->data.size || (dmg->type == VT_LINE_DAMAGE_NONE));
+}
+
+static line_render_pass_t create_line_render_pass(const line_render_pass_args_t* args)
+{
+    line_render_pass_t rp = { .args                 = *args,
+                              .final_texture        = 0,
+                              .final_depthbuffer    = 0,
+                              .prepared_subpass     = NULL,
+                              .length               = args->vt_line->data.size,
+                              .has_underlined_chars = false,
+                              .has_blinking_chars   = false,
+                              .is_reusing           = false,
+                              .texture_width =
+                                args->gl21->max_cells_in_line * args->gl21->glyph_width_pixels,
+                              .texture_height     = args->gl21->line_height_pixels,
+                              .n_queued_subpasses = 0,
+                              .subpass_args       = {
+                                {
+                                  .render_range_begin = 0,
+                                  .render_range_end   = 0,
+                                },
+                                {
+                                  .render_range_begin = 0,
+                                  .render_range_end   = 0,
+                                },
+                              } };
+
+    if (!rp.args.proxy) {
+        rp.args.proxy = &rp.args.vt_line->proxy;
+    }
+
+    if (!rp.args.damage) {
+        rp.args.damage = &rp.args.vt_line->damage;
+    }
+
+    return rp;
+}
+
+static void line_render_pass_try_to_recover_proxies(line_render_pass_t* self)
+{
+    size_t proxy_tex_idx   = PROXY_INDEX_TEXTURE;
+    size_t proxy_depth_idx = PROXY_INDEX_DEPTHBUFFER;
+
+    if (unlikely(self->args.is_for_blinking)) {
+        proxy_tex_idx   = PROXY_INDEX_TEXTURE_BLINK;
+        proxy_depth_idx = PROXY_INDEX_DEPTHBUFFER_BLINK;
+    }
+
+    GLuint recovered_texture     = self->args.proxy->data[proxy_tex_idx];
+    GLuint recovered_depthbuffer = self->args.proxy->data[proxy_depth_idx];
+
+    self->is_reusing        = recovered_texture;
+    self->final_texture     = recovered_texture;
+    self->final_depthbuffer = recovered_depthbuffer;
+}
+
+static void line_render_pass_set_up_subpasses(line_render_pass_t* self)
+{
+#define CURSOR_OVERPAINT_FWD  3
+#define CURSOR_OVERPAINT_BACK 4
+
+    if (self->args.is_for_cursor) {
+        uint16_t range_begin_idx = self->args.cnd_cursor_column;
+        uint16_t range_end_idx   = range_begin_idx;
+
+        for (uint_fast8_t i = 0; i < CURSOR_OVERPAINT_BACK && range_begin_idx; ++i) {
+            --range_begin_idx;
+        }
+
+        for (uint_fast8_t i = 0; i < CURSOR_OVERPAINT_FWD && range_end_idx < self->length; ++i) {
+            ++range_end_idx;
+        }
+
+        self->subpass_args[0] = (line_render_subpass_args_t){
+            .render_range_begin = range_begin_idx,
+            .render_range_end   = range_end_idx,
+        };
+
+        self->n_queued_subpasses = 1;
+
+    } else /* not for cursor */ {
+        const VtLine* const ln = self->args.vt_line;
+
+        switch (self->args.damage->type) {
+            case VT_LINE_DAMAGE_RANGE: {
+                uint16_t range_begin_idx = self->args.damage->front;
+                uint16_t range_end_idx   = self->args.damage->end + 1;
+
+                while (range_begin_idx) {
+                    char32_t this_char = ln->data.buf[range_begin_idx].rune.code;
+                    char32_t prev_char = ln->data.buf[range_begin_idx - 1].rune.code;
+
+                    if (this_char == ' ' && !unicode_is_ambiguous_width(prev_char) &&
+                        wcwidth(prev_char) < 2) {
+                        break;
+                    }
+                    --range_begin_idx;
+                }
+
+                while (range_end_idx < self->args.vt_line->data.size && range_end_idx) {
+                    char32_t this_char = ln->data.buf[range_end_idx].rune.code;
+                    char32_t prev_char = ln->data.buf[range_end_idx - 1].rune.code;
+
+                    ++range_end_idx;
+                    if (this_char == ' ' && !unicode_is_ambiguous_width(prev_char) &&
+                        wcwidth(prev_char) < 2) {
+                        break;
+                    }
+                }
+
+                self->subpass_args[0] = (line_render_subpass_args_t){
+                    .render_range_begin = range_begin_idx,
+                    .render_range_end   = range_end_idx,
+                };
+
+                self->n_queued_subpasses = 1;
+            } break;
+
+            case VT_LINE_DAMAGE_SHIFT:
+                // TODO:
+            case VT_LINE_DAMAGE_FULL: {
+                self->subpass_args[0] = (line_render_subpass_args_t){
+                    .render_range_begin = 0,
+                    .render_range_end   = self->length,
+                };
+
+                self->n_queued_subpasses = 1;
+            } break;
+
+            default:
+                ASSERT_UNREACHABLE
+        }
+    }
+}
+
+static void line_render_pass_finalize(line_render_pass_t* self)
+{
+    // set proxy data to generated texture
+    if (unlikely(self->args.is_for_blinking)) {
+        self->args.proxy->data[PROXY_INDEX_TEXTURE_BLINK]     = self->final_texture;
+        self->args.proxy->data[PROXY_INDEX_DEPTHBUFFER_BLINK] = self->final_depthbuffer;
+        self->args.damage->type                               = VT_LINE_DAMAGE_NONE;
+        self->args.damage->shift                              = 0;
+        self->args.damage->front                              = 0;
+        self->args.damage->end                                = 0;
+    } else {
+        self->args.proxy->data[PROXY_INDEX_TEXTURE]     = self->final_texture;
+        self->args.proxy->data[PROXY_INDEX_DEPTHBUFFER] = self->final_depthbuffer;
+        if (!self->has_blinking_chars) {
+            self->args.damage->type  = VT_LINE_DAMAGE_NONE;
+            self->args.damage->shift = 0;
+            self->args.damage->front = 0;
+            self->args.damage->end   = 0;
+        }
+    }
+
+    if (unlikely(settings.debug_gfx)) {
+        static float debug_tint = 0.0f;
+        glDisable(GL_SCISSOR_TEST);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        Shader_use(&self->args.gl21->solid_fill_shader);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+        glColor4f(fabs(sin(debug_tint)), fabs(cos(debug_tint)), sin(debug_tint), 0.1);
+        glUniform4f(self->args.gl21->solid_fill_shader.uniforms[0].location,
+                    fabs(sin(debug_tint)),
+                    fabs(cos(debug_tint)),
+                    sin(debug_tint),
+                    0.1);
+        glBindBuffer(GL_ARRAY_BUFFER, self->args.gl21->full_framebuffer_quad_vbo);
+        glVertexAttribPointer(self->args.gl21->solid_fill_shader.attribs->location,
+                              2,
+                              GL_FLOAT,
+                              GL_FALSE,
+                              0,
+                              0);
+        glDrawArrays(GL_QUADS, 0, 4);
+
+        glDisable(GL_BLEND);
+        debug_tint += 0.5f;
+        if (debug_tint > M_PI) {
+            debug_tint -= M_PI;
+        }
+    }
+
+    glDisable(GL_DEPTH_TEST);
+
+    glBindFramebuffer(GL_FRAMEBUFFER, self->args.gl21->line_framebuffer);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    gl_check_error();
+
+    glViewport(0, 0, self->args.gl21->win_w, self->args.gl21->win_h);
+
+    // There are no blinking characters, but their resources still exist
+    if (!self->has_blinking_chars && self->args.proxy->data[PROXY_INDEX_TEXTURE_BLINK]) {
+        // TODO: recycle?
+        glDeleteTextures(1, (GLuint*)&self->args.proxy->data[PROXY_INDEX_TEXTURE_BLINK]);
+        self->args.proxy->data[PROXY_INDEX_TEXTURE_BLINK] = 0;
+
+        ASSERT(self->args.proxy->data[PROXY_INDEX_DEPTHBUFFER_BLINK],
+               "deleted proxy texture has depth rb");
+        glDeleteRenderbuffers(1, (GLuint*)&self->args.proxy->data[PROXY_INDEX_DEPTHBUFFER_BLINK]);
+        self->args.proxy->data[PROXY_INDEX_DEPTHBUFFER_BLINK] = 0;
+    }
+}
+
+static void line_render_pass_set_up_framebuffer(line_render_pass_t* self)
+{
+    if (self->is_reusing) {
+        glBindFramebuffer(GL_FRAMEBUFFER, self->args.gl21->line_framebuffer);
+
+        glBindTexture(GL_TEXTURE_2D, self->final_texture);
+        glFramebufferTexture2D(GL_FRAMEBUFFER,
+                               GL_COLOR_ATTACHMENT0,
+                               GL_TEXTURE_2D,
+                               self->final_texture,
+                               0);
+        glBindRenderbuffer(GL_RENDERBUFFER, self->final_depthbuffer);
+        glFramebufferRenderbuffer(GL_FRAMEBUFFER,
+                                  GL_DEPTH_ATTACHMENT,
+                                  GL_RENDERBUFFER,
+                                  self->final_depthbuffer);
+
+        glViewport(0, 0, self->texture_width, self->texture_height);
+
+        gl_check_error();
+    } else {
+        if (!self->args.is_for_blinking) {
+            GfxOpenGL21_destroy_proxy(
+              (void*)((uint8_t*)self->args.gl21 - offsetof(Gfx, extend_data)),
+              self->args.proxy->data);
+        }
+        if (!self->args.vt_line->data.size) {
+            return;
+        }
+
+        GLuint recycle_tex_id = self->args.gl21->recycled_textures[0].color_tex;
+
+        if (recycle_tex_id) {
+            Pair_GLuint recycled = GfxOpenGL21_pop_recycled(self->args.gl21);
+            ASSERT(recycled.second, "recovered texture has a depth rb");
+            self->final_texture     = recycled.first;
+            self->final_depthbuffer = recycled.second;
+            glBindFramebuffer(GL_FRAMEBUFFER, self->args.gl21->line_framebuffer);
+            glBindTexture(GL_TEXTURE_2D, self->final_texture);
+
+            glFramebufferTexture2D(GL_FRAMEBUFFER,
+                                   GL_COLOR_ATTACHMENT0,
+                                   GL_TEXTURE_2D,
+                                   self->final_texture,
+                                   0);
+
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER,
+                                      GL_DEPTH_ATTACHMENT,
+                                      GL_RENDERBUFFER,
+                                      self->final_depthbuffer);
+            gl_check_error();
+
+        } else {
+            // Generate new framebuffer attachments
+            glGenTextures(1, &self->final_texture);
+            glBindTexture(GL_TEXTURE_2D, self->final_texture);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            glTexImage2D(GL_TEXTURE_2D,
+                         0,
+                         GL_RGBA,
+                         self->texture_width,
+                         self->texture_height,
+                         0,
+                         GL_RGBA,
+                         GL_UNSIGNED_BYTE,
+                         0);
+
+            glGenRenderbuffers(1, &self->final_depthbuffer);
+            glBindRenderbuffer(GL_RENDERBUFFER, self->final_depthbuffer);
+            glRenderbufferStorage(GL_RENDERBUFFER,
+                                  GL_DEPTH_COMPONENT,
+                                  self->texture_width,
+                                  self->texture_height);
+
+            glBindFramebuffer(GL_FRAMEBUFFER, self->args.gl21->line_framebuffer);
+            glFramebufferTexture2D(GL_FRAMEBUFFER,
+                                   GL_COLOR_ATTACHMENT0,
+                                   GL_TEXTURE_2D,
+                                   self->final_texture,
+                                   0);
+
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER,
+                                      GL_DEPTH_ATTACHMENT,
+                                      GL_RENDERBUFFER,
+                                      self->final_depthbuffer);
+            gl_check_error();
+        }
+    }
+
+    assert_farmebuffer_complete();
+}
+
+typedef struct
+{
+    line_render_subpass_args_t* args;
+} line_render_subpass_t;
+
+static line_render_subpass_t line_render_pass_create_subpass(line_render_pass_t*         self,
+                                                             line_render_subpass_args_t* args)
+{
+    line_render_subpass_t sub = {
+        .args = args,
+    };
+
+    return sub;
+}
+
+static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
+                                             line_render_subpass_t* subpass)
+{
+    const double scalex = 2.0 / pass->texture_width;
+    const double scaley = 2.0 / pass->texture_height;
+
+    GLint bg_pixels_begin = subpass->args->render_range_begin * pass->args.gl21->glyph_width_pixels,
+          bg_pixels_end;
+    ColorRGBA active_bg_color =
+      pass->args.is_for_cursor ? Vt_rune_cursor_bg(pass->args.vt, NULL) : pass->args.vt->colors.bg;
+    VtRune* each_rune = pass->args.vt_line->data.buf + subpass->args->render_range_begin;
+    VtRune* same_bg_block_begin_rune = each_rune;
+    VtRune* cursor_rune              = Vt_cursor_cell(pass->args.vt);
+
+    for (uint16_t idx_each_rune = subpass->args->render_range_begin;
+         idx_each_rune <= subpass->args->render_range_end;) {
+        each_rune = pass->args.vt_line->data.buf + idx_each_rune;
+        if (likely(idx_each_rune != subpass->args->render_range_end)) {
+            if (unlikely(each_rune->blinkng)) {
+                pass->has_blinking_chars = true;
+            }
+            if (!pass->has_underlined_chars &&
+                unlikely(each_rune->underlined || each_rune->strikethrough ||
+                         each_rune->doubleunderline || each_rune->curlyunderline ||
+                         each_rune->overline || each_rune->hyperlink_idx)) {
+                pass->has_underlined_chars = true;
+            }
+        }
+
+        if (idx_each_rune == subpass->args->render_range_end ||
+            !ColorRGBA_eq(Vt_rune_final_bg(pass->args.vt,
+                                           pass->args.is_for_cursor ? cursor_rune : each_rune,
+                                           idx_each_rune,
+                                           pass->args.visual_index,
+                                           pass->args.is_for_cursor),
+                          active_bg_color)) {
+            int32_t extra_width = 0;
+
+            if (idx_each_rune > 1) {
+                extra_width =
+                  MAX(wcwidth(pass->args.vt_line->data.buf[idx_each_rune - 1].rune.code) - 2, 0);
+            }
+
+            bg_pixels_end = (idx_each_rune + extra_width) * pass->args.gl21->glyph_width_pixels;
+
+            glEnable(GL_SCISSOR_TEST);
+            glScissor(bg_pixels_begin, 0, bg_pixels_end - bg_pixels_begin, pass->texture_height);
+
+            glClearColor(ColorRGBA_get_float(active_bg_color, 0),
+                         ColorRGBA_get_float(active_bg_color, 1),
+                         ColorRGBA_get_float(active_bg_color, 2),
+                         ColorRGBA_get_float(active_bg_color, 3));
+
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+            { // for each block of characters with the same background color
+                ColorRGB      active_fg_color              = settings.fg;
+                const VtRune* same_colors_block_begin_rune = same_bg_block_begin_rune;
+
+                for (const VtRune* each_rune_same_bg = same_bg_block_begin_rune;
+                     each_rune_same_bg != each_rune + 1;
+                     ++each_rune_same_bg) {
+
+                    if (each_rune_same_bg == each_rune ||
+                        !ColorRGB_eq(
+                          Vt_rune_final_fg(pass->args.vt,
+                                           each_rune_same_bg,
+                                           each_rune_same_bg - pass->args.vt_line->data.buf,
+                                           pass->args.visual_index,
+                                           active_bg_color,
+                                           pass->args.is_for_cursor),
+                          active_fg_color)) {
+
+                        /* Dummy value with we can point to to filter out a character */
+                        VtRune        same_color_blank_space;
+                        const VtRune* each_rune_filtered_visible;
+
+                        for (Vector_float* i = NULL;
+                             (i = Vector_iter_Vector_float(&pass->args.gl21->float_vec, i));) {
+                            Vector_clear_float(i);
+                        }
+
+                        for (const VtRune* each_rune_same_colors = same_colors_block_begin_rune;
+                             each_rune_same_colors != each_rune_same_bg;
+                             ++each_rune_same_colors) {
+                            size_t column = each_rune_same_colors - pass->args.vt_line->data.buf;
+
+                            /* Filter out stuff that should be hidden on this pass */
+                            if (unlikely(
+                                  (pass->args.is_for_blinking && each_rune_same_colors->blinkng) ||
+                                  each_rune_same_colors->hidden)) {
+                                same_color_blank_space           = *each_rune_same_colors;
+                                same_color_blank_space.rune.code = ' ';
+                                each_rune_filtered_visible       = &same_color_blank_space;
+                            } else {
+                                each_rune_filtered_visible = each_rune_same_colors;
+                            }
+
+                            if (each_rune_filtered_visible->rune.code > ' ') {
+                                GlyphAtlasEntry* entry =
+                                  GlyphAtlas_get(pass->args.gl21,
+                                                 &pass->args.gl21->glyph_atlas,
+                                                 &each_rune_filtered_visible->rune);
+                                if (!entry) {
+                                    continue;
+                                }
+
+                                float h = (float)entry->height * scaley;
+                                float w = (float)entry->width * scalex;
+                                float t = entry->top * scaley;
+                                float l = entry->left * scalex;
+
+                                if (unlikely(h > 2.0f && entry->can_scale)) {
+                                    float s = h / 2.0f;
+                                    h /= s;
+                                    w /= s;
+                                    t /= s;
+                                    l /= s;
+                                }
+
+                                float x3 =
+                                  -1.0 +
+                                  (double)column * pass->args.gl21->glyph_width_pixels * scalex +
+                                  l + pass->args.gl21->pen_begin_pixels_x * scalex;
+                                float y3 = -1.0 + pass->args.gl21->pen_begin_pixels_y * scaley - t;
+
+                                float buf[] = {
+                                    x3,     y3,     entry->tex_coords[0], entry->tex_coords[1],
+                                    x3 + w, y3,     entry->tex_coords[2], entry->tex_coords[1],
+                                    x3 + w, y3 + h, entry->tex_coords[2], entry->tex_coords[3],
+                                    x3,     y3 + h, entry->tex_coords[0], entry->tex_coords[3],
+                                };
+
+                                while (pass->args.gl21->float_vec.size <= entry->page_id) {
+                                    Vector_push_Vector_float(&pass->args.gl21->float_vec,
+                                                             Vector_new_float());
+                                }
+
+                                Vector_pushv_float(&pass->args.gl21->float_vec.buf[entry->page_id],
+                                                   buf,
+                                                   ARRAY_SIZE(buf));
+                            }
+                        }
+                        GLint clip_begin =
+                          (same_colors_block_begin_rune - pass->args.vt_line->data.buf) *
+                          pass->args.gl21->glyph_width_pixels;
+                        GLsizei clip_end = (each_rune_same_bg - pass->args.vt_line->data.buf) *
+                                           pass->args.gl21->glyph_width_pixels;
+
+                        glEnable(GL_SCISSOR_TEST);
+                        glScissor(clip_begin, 0, clip_end - clip_begin, pass->texture_height);
+
+                        // actual drawing
+                        for (size_t i = 0; i < pass->args.gl21->glyph_atlas.pages.size; ++i) {
+                            Vector_float*   v    = &pass->args.gl21->float_vec.buf[i];
+                            GlyphAtlasPage* page = &pass->args.gl21->glyph_atlas.pages.buf[i];
+
+                            glBindTexture(GL_TEXTURE_2D, page->texture_id);
+                            glBindBuffer(GL_ARRAY_BUFFER, pass->args.gl21->flex_vbo.vbo);
+
+                            size_t newsize = v->size * sizeof(float);
+                            ARRAY_BUFFER_SUB_OR_SWAP(v->buf,
+                                                     pass->args.gl21->flex_vbo.size,
+                                                     newsize);
+
+                            switch (page->texture_format) {
+                                case TEX_FMT_RGB:
+                                    if (pass->args.gl21->bound_resources != BOUND_RESOURCES_FONT) {
+                                        pass->args.gl21->bound_resources = BOUND_RESOURCES_FONT;
+                                        glUseProgram(pass->args.gl21->font_shader.id);
+                                    }
+                                    glVertexAttribPointer(
+                                      pass->args.gl21->font_shader.attribs->location,
+                                      4,
+                                      GL_FLOAT,
+                                      GL_FALSE,
+                                      0,
+                                      0);
+                                    glUniform3f(pass->args.gl21->font_shader.uniforms[1].location,
+                                                ColorRGB_get_float(active_fg_color, 0),
+                                                ColorRGB_get_float(active_fg_color, 1),
+                                                ColorRGB_get_float(active_fg_color, 2));
+                                    glUniform4f(pass->args.gl21->font_shader.uniforms[2].location,
+                                                ColorRGBA_get_float(active_bg_color, 0),
+                                                ColorRGBA_get_float(active_bg_color, 1),
+                                                ColorRGBA_get_float(active_bg_color, 2),
+                                                ColorRGBA_get_float(active_bg_color, 3));
+                                    break;
+
+                                case TEX_FMT_MONO:
+                                    if (pass->args.gl21->bound_resources !=
+                                        BOUND_RESOURCES_FONT_MONO) {
+                                        pass->args.gl21->bound_resources =
+                                          BOUND_RESOURCES_FONT_MONO;
+                                        glUseProgram(pass->args.gl21->font_shader_gray.id);
+                                    }
+                                    glVertexAttribPointer(
+                                      pass->args.gl21->font_shader_gray.attribs->location,
+                                      4,
+                                      GL_FLOAT,
+                                      GL_FALSE,
+                                      0,
+                                      0);
+                                    glUniform3f(
+                                      pass->args.gl21->font_shader_gray.uniforms[1].location,
+                                      ColorRGB_get_float(active_fg_color, 0),
+                                      ColorRGB_get_float(active_fg_color, 1),
+                                      ColorRGB_get_float(active_fg_color, 2));
+
+                                    glUniform4f(
+                                      pass->args.gl21->font_shader_gray.uniforms[2].location,
+                                      ColorRGBA_get_float(active_bg_color, 0),
+                                      ColorRGBA_get_float(active_bg_color, 1),
+                                      ColorRGBA_get_float(active_bg_color, 2),
+                                      ColorRGBA_get_float(active_bg_color, 3));
+                                    break;
+                                case TEX_FMT_RGBA:
+                                    if (pass->args.gl21->bound_resources != BOUND_RESOURCES_IMAGE) {
+                                        pass->args.gl21->bound_resources = BOUND_RESOURCES_IMAGE;
+                                        glUseProgram(pass->args.gl21->image_shader.id);
+                                    }
+
+                                    glEnable(GL_BLEND);
+                                    glBlendFuncSeparate(GL_ONE,
+                                                        GL_ONE_MINUS_SRC_COLOR,
+                                                        GL_ONE,
+                                                        GL_ONE);
+                                    glVertexAttribPointer(
+                                      pass->args.gl21->image_shader.attribs->location,
+                                      4,
+                                      GL_FLOAT,
+                                      GL_FALSE,
+                                      0,
+                                      0);
+                                default:;
+                            }
+
+                            glDrawArrays(GL_QUADS, 0, v->size / 4);
+                            glDisable(GL_BLEND);
+                        }
+                        // end drawing
+
+                        glDisable(GL_SCISSOR_TEST);
+
+                        if (each_rune_same_bg != each_rune) {
+                            same_colors_block_begin_rune = each_rune_same_bg;
+                            // update active fg color;
+                            if (settings.highlight_change_fg &&
+                                unlikely(Vt_is_cell_selected(pass->args.vt,
+                                                             each_rune_same_bg -
+                                                               pass->args.vt_line->data.buf,
+                                                             pass->args.visual_index))) {
+                                active_fg_color = pass->args.vt->colors.highlight.fg;
+                            } else {
+                                active_fg_color =
+                                  Vt_rune_final_fg_apply_dim(pass->args.vt,
+                                                             each_rune_same_bg,
+                                                             active_bg_color,
+                                                             pass->args.is_for_cursor);
+                            }
+                        }
+
+                    } // end for each block with the same color
+                }     // end for each char
+            }         // end for each block with the same bg
+
+            bg_pixels_begin = (idx_each_rune + extra_width) * pass->args.gl21->glyph_width_pixels;
+
+            int clip_begin = idx_each_rune * pass->args.gl21->glyph_width_pixels;
+            glEnable(GL_SCISSOR_TEST);
+            glScissor(clip_begin, 0, pass->texture_width, pass->texture_height);
+
+            if (idx_each_rune != subpass->args->render_range_end) {
+                same_bg_block_begin_rune = each_rune;
+                active_bg_color          = Vt_rune_final_bg(pass->args.vt,
+                                                   each_rune,
+                                                   idx_each_rune,
+                                                   pass->args.visual_index,
+                                                   pass->args.is_for_cursor);
+            }
+        } // end if bg color changed
+
+        int w = likely(idx_each_rune != subpass->args->render_range_end)
+                  ? wcwidth(pass->args.vt_line->data.buf[idx_each_rune].rune.code)
+                  : 1;
+
+        idx_each_rune = CLAMP(idx_each_rune + (unlikely(w > 1) ? w : 1),
+                              subpass->args->render_range_begin,
+                              (uint16_t)(pass->args.vt_line->data.size + 1));
+    }
+}
+
+static void line_reder_pass_run_line_subpass(const line_render_pass_t* pass,
+                                             line_render_subpass_t*    subpass)
 {
     /* Scale from pixels to GL coordinates */
-    const double scalex = 2.0f / texture_dims.first;
-    const double scaley = 2.0f / texture_dims.second;
+    const double scalex = 2.0f / pass->texture_width;
+    const double scaley = 2.0f / pass->texture_height;
 
     // draw lines
     static float begin[6]   = { -1, -1, -1, -1, -1 };
     static float end[6]     = { 1, 1, 1, 1, 1, 1 };
     static bool  drawing[6] = { 0 };
 
-    if (unlikely(range.first)) {
-        const float init_coord =
-          unlikely(range.second) ? -1.0f + gfx->glyph_width_pixels * scalex * range.first : 0.0f;
+    if (unlikely(subpass->args->render_range_begin)) {
+        const float init_coord = unlikely(subpass->args->render_range_end)
+                                   ? -1.0f + pass->args.gl21->glyph_width_pixels * scalex *
+                                               subpass->args->render_range_begin
+                                   : 0.0f;
 
         for (uint_fast8_t i = 0; i < ARRAY_SIZE(begin); ++i) {
             begin[i] = init_coord;
@@ -1327,35 +1965,39 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_underline_ra
     }
 
     // lines are drawn in the same color as the character, unless the line color was explicitly set
-    ColorRGB line_color = Vt_rune_ln_clr(vt, &vt_line->data.buf[range.first]);
+    ColorRGB line_color =
+      Vt_rune_ln_clr(pass->args.vt,
+                     &pass->args.vt_line->data.buf[subpass->args->render_range_begin]);
     glDisable(GL_SCISSOR_TEST);
     glEnable(GL_BLEND);
 
-    for (const VtRune* each_rune = vt_line->data.buf + range.first;
-         each_rune <= vt_line->data.buf + range.second;
+    for (const VtRune* each_rune = pass->args.vt_line->data.buf + subpass->args->render_range_begin;
+         each_rune <= pass->args.vt_line->data.buf + subpass->args->render_range_end;
          ++each_rune) {
 
         /* text column where this should be drawn */
-        size_t   column = each_rune - vt_line->data.buf;
+        size_t   column = each_rune - pass->args.vt_line->data.buf;
         ColorRGB nc     = { 0 };
-        if (each_rune != vt_line->data.buf + range.second) {
-            nc = Vt_rune_ln_clr(vt, each_rune);
+        if (each_rune != pass->args.vt_line->data.buf + subpass->args->render_range_end) {
+            nc = Vt_rune_ln_clr(pass->args.vt, each_rune);
         }
         // State has changed
-        if (!ColorRGB_eq(line_color, nc) || each_rune == vt_line->data.buf + range.second ||
+        if (!ColorRGB_eq(line_color, nc) ||
+            each_rune == pass->args.vt_line->data.buf + subpass->args->render_range_end ||
             each_rune->underlined != drawing[0] || each_rune->doubleunderline != drawing[1] ||
             each_rune->strikethrough != drawing[2] || each_rune->overline != drawing[3] ||
             each_rune->curlyunderline != drawing[4] ||
             (each_rune->hyperlink_idx != 0) != drawing[5]) {
 
-            if (each_rune == vt_line->data.buf + range.second) {
+            if (each_rune == pass->args.vt_line->data.buf + subpass->args->render_range_end) {
                 for (uint_fast8_t tmp = 0; tmp < ARRAY_SIZE(end); tmp++) {
-                    end[tmp] = -1.0f + (float)column * scalex * (float)gfx->glyph_width_pixels;
+                    end[tmp] =
+                      -1.0f + (float)column * scalex * (float)pass->args.gl21->glyph_width_pixels;
                 }
             } else {
 #define L_SET_BOUNDS_END(what, index)                                                              \
     if (drawing[index]) {                                                                          \
-        end[index] = -1.0f + (float)column * scalex * (float)gfx->glyph_width_pixels;              \
+        end[index] = -1.0f + (float)column * scalex * (float)pass->args.gl21->glyph_width_pixels;  \
     }
                 L_SET_BOUNDS_END(z->underlined, 0);
                 L_SET_BOUNDS_END(z->doubleunderline, 1);
@@ -1365,103 +2007,124 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_underline_ra
                 L_SET_BOUNDS_END(z->hyperlink_idx, 5);
             }
 
-            Vector_clear_vertex_t(&gfx->vec_vertex_buffer);
-            Vector_clear_vertex_t(&gfx->vec_vertex_buffer2);
+            Vector_clear_vertex_t(&pass->args.gl21->vec_vertex_buffer);
+            Vector_clear_vertex_t(&pass->args.gl21->vec_vertex_buffer2);
 
             if (drawing[0]) {
-                Vector_push_vertex_t(&gfx->vec_vertex_buffer,
+                Vector_push_vertex_t(&pass->args.gl21->vec_vertex_buffer,
                                      (vertex_t){ begin[0], 1.0f - scaley });
-                Vector_push_vertex_t(&gfx->vec_vertex_buffer, (vertex_t){ end[0], 1.0f - scaley });
+                Vector_push_vertex_t(&pass->args.gl21->vec_vertex_buffer,
+                                     (vertex_t){ end[0], 1.0f - scaley });
             }
             if (drawing[1]) {
-                Vector_push_vertex_t(&gfx->vec_vertex_buffer, (vertex_t){ begin[1], 1.0f });
-                Vector_push_vertex_t(&gfx->vec_vertex_buffer, (vertex_t){ end[1], 1.0f });
-                Vector_push_vertex_t(&gfx->vec_vertex_buffer,
+                Vector_push_vertex_t(&pass->args.gl21->vec_vertex_buffer,
+                                     (vertex_t){ begin[1], 1.0f });
+                Vector_push_vertex_t(&pass->args.gl21->vec_vertex_buffer,
+                                     (vertex_t){ end[1], 1.0f });
+                Vector_push_vertex_t(&pass->args.gl21->vec_vertex_buffer,
                                      (vertex_t){ begin[1], 1.0f - 2 * scaley });
-                Vector_push_vertex_t(&gfx->vec_vertex_buffer,
+                Vector_push_vertex_t(&pass->args.gl21->vec_vertex_buffer,
                                      (vertex_t){ end[1], 1.0f - 2 * scaley });
             }
             if (drawing[2]) {
-                Vector_push_vertex_t(&gfx->vec_vertex_buffer, (vertex_t){ begin[2], .2f });
-                Vector_push_vertex_t(&gfx->vec_vertex_buffer, (vertex_t){ end[2], .2f });
+                Vector_push_vertex_t(&pass->args.gl21->vec_vertex_buffer,
+                                     (vertex_t){ begin[2], .2f });
+                Vector_push_vertex_t(&pass->args.gl21->vec_vertex_buffer,
+                                     (vertex_t){ end[2], .2f });
             }
             if (drawing[3]) {
-                Vector_push_vertex_t(&gfx->vec_vertex_buffer,
+                Vector_push_vertex_t(&pass->args.gl21->vec_vertex_buffer,
                                      (vertex_t){ begin[3], -1.0f + scaley });
-                Vector_push_vertex_t(&gfx->vec_vertex_buffer, (vertex_t){ end[3], -1.0f + scaley });
+                Vector_push_vertex_t(&pass->args.gl21->vec_vertex_buffer,
+                                     (vertex_t){ end[3], -1.0f + scaley });
             }
             if (drawing[4]) {
-                float   cw      = gfx->glyph_width_pixels * scalex;
+                float   cw      = pass->args.gl21->glyph_width_pixels * scalex;
                 int32_t n_cells = round((end[4] - begin[4]) / cw);
-                float   t_y     = 1.0f - gfx->squiggle_texture.h * scaley;
+                float   t_y     = 1.0f - pass->args.gl21->squiggle_texture.h * scaley;
 
-                Vector_push_vertex_t(&gfx->vec_vertex_buffer2, (vertex_t){ begin[4], t_y });
-                Vector_push_vertex_t(&gfx->vec_vertex_buffer2, (vertex_t){ 0.0f, 0.0f });
+                Vector_push_vertex_t(&pass->args.gl21->vec_vertex_buffer2,
+                                     (vertex_t){ begin[4], t_y });
+                Vector_push_vertex_t(&pass->args.gl21->vec_vertex_buffer2,
+                                     (vertex_t){ 0.0f, 0.0f });
 
-                Vector_push_vertex_t(&gfx->vec_vertex_buffer2, (vertex_t){ begin[4], 1.0f });
-                Vector_push_vertex_t(&gfx->vec_vertex_buffer2, (vertex_t){ 0.0f, 1.0f });
+                Vector_push_vertex_t(&pass->args.gl21->vec_vertex_buffer2,
+                                     (vertex_t){ begin[4], 1.0f });
+                Vector_push_vertex_t(&pass->args.gl21->vec_vertex_buffer2,
+                                     (vertex_t){ 0.0f, 1.0f });
 
-                Vector_push_vertex_t(&gfx->vec_vertex_buffer2, (vertex_t){ end[4], 1.0f });
-                Vector_push_vertex_t(&gfx->vec_vertex_buffer2, (vertex_t){ 1.0f * n_cells, 1.0f });
+                Vector_push_vertex_t(&pass->args.gl21->vec_vertex_buffer2,
+                                     (vertex_t){ end[4], 1.0f });
+                Vector_push_vertex_t(&pass->args.gl21->vec_vertex_buffer2,
+                                     (vertex_t){ 1.0f * n_cells, 1.0f });
 
-                Vector_push_vertex_t(&gfx->vec_vertex_buffer2, (vertex_t){ end[4], t_y });
-                Vector_push_vertex_t(&gfx->vec_vertex_buffer2, (vertex_t){ 1.0f * n_cells, 0.0f });
+                Vector_push_vertex_t(&pass->args.gl21->vec_vertex_buffer2,
+                                     (vertex_t){ end[4], t_y });
+                Vector_push_vertex_t(&pass->args.gl21->vec_vertex_buffer2,
+                                     (vertex_t){ 1.0f * n_cells, 0.0f });
             }
             if (drawing[5] && !drawing[0]) {
                 for (float i = begin[5]; i < (end[5] - scalex * 0.5f);
-                     i += (scalex * gfx->glyph_width_pixels)) {
-                    float j = i + scalex * gfx->glyph_width_pixels / 2.0;
-                    Vector_push_vertex_t(&gfx->vec_vertex_buffer, (vertex_t){ i, 1.0f - scaley });
-                    Vector_push_vertex_t(&gfx->vec_vertex_buffer, (vertex_t){ j, 1.0f - scaley });
+                     i += (scalex * pass->args.gl21->glyph_width_pixels)) {
+                    float j = i + scalex * pass->args.gl21->glyph_width_pixels / 2.0;
+                    Vector_push_vertex_t(&pass->args.gl21->vec_vertex_buffer,
+                                         (vertex_t){ i, 1.0f - scaley });
+                    Vector_push_vertex_t(&pass->args.gl21->vec_vertex_buffer,
+                                         (vertex_t){ j, 1.0f - scaley });
                 }
             }
 
-            if (gfx->vec_vertex_buffer.size) {
-                if (*bound_resources != BOUND_RESOURCES_LINES) {
-                    *bound_resources = BOUND_RESOURCES_LINES;
-                    Shader_use(&gfx->line_shader);
-                    glBindBuffer(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
-                    glVertexAttribPointer(gfx->line_shader.attribs->location,
+            if (pass->args.gl21->vec_vertex_buffer.size) {
+                if (pass->args.gl21->bound_resources != BOUND_RESOURCES_LINES) {
+                    pass->args.gl21->bound_resources = BOUND_RESOURCES_LINES;
+                    Shader_use(&pass->args.gl21->line_shader);
+                    glBindBuffer(GL_ARRAY_BUFFER, pass->args.gl21->flex_vbo.vbo);
+                    glVertexAttribPointer(pass->args.gl21->line_shader.attribs->location,
                                           2,
                                           GL_FLOAT,
                                           GL_FALSE,
                                           0,
                                           0);
                 }
-                glUniform3f(gfx->line_shader.uniforms[1].location,
+                glUniform3f(pass->args.gl21->line_shader.uniforms[1].location,
                             ColorRGB_get_float(line_color, 0),
                             ColorRGB_get_float(line_color, 1),
                             ColorRGB_get_float(line_color, 2));
-                size_t new_size = sizeof(vertex_t) * gfx->vec_vertex_buffer.size;
-                ARRAY_BUFFER_SUB_OR_SWAP(gfx->vec_vertex_buffer.buf, gfx->flex_vbo.size, new_size);
-                glDrawArrays(GL_LINES, 0, gfx->vec_vertex_buffer.size);
+                size_t new_size = sizeof(vertex_t) * pass->args.gl21->vec_vertex_buffer.size;
+                ARRAY_BUFFER_SUB_OR_SWAP(pass->args.gl21->vec_vertex_buffer.buf,
+                                         pass->args.gl21->flex_vbo.size,
+                                         new_size);
+                glDrawArrays(GL_LINES, 0, pass->args.gl21->vec_vertex_buffer.size);
             }
-            if (gfx->vec_vertex_buffer2.size) {
-                *bound_resources = BOUND_RESOURCES_NONE;
-                Shader_use(&gfx->image_tint_shader);
-                glBindTexture(GL_TEXTURE_2D, gfx->squiggle_texture.id);
-                glUniform3f(gfx->image_tint_shader.uniforms[1].location,
+            if (pass->args.gl21->vec_vertex_buffer2.size) {
+                pass->args.gl21->bound_resources = BOUND_RESOURCES_NONE;
+                Shader_use(&pass->args.gl21->image_tint_shader);
+                glBindTexture(GL_TEXTURE_2D, pass->args.gl21->squiggle_texture.id);
+                glUniform3f(pass->args.gl21->image_tint_shader.uniforms[1].location,
                             ColorRGB_get_float(line_color, 0),
                             ColorRGB_get_float(line_color, 1),
                             ColorRGB_get_float(line_color, 2));
-                glBindBuffer(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
-                glVertexAttribPointer(gfx->font_shader.attribs->location,
+                glBindBuffer(GL_ARRAY_BUFFER, pass->args.gl21->flex_vbo.vbo);
+                glVertexAttribPointer(pass->args.gl21->font_shader.attribs->location,
                                       4,
                                       GL_FLOAT,
                                       GL_FALSE,
                                       0,
                                       0);
-                size_t new_size = sizeof(vertex_t) * gfx->vec_vertex_buffer2.size;
-                ARRAY_BUFFER_SUB_OR_SWAP(gfx->vec_vertex_buffer2.buf, gfx->flex_vbo.size, new_size);
-                glDrawArrays(GL_QUADS, 0, gfx->vec_vertex_buffer2.size / 2);
+                size_t new_size = sizeof(vertex_t) * pass->args.gl21->vec_vertex_buffer2.size;
+                ARRAY_BUFFER_SUB_OR_SWAP(pass->args.gl21->vec_vertex_buffer2.buf,
+                                         pass->args.gl21->flex_vbo.size,
+                                         new_size);
+                glDrawArrays(GL_QUADS, 0, pass->args.gl21->vec_vertex_buffer2.size / 2);
             }
 
 #define L_SET_BOUNDS_BEGIN(what, index)                                                            \
     if (what) {                                                                                    \
-        begin[index] = -1.0f + (float)column * scalex * (float)gfx->glyph_width_pixels;            \
+        begin[index] =                                                                             \
+          -1.0f + (float)column * scalex * (float)pass->args.gl21->glyph_width_pixels;             \
     }
 
-            if (each_rune != vt_line->data.buf + range.second) {
+            if (each_rune != pass->args.vt_line->data.buf + subpass->args->render_range_end) {
                 L_SET_BOUNDS_BEGIN(each_rune->underlined, 0);
                 L_SET_BOUNDS_BEGIN(each_rune->doubleunderline, 1);
                 L_SET_BOUNDS_BEGIN(each_rune->strikethrough, 2);
@@ -1483,473 +2146,32 @@ __attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_underline_ra
     }
 }
 
-/**
- * Draw a range of characters of a given VtLine
- *
- * Should only be called by GfxOpenGL21_rasterize_line()
- *
- * TODO: This is terrible. Maybe introduce a RenderPass that stores progress of updating a proxy?
- *       Then we could have a glMapBuffer()-d vbo and queue all vertex data transfers at once.
- *
- *       void draw_vt(Vt vt) {
- *           ...
- *           for (i : lines)
- *               if (i->damage)
- *                   passes.push(RenderPass_new(i));
- *           for (i : passes) RenderPass_gen_vertex_data(i);
- *           for (i : passes) { RenderPass_sync(i); RenderPass_rasterize(i); }
- *           ...
- *
- *       which theoretically should be much faster than this nonsense.
- */
-__attribute__((hot)) static inline void _GfxOpenGL21_rasterize_line_range(
-  GfxOpenGL21*    gfx,
-  const Vt* const vt,
-  VtLine*         vt_line,
-  Pair_size_t     range,
-  size_t          visual_line_index,
-  bool            is_for_blinking,
-  int_fast8_t*    bound_resources,
-  Pair_int32_t    texture_dims,
-  bool*           has_blinking_chars,
-  bool*           has_underlined_chars,
-  bool            is_for_cursor)
+static void line_reder_subpass_run_clear_stage(const line_render_pass_t* self,
+                                               line_render_subpass_t*    subpass)
 {
-    const double scalex = 2.0 / texture_dims.first;
-    const double scaley = 2.0 / texture_dims.second;
-
-    GLint     bg_pixels_begin = range.first * gfx->glyph_width_pixels, bg_pixels_end;
-    ColorRGBA active_bg_color = is_for_cursor ? Vt_rune_cursor_bg(vt, NULL) : vt->colors.bg;
-    VtRune*   each_rune       = vt_line->data.buf + range.first;
-    VtRune*   same_bg_block_begin_rune = each_rune;
-
-    VtRune* cursor_rune = Vt_cursor_cell(vt);
-
-    for (size_t idx_each_rune = range.first; idx_each_rune <= range.second;) {
-
-        each_rune = vt_line->data.buf + idx_each_rune;
-        if (likely(idx_each_rune != range.second)) {
-            if (unlikely(each_rune->blinkng)) {
-                *has_blinking_chars = true;
-            }
-            if (!*has_underlined_chars &&
-                unlikely(each_rune->underlined || each_rune->strikethrough ||
-                         each_rune->doubleunderline || each_rune->curlyunderline ||
-                         each_rune->overline || each_rune->hyperlink_idx)) {
-                *has_underlined_chars = true;
-            }
-        }
-
-        if (idx_each_rune == range.second ||
-            !ColorRGBA_eq(Vt_rune_final_bg(vt,
-                                           is_for_cursor ? cursor_rune : each_rune,
-                                           idx_each_rune,
-                                           visual_line_index,
-                                           is_for_cursor),
-                          active_bg_color)) {
-            int32_t extra_width = 0;
-
-            if (idx_each_rune > 1) {
-                extra_width = MAX(wcwidth(vt_line->data.buf[idx_each_rune - 1].rune.code) - 2, 0);
-            }
-
-            bg_pixels_end = (idx_each_rune + extra_width) * gfx->glyph_width_pixels;
-
-            glEnable(GL_SCISSOR_TEST);
-            glScissor(bg_pixels_begin, 0, bg_pixels_end - bg_pixels_begin, texture_dims.second);
-
-            glClearColor(ColorRGBA_get_float(active_bg_color, 0),
-                         ColorRGBA_get_float(active_bg_color, 1),
-                         ColorRGBA_get_float(active_bg_color, 2),
-                         ColorRGBA_get_float(active_bg_color, 3));
-
-            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-            { // for each block of characters with the same background color
-                ColorRGB      active_fg_color              = settings.fg;
-                const VtRune* same_colors_block_begin_rune = same_bg_block_begin_rune;
-
-                for (const VtRune* each_rune_same_bg = same_bg_block_begin_rune;
-                     each_rune_same_bg != each_rune + 1;
-                     ++each_rune_same_bg) {
-
-                    if (each_rune_same_bg == each_rune ||
-                        !ColorRGB_eq(Vt_rune_final_fg(vt,
-                                                      each_rune_same_bg,
-                                                      each_rune_same_bg - vt_line->data.buf,
-                                                      visual_line_index,
-                                                      active_bg_color,
-                                                      is_for_cursor),
-                                     active_fg_color)) {
-
-                        /* Dummy value with we can point to to filter out a character */
-                        VtRune        same_color_blank_space;
-                        const VtRune* each_rune_filtered_visible;
-
-                        for (Vector_float* i = NULL;
-                             (i = Vector_iter_Vector_float(&gfx->float_vec, i));) {
-                            Vector_clear_float(i);
-                        }
-
-                        for (const VtRune* each_rune_same_colors = same_colors_block_begin_rune;
-                             each_rune_same_colors != each_rune_same_bg;
-                             ++each_rune_same_colors) {
-                            size_t column = each_rune_same_colors - vt_line->data.buf;
-
-                            /* Filter out stuff that should be hidden on this pass */
-                            if (unlikely((is_for_blinking && each_rune_same_colors->blinkng) ||
-                                         each_rune_same_colors->hidden)) {
-                                same_color_blank_space           = *each_rune_same_colors;
-                                same_color_blank_space.rune.code = ' ';
-                                each_rune_filtered_visible       = &same_color_blank_space;
-                            } else {
-                                each_rune_filtered_visible = each_rune_same_colors;
-                            }
-
-                            if (each_rune_filtered_visible->rune.code > ' ') {
-                                GlyphAtlasEntry* entry =
-                                  GlyphAtlas_get(gfx,
-                                                 &gfx->glyph_atlas,
-                                                 &each_rune_filtered_visible->rune);
-                                if (!entry) {
-                                    continue;
-                                }
-
-                                float h = (float)entry->height * scaley;
-                                float w = (float)entry->width * scalex;
-                                float t = entry->top * scaley;
-                                float l = entry->left * scalex;
-
-                                if (unlikely(h > 2.0f && entry->can_scale)) {
-                                    float s = h / 2.0f;
-                                    h /= s;
-                                    w /= s;
-                                    t /= s;
-                                    l /= s;
-                                }
-
-                                float x3 = -1.0 +
-                                           (double)column * gfx->glyph_width_pixels * scalex + l +
-                                           gfx->pen_begin_pixels_x * scalex;
-                                float y3 = -1.0 + gfx->pen_begin_pixels_y * scaley - t;
-
-                                float buf[] = {
-                                    x3,     y3,     entry->tex_coords[0], entry->tex_coords[1],
-                                    x3 + w, y3,     entry->tex_coords[2], entry->tex_coords[1],
-                                    x3 + w, y3 + h, entry->tex_coords[2], entry->tex_coords[3],
-                                    x3,     y3 + h, entry->tex_coords[0], entry->tex_coords[3],
-                                };
-
-                                while (gfx->float_vec.size <= entry->page_id) {
-                                    Vector_push_Vector_float(&gfx->float_vec, Vector_new_float());
-                                }
-
-                                Vector_pushv_float(&gfx->float_vec.buf[entry->page_id],
-                                                   buf,
-                                                   ARRAY_SIZE(buf));
-                            }
-                        }
-                        GLint clip_begin = (same_colors_block_begin_rune - vt_line->data.buf) *
-                                           gfx->glyph_width_pixels;
-                        GLsizei clip_end =
-                          (each_rune_same_bg - vt_line->data.buf) * gfx->glyph_width_pixels;
-
-                        glEnable(GL_SCISSOR_TEST);
-                        glScissor(clip_begin, 0, clip_end - clip_begin, texture_dims.second);
-
-                        // actual drawing
-                        for (size_t i = 0; i < gfx->glyph_atlas.pages.size; ++i) {
-                            Vector_float*   v    = &gfx->float_vec.buf[i];
-                            GlyphAtlasPage* page = &gfx->glyph_atlas.pages.buf[i];
-
-                            glBindTexture(GL_TEXTURE_2D, page->texture_id);
-                            glBindBuffer(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
-
-                            size_t newsize = v->size * sizeof(float);
-                            ARRAY_BUFFER_SUB_OR_SWAP(v->buf, gfx->flex_vbo.size, newsize);
-
-                            switch (page->texture_format) {
-                                case TEX_FMT_RGB:
-                                    if (*bound_resources != BOUND_RESOURCES_FONT) {
-                                        *bound_resources = BOUND_RESOURCES_FONT;
-                                        glUseProgram(gfx->font_shader.id);
-                                    }
-                                    glVertexAttribPointer(gfx->font_shader.attribs->location,
-                                                          4,
-                                                          GL_FLOAT,
-                                                          GL_FALSE,
-                                                          0,
-                                                          0);
-                                    glUniform3f(gfx->font_shader.uniforms[1].location,
-                                                ColorRGB_get_float(active_fg_color, 0),
-                                                ColorRGB_get_float(active_fg_color, 1),
-                                                ColorRGB_get_float(active_fg_color, 2));
-                                    glUniform4f(gfx->font_shader.uniforms[2].location,
-                                                ColorRGBA_get_float(active_bg_color, 0),
-                                                ColorRGBA_get_float(active_bg_color, 1),
-                                                ColorRGBA_get_float(active_bg_color, 2),
-                                                ColorRGBA_get_float(active_bg_color, 3));
-                                    break;
-
-                                case TEX_FMT_MONO:
-                                    if (*bound_resources != BOUND_RESOURCES_FONT_MONO) {
-                                        *bound_resources = BOUND_RESOURCES_FONT_MONO;
-                                        glUseProgram(gfx->font_shader_gray.id);
-                                    }
-                                    glVertexAttribPointer(gfx->font_shader_gray.attribs->location,
-                                                          4,
-                                                          GL_FLOAT,
-                                                          GL_FALSE,
-                                                          0,
-                                                          0);
-                                    glUniform3f(gfx->font_shader_gray.uniforms[1].location,
-                                                ColorRGB_get_float(active_fg_color, 0),
-                                                ColorRGB_get_float(active_fg_color, 1),
-                                                ColorRGB_get_float(active_fg_color, 2));
-
-                                    glUniform4f(gfx->font_shader_gray.uniforms[2].location,
-                                                ColorRGBA_get_float(active_bg_color, 0),
-                                                ColorRGBA_get_float(active_bg_color, 1),
-                                                ColorRGBA_get_float(active_bg_color, 2),
-                                                ColorRGBA_get_float(active_bg_color, 3));
-                                    break;
-                                case TEX_FMT_RGBA:
-                                    if (*bound_resources != BOUND_RESOURCES_IMAGE) {
-                                        *bound_resources = BOUND_RESOURCES_IMAGE;
-                                        glUseProgram(gfx->image_shader.id);
-                                    }
-
-                                    glEnable(GL_BLEND);
-                                    glBlendFuncSeparate(GL_ONE,
-                                                        GL_ONE_MINUS_SRC_COLOR,
-                                                        GL_ONE,
-                                                        GL_ONE);
-                                    glVertexAttribPointer(gfx->image_shader.attribs->location,
-                                                          4,
-                                                          GL_FLOAT,
-                                                          GL_FALSE,
-                                                          0,
-                                                          0);
-                                default:;
-                            }
-
-                            glDrawArrays(GL_QUADS, 0, v->size / 4);
-                            glDisable(GL_BLEND);
-                        }
-                        // end drawing
-
-                        glDisable(GL_SCISSOR_TEST);
-
-                        if (each_rune_same_bg != each_rune) {
-                            same_colors_block_begin_rune = each_rune_same_bg;
-                            // update active fg color;
-                            if (settings.highlight_change_fg &&
-                                unlikely(Vt_is_cell_selected(vt,
-                                                             each_rune_same_bg - vt_line->data.buf,
-                                                             visual_line_index))) {
-                                active_fg_color = vt->colors.highlight.fg;
-                            } else {
-                                active_fg_color = Vt_rune_final_fg_apply_dim(vt,
-                                                                             each_rune_same_bg,
-                                                                             active_bg_color,
-                                                                             is_for_cursor);
-                            }
-                        }
-
-                    } // end for each block with the same color
-                }     // end for each char
-            }         // end for each block with the same bg
-
-            bg_pixels_begin = (idx_each_rune + extra_width) * gfx->glyph_width_pixels;
-
-            int clip_begin = idx_each_rune * gfx->glyph_width_pixels;
-            glEnable(GL_SCISSOR_TEST);
-            glScissor(clip_begin, 0, texture_dims.first, texture_dims.second);
-
-            if (idx_each_rune != range.second) {
-                same_bg_block_begin_rune = each_rune;
-                active_bg_color =
-                  Vt_rune_final_bg(vt, each_rune, idx_each_rune, visual_line_index, is_for_cursor);
-            }
-        } // end if bg color changed
-
-        int w = likely(idx_each_rune != range.second)
-                  ? wcwidth(vt_line->data.buf[idx_each_rune].rune.code)
-                  : 1;
-
-        idx_each_rune =
-          CLAMP(idx_each_rune + (unlikely(w > 1) ? w : 1), range.first, (vt_line->data.size + 1));
-    }
-}
-
-/**
- * (Re)generate 'proxy' texture(s) for a given VtLine
- *
- * @param is_for_blinking - this func calls itself with this set to true if the line contains
- * blinking characters
- *
- */
-__attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(
-  GfxOpenGL21*      gfx,
-  const Vt* const   vt,
-  VtLine*           vt_line,
-  VtLineProxy*      opt_extern_proxy,
-  vt_line_damage_t* opt_extern_damage,
-  size_t            visual_line_index,
-  bool              is_for_blinking,
-  bool              is_for_cursor,
-  uint16_t          cnd_cursor_column)
-{
-    const size_t      length               = vt_line->data.size;
-    bool              has_blinking_chars   = false;
-    uint32_t          texture_width        = length * gfx->glyph_width_pixels;
-    uint32_t          actual_texture_width = texture_width;
-    uint32_t          texture_height       = gfx->line_height_pixels;
-    bool              has_underlined_chars = false;
-    GLuint            final_texture        = 0;
-    GLuint            final_depthbuffer    = 0;
-    VtLineProxy*      proxy                = OR(opt_extern_proxy, &vt_line->proxy);
-    vt_line_damage_t* damage               = OR(opt_extern_damage, &vt_line->damage);
-
-    if (likely(!is_for_blinking && damage->type == VT_LINE_DAMAGE_NONE)) {
-        return;
-    }
-
-    size_t proxy_tex_idx = is_for_blinking ? PROXY_INDEX_TEXTURE_BLINK : PROXY_INDEX_TEXTURE;
-    size_t proxy_depth_idx =
-      is_for_blinking ? PROXY_INDEX_DEPTHBUFFER_BLINK : PROXY_INDEX_DEPTHBUFFER;
-
-    GLuint   recovered_texture     = 0;
-    GLuint   recovered_depthbuffer = 0;
-    uint32_t recovered_width       = 0;
-
-    /* Try to reuse the texture that is already there */
-    recovered_texture     = proxy->data[proxy_tex_idx];
-    recovered_depthbuffer = proxy->data[proxy_depth_idx];
-    recovered_width       = proxy->data[PROXY_INDEX_SIZE];
-
-    bool can_reuse = recovered_texture && recovered_width >= texture_width;
-
-    /* TODO: pixel transfer the recovered texture onto the new one and set damage mode to
-     * remaining range? */
-    if (!can_reuse) {
-        damage->type = VT_LINE_DAMAGE_FULL;
-    }
-
-    if (can_reuse) {
-        final_texture        = recovered_texture;
-        final_depthbuffer    = recovered_depthbuffer;
-        actual_texture_width = recovered_width;
-
-        glBindFramebuffer(GL_FRAMEBUFFER, gfx->line_framebuffer);
-
-        glBindTexture(GL_TEXTURE_2D, recovered_texture);
-        glFramebufferTexture2D(GL_FRAMEBUFFER,
-                               GL_COLOR_ATTACHMENT0,
-                               GL_TEXTURE_2D,
-                               recovered_texture,
-                               0);
-        glBindRenderbuffer(GL_RENDERBUFFER, recovered_depthbuffer);
-        glFramebufferRenderbuffer(GL_FRAMEBUFFER,
-                                  GL_DEPTH_ATTACHMENT,
-                                  GL_RENDERBUFFER,
-                                  recovered_depthbuffer);
-
-        glViewport(0, 0, actual_texture_width, texture_height);
-
-        gl_check_error();
-    } else {
-        if (!is_for_blinking) {
-            GfxOpenGL21_destroy_proxy((void*)((uint8_t*)gfx - offsetof(Gfx, extend_data)),
-                                      proxy->data);
-        }
-        if (!vt_line->data.size) {
-            return;
-        }
-
-        GLuint  recycle_tex_id = gfx->recycled_textures[0].color_tex;
-        int32_t recycle_width  = gfx->recycled_textures[0].width;
-
-        if (recycle_tex_id && recycle_width >= (int32_t)texture_width) {
-            Pair_GLuint recycled = GfxOpenGL21_pop_recycled(gfx);
-            ASSERT(recycled.second, "recovered texture has a depth rb");
-            final_texture        = recycled.first;
-            final_depthbuffer    = recycled.second;
-            actual_texture_width = recycle_width;
-            glBindFramebuffer(GL_FRAMEBUFFER, gfx->line_framebuffer);
-            glBindTexture(GL_TEXTURE_2D, final_texture);
-            glFramebufferTexture2D(GL_FRAMEBUFFER,
-                                   GL_COLOR_ATTACHMENT0,
-                                   GL_TEXTURE_2D,
-                                   final_texture,
-                                   0);
-            glFramebufferRenderbuffer(GL_FRAMEBUFFER,
-                                      GL_DEPTH_ATTACHMENT,
-                                      GL_RENDERBUFFER,
-                                      final_depthbuffer);
-            gl_check_error();
-
-        } else {
-            // Generate new framebuffer attachments
-            glGenTextures(1, &final_texture);
-            glBindTexture(GL_TEXTURE_2D, final_texture);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-            glTexImage2D(GL_TEXTURE_2D,
-                         0,
-                         GL_RGBA,
-                         texture_width,
-                         texture_height,
-                         0,
-                         GL_RGBA,
-                         GL_UNSIGNED_BYTE,
-                         0);
-
-            glGenRenderbuffers(1, &final_depthbuffer);
-            glBindRenderbuffer(GL_RENDERBUFFER, final_depthbuffer);
-            glRenderbufferStorage(GL_RENDERBUFFER,
-                                  GL_DEPTH_COMPONENT,
-                                  actual_texture_width,
-                                  texture_height);
-
-            glBindFramebuffer(GL_FRAMEBUFFER, gfx->line_framebuffer);
-            glFramebufferTexture2D(GL_FRAMEBUFFER,
-                                   GL_COLOR_ATTACHMENT0,
-                                   GL_TEXTURE_2D,
-                                   final_texture,
-                                   0);
-            glFramebufferRenderbuffer(GL_FRAMEBUFFER,
-                                      GL_DEPTH_ATTACHMENT,
-                                      GL_RENDERBUFFER,
-                                      final_depthbuffer);
-            gl_check_error();
-        }
-    }
-
-    assert_farmebuffer_complete();
-
-    glViewport(0, 0, texture_width, texture_height);
+    glViewport(0, 0, self->texture_width, self->texture_height);
     glBindTexture(GL_TEXTURE_2D, 0);
     glUseProgram(0);
 
-    if (is_for_cursor) {
-        ColorRGBA clr = Vt_rune_cursor_bg(vt, NULL);
+    if (self->args.is_for_cursor) {
+        ColorRGBA clr = Vt_rune_cursor_bg(self->args.vt, NULL);
         glClearColor(ColorRGBA_get_float(clr, 0),
                      ColorRGBA_get_float(clr, 1),
                      ColorRGBA_get_float(clr, 2),
                      ColorRGBA_get_float(clr, 3));
     } else {
-        glClearColor(ColorRGBA_get_float(vt->colors.bg, 0),
-                     ColorRGBA_get_float(vt->colors.bg, 1),
-                     ColorRGBA_get_float(vt->colors.bg, 2),
-                     ColorRGBA_get_float(vt->colors.bg, 3));
+        glClearColor(ColorRGBA_get_float(self->args.vt->colors.bg, 0),
+                     ColorRGBA_get_float(self->args.vt->colors.bg, 1),
+                     ColorRGBA_get_float(self->args.vt->colors.bg, 2),
+                     ColorRGBA_get_float(self->args.vt->colors.bg, 3));
     }
 
-    if (damage->type == VT_LINE_DAMAGE_RANGE) {
+    if (self->args.damage->type == VT_LINE_DAMAGE_RANGE) {
         glEnable(GL_SCISSOR_TEST);
-        size_t begin_px = gfx->glyph_width_pixels * damage->front;
-        size_t width_px = ((damage->end + 1) - damage->front) * gfx->glyph_width_pixels;
-        glScissor(begin_px, 0, width_px, texture_height);
+        size_t begin_px = self->args.gl21->glyph_width_pixels * self->args.damage->front;
+        size_t width_px = ((self->args.damage->end + 1) - self->args.damage->front) *
+                          self->args.gl21->glyph_width_pixels;
+        glScissor(begin_px, 0, width_px, self->texture_height);
     } else {
         glDisable(GL_SCISSOR_TEST);
     }
@@ -1964,204 +2186,27 @@ __attribute__((hot)) static inline void GfxOpenGL21_rasterize_line(
     glDepthMask(GL_TRUE);
     glDepthFunc(GL_LEQUAL);
     glDepthRange(0.0f, 1.0f);
+}
 
-    /* Keep track of gl state to avoid unnececery changes */
-    int_fast8_t bound_resources = BOUND_RESOURCES_NONE;
+static void line_reder_pass_run_subpass(line_render_pass_t* pass, line_render_subpass_t* subpass)
+{
+    line_reder_subpass_run_clear_stage(pass, subpass);
+    line_reder_pass_run_cell_subpass(pass, subpass);
 
-    if (is_for_cursor) {
-        size_t range_begin_idx = cnd_cursor_column;
-        size_t range_end_idx   = range_begin_idx;
-
-        for (uint_fast8_t i = 0; i < 4 && range_begin_idx; ++i) {
-            --range_begin_idx;
-        }
-
-        for (uint_fast8_t i = 0; i < 3 && range_end_idx < length; ++i) {
-            ++range_end_idx;
-        }
-
-        _GfxOpenGL21_rasterize_line_range(gfx,
-                                          vt,
-                                          vt_line,
-                                          (Pair_size_t){ range_begin_idx, range_end_idx },
-                                          visual_line_index,
-                                          is_for_blinking,
-                                          &bound_resources,
-                                          (Pair_int32_t){ texture_width, texture_height },
-                                          &has_blinking_chars,
-                                          &has_underlined_chars,
-                                          is_for_cursor);
-
-        if (has_underlined_chars) {
-            _GfxOpenGL21_rasterize_line_underline_range(
-              vt,
-              gfx,
-              vt_line,
-              (Pair_size_t){ range_begin_idx, range_end_idx },
-              &bound_resources,
-              (Pair_int32_t){ texture_width, texture_height });
-        }
-    } else {
-        switch (damage->type) {
-            case VT_LINE_DAMAGE_RANGE: {
-                size_t range_begin_idx = damage->front;
-                size_t range_end_idx   = damage->end + 1;
-
-                while (range_begin_idx) {
-                    char32_t this_char = vt_line->data.buf[range_begin_idx].rune.code;
-                    char32_t prev_char = vt_line->data.buf[range_begin_idx - 1].rune.code;
-
-                    if (this_char == ' ' && !unicode_is_ambiguous_width(prev_char) &&
-                        wcwidth(prev_char) < 2) {
-                        break;
-                    }
-                    --range_begin_idx;
-                }
-
-                while (range_end_idx < vt_line->data.size && range_end_idx) {
-                    char32_t this_char = vt_line->data.buf[range_end_idx].rune.code;
-                    char32_t prev_char = vt_line->data.buf[range_end_idx - 1].rune.code;
-
-                    ++range_end_idx;
-                    if (this_char == ' ' && !unicode_is_ambiguous_width(prev_char) &&
-                        wcwidth(prev_char) < 2) {
-                        break;
-                    }
-                }
-
-                _GfxOpenGL21_rasterize_line_range(gfx,
-                                                  vt,
-                                                  vt_line,
-                                                  (Pair_size_t){ range_begin_idx, range_end_idx },
-                                                  visual_line_index,
-                                                  is_for_blinking,
-                                                  &bound_resources,
-                                                  (Pair_int32_t){ texture_width, texture_height },
-                                                  &has_blinking_chars,
-                                                  &has_underlined_chars,
-                                                  is_for_cursor);
-                if (has_underlined_chars) {
-                    _GfxOpenGL21_rasterize_line_underline_range(
-                      vt,
-                      gfx,
-                      vt_line,
-                      (Pair_size_t){ range_begin_idx, range_end_idx },
-                      &bound_resources,
-                      (Pair_int32_t){ texture_width, texture_height });
-                }
-            } break;
-
-            case VT_LINE_DAMAGE_SHIFT:
-                // TODO:
-            case VT_LINE_DAMAGE_FULL: {
-                _GfxOpenGL21_rasterize_line_range(gfx,
-                                                  vt,
-                                                  vt_line,
-                                                  (Pair_size_t){ 0, length },
-                                                  visual_line_index,
-                                                  is_for_blinking,
-                                                  &bound_resources,
-                                                  (Pair_int32_t){ texture_width, texture_height },
-                                                  &has_blinking_chars,
-                                                  &has_underlined_chars,
-                                                  is_for_cursor);
-                if (has_underlined_chars) {
-                    _GfxOpenGL21_rasterize_line_underline_range(
-                      vt,
-                      gfx,
-                      vt_line,
-                      (Pair_size_t){ 0, length },
-                      &bound_resources,
-                      (Pair_int32_t){ texture_width, texture_height });
-                }
-            } break;
-
-            default:
-                ASSERT_UNREACHABLE
-        }
+    if (pass->has_underlined_chars) {
+        line_reder_pass_run_line_subpass(pass, subpass);
     }
+}
 
-    // set proxy data to generated texture
-    if (unlikely(is_for_blinking)) {
-        proxy->data[PROXY_INDEX_TEXTURE_BLINK]     = final_texture;
-        proxy->data[PROXY_INDEX_DEPTHBUFFER_BLINK] = final_depthbuffer;
-        damage->type                               = VT_LINE_DAMAGE_NONE;
-        damage->shift                              = 0;
-        damage->front                              = 0;
-        damage->end                                = 0;
-    } else {
-        proxy->data[PROXY_INDEX_TEXTURE]     = final_texture;
-        proxy->data[PROXY_INDEX_DEPTHBUFFER] = final_depthbuffer;
-        proxy->data[PROXY_INDEX_SIZE]        = actual_texture_width;
-        if (!has_blinking_chars) {
-            damage->type  = VT_LINE_DAMAGE_NONE;
-            damage->shift = 0;
-            damage->front = 0;
-            damage->end   = 0;
-        }
-    }
+static void line_reder_pass_run(line_render_pass_t* self)
+{
+    line_render_pass_try_to_recover_proxies(self);
+    line_render_pass_set_up_framebuffer(self);
+    line_render_pass_set_up_subpasses(self);
 
-    if (unlikely(settings.debug_gfx)) {
-        static float debug_tint = 0.0f;
-        glDisable(GL_SCISSOR_TEST);
-        glBindTexture(GL_TEXTURE_2D, 0);
-        Shader_use(&gfx->solid_fill_shader);
-        glEnable(GL_BLEND);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-        glColor4f(fabs(sin(debug_tint)), fabs(cos(debug_tint)), sin(debug_tint), 0.1);
-        glUniform4f(gfx->solid_fill_shader.uniforms[0].location,
-                    fabs(sin(debug_tint)),
-                    fabs(cos(debug_tint)),
-                    sin(debug_tint),
-                    0.1);
-        glBindBuffer(GL_ARRAY_BUFFER, gfx->full_framebuffer_quad_vbo);
-        glVertexAttribPointer(gfx->solid_fill_shader.attribs->location,
-                              2,
-                              GL_FLOAT,
-                              GL_FALSE,
-                              0,
-                              0);
-        glDrawArrays(GL_QUADS, 0, 4);
-
-        glDisable(GL_BLEND);
-        debug_tint += 0.5f;
-        if (debug_tint > M_PI) {
-            debug_tint -= M_PI;
-        }
-    }
-
-    glDisable(GL_DEPTH_TEST);
-
-    glBindFramebuffer(GL_FRAMEBUFFER, gfx->line_framebuffer);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, 0);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    gl_check_error();
-
-    glViewport(0, 0, gfx->win_w, gfx->win_h);
-
-    // There are no blinking characters, but their resources still exist
-    if (!has_blinking_chars && proxy->data[PROXY_INDEX_TEXTURE_BLINK]) {
-        // TODO: recycle
-        glDeleteTextures(1, (GLuint*)&proxy->data[PROXY_INDEX_TEXTURE_BLINK]);
-        proxy->data[PROXY_INDEX_TEXTURE_BLINK] = 0;
-
-        ASSERT(proxy->data[PROXY_INDEX_DEPTHBUFFER_BLINK], "deleted proxy texture has depth rb");
-        glDeleteRenderbuffers(1, (GLuint*)&proxy->data[PROXY_INDEX_DEPTHBUFFER_BLINK]);
-        proxy->data[PROXY_INDEX_DEPTHBUFFER_BLINK] = 0;
-    }
-
-    if (unlikely(has_blinking_chars && !is_for_blinking)) {
-        GfxOpenGL21_rasterize_line(gfx,
-                                   vt,
-                                   vt_line,
-                                   opt_extern_proxy,
-                                   opt_extern_damage,
-                                   visual_line_index,
-                                   true,
-                                   false,
-                                   cnd_cursor_column);
+    for (int i = 0; i < self->n_queued_subpasses; ++i) {
+        line_render_subpass_t sub = line_render_pass_create_subpass(self, &self->subpass_args[i]);
+        line_reder_pass_run_subpass(self, &sub);
     }
 }
 
@@ -2173,20 +2218,40 @@ static void _GfxOpenGL21_draw_block_cursor(GfxOpenGL21* gfx,
 {
     ((vt_line_damage_t*)&ui->cursor_damage)->type = VT_LINE_DAMAGE_FULL; // test
     VtLine* vt_line                               = Vt_cursor_line(vt);
-    GfxOpenGL21_rasterize_line(gfx,
-                               vt,
-                               vt_line,
-                               (VtLineProxy*)&ui->cursor_proxy,
-                               (vt_line_damage_t*)&ui->cursor_damage,
-                               Vt_visual_cursor_row(vt),
-                               false,
-                               true,
-                               ui->cursor->col);
+
+    line_render_pass_args_t rp_args = {
+        .gl21              = gfx,
+        .vt                = vt,
+        .vt_line           = vt_line,
+        .proxy             = (VtLineProxy*)&ui->cursor_proxy,
+        .damage            = (vt_line_damage_t*)&ui->cursor_damage,
+        .visual_index      = Vt_visual_cursor_row(vt),
+        .cnd_cursor_column = ui->cursor->col,
+        .is_for_cursor     = true,
+        .is_for_blinking   = false,
+    };
+
+    if (should_create_line_render_pass(&rp_args)) {
+        gfx->bound_resources  = BOUND_RESOURCES_NONE;
+        line_render_pass_t rp = create_line_render_pass(&rp_args);
+        line_reder_pass_run(&rp);
+
+        if (rp.has_blinking_chars) {
+            gfxBase(gfx)->has_blinking_text = true;
+            rp_args.is_for_blinking         = true;
+            gfx->bound_resources            = BOUND_RESOURCES_NONE;
+            line_render_pass_t rp_b         = create_line_render_pass(&rp_args);
+            line_reder_pass_run(&rp_b);
+            rp_b.has_blinking_chars = true;
+            line_render_pass_finalize(&rp_b);
+            rp_args.is_for_blinking = false;
+        }
+
+        line_render_pass_finalize(&rp);
+    }
 
     glViewport(0, 0, gfx->win_w, gfx->win_h);
-
     double dbl_col = ui->cursor_cell_fraction;
-
     {
         glEnable(GL_SCISSOR_TEST);
         GLint x   = dbl_col * gfx->glyph_width_pixels + gfx->pixel_offset_x,
@@ -2197,14 +2262,14 @@ static void _GfxOpenGL21_draw_block_cursor(GfxOpenGL21* gfx,
 
     glClearColor(ColorRGBA_get_float(clr, 0),
                  ColorRGBA_get_float(clr, 1),
-                 ColorRGBA_get_float(clr, 3),
-                 ColorRGBA_get_float(clr, 4));
+                 ColorRGBA_get_float(clr, 2),
+                 ColorRGBA_get_float(clr, 3));
 
     glClear(GL_COLOR_BUFFER_BIT);
 
     float tex_begin_x = -1.0f + (gfx->pixel_offset_x) * gfx->sx;
     float tex_end_x =
-      -1.0f + (ui->cursor_proxy.data[PROXY_INDEX_SIZE] + gfx->pixel_offset_x) * gfx->sx;
+      -1.0f + (gfx->max_cells_in_line * gfx->glyph_width_pixels + gfx->pixel_offset_x) * gfx->sx;
     float tex_begin_y = 1.0f - gfx->line_height_pixels * (Vt_visual_cursor_row(vt) + 1) * gfx->sy -
                         gfx->pixel_offset_y * gfx->sy;
 
@@ -2786,8 +2851,36 @@ void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
                  ColorRGBA_get_float(vt->colors.bg, 3));
 
     glClear(GL_COLOR_BUFFER_BIT);
+
     for (VtLine* i = begin; i < end; ++i) {
-        GfxOpenGL21_rasterize_line(gfx, vt, i, NULL, NULL, i - begin, false, false, 0);
+        line_render_pass_args_t rp_args = {
+            .gl21            = gfx,
+            .vt              = vt,
+            .vt_line         = i,
+            .proxy           = NULL,
+            .damage          = NULL,
+            .visual_index    = i - begin,
+            .is_for_cursor   = false,
+            .is_for_blinking = false,
+        };
+        if (should_create_line_render_pass(&rp_args)) {
+            gfx->bound_resources  = BOUND_RESOURCES_NONE;
+            line_render_pass_t rp = create_line_render_pass(&rp_args);
+            line_reder_pass_run(&rp);
+
+            if (unlikely(rp.has_blinking_chars)) {
+                self->has_blinking_text = true;
+                gfx->bound_resources    = BOUND_RESOURCES_NONE;
+                rp_args.is_for_blinking = true;
+                line_render_pass_t rp_b = create_line_render_pass(&rp_args);
+                line_reder_pass_run(&rp_b);
+                rp_b.has_blinking_chars = true;
+                line_render_pass_finalize(&rp_b);
+                rp_args.is_for_blinking = false;
+            }
+
+            line_render_pass_finalize(&rp);
+        }
     }
 
     glDisable(GL_BLEND);
@@ -2806,28 +2899,15 @@ void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
                   chars.second * gfx->line_height_pixels);
     }
 
-    glViewport(0, 0, gfx->win_w, gfx->win_h);
     GfxOpenGL21_draw_images(gfx, vt, true);
-
-    Vector_clear_float(&gfx->float_vec.buf[0]);
-    self->has_blinking_text = false;
-    for (VtLine* i = begin; i < end; ++i) {
-        GfxOpenGL21_generate_line_quads(gfx, i, i - begin);
-    }
+    glBindBuffer(GL_ARRAY_BUFFER, gfx->line_quads_vbo);
+    Shader_use(&gfx->image_shader);
+    glUniform2f(gfx->image_shader.uniforms[1].location, 0, 0);
+    glVertexAttribPointer(gfx->image_shader.attribs->location, 4, GL_FLOAT, GL_FALSE, 0, 0);
     glViewport(gfx->pixel_offset_x, -gfx->pixel_offset_y, gfx->win_w, gfx->win_h);
-    if (gfxOpenGL21(self)->float_vec.buf->size) {
-        glBindBuffer(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
-        size_t newsize = gfxOpenGL21(self)->float_vec.buf->size * sizeof(float);
-        ARRAY_BUFFER_SUB_OR_SWAP(gfxOpenGL21(self)->float_vec.buf->buf,
-                                 gfx->flex_vbo.size,
-                                 newsize);
-        Shader_use(&gfx->image_shader);
-        glUniform2f(gfx->image_shader.uniforms[1].location, 0, 0);
-        glVertexAttribPointer(gfx->image_shader.attribs->location, 4, GL_FLOAT, GL_FALSE, 0, 0);
-        uint_fast32_t quad_index = 0;
-        for (VtLine* i = begin; i < end; ++i) {
-            quad_index = GfxOpenGL21_draw_line_quads(gfx, ui, i, quad_index);
-        }
+
+    for (VtLine* i = begin; i < end; ++i) {
+        GfxOpenGL21_draw_line_quads(gfx, ui, i, i - begin);
     }
 
     GfxOpenGL21_draw_images(gfx, vt, false);
@@ -2873,32 +2953,32 @@ void GfxOpenGL21_destroy_recycled(GfxOpenGL21* self)
         }
         self->recycled_textures[i].color_tex = 0;
         self->recycled_textures[i].depth_rb  = 0;
-        self->recycled_textures[i].width     = 0;
     }
 }
 
-void GfxOpenGL21_push_recycled(GfxOpenGL21* self, GLuint tex_id, GLuint rb_id, uint32_t width)
+void GfxOpenGL21_push_recycled(GfxOpenGL21* self, GLuint tex_id, GLuint rb_id)
 {
-    uint_fast8_t insert_point;
-    for (insert_point = 0; insert_point < N_RECYCLED_TEXTURES; ++insert_point) {
-        if (width > self->recycled_textures[insert_point].width) {
+    for (uint_fast8_t insert_point = 0; insert_point < N_RECYCLED_TEXTURES; ++insert_point) {
+        if (!self->recycled_textures[insert_point].color_tex) {
             if (likely(ARRAY_LAST(self->recycled_textures).color_tex)) {
                 ASSERT(ARRAY_LAST(self->recycled_textures).depth_rb,
                        "deleted texture has depth rb");
                 glDeleteTextures(1, &ARRAY_LAST(self->recycled_textures).color_tex);
                 glDeleteRenderbuffers(1, &ARRAY_LAST(self->recycled_textures).depth_rb);
             }
+
             void*  src = self->recycled_textures + insert_point;
             void*  dst = self->recycled_textures + insert_point + 1;
             size_t n = sizeof(*self->recycled_textures) * (N_RECYCLED_TEXTURES - insert_point - 1);
             memmove(dst, src, n);
             self->recycled_textures[insert_point].color_tex = tex_id;
             self->recycled_textures[insert_point].depth_rb  = rb_id;
-            self->recycled_textures[insert_point].width     = width;
             return;
         }
     }
+
     glDeleteTextures(1, &tex_id);
+    glDeleteRenderbuffers(1, &rb_id);
 }
 
 Pair_GLuint GfxOpenGL21_pop_recycled(GfxOpenGL21* self)
@@ -2912,8 +2992,6 @@ Pair_GLuint GfxOpenGL21_pop_recycled(GfxOpenGL21* self)
 
     ARRAY_LAST(self->recycled_textures).color_tex = 0;
     ARRAY_LAST(self->recycled_textures).depth_rb  = 0;
-    ARRAY_LAST(self->recycled_textures).width     = 0;
-
     return ret;
 }
 
@@ -2945,20 +3023,15 @@ void GfxOpenGL21_destroy_image_view_proxy(Gfx* self, uint32_t* proxy)
 
 __attribute__((hot)) void GfxOpenGL21_destroy_proxy(Gfx* self, uint32_t* proxy)
 {
-    if (unlikely(proxy[PROXY_INDEX_TEXTURE] &&
-                 ARRAY_LAST(gfxOpenGL21(self)->recycled_textures).width <
-                   proxy[PROXY_INDEX_SIZE])) {
-
+    if (unlikely(proxy[PROXY_INDEX_TEXTURE])) {
         GfxOpenGL21_push_recycled(gfxOpenGL21(self),
                                   proxy[PROXY_INDEX_TEXTURE],
-                                  proxy[PROXY_INDEX_DEPTHBUFFER],
-                                  proxy[PROXY_INDEX_SIZE]);
+                                  proxy[PROXY_INDEX_DEPTHBUFFER]);
 
         if (unlikely(proxy[PROXY_INDEX_TEXTURE_BLINK])) {
             GfxOpenGL21_push_recycled(gfxOpenGL21(self),
                                       proxy[PROXY_INDEX_TEXTURE_BLINK],
-                                      proxy[PROXY_INDEX_DEPTHBUFFER_BLINK],
-                                      proxy[PROXY_INDEX_SIZE]);
+                                      proxy[PROXY_INDEX_DEPTHBUFFER_BLINK]);
         }
     } else if (likely(proxy[PROXY_INDEX_TEXTURE])) {
         /* delete starting from first */
@@ -2978,7 +3051,6 @@ __attribute__((hot)) void GfxOpenGL21_destroy_proxy(Gfx* self, uint32_t* proxy)
         glDeleteTextures(1, (GLuint*)&proxy[PROXY_INDEX_TEXTURE_BLINK]);
         glDeleteRenderbuffers(1, (GLuint*)&proxy[PROXY_INDEX_DEPTHBUFFER_BLINK]);
     }
-    proxy[PROXY_INDEX_SIZE]              = 0;
     proxy[PROXY_INDEX_TEXTURE]           = 0;
     proxy[PROXY_INDEX_TEXTURE_BLINK]     = 0;
     proxy[PROXY_INDEX_DEPTHBUFFER]       = 0;
@@ -2995,6 +3067,7 @@ void GfxOpenGL21_destroy(Gfx* self)
     glDeleteTextures(1, &gfxOpenGL21(self)->squiggle_texture.id);
     glDeleteFramebuffers(1, &gfxOpenGL21(self)->line_framebuffer);
     VBO_destroy(&gfxOpenGL21(self)->flex_vbo);
+    glDeleteBuffers(1, &gfxOpenGL21(self)->line_quads_vbo);
     glDeleteBuffers(1, &gfxOpenGL21(self)->full_framebuffer_quad_vbo);
     Shader_destroy(&gfxOpenGL21(self)->solid_fill_shader);
     Shader_destroy(&gfxOpenGL21(self)->font_shader);
