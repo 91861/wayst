@@ -142,7 +142,7 @@ static struct option long_options[] = {
     [OPT_C_FG_COLOR_IDX] = { "cursor-fg-color", required_argument, 0, 0 },
 
 #define OPT_H_BG_COLOR_IDX 39
-    [OPT_H_BG_COLOR_IDX] = { "highlihgt-bg-color", required_argument, 0, 0 },
+    [OPT_H_BG_COLOR_IDX] = { "highlight-bg-color", required_argument, 0, 0 },
 
 #define OPT_H_FG_COLOR_IDX 40
     [OPT_H_FG_COLOR_IDX] = { "highlight-fg-color", required_argument, 0, 0 },
