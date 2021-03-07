@@ -72,16 +72,19 @@ typedef struct WindowBase
     /* Window dimensions and position */
     int32_t w, h, x, y;
 
-    /*
-     * Window dimensions used before window state was changed by maximizing or making it fullscreen.
-     */
+    /* The window is fullscreen/maximized/tiled */
+    bool size_set_by_wm;
+
+    /* Store the old window size when 'size_set_by_wm', so we can reset it when the window is set to
+     * floating again. */
     int32_t previous_w, previous_h;
 
-    int32_t                pointer_x, pointer_y;
+    int32_t  pointer_x, pointer_y;
+    uint32_t key_repeat_interval_ms;
+
     uint16_t               state_flags;
     bool                   paint;
     enum MousePointerStyle current_pointer_style;
-    uint32_t               key_repeat_interval_ms;
 
     struct window_callbacks_t
     {

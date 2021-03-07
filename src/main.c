@@ -469,14 +469,15 @@ static void App_maybe_resize(App* self, Pair_uint32_t newres)
     if (newres.first != self->resolution.first || newres.second != self->resolution.second) {
         self->resolution    = newres;
         Pair_uint32_t chars = Gfx_get_char_size(self->gfx);
-        Vt_resize(&self->vt, chars.first, chars.second);
-        Gfx_resize(self->gfx, self->resolution.first, self->resolution.second);
-        App_update_padding(self);
         Vt_clear_all_proxies(&self->vt);
         Gfx_destroy_proxy(self->gfx, self->ui.cursor_proxy.data);
         Gfx_resize(self->gfx, self->resolution.first, self->resolution.second);
-        Window_notify_content_change(self->win);
+        App_update_padding(self);
         App_clamp_cursor(self, chars);
+        chars = Gfx_get_char_size(self->gfx);
+        Vt_resize(&self->vt, chars.first, chars.second);
+
+        Window_notify_content_change(self->win);
 
         if (settings.dynamic_title) {
             App_set_title(self);

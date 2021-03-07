@@ -1085,22 +1085,36 @@ static void xdg_toplevel_handle_configure(void*                data,
                                           struct wl_array*     states)
 {
     struct WindowBase* win = data;
-    /* enum xdg_toplevel_state* s; */
-    /* bool                     is_active = false; */
-    /* wl_array_for_each(s, states) { */
-    /*     if (*s == XDG_TOPLEVEL_STATE_ACTIVATED) { */
-    /*         is_active = true; */
-    /*     } */
-    /* } */
+
+    enum xdg_toplevel_state* s;
+    bool                     is_wm_size = false;
+
+    wl_array_for_each(s, states)
+    {
+        if (*s == XDG_TOPLEVEL_STATE_MAXIMIZED || *s == XDG_TOPLEVEL_STATE_FULLSCREEN ||
+            *s == XDG_TOPLEVEL_STATE_TILED_LEFT || *s == XDG_TOPLEVEL_STATE_TILED_RIGHT ||
+            *s == XDG_TOPLEVEL_STATE_TILED_TOP || *s == XDG_TOPLEVEL_STATE_TILED_BOTTOM) {
+            is_wm_size = true;
+        }
+    }
+
     if (!width && !height) {
+        if (win->previous_w && win->previous_h) {
+            win->w = win->previous_w;
+            win->h = win->previous_h;
+        }
         wl_egl_window_resize(windowWl(win)->egl_window, win->w, win->h, 0, 0);
     } else {
         win->w = width;
         win->h = height;
+        if (!is_wm_size) {
+            win->previous_w = win->w;
+            win->previous_h = win->h;
+        }
+        wl_egl_window_resize(windowWl(win)->egl_window, win->w, win->h, 0, 0);
     }
 
     Window_notify_content_change(win);
-    wl_egl_window_resize(windowWl(win)->egl_window, win->w, win->h, 0, 0);
 }
 
 static const struct xdg_toplevel_listener xdg_toplevel_listener = {
