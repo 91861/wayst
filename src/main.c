@@ -375,7 +375,7 @@ static void App_run(App* self)
                 usleep(settings.pty_chunk_wait_delay_ns);
             }
         } while (bytes && likely(!settings.debug_vt));
-
+        
         char*        buf;
         size_t       len;
         Vector_char* out = Vt_get_output(&self->vt, PIPE_BUF, &buf, &len);

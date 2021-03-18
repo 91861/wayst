@@ -1636,14 +1636,17 @@ static void line_render_pass_set_up_framebuffer(line_render_pass_t* self)
 
 typedef struct
 {
-    line_render_subpass_args_t* args;
+    line_render_subpass_args_t args;
 } line_render_subpass_t;
 
 static line_render_subpass_t line_render_pass_create_subpass(line_render_pass_t*         self,
                                                              line_render_subpass_args_t* args)
 {
     line_render_subpass_t sub = {
-        .args = args,
+        .args =
+          (line_render_subpass_args_t){
+            .render_range_begin = MIN(args->render_range_begin, self->args.vt_line->data.size),
+            .render_range_end   = MIN(args->render_range_end, self->args.vt_line->data.size) }
     };
 
     return sub;
@@ -1652,21 +1655,25 @@ static line_render_subpass_t line_render_pass_create_subpass(line_render_pass_t*
 static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
                                              line_render_subpass_t* subpass)
 {
+    ASSERT(subpass->args.render_range_begin <= pass->args.vt_line->data.size &&
+             subpass->args.render_range_end <= pass->args.vt_line->data.size,
+           "subpass range within line size");
+
     const double scalex = 2.0 / pass->texture_width;
     const double scaley = 2.0 / pass->texture_height;
 
-    GLint bg_pixels_begin = subpass->args->render_range_begin * pass->args.gl21->glyph_width_pixels,
+    GLint bg_pixels_begin = subpass->args.render_range_begin * pass->args.gl21->glyph_width_pixels,
           bg_pixels_end;
     ColorRGBA active_bg_color =
       pass->args.is_for_cursor ? Vt_rune_cursor_bg(pass->args.vt, NULL) : pass->args.vt->colors.bg;
-    VtRune* each_rune = pass->args.vt_line->data.buf + subpass->args->render_range_begin;
+    VtRune* each_rune = pass->args.vt_line->data.buf + subpass->args.render_range_begin;
     VtRune* same_bg_block_begin_rune = each_rune;
     VtRune* cursor_rune              = Vt_cursor_cell(pass->args.vt);
 
-    for (uint16_t idx_each_rune = subpass->args->render_range_begin;
-         idx_each_rune <= subpass->args->render_range_end;) {
+    for (uint16_t idx_each_rune = subpass->args.render_range_begin;
+         idx_each_rune <= subpass->args.render_range_end;) {
         each_rune = pass->args.vt_line->data.buf + idx_each_rune;
-        if (likely(idx_each_rune != subpass->args->render_range_end)) {
+        if (likely(idx_each_rune != subpass->args.render_range_end)) {
             if (unlikely(each_rune->blinkng)) {
                 pass->has_blinking_chars = true;
             }
@@ -1678,7 +1685,7 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
             }
         }
 
-        if (idx_each_rune == subpass->args->render_range_end ||
+        if (idx_each_rune == subpass->args.render_range_end ||
             !ColorRGBA_eq(Vt_rune_final_bg(pass->args.vt,
                                            pass->args.is_for_cursor ? cursor_rune : each_rune,
                                            idx_each_rune,
@@ -1921,7 +1928,7 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
             glEnable(GL_SCISSOR_TEST);
             glScissor(clip_begin, 0, pass->texture_width, pass->texture_height);
 
-            if (idx_each_rune != subpass->args->render_range_end) {
+            if (idx_each_rune != subpass->args.render_range_end) {
                 same_bg_block_begin_rune = each_rune;
                 active_bg_color          = Vt_rune_final_bg(pass->args.vt,
                                                    each_rune,
@@ -1931,12 +1938,12 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
             }
         } // end if bg color changed
 
-        int w = likely(idx_each_rune != subpass->args->render_range_end)
+        int w = likely(idx_each_rune != subpass->args.render_range_end)
                   ? wcwidth(pass->args.vt_line->data.buf[idx_each_rune].rune.code)
                   : 1;
 
         idx_each_rune = CLAMP(idx_each_rune + (unlikely(w > 1) ? w : 1),
-                              subpass->args->render_range_begin,
+                              subpass->args.render_range_begin,
                               (uint16_t)(pass->args.vt_line->data.size + 1));
     }
 }
@@ -1953,10 +1960,10 @@ static void line_reder_pass_run_line_subpass(const line_render_pass_t* pass,
     static float end[6]     = { 1, 1, 1, 1, 1, 1 };
     static bool  drawing[6] = { 0 };
 
-    if (unlikely(subpass->args->render_range_begin)) {
-        const float init_coord = unlikely(subpass->args->render_range_end)
+    if (unlikely(subpass->args.render_range_begin)) {
+        const float init_coord = unlikely(subpass->args.render_range_end)
                                    ? -1.0f + pass->args.gl21->glyph_width_pixels * scalex *
-                                               subpass->args->render_range_begin
+                                               subpass->args.render_range_begin
                                    : 0.0f;
 
         for (uint_fast8_t i = 0; i < ARRAY_SIZE(begin); ++i) {
@@ -1967,29 +1974,29 @@ static void line_reder_pass_run_line_subpass(const line_render_pass_t* pass,
     // lines are drawn in the same color as the character, unless the line color was explicitly set
     ColorRGB line_color =
       Vt_rune_ln_clr(pass->args.vt,
-                     &pass->args.vt_line->data.buf[subpass->args->render_range_begin]);
+                     &pass->args.vt_line->data.buf[subpass->args.render_range_begin]);
     glDisable(GL_SCISSOR_TEST);
     glEnable(GL_BLEND);
 
-    for (const VtRune* each_rune = pass->args.vt_line->data.buf + subpass->args->render_range_begin;
-         each_rune <= pass->args.vt_line->data.buf + subpass->args->render_range_end;
+    for (const VtRune* each_rune = pass->args.vt_line->data.buf + subpass->args.render_range_begin;
+         each_rune <= pass->args.vt_line->data.buf + subpass->args.render_range_end;
          ++each_rune) {
 
         /* text column where this should be drawn */
         size_t   column = each_rune - pass->args.vt_line->data.buf;
         ColorRGB nc     = { 0 };
-        if (each_rune != pass->args.vt_line->data.buf + subpass->args->render_range_end) {
+        if (each_rune != pass->args.vt_line->data.buf + subpass->args.render_range_end) {
             nc = Vt_rune_ln_clr(pass->args.vt, each_rune);
         }
         // State has changed
         if (!ColorRGB_eq(line_color, nc) ||
-            each_rune == pass->args.vt_line->data.buf + subpass->args->render_range_end ||
+            each_rune == pass->args.vt_line->data.buf + subpass->args.render_range_end ||
             each_rune->underlined != drawing[0] || each_rune->doubleunderline != drawing[1] ||
             each_rune->strikethrough != drawing[2] || each_rune->overline != drawing[3] ||
             each_rune->curlyunderline != drawing[4] ||
             (each_rune->hyperlink_idx != 0) != drawing[5]) {
 
-            if (each_rune == pass->args.vt_line->data.buf + subpass->args->render_range_end) {
+            if (each_rune == pass->args.vt_line->data.buf + subpass->args.render_range_end) {
                 for (uint_fast8_t tmp = 0; tmp < ARRAY_SIZE(end); tmp++) {
                     end[tmp] =
                       -1.0f + (float)column * scalex * (float)pass->args.gl21->glyph_width_pixels;
@@ -2124,7 +2131,7 @@ static void line_reder_pass_run_line_subpass(const line_render_pass_t* pass,
           -1.0f + (float)column * scalex * (float)pass->args.gl21->glyph_width_pixels;             \
     }
 
-            if (each_rune != pass->args.vt_line->data.buf + subpass->args->render_range_end) {
+            if (each_rune != pass->args.vt_line->data.buf + subpass->args.render_range_end) {
                 L_SET_BOUNDS_BEGIN(each_rune->underlined, 0);
                 L_SET_BOUNDS_BEGIN(each_rune->doubleunderline, 1);
                 L_SET_BOUNDS_BEGIN(each_rune->strikethrough, 2);
@@ -2234,6 +2241,7 @@ static void _GfxOpenGL21_draw_block_cursor(GfxOpenGL21* gfx,
     if (should_create_line_render_pass(&rp_args)) {
         gfx->bound_resources  = BOUND_RESOURCES_NONE;
         line_render_pass_t rp = create_line_render_pass(&rp_args);
+
         line_reder_pass_run(&rp);
 
         if (rp.has_blinking_chars) {
