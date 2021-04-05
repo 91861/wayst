@@ -94,6 +94,8 @@ static WindowStatic* global;
 #define globalX11       ((GlobalX11*)&global->extend_data)
 #define windowX11(base) ((WindowX11*)&base->extend_data)
 
+static void               WindowX11_set_decoration_theme_hint(struct WindowBase*      self,
+                                                              enum decoration_theme_e theme);
 static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h);
 static void               WindowX11_set_fullscreen(struct WindowBase* self, bool fullscreen);
 static void               WindowX11_set_maximized(struct WindowBase* self, bool maximized);
@@ -174,6 +176,8 @@ typedef struct
 
         Atom dnd_enter, dnd_type_list, dnd_position, dnd_finished, dnd_leave, dnd_status, dnd_drop,
           dnd_selection, dnd_action_copy, dnd_proxy;
+
+        Atom gtk_theme_variant;
     } atom;
 
     struct globalX11_incr_transfer_inbound
@@ -735,6 +739,8 @@ static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
         globalX11->atom.dnd_selection   = XInternAtom(globalX11->display, "XdndSelection", True);
         globalX11->atom.dnd_action_copy = XInternAtom(globalX11->display, "XdndActionCopy", True);
         globalX11->atom.dnd_proxy       = XInternAtom(globalX11->display, "XdndProxy", True);
+        globalX11->atom.gtk_theme_variant =
+          XInternAtom(globalX11->display, "_GTK_THEME_VARIANT", False);
 
         /* There is no actual limit on property size, ICCCM only says that INCR should be used for
          * data 'large relative to max request size'. It seems that (XExtendedMaxRequestSize() or
@@ -778,6 +784,8 @@ static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
                     PropModeReplace,
                     (unsigned char*)&xdnd_proto_version,
                     1);
+
+    WindowX11_set_decoration_theme_hint(win, settings.decoration_theme);
 
     XFlush(globalX11->display);
 
@@ -1686,6 +1694,45 @@ static bool WindowX11_maybe_swap(struct WindowBase* self)
         return true;
     } else {
         return false;
+    }
+}
+
+static void WindowX11_set_decoration_theme_hint(struct WindowBase*      self,
+                                                enum decoration_theme_e theme)
+{
+    const char* name = NULL;
+
+    switch (theme) {
+        case DECORATION_THEME_DONT_CARE:
+            return;
+        case DECORATION_THEME_DARK:
+            name = "dark";
+            break;
+        case DECORATION_THEME_LIGHT:
+            name = "light";
+            break;
+        case DECORATION_THEME_FROM_BG:
+            name = ColorRGB_get_relative_luminance((ColorRGB*)&settings.bg) >
+                       RELATIVE_LUMINANCE_BRIGHT_COLOR_TRESHOLD
+                     ? "light"
+                     : "dark";
+            break;
+        case DECORATION_THEME_FROM_BG_IF_DARK:
+            if (ColorRGB_get_relative_luminance((ColorRGB*)&settings.bg) <=
+                RELATIVE_LUMINANCE_BRIGHT_COLOR_TRESHOLD)
+                name = "dark";
+            break;
+    }
+
+    if (name) {
+        XChangeProperty(globalX11->display,
+                        windowX11(self)->window,
+                        globalX11->atom.gtk_theme_variant,
+                        globalX11->atom.utf8_string_mime_type,
+                        8,
+                        PropModeReplace,
+                        (unsigned char*)name,
+                        strlen(name));
     }
 }
 

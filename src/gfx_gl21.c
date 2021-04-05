@@ -223,6 +223,57 @@ static void LineTexture_destroy(LineTexture* self)
     }
 }
 
+typedef struct
+{
+    GLint     framebuffer;
+    GLint     shader;
+    GLboolean depth_test;
+    GLboolean scissor_test;
+    GLboolean blend;
+    GLint     viewport[4];
+    GLint     blend_dst, blend_src;
+} stored_common_gl_state_t;
+
+static stored_common_gl_state_t store_common_state()
+{
+    stored_common_gl_state_t state;
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &state.framebuffer);
+    glGetIntegerv(GL_CURRENT_PROGRAM, &state.shader);
+    glGetBooleanv(GL_DEPTH_TEST, &state.depth_test);
+    glGetBooleanv(GL_SCISSOR_TEST, &state.scissor_test);
+    glGetBooleanv(GL_BLEND, &state.blend);
+    glGetIntegerv(GL_VIEWPORT, state.viewport);
+    glGetIntegerv(GL_BLEND_SRC_ALPHA, &state.blend_src);
+    glGetIntegerv(GL_BLEND_DST_ALPHA, &state.blend_dst);
+    return state;
+}
+
+static void restore_gl_state(stored_common_gl_state_t* state)
+{
+    glUseProgram(state->shader);
+    glBindFramebuffer(GL_FRAMEBUFFER, state->framebuffer);
+    glViewport(state->viewport[0], state->viewport[1], state->viewport[2], state->viewport[3]);
+    glBlendFunc(state->blend_src, state->blend_dst);
+
+    if (state->depth_test) {
+        glEnable(GL_DEPTH_TEST);
+    } else {
+        glDisable(GL_DEPTH_TEST);
+    }
+
+    if (state->scissor_test) {
+        glEnable(GL_SCISSOR_TEST);
+    } else {
+        glDisable(GL_SCISSOR_TEST);
+    }
+
+    if (state->blend) {
+        glEnable(GL_BLEND);
+    } else {
+        glDisable(GL_BLEND);
+    }
+}
+
 struct _GfxOpenGL21;
 
 typedef struct
@@ -239,7 +290,6 @@ typedef struct
 typedef struct
 {
     uint8_t page_id;
-    bool    can_scale;
     GLuint  texture_id;
 
     float   left, top;
@@ -266,7 +316,13 @@ typedef struct
     GlyphAtlasPage*          current_grayscale_page;
     Map_Rune_GlyphAtlasEntry entry_map;
     uint32_t                 page_size_px;
+    uint32_t                 color_page_size_px;
 } GlyphAtlas;
+
+typedef struct
+{
+    uint32_t width, height, top, left;
+} freetype_output_scaling_t;
 
 typedef struct _GfxOpenGL21
 {
@@ -332,9 +388,10 @@ typedef struct _GfxOpenGL21
 #define gfxOpenGL21(gfx) ((GfxOpenGL21*)&gfx->extend_data)
 #define gfxBase(gfxGl21) ((Gfx*)(((uint8_t*)(gfxGl21)) - offsetof(Gfx, extend_data)))
 
-Pair_GLuint GfxOpenGL21_pop_recycled(GfxOpenGL21* self);
-void        GfxOpenGL21_load_font(Gfx* self);
-void        GfxOpenGL21_destroy_recycled(GfxOpenGL21* self);
+static freetype_output_scaling_t scale_ft_glyph(GfxOpenGL21* gfx, FreetypeOutput* glyph);
+Pair_GLuint                      GfxOpenGL21_pop_recycled(GfxOpenGL21* self);
+void                             GfxOpenGL21_load_font(Gfx* self);
+void                             GfxOpenGL21_destroy_recycled(GfxOpenGL21* self);
 
 void          GfxOpenGL21_destroy(Gfx* self);
 void          GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui);
@@ -410,9 +467,7 @@ static GlyphAtlasPage GlyphAtlasPage_new(GfxOpenGL21*       gfx,
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
 
-    glTexParameteri(GL_TEXTURE_2D,
-                    GL_TEXTURE_MIN_FILTER,
-                    filter ? GL_LINEAR_MIPMAP_LINEAR : GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter ? GL_LINEAR : GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter ? GL_LINEAR : GL_NEAREST);
 
     glTexImage2D(GL_TEXTURE_2D,
@@ -424,50 +479,66 @@ static GlyphAtlasPage GlyphAtlasPage_new(GfxOpenGL21*       gfx,
                  self.internal_format,
                  GL_UNSIGNED_BYTE,
                  0);
-
-    if (filter) {
-        glGenerateMipmap(GL_TEXTURE_2D);
-    }
-
     return self;
 }
 
-static inline bool GlyphAtlasPage_can_push(GlyphAtlasPage* self, FreetypeOutput* glyph)
+static inline bool GlyphAtlasPage_can_push(GfxOpenGL21*    gfx,
+                                           GlyphAtlasPage* self,
+                                           FreetypeOutput* glyph)
 {
-    return self->current_offset_y + MAX((uint32_t)glyph->height, self->current_line_height_px) + 1 <
-           self->height_px;
+    if (unlikely(glyph->type == FT_OUTPUT_COLOR_BGRA)) {
+        freetype_output_scaling_t scaling = scale_ft_glyph(gfx, glyph);
+
+        return self->current_offset_y +
+                   MAX((uint32_t)scaling.height, self->current_line_height_px) + 1 <
+                 self->height_px &&
+               self->current_offset_x + scaling.width + 1 < self->width_px;
+    } else {
+        return self->current_offset_y + MAX((uint32_t)glyph->height, self->current_line_height_px) +
+                   1 <
+                 self->height_px &&
+               self->current_offset_x + glyph->width + 1 < self->width_px;
+    }
 }
 
 static inline bool GlyphAtlasPage_can_push_tex(GlyphAtlasPage* self, Texture tex)
 {
-    return self->current_offset_y + MAX(tex.h, self->current_line_height_px) + 1 < self->height_px;
+    return self->current_offset_y + MAX(tex.h, self->current_line_height_px) + 1 <
+             self->height_px &&
+           self->current_offset_x + tex.w + 1 < self->width_px;
 }
 
-static GlyphAtlasEntry GlyphAtlasPage_push_tex(GfxOpenGL21*    gfx,
-                                               GlyphAtlasPage* self,
-                                               FreetypeOutput* glyph,
-                                               Texture         tex)
+static GlyphAtlasEntry GlyphAtlasPage_push_tex(GfxOpenGL21*               gfx,
+                                               GlyphAtlasPage*            self,
+                                               FreetypeOutput*            glyph,
+                                               Texture                    tex,
+                                               freetype_output_scaling_t* opt_scaling)
 {
     ASSERT(GlyphAtlasPage_can_push_tex(self, tex), "does not overflow");
-    if (self->current_offset_x + glyph->width >= self->width_px) {
+
+    uint32_t final_width, final_height, final_top, final_left;
+
+    if (opt_scaling) {
+        final_width  = opt_scaling->width;
+        final_height = opt_scaling->height;
+        final_top    = opt_scaling->top;
+        final_left   = opt_scaling->left;
+    } else {
+        final_width  = tex.w;
+        final_height = tex.h;
+        final_top    = glyph->top;
+        final_left   = glyph->left;
+    }
+
+    if (self->current_offset_x + final_width >= self->width_px) {
         self->current_offset_y += (self->current_line_height_px + 1);
         self->current_offset_x       = 0;
         self->current_line_height_px = 0;
     }
-    self->current_line_height_px = MAX(self->current_line_height_px, (uint32_t)glyph->height);
-    if (unlikely(glyph->type == FT_OUTPUT_COLOR_BGRA))
-        glGenerateMipmap(GL_TEXTURE_2D);
 
-    GLint     old_fb;
-    GLint     old_shader;
-    GLboolean old_depth_test;
-    GLboolean old_scissor_test;
-    GLint     old_viewport[4];
-    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &old_fb);
-    glGetIntegerv(GL_CURRENT_PROGRAM, &old_shader);
-    glGetBooleanv(GL_DEPTH_TEST, &old_depth_test);
-    glGetBooleanv(GL_SCISSOR_TEST, &old_scissor_test);
-    glGetIntegerv(GL_VIEWPORT, old_viewport);
+    self->current_line_height_px = MAX(self->current_line_height_px, final_height);
+
+    stored_common_gl_state_t old_state = store_common_state();
 
     GLuint tmp_fb;
     glGenFramebuffers(1, &tmp_fb);
@@ -481,7 +552,13 @@ static GlyphAtlasEntry GlyphAtlasPage_push_tex(GfxOpenGL21*    gfx,
     glViewport(0, 0, self->width_px, self->height_px);
 
     glDisable(GL_SCISSOR_TEST);
-    glDisable(GL_BLEND);
+
+    if (opt_scaling) {
+        glEnable(GL_BLEND);
+    } else {
+        glDisable(GL_BLEND);
+    }
+
     glDisable(GL_DEPTH_TEST);
     GLuint tmp_vbo;
     glGenBuffers(1, &tmp_vbo);
@@ -489,12 +566,13 @@ static GlyphAtlasEntry GlyphAtlasPage_push_tex(GfxOpenGL21*    gfx,
     glUseProgram(gfx->image_shader.id);
     glBindTexture(GL_TEXTURE_2D, tex.id);
 
-    float sx             = 2.0f / self->width_px;
-    float sy             = 2.0f / self->height_px;
-    float w              = tex.w * sx;
-    float h              = tex.h * sy;
-    float x              = -1.0f + self->current_offset_x * sx;
-    float y              = -1.0f + self->current_offset_y * sy + h;
+    float sx = 2.0f / self->width_px;
+    float sy = 2.0f / self->height_px;
+    float w  = final_width * sx;
+    float h  = final_height * sy;
+    float x  = -1.0f + self->current_offset_x * sx;
+    float y  = -1.0f + self->current_offset_y * sy + h;
+
     float vbo_data[4][4] = {
         { x, y, 0.0f, 1.0f },
         { x + w, y, 1.0f, 1.0f },
@@ -510,47 +588,63 @@ static GlyphAtlasEntry GlyphAtlasPage_push_tex(GfxOpenGL21*    gfx,
     glDeleteFramebuffers(1, &tmp_fb);
     glDeleteBuffers(1, &tmp_vbo);
 
-    /* restore initial state */
-    glUseProgram(old_shader);
-    glBindFramebuffer(GL_FRAMEBUFFER, old_fb);
-    glViewport(old_viewport[0], old_viewport[1], old_viewport[2], old_viewport[3]);
-    if (!old_depth_test) {
-        glDisable(GL_DEPTH_TEST);
-    }
-    if (old_scissor_test) {
-        glEnable(GL_SCISSOR_TEST);
-    }
+    restore_gl_state(&old_state);
 
     GlyphAtlasEntry retval = {
         .page_id    = self->page_id,
-        .can_scale  = glyph->type == FT_OUTPUT_COLOR_BGRA,
         .texture_id = self->texture_id,
-        .left       = MIN(0, glyph->left),
-        .top        = tex.h,
-        .height     = tex.h,
-        .width      = tex.w,
+        .left       = MIN(0, final_left),
+        .top        = final_top,
+        .height     = final_height,
+        .width      = final_width,
         .tex_coords = { (float)self->current_offset_x / self->width_px,
                         1.0f - (((float)self->height_px - (float)self->current_offset_y) /
                                 self->height_px),
                         (float)self->current_offset_x / self->width_px +
-                          (float)tex.w / self->width_px,
+                          (float)final_width / self->width_px,
                         1.0f - (((float)self->height_px - (float)self->current_offset_y) /
                                   self->height_px -
-                                (float)tex.h / self->height_px) },
+                                (float)final_height / self->height_px) },
     };
-    self->current_offset_x += tex.w;
+
+    self->current_offset_x += final_width;
     return retval;
 }
 
-static GlyphAtlasEntry GlyphAtlasPage_push(GlyphAtlasPage* self, FreetypeOutput* glyph)
+static freetype_output_scaling_t scale_ft_glyph(GfxOpenGL21* gfx, FreetypeOutput* glyph)
 {
-    ASSERT(GlyphAtlasPage_can_push(self, glyph), "does not overflow");
+    double scale_factor = 1.0;
+    if (glyph->height > gfx->line_height_pixels) {
+        scale_factor = (double)gfx->line_height_pixels / (double)glyph->height;
+
+        return (freetype_output_scaling_t){
+            .width  = (double)glyph->width * scale_factor,
+            .height = (double)glyph->height * scale_factor,
+            .top    = (double)glyph->top * scale_factor,
+            .left   = (double)glyph->left * scale_factor,
+        };
+    } else {
+        return (freetype_output_scaling_t){
+            .width  = glyph->width,
+            .height = glyph->height,
+            .top    = glyph->top,
+            .left   = glyph->left,
+        };
+    }
+}
+
+static GlyphAtlasEntry GlyphAtlasPage_push(GfxOpenGL21*    gfx,
+                                           GlyphAtlasPage* self,
+                                           FreetypeOutput* glyph)
+{
+    ASSERT(GlyphAtlasPage_can_push(gfx, self, glyph), "does not overflow");
+
     if (self->current_offset_x + glyph->width >= self->width_px) {
         self->current_offset_y += (self->current_line_height_px + 1);
         self->current_offset_x       = 0;
         self->current_line_height_px = 0;
     }
-    self->current_line_height_px = MAX(self->current_line_height_px, (uint32_t)glyph->height);
+
     GLenum format;
     switch (glyph->type) {
         case FT_OUTPUT_BGR_H:
@@ -570,50 +664,97 @@ static GlyphAtlasEntry GlyphAtlasPage_push(GlyphAtlasPage* self, FreetypeOutput*
         default:
             ASSERT_UNREACHABLE
     }
+
+    GLsizei final_width = glyph->width, final_height = glyph->height, final_top = glyph->top,
+            final_left = glyph->left;
+
     glPixelStorei(GL_UNPACK_ALIGNMENT, glyph->alignment);
-    glBindTexture(GL_TEXTURE_2D, self->texture_id);
-    glTexSubImage2D(GL_TEXTURE_2D,
-                    0,
-                    self->current_offset_x,
-                    self->current_offset_y,
-                    glyph->width,
-                    glyph->height,
-                    format,
-                    GL_UNSIGNED_BYTE,
-                    glyph->pixels);
-    if (unlikely(glyph->type == FT_OUTPUT_COLOR_BGRA))
+
+    if (unlikely(glyph->type == FT_OUTPUT_COLOR_BGRA)) {
+        freetype_output_scaling_t scale = scale_ft_glyph(gfx, glyph);
+        final_height                    = scale.height;
+        final_width                     = scale.width;
+        final_top                       = scale.top;
+        final_left                      = scale.left;
+
+        GLuint tmp_tex;
+        glGenTextures(1, &tmp_tex);
+        glBindTexture(GL_TEXTURE_2D, tmp_tex);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        glTexImage2D(GL_TEXTURE_2D,
+                     0,
+                     GL_RGBA,
+                     glyph->width,
+                     glyph->height,
+                     0,
+                     GL_BGRA,
+                     GL_UNSIGNED_BYTE,
+                     glyph->pixels);
+
         glGenerateMipmap(GL_TEXTURE_2D);
+
+        Texture tex = {
+            .format = TEX_FMT_RGBA,
+            .w      = glyph->width,
+            .h      = glyph->height,
+            .id     = tmp_tex,
+        };
+
+        return GlyphAtlasPage_push_tex(gfx, self, glyph, tex, &scale);
+    } else {
+        glBindTexture(GL_TEXTURE_2D, self->texture_id);
+        glTexSubImage2D(GL_TEXTURE_2D,
+                        0,
+                        self->current_offset_x,
+                        self->current_offset_y,
+                        glyph->width,
+                        glyph->height,
+                        format,
+                        GL_UNSIGNED_BYTE,
+                        glyph->pixels);
+    }
+
+    self->current_line_height_px = MAX(self->current_line_height_px, (uint32_t)glyph->height);
+
+    if (unlikely(glyph->type == FT_OUTPUT_COLOR_BGRA)) {
+        glGenerateMipmap(GL_TEXTURE_2D);
+    }
+
     GlyphAtlasEntry retval = {
         .page_id    = self->page_id,
-        .can_scale  = glyph->type == FT_OUTPUT_COLOR_BGRA,
         .texture_id = self->texture_id,
-        .left       = glyph->left,
-        .top        = glyph->top,
-        .height     = glyph->height,
-        .width      = glyph->width,
+        .left       = final_left,
+        .top        = final_top,
+        .height     = final_height,
+        .width      = final_width,
         .tex_coords = { (float)self->current_offset_x / self->width_px,
                         1.0f - (((float)self->height_px - (float)self->current_offset_y) /
                                 self->height_px),
                         (float)self->current_offset_x / self->width_px +
-                          (float)glyph->width / self->width_px,
+                          (float)final_width / self->width_px,
                         1.0f - (((float)self->height_px - (float)self->current_offset_y) /
                                   self->height_px -
-                                (float)glyph->height / self->height_px) },
+                                (float)final_height / self->height_px) },
     };
-    self->current_offset_x += glyph->width;
+
+    self->current_offset_x += final_width;
+
     return retval;
 }
 
-static GlyphAtlas GlyphAtlas_new(uint32_t page_size_px)
+static GlyphAtlas GlyphAtlas_new(uint32_t page_size_px, uint32_t color_page_size_px)
 {
-    GlyphAtlas self;
-    self.pages                  = Vector_new_with_capacity_GlyphAtlasPage(3);
-    self.entry_map              = Map_new_Rune_GlyphAtlasEntry(1024);
-    self.current_rgba_page      = NULL;
-    self.current_rgb_page       = NULL;
-    self.current_grayscale_page = NULL;
-    self.page_size_px           = page_size_px;
-    return self;
+    return (GlyphAtlas){
+        .pages                  = Vector_new_with_capacity_GlyphAtlasPage(3),
+        .entry_map              = Map_new_Rune_GlyphAtlasEntry(1024),
+        .current_rgba_page      = NULL,
+        .current_rgb_page       = NULL,
+        .current_grayscale_page = NULL,
+        .page_size_px           = page_size_px,
+        .color_page_size_px     = color_page_size_px,
+    };
 }
 
 static void GlyphAtlas_destroy(GlyphAtlas* self)
@@ -678,16 +819,7 @@ __attribute__((cold)) GlyphAtlasEntry* GlyphAtlas_get_combined(GfxOpenGL21* gfx,
             ASSERT_UNREACHABLE
     }
 
-    GLint     old_fb;
-    GLint     old_shader;
-    GLboolean old_depth_test;
-    GLboolean old_scissor_test;
-    GLint     old_viewport[4];
-    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &old_fb);
-    glGetIntegerv(GL_CURRENT_PROGRAM, &old_shader);
-    glGetBooleanv(GL_DEPTH_TEST, &old_depth_test);
-    glGetBooleanv(GL_SCISSOR_TEST, &old_scissor_test);
-    glGetIntegerv(GL_VIEWPORT, old_viewport);
+    stored_common_gl_state_t old_state = store_common_state();
 
     Texture tex = {
         .id = 0,
@@ -794,24 +926,14 @@ __attribute__((cold)) GlyphAtlasEntry* GlyphAtlas_get_combined(GfxOpenGL21* gfx,
     glDeleteRenderbuffers(1, &tmp_rb);
     glDeleteBuffers(1, &tmp_vbo);
 
-    /* restore initial state */
-    glUseProgram(old_shader);
-    glBindFramebuffer(GL_FRAMEBUFFER, old_fb);
-    glViewport(old_viewport[0], old_viewport[1], old_viewport[2], old_viewport[3]);
-
-    if (!old_depth_test) {
-        glDisable(GL_DEPTH_TEST);
-    }
-
-    if (old_scissor_test) {
-        glEnable(GL_SCISSOR_TEST);
-    }
+    restore_gl_state(&old_state);
 
     GlyphAtlasPage* tgt_page;
 
     if (!output) {
         return NULL;
     }
+
     switch (output->type) {
         case FT_OUTPUT_RGB_H:
         case FT_OUTPUT_BGR_H:
@@ -855,8 +977,8 @@ __attribute__((cold)) GlyphAtlasEntry* GlyphAtlas_get_combined(GfxOpenGL21* gfx,
                                                               true,
                                                               GL_RGBA,
                                                               TEX_FMT_RGBA,
-                                                              self->page_size_px,
-                                                              self->page_size_px));
+                                                              self->color_page_size_px,
+                                                              self->color_page_size_px));
                 tgt_page = self->current_rgba_page = Vector_last_GlyphAtlasPage(&self->pages);
             }
             break;
@@ -871,7 +993,7 @@ __attribute__((cold)) GlyphAtlasEntry* GlyphAtlas_get_combined(GfxOpenGL21* gfx,
     return Map_insert_Rune_GlyphAtlasEntry(
       &self->entry_map,
       key,
-      GlyphAtlasPage_push_tex(gfx, tgt_page, base_output, tex));
+      GlyphAtlasPage_push_tex(gfx, tgt_page, base_output, tex, NULL));
 }
 
 __attribute__((hot, always_inline)) static inline GlyphAtlasEntry*
@@ -903,7 +1025,7 @@ GlyphAtlas_get_regular(GfxOpenGL21* gfx, GlyphAtlas* self, const Rune* rune)
         case FT_OUTPUT_RGB_V:
         case FT_OUTPUT_BGR_V:
             tgt_page = self->current_rgb_page;
-            if (unlikely(!tgt_page || !GlyphAtlasPage_can_push(tgt_page, output))) {
+            if (unlikely(!tgt_page || !GlyphAtlasPage_can_push(gfx, tgt_page, output))) {
                 Vector_push_GlyphAtlasPage(&self->pages,
                                            GlyphAtlasPage_new(gfx,
                                                               self->pages.size,
@@ -917,7 +1039,7 @@ GlyphAtlas_get_regular(GfxOpenGL21* gfx, GlyphAtlas* self, const Rune* rune)
             break;
         case FT_OUTPUT_GRAYSCALE:
             tgt_page = self->current_grayscale_page;
-            if (unlikely(!tgt_page || !GlyphAtlasPage_can_push(tgt_page, output))) {
+            if (unlikely(!tgt_page || !GlyphAtlasPage_can_push(gfx, tgt_page, output))) {
                 Vector_push_GlyphAtlasPage(&self->pages,
                                            GlyphAtlasPage_new(gfx,
                                                               self->pages.size,
@@ -931,7 +1053,7 @@ GlyphAtlas_get_regular(GfxOpenGL21* gfx, GlyphAtlas* self, const Rune* rune)
             break;
         case FT_OUTPUT_COLOR_BGRA:
             tgt_page = self->current_rgba_page;
-            if (unlikely(!tgt_page || !GlyphAtlasPage_can_push(tgt_page, output))) {
+            if (unlikely(!tgt_page || !GlyphAtlasPage_can_push(gfx, tgt_page, output))) {
                 Vector_push_GlyphAtlasPage(&self->pages,
                                            GlyphAtlasPage_new(gfx,
                                                               self->pages.size,
@@ -951,7 +1073,7 @@ GlyphAtlas_get_regular(GfxOpenGL21* gfx, GlyphAtlas* self, const Rune* rune)
         key.style = VT_RUNE_UNSTYLED;
     return Map_insert_Rune_GlyphAtlasEntry(&self->entry_map,
                                            key,
-                                           GlyphAtlasPage_push(tgt_page, output));
+                                           GlyphAtlasPage_push(gfx, tgt_page, output));
 }
 
 __attribute__((hot)) static GlyphAtlasEntry* GlyphAtlas_get(GfxOpenGL21* gfx,
@@ -1205,7 +1327,7 @@ void GfxOpenGL21_init_with_context_activated(Gfx* self)
     gl21->color    = settings.fg;
     gl21->bg_color = settings.bg;
 
-    gl21->glyph_atlas = GlyphAtlas_new(1024);
+    gl21->glyph_atlas = GlyphAtlas_new(1024, 512);
 
     Shader_use(&gl21->font_shader);
     glUniform3f(gl21->font_shader.uniforms[1].location,
@@ -1237,7 +1359,7 @@ void GfxOpenGL21_reload_font(Gfx* self)
     GfxOpenGL21_resize(self, gl21->win_w, gl21->win_h);
 
     GlyphAtlas_destroy(&gl21->glyph_atlas);
-    gl21->glyph_atlas = GlyphAtlas_new(1024);
+    gl21->glyph_atlas = GlyphAtlas_new(1024, 512);
 
     GfxOpenGL21_regenerate_line_quad_vbo(gl21);
 
@@ -1767,14 +1889,6 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
                                 float w = (float)entry->width * scalex;
                                 float t = entry->top * scaley;
                                 float l = entry->left * scalex;
-
-                                if (unlikely(h > 2.0f && entry->can_scale)) {
-                                    float s = h / 2.0f;
-                                    h /= s;
-                                    w /= s;
-                                    t /= s;
-                                    l /= s;
-                                }
 
                                 float x3 =
                                   -1.0 +

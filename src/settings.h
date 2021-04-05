@@ -247,6 +247,15 @@ typedef struct
         DECORATION_STYLE_NONE,
     } decoration_style;
 
+    enum decoration_theme_e
+    {
+        DECORATION_THEME_DONT_CARE = 0,
+        DECORATION_THEME_FROM_BG,
+        DECORATION_THEME_FROM_BG_IF_DARK,
+        DECORATION_THEME_DARK,
+        DECORATION_THEME_LIGHT,
+    } decoration_theme;
+
     enum initial_gui_pointer_mode_e
     {
         GUI_POINTER_MODE_FORCE_SHOW,

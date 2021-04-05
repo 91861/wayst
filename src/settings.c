@@ -855,6 +855,7 @@ static void settings_make_default()
         .initial_cursor_style    = CURSOR_STYLE_BLOCK,
 
         .decoration_style = DECORATION_STYLE_FULL,
+        .decoration_theme = DECORATION_THEME_FROM_BG_IF_DARK,
 
         .defer_font_loading = true,
         .flush_ft_cache     = false,
@@ -1418,6 +1419,16 @@ static void handle_option(const char opt, const int array_index, const char* val
             }
         } break;
 
+        case OPT_DECORATION_THEME: {
+            if (!strcasecmp(value, "dark")) {
+                settings.decoration_theme = DECORATION_THEME_DARK;
+            } else if (!strcasecmp(value, "none")) {
+                settings.decoration_theme = DECORATION_THEME_DONT_CARE;
+            } else if (!strcasecmp(value, "auto")) {
+                settings.decoration_theme = DECORATION_THEME_FROM_BG_IF_DARK;
+            }
+        } break;
+
         case OPT_COLORSCHEME_IDX:
             if (!strcasecmp(value, "wayst")) {
                 settings.colorscheme_preset = 0;
@@ -1760,7 +1771,7 @@ static void settings_get_opts(const int argc, char* const* argv, const bool cfg_
             break;
         }
         if (cfg_file_check) {
-            if (o == 'C') {
+            if (o == 'c') {
                 settings.skip_config = true;
             } else if (opid == OPT_CONFIG_FILE_IDX && optarg) {
                 AString_replace_with_dynamic(&settings.config_path, strdup(optarg));

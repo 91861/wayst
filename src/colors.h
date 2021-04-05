@@ -28,6 +28,8 @@ typedef struct
     uint8_t r, g, b, a;
 } ColorRGBA;
 
+#define RELATIVE_LUMINANCE_BRIGHT_COLOR_TRESHOLD 0.04
+
 #define COLOR_RGB_FMT   "rgb(%d, %d, %d)"
 #define COLOR_RGB_AP(c) (c.r), (c.g), (c.b)
 
@@ -277,6 +279,16 @@ static inline float ColorRGB_get_saturation(const ColorRGB c)
 
     float lightness = (float)(max + min) / 2.0f;
     return ((float)delta / 255.0f) / (1 - ABS(2 * lightness - 1.0));
+}
+
+float color_component_gamma_correct(float val);
+
+static inline float ColorRGB_get_relative_luminance(const ColorRGB* c)
+{
+    float r = color_component_gamma_correct(ColorRGB_get_float(*c, 0)),
+          g = color_component_gamma_correct(ColorRGB_get_float(*c, 1)),
+          b = color_component_gamma_correct(ColorRGB_get_float(*c, 2));
+    return r * 0.2126 + g * 0.7152 + b * 0.0722;
 }
 
 float ColorRGB_get_readability_WCAG(const ColorRGB* color1, const ColorRGB* color2);

@@ -198,7 +198,7 @@ float ColorRGB_get_hue(const ColorRGB c)
     return hue > 0.0f ? hue : hue + 360.0f;
 }
 
-static inline float color_component_gamma_correct(float val)
+float color_component_gamma_correct(float val)
 {
     if (val < 0.03938f) {
         val /= 12.92;
@@ -210,14 +210,7 @@ static inline float color_component_gamma_correct(float val)
     return val;
 }
 
-static inline float ColorRGB_get_relative_luminance(const ColorRGB* c)
-{
-    float r = color_component_gamma_correct(ColorRGB_get_float(*c, 0)),
-          g = color_component_gamma_correct(ColorRGB_get_float(*c, 1)),
-          b = color_component_gamma_correct(ColorRGB_get_float(*c, 2));
-    return r * 0.2126 + g * 0.7152 + b * 0.0722;
-}
-
+/* https://www.w3.org/TR/WCAG20/#relativeluminancedef */
 float ColorRGB_get_readability_WCAG(const ColorRGB* color1, const ColorRGB* color2)
 {
     float l1 = ColorRGB_get_relative_luminance(color1),
