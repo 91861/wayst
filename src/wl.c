@@ -97,7 +97,7 @@ static TimePoint* WindowWl_process_timers(struct WindowBase* self);
 static void       WindowWl_set_swap_interval(struct WindowBase* self, int32_t ival);
 static void       WindowWl_set_wm_name(struct WindowBase* self, const char* title);
 static void       WindowWl_set_title(struct WindowBase* self, const char* title);
-static bool       WindowWl_maybe_swap(struct WindowBase* self);
+static bool       WindowWl_maybe_swap(WindowBase* self);
 static void       WindowWl_destroy(struct WindowBase* self);
 static int        WindowWl_get_connection_fd(struct WindowBase* self);
 static void       WindowWl_clipboard_send(struct WindowBase* self, const char* text);
@@ -110,6 +110,7 @@ static void       WindowWl_set_pointer_style(struct WindowBase* self, enum Mouse
 static void       WindowWl_set_current_context(struct WindowBase* self, bool this);
 static void       WindowWl_set_urgent(struct WindowBase* self);
 static void       WindowWl_set_stack_order(struct WindowBase* self, bool front_or_back);
+static void       WindowWl_set_incremental_resize(struct WindowBase* self, uint32_t x, uint32_t y);
 static int64_t    WindowWl_get_window_id(struct WindowBase* self)
 {
     return -1;
@@ -137,6 +138,7 @@ static struct IWindow window_interface_wayland = {
     .set_urgent             = WindowWl_set_urgent,
     .set_stack_order        = WindowWl_set_stack_order,
     .get_window_id          = WindowWl_get_window_id,
+    .set_incremental_resize = WindowWl_set_incremental_resize,
 };
 
 typedef struct
@@ -266,7 +268,7 @@ static inline xkb_keysym_t keysym_filter_compose(xkb_keysym_t sym)
     }
 }
 
-static void WindowWl_swap_buffers(struct WindowBase* self);
+static void WindowWl_swap_buffers(WindowBase* self);
 
 static void WindowWl_drain_pipe_to_clipboard(struct WindowBase* self,
                                              int                pipe_fd,
@@ -1778,7 +1780,7 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h)
     return win;
 }
 
-struct WindowBase* Window_new_wayland(Pair_uint32_t res)
+struct WindowBase* Window_new_wayland(Pair_uint32_t res, Pair_uint32_t cell_dims)
 {
     struct WindowBase* win = WindowWl_new(res.first, res.second);
 
@@ -1813,6 +1815,8 @@ void WindowWl_set_current_context(struct WindowBase* self, bool this)
         WindowWl_set_no_context();
     }
 }
+
+static void WindowWl_set_incremental_resize(struct WindowBase* self, uint32_t x, uint32_t y) {}
 
 void WindowWl_set_fullscreen(struct WindowBase* self, bool fullscreen)
 {
@@ -1913,21 +1917,38 @@ static void WindowWl_dont_swap_buffers(struct WindowBase* self)
     wl_display_flush(globalWl->display);
 }
 
-static void WindowWl_swap_buffers(struct WindowBase* self)
+static void WindowWl_swap_buffers(WindowBase* self)
 {
     self->paint                     = false;
     windowWl(self)->draw_next_frame = false;
-    TRY_CALL(self->callbacks.on_redraw_requested, self->callbacks.user_data);
 
-    if (unlikely(eglSwapBuffers(globalWl->egl_display, windowWl(self)->egl_surface) != EGL_TRUE)) {
-        ERR("buffer swap failed EGL Error %s\n", egl_get_error_string(eglGetError()));
+    EGLint age;
+    eglQuerySurface(globalWl->egl_display, windowWl(self)->egl_surface, EGL_BUFFER_AGE_EXT, &age);
+
+    window_partial_swap_request_t* swap_req = NULL;
+    if (likely(self->callbacks.on_redraw_requested)) {
+        swap_req = self->callbacks.on_redraw_requested(self->callbacks.user_data, age);
     }
-    
+
+    EGLBoolean result;
+    if (eglSwapBuffersWithDamageKHR && swap_req && swap_req->count > 0) {
+        result = eglSwapBuffersWithDamageKHR(globalWl->egl_display,
+                                             windowWl(self)->egl_surface,
+                                             (const EGLint*)swap_req->regions,
+                                             swap_req->count);
+    } else {
+        result = eglSwapBuffers(globalWl->egl_display, windowWl(self)->egl_surface);
+    }
+
+    if (unlikely(result != EGL_TRUE)) {
+        ERR("EGL buffer swap failed: %s\n", egl_get_error_string(eglGetError()));
+    }
+
     struct wl_callback* frame_callback = wl_surface_frame(windowWl(self)->surface);
     wl_callback_add_listener(frame_callback, &frame_listener, self);
 }
 
-static bool WindowWl_maybe_swap(struct WindowBase* self)
+static bool WindowWl_maybe_swap(WindowBase* self)
 {
     if (windowWl(self)->draw_next_frame && self->paint) {
         WindowWl_swap_buffers(self);

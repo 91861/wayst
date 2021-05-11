@@ -868,6 +868,7 @@ static void settings_make_default()
         .vt_debug_delay_usec = 5000,
 
         .smooth_cursor = false,
+        .incremental_windw_resize = true,
     };
 }
 

@@ -251,6 +251,35 @@ static inline char* _asprintf(const char* fmt, ...)
       (byte & 0b00000000000000000000000000000010 ? '1' : '0'),                                     \
       (byte & 0b00000000000000000000000000000001 ? '1' : '0')
 
+typedef struct
+{
+    int32_t x, y, w, h;
+} rect_t;
+
+static void print_rect(rect_t* rect) {
+    printf("rect{ x: %d, y: %d, w: %d, h :%d }\n", rect->x, rect->y, rect->w, rect->h);
+}
+
+static bool regions_intersect(int32_t a, int32_t as, int32_t b, int32_t bs)
+{
+    return (a <= b && a + as >= b) || (a >= b && a <= b + bs);
+}
+
+static bool rect_intersects_horizontal(rect_t* a, rect_t* b)
+{
+    return regions_intersect(a->x, a->w, b->x, b->w);
+}
+
+static bool rect_intersects_vertical(rect_t* a, rect_t* b)
+{
+    return regions_intersect(a->y, a->h, b->y, b->h);
+}
+
+static bool rect_intersects(rect_t* a, rect_t* b)
+{
+    return rect_intersects_horizontal(a, b) && rect_intersects_vertical(a, b);
+}
+
 /* Pair struct */
 #define DEF_PAIR(a)                                                                                \
     typedef struct                                                                                 \
@@ -258,6 +287,23 @@ static inline char* _asprintf(const char* fmt, ...)
         a first;                                                                                   \
         a second;                                                                                  \
     } Pair_##a
+
+#define DEF_TRIPPLE(a)                                                                             \
+    typedef struct                                                                                 \
+    {                                                                                              \
+        a first;                                                                                   \
+        a second;                                                                                  \
+        a third;                                                                                   \
+    } Tripple_##a
+
+#define DEF_QUAD(a)                                                                                \
+    typedef struct                                                                                 \
+    {                                                                                              \
+        a first;                                                                                   \
+        a second;                                                                                  \
+        a third;                                                                                   \
+        a fourth;                                                                                  \
+    } Quad_##a
 
 DEF_PAIR(uint8_t);
 DEF_PAIR(uint16_t);

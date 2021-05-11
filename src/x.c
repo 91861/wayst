@@ -69,8 +69,26 @@ typedef struct
 #define GLX_CONTEXT_MINOR_VERSION_ARB 0x2092
 #define GLX_SWAP_INTERVAL_EXT         0x20F1
 #define GLX_MAX_SWAP_INTERVAL_EXT     0x20F2
+#define GLX_BACK_BUFFER_AGE_EXT       0x20F4
 
 static APIENTRY PFNGLXSWAPINTERVALEXTPROC glXSwapIntervalEXT = NULL;
+
+/*
+ * Mesa associates a set of ancillary (depth, accumulation, stencil and alpha) buffers with each X
+ * window it draws into. These ancillary buffers are allocated for each X window the first time the
+ * X window is passed to glXMakeCurrent(). Mesa, however, can’t detect when an X window has been
+ * destroyed in order to free the ancillary buffers.
+ *
+ * The best it can do is to check for recently destroyed windows whenever the client calls the
+ * glXCreateContext() or glXDestroyContext() functions. This may not be sufficient in all situations
+ * though. */
+static APIENTRY PFNGLXRELEASEBUFFERSMESAPROC glXReleaseBuffersMESA = NULL;
+
+/* This extension adds the glXCopySubBufferMESA() function. It works like glXSwapBuffers() but only
+ * copies a sub-region of the window instead of the whole window. */
+static APIENTRY PFNGLXCOPYSUBBUFFERMESAPROC glXCopySubBufferMESA = NULL;
+
+static bool GLX_EXT_buffer_age_supported = false;
 
 static int32_t convert_modifier_mask(unsigned int x_mask)
 {
@@ -94,31 +112,31 @@ static WindowStatic* global;
 #define globalX11       ((GlobalX11*)&global->extend_data)
 #define windowX11(base) ((WindowX11*)&base->extend_data)
 
-static void               WindowX11_set_decoration_theme_hint(struct WindowBase*      self,
-                                                              enum decoration_theme_e theme);
-static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h);
-static void               WindowX11_set_fullscreen(struct WindowBase* self, bool fullscreen);
-static void               WindowX11_set_maximized(struct WindowBase* self, bool maximized);
-static void               WindowX11_resize(struct WindowBase* self, uint32_t w, uint32_t h);
-static void               WindowX11_events(struct WindowBase* self);
-static void     WindowX11_set_wm_name(struct WindowBase* self, const char* title, const char* name);
-static void     WindowX11_set_title(struct WindowBase* self, const char* title);
-static void     WindowX11_set_swap_interval(struct WindowBase* self, int32_t ival);
-static bool     WindowX11_maybe_swap(struct WindowBase* self);
-static void     WindowX11_destroy(struct WindowBase* self);
-static int      WindowX11_get_connection_fd(struct WindowBase* self);
-static void     WindowX11_primary_get(struct WindowBase* self);
-static void     WindowX11_primary_send(struct WindowBase* self, const char* text);
-static void     WindowX11_clipboard_get(struct WindowBase* self);
-static void     WindowX11_clipboard_send(struct WindowBase* self, const char* text);
-static void     WindowX11_set_pointer_style(struct WindowBase* self, enum MousePointerStyle style);
-static void*    WindowX11_get_gl_ext_proc_adress(struct WindowBase* self, const char* name);
-static uint32_t WindowX11_get_keycode_from_name(struct WindowBase* self, char* name);
-static void     WindowX11_set_current_context(struct WindowBase* self, bool this);
-static inline void WindowX11_set_urgent(struct WindowBase* self);
-static int64_t     WindowX11_get_window_id(struct WindowBase* self);
-static inline void WindowX11_set_stack_order(struct WindowBase* self, bool front_or_back);
-static TimePoint*  WindowX11_process_timers(struct WindowBase* self)
+static void WindowX11_set_decoration_theme_hint(WindowBase* self, enum decoration_theme_e theme);
+static WindowBase* WindowX11_new(uint32_t w, uint32_t h, uint32_t cellx, uint32_t celly);
+static void        WindowX11_set_fullscreen(WindowBase* self, bool fullscreen);
+static void        WindowX11_set_maximized(WindowBase* self, bool maximized);
+static void        WindowX11_resize(WindowBase* self, uint32_t w, uint32_t h);
+static void        WindowX11_events(WindowBase* self);
+static void        WindowX11_set_wm_name(WindowBase* self, const char* title, const char* name);
+static void        WindowX11_set_title(WindowBase* self, const char* title);
+static void        WindowX11_set_swap_interval(WindowBase* self, int32_t ival);
+static bool        WindowX11_maybe_swap(WindowBase* self);
+static void        WindowX11_destroy(WindowBase* self);
+static int         WindowX11_get_connection_fd(WindowBase* self);
+static void        WindowX11_primary_get(WindowBase* self);
+static void        WindowX11_primary_send(WindowBase* self, const char* text);
+static void        WindowX11_clipboard_get(WindowBase* self);
+static void        WindowX11_clipboard_send(WindowBase* self, const char* text);
+static void        WindowX11_set_pointer_style(WindowBase* self, enum MousePointerStyle style);
+static void*       WindowX11_get_gl_ext_proc_adress(WindowBase* self, const char* name);
+static uint32_t    WindowX11_get_keycode_from_name(WindowBase* self, char* name);
+static void        WindowX11_set_current_context(WindowBase* self, bool this);
+static inline void WindowX11_set_urgent(WindowBase* self);
+static int64_t     WindowX11_get_window_id(WindowBase* self);
+static inline void WindowX11_set_stack_order(WindowBase* self, bool front_or_back);
+static void        WindowX11_set_incremental_resize(WindowBase* self, uint32_t x, uint32_t y);
+static TimePoint*  WindowX11_process_timers(WindowBase* self)
 {
     return NULL;
 }
@@ -145,6 +163,7 @@ static struct IWindow window_interface_x11 = {
     .set_urgent             = WindowX11_set_urgent,
     .set_stack_order        = WindowX11_set_stack_order,
     .get_window_id          = WindowX11_get_window_id,
+    .set_incremental_resize = WindowX11_set_incremental_resize,
 };
 
 typedef struct
@@ -216,6 +235,7 @@ typedef struct
     XSetWindowAttributes set_win_attribs;
     Colormap             colormap;
     uint32_t             last_button_pressed;
+    XSizeHints*          size_hints;
 
     RcPtr_clipboard_content_t clipboard_content, primary_content;
 
@@ -274,7 +294,7 @@ static void WindowX11_record_dnd_offer(WindowX11*  self,
     self->dnd_offer.accepted       = false;
 }
 
-static void WindowX11_primary_send(struct WindowBase* self, const char* text)
+static void WindowX11_primary_send(WindowBase* self, const char* text)
 {
     if (!text) {
         return;
@@ -293,7 +313,7 @@ static void WindowX11_primary_send(struct WindowBase* self, const char* text)
     }
 }
 
-static void WindowX11_primary_get(struct WindowBase* self)
+static void WindowX11_primary_get(WindowBase* self)
 {
     Window owner = XGetSelectionOwner(globalX11->display, XA_PRIMARY);
 
@@ -320,7 +340,7 @@ static void WindowX11_primary_get(struct WindowBase* self)
     }
 }
 
-static void WindowX11_clipboard_send(struct WindowBase* self, const char* text)
+static void WindowX11_clipboard_send(WindowBase* self, const char* text)
 {
     RcPtr_new_in_place_of_clipboard_content_t(&windowX11(self)->clipboard_content);
     *RcPtr_get_clipboard_content_t(&windowX11(self)->clipboard_content) = (clipboard_content_t){
@@ -339,7 +359,7 @@ static void WindowX11_clipboard_send(struct WindowBase* self, const char* text)
     }
 }
 
-static void WindowX11_clipboard_get(struct WindowBase* self)
+static void WindowX11_clipboard_get(WindowBase* self)
 {
     Window owner = XGetSelectionOwner(globalX11->display, globalX11->atom.clipboard);
 
@@ -367,7 +387,7 @@ static void WindowX11_clipboard_get(struct WindowBase* self)
     }
 }
 
-static void WindowX11_setup_pointer(struct WindowBase* self)
+static void WindowX11_setup_pointer(WindowBase* self)
 {
     XColor      c       = { .red = 0, .green = 0, .blue = 0 };
     static char data[8] = { 0 };
@@ -377,7 +397,7 @@ static void WindowX11_setup_pointer(struct WindowBase* self)
     globalX11->cursor_hand   = XCreateFontCursor(globalX11->display, XC_hand1);
 }
 
-static void* WindowX11_get_gl_ext_proc_adress(struct WindowBase* self, const char* name)
+static void* WindowX11_get_gl_ext_proc_adress(WindowBase* self, const char* name)
 {
     return glXGetProcAddress((const GLubyte*)name);
 }
@@ -406,7 +426,7 @@ static int x11_io_error_handler(Display* dpy)
     return 0; /* return value is ignored */
 }
 
-static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
+static WindowBase* WindowX11_new(uint32_t w, uint32_t h, uint32_t cellx, uint32_t celly)
 {
     bool init_globals = false;
 
@@ -442,8 +462,7 @@ static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
         }
     }
 
-    struct WindowBase* win =
-      calloc(1, sizeof(struct WindowBase) + sizeof(WindowX11) - sizeof(uint8_t));
+    WindowBase* win = calloc(1, sizeof(WindowBase) + sizeof(WindowX11) - sizeof(uint8_t));
 
     XSetLocaleModifiers("@im=none");
     globalX11->im = XOpenIM(globalX11->display, NULL, NULL, NULL);
@@ -586,6 +605,26 @@ static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
       glXQueryExtensionsString(globalX11->display, DefaultScreen(globalX11->display));
     LOG("X::GLX extensions{ %s }\n", exts);
 
+    if (strstr(exts, "GLX_MESA_release_buffers")) {
+        glXReleaseBuffersMESA = (APIENTRY PFNGLXRELEASEBUFFERSMESAPROC)glXGetProcAddressARB(
+          (const GLubyte*)"glXReleaseBuffersMESA");
+    }
+
+    LOG("X::glXReleaseBuffersMESA found: " BOOL_FMT "\n", BOOL_AP(!!glXReleaseBuffersMESA));
+
+    if (strstr(exts, "GLX_MESA_copy_sub_buffer")) {
+        glXCopySubBufferMESA = (APIENTRY PFNGLXCOPYSUBBUFFERMESAPROC)glXGetProcAddressARB(
+          (const GLubyte*)"glXCopySubBufferMESA");
+    }
+
+    LOG("X::glXCopySubBufferMESA found: " BOOL_FMT "\n", BOOL_AP(!!glXCopySubBufferMESA));
+
+    if (strstr(exts, "GLX_EXT_buffer_age")) {
+        GLX_EXT_buffer_age_supported = true;
+    }
+
+    LOG("X::GLX_EXT_buffer_age supported: " BOOL_FMT "\n", BOOL_AP(!!GLX_EXT_buffer_age_supported));
+
     static const int context_attrs[] = { GLX_CONTEXT_MAJOR_VERSION_ARB,
                                          2,
                                          GLX_CONTEXT_MINOR_VERSION_ARB,
@@ -661,13 +700,28 @@ static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
     XClassHint class_hint = { APPLICATION_NAME, "CLASS" };
     XWMHints   wm_hints   = { .flags = InputHint, .input = True };
 
+    windowX11(win)->size_hints        = XAllocSizeHints();
+    windowX11(win)->size_hints->flags = PSize | PMinSize | PWinGravity | PBaseSize;
+    if (settings.incremental_windw_resize) {
+        windowX11(win)->size_hints->flags |= PResizeInc;
+        windowX11(win)->size_hints->width_inc  = cellx;
+        windowX11(win)->size_hints->height_inc = celly;
+    }
+    windowX11(win)->size_hints->width       = win->w;
+    windowX11(win)->size_hints->height      = win->h;
+    windowX11(win)->size_hints->min_width   = cellx * 3;
+    windowX11(win)->size_hints->min_height  = celly * 3;
+    windowX11(win)->size_hints->base_width  = cellx * 2;
+    windowX11(win)->size_hints->base_height = celly * 2;
+    windowX11(win)->size_hints->win_gravity = NorthWestGravity;
+
     XSetWMProperties(globalX11->display,
                      windowX11(win)->window,
                      NULL,
                      NULL,
                      NULL,
                      0,
-                     NULL,
+                     windowX11(win)->size_hints,
                      &wm_hints,
                      &class_hint);
 
@@ -786,15 +840,14 @@ static struct WindowBase* WindowX11_new(uint32_t w, uint32_t h)
                     1);
 
     WindowX11_set_decoration_theme_hint(win, settings.decoration_theme);
-
     XFlush(globalX11->display);
 
     return win;
 }
 
-struct WindowBase* Window_new_x11(Pair_uint32_t res)
+WindowBase* Window_new_x11(Pair_uint32_t res, Pair_uint32_t cell_dims)
 {
-    struct WindowBase* win = WindowX11_new(res.first, res.second);
+    WindowBase* win = WindowX11_new(res.first, res.second, cell_dims.first, cell_dims.second);
 
     if (!win) {
         return NULL;
@@ -806,10 +859,41 @@ struct WindowBase* Window_new_x11(Pair_uint32_t res)
                           OR(settings.user_app_id_2, NULL));
     WindowX11_set_title(win, settings.title.str);
 
+    // TODO: WM_COMMAND(STRING) = { "wayst", "--foo", "bar" }
+
     return win;
 }
 
-static inline void WindowX11_set_urgent(struct WindowBase* self)
+static void WindowX11_set_incremental_resize(WindowBase* self, uint32_t x, uint32_t y)
+{
+    windowX11(self)->size_hints->flags = PSize | PMinSize | PWinGravity | PBaseSize;
+    if (settings.incremental_windw_resize) {
+        windowX11(self)->size_hints->flags |= PResizeInc;
+        windowX11(self)->size_hints->width_inc  = x;
+        windowX11(self)->size_hints->height_inc = y;
+    }
+    windowX11(self)->size_hints->width       = self->w;
+    windowX11(self)->size_hints->height      = self->h;
+    windowX11(self)->size_hints->min_width   = settings.padding + x * 3;
+    windowX11(self)->size_hints->min_height  = settings.padding + y * 3;
+    windowX11(self)->size_hints->base_width  = settings.padding + x * 2;
+    windowX11(self)->size_hints->base_height = settings.padding + y * 2;
+    windowX11(self)->size_hints->win_gravity = NorthWestGravity;
+
+    XClassHint class_hint = { APPLICATION_NAME, "CLASS" };
+    XWMHints   wm_hints   = { .flags = InputHint, .input = True };
+    XSetWMProperties(globalX11->display,
+                     windowX11(self)->window,
+                     NULL,
+                     NULL,
+                     NULL,
+                     0,
+                     windowX11(self)->size_hints,
+                     &wm_hints,
+                     &class_hint);
+}
+
+static inline void WindowX11_set_urgent(WindowBase* self)
 {
     XClientMessageEvent e = {
         .type                 = ClientMessage,
@@ -834,7 +918,7 @@ static inline void WindowX11_set_urgent(struct WindowBase* self)
     XFlush(globalX11->display);
 }
 
-static inline void WindowX11_fullscreen_change_state(struct WindowBase* self, const long arg)
+static inline void WindowX11_fullscreen_change_state(WindowBase* self, const long arg)
 {
     XClientMessageEvent e = { .type         = ClientMessage,
                               .window       = windowX11(self)->window,
@@ -856,7 +940,7 @@ static inline void WindowX11_fullscreen_change_state(struct WindowBase* self, co
     XFlush(globalX11->display);
 }
 
-static inline void WindowX11_set_stack_order(struct WindowBase* self, bool front_or_back)
+static inline void WindowX11_set_stack_order(WindowBase* self, bool front_or_back)
 {
     if (front_or_back) {
         XRaiseWindow(globalX11->display, windowX11(self)->window);
@@ -865,7 +949,7 @@ static inline void WindowX11_set_stack_order(struct WindowBase* self, bool front
     }
 }
 
-static void WindowX11_set_fullscreen(struct WindowBase* self, bool fullscreen)
+static void WindowX11_set_fullscreen(WindowBase* self, bool fullscreen)
 {
     if (fullscreen && !FLAG_IS_SET(self->state_flags, WINDOW_IS_FULLSCREEN)) {
         WindowX11_fullscreen_change_state(self, _NET_WM_STATE_ADD);
@@ -876,7 +960,7 @@ static void WindowX11_set_fullscreen(struct WindowBase* self, bool fullscreen)
     }
 }
 
-static void WindowX11_set_maximized(struct WindowBase* self, bool maximized)
+static void WindowX11_set_maximized(WindowBase* self, bool maximized)
 {
     if (maximized) {
         WindowX11_set_fullscreen(self, false);
@@ -913,7 +997,7 @@ static void WindowX11_set_maximized(struct WindowBase* self, bool maximized)
     XFlush(globalX11->display);
 }
 
-static void WindowX11_resize(struct WindowBase* self, uint32_t w, uint32_t h)
+static void WindowX11_resize(WindowBase* self, uint32_t w, uint32_t h)
 {
     XWindowChanges changes = {
         .width = self->w = w,
@@ -955,18 +1039,18 @@ static const char* mime_atom_list_select_preferred(Atom* list, size_t n, Atom* a
     return selected_index < 0 ? NULL : ACCEPTED_DND_MIMES[selected_index];
 }
 
-static void WindowX11_event_map(struct WindowBase* self, XMapEvent* e)
+static void WindowX11_event_map(WindowBase* self, XMapEvent* e)
 {
     FLAG_UNSET(self->state_flags, WINDOW_IS_MINIMIZED);
     Window_notify_content_change(self);
 }
 
-static void WindowX11_event_unmap(struct WindowBase* self, XUnmapEvent* e)
+static void WindowX11_event_unmap(WindowBase* self, XUnmapEvent* e)
 {
     FLAG_SET(self->state_flags, WINDOW_IS_MINIMIZED);
 }
 
-static void WindowX11_event_focus_in(struct WindowBase* self, XFocusInEvent* e)
+static void WindowX11_event_focus_in(WindowBase* self, XFocusInEvent* e)
 {
     XSetICFocus(globalX11->ic);
     FLAG_SET(self->state_flags, WINDOW_IS_IN_FOCUS);
@@ -982,7 +1066,7 @@ static void WindowX11_event_focus_in(struct WindowBase* self, XFocusInEvent* e)
     }
 }
 
-static void WindowX11_event_focus_out(struct WindowBase* self, XFocusOutEvent* e)
+static void WindowX11_event_focus_out(WindowBase* self, XFocusOutEvent* e)
 {
     XUnsetICFocus(globalX11->ic);
     FLAG_UNSET(self->state_flags, WINDOW_IS_IN_FOCUS);
@@ -992,12 +1076,12 @@ static void WindowX11_event_focus_out(struct WindowBase* self, XFocusOutEvent* e
     }
 }
 
-static void WindowX11_event_expose(struct WindowBase* self, XExposeEvent* e)
+static void WindowX11_event_expose(WindowBase* self, XExposeEvent* e)
 {
     Window_notify_content_change(self);
 }
 
-static void WindowX11_event_configure(struct WindowBase* self, XConfigureEvent* e)
+static void WindowX11_event_configure(WindowBase* self, XConfigureEvent* e)
 {
     self->x = e->x;
     self->y = e->y;
@@ -1008,7 +1092,7 @@ static void WindowX11_event_configure(struct WindowBase* self, XConfigureEvent* 
     }
 }
 
-static void WindowX11_event_client_message(struct WindowBase* self, XClientMessageEvent* e)
+static void WindowX11_event_client_message(WindowBase* self, XClientMessageEvent* e)
 {
     if ((Atom)e->data.l[0] == globalX11->atom.wm_delete) {
         FLAG_SET(self->state_flags, WINDOW_IS_CLOSED);
@@ -1138,12 +1222,12 @@ static void WindowX11_event_client_message(struct WindowBase* self, XClientMessa
     }
 }
 
-static void WindowX11_event_mapping(struct WindowBase* self, XMappingEvent* e)
+static void WindowX11_event_mapping(WindowBase* self, XMappingEvent* e)
 {
     XRefreshKeyboardMapping(e);
 }
 
-static void WindowX11_event_key_press(struct WindowBase* self, XKeyPressedEvent* e)
+static void WindowX11_event_key_press(WindowBase* self, XKeyPressedEvent* e)
 {
     Status    stat = 0;
     KeySym    ret;
@@ -1192,7 +1276,7 @@ static void WindowX11_event_key_press(struct WindowBase* self, XKeyPressedEvent*
     }
 }
 
-static void WindowX11_event_button_press(struct WindowBase* self, XButtonPressedEvent* e)
+static void WindowX11_event_button_press(WindowBase* self, XButtonPressedEvent* e)
 {
     uint32_t btn;
     switch (e->button) {
@@ -1218,7 +1302,7 @@ static void WindowX11_event_button_press(struct WindowBase* self, XButtonPressed
          convert_modifier_mask(e->state));
 }
 
-static void WindowX11_event_button_release(struct WindowBase* self, XButtonReleasedEvent* e)
+static void WindowX11_event_button_release(WindowBase* self, XButtonReleasedEvent* e)
 {
     if (e->button != 4 && e->button != 5 && e->button) {
         CALL(self->callbacks.button_handler,
@@ -1233,7 +1317,7 @@ static void WindowX11_event_button_release(struct WindowBase* self, XButtonRelea
     windowX11(self)->last_button_pressed = 0;
 }
 
-static void WindowX11_event_motion(struct WindowBase* self, XMotionEvent* e)
+static void WindowX11_event_motion(WindowBase* self, XMotionEvent* e)
 {
     if (Window_is_pointer_hidden(self)) {
         WindowX11_set_pointer_style(self, MOUSE_POINTER_ARROW);
@@ -1246,7 +1330,7 @@ static void WindowX11_event_motion(struct WindowBase* self, XMotionEvent* e)
          e->y);
 }
 
-static void WindowX11_event_selection_clear(struct WindowBase* self, XSelectionClearEvent* e)
+static void WindowX11_event_selection_clear(WindowBase* self, XSelectionClearEvent* e)
 {
     if (e->selection == XA_PRIMARY || e->selection == globalX11->atom.clipboard) {
         RcPtr_destroy_clipboard_content_t(e->selection == XA_PRIMARY
@@ -1255,7 +1339,7 @@ static void WindowX11_event_selection_clear(struct WindowBase* self, XSelectionC
     }
 }
 
-static void WindowX11_event_selection_request(struct WindowBase* self, XSelectionRequestEvent* e)
+static void WindowX11_event_selection_request(WindowBase* self, XSelectionRequestEvent* e)
 {
     RcPtr_clipboard_content_t* cc_ptr =
       e->selection == XA_PRIMARY                  ? &windowX11(self)->primary_content
@@ -1395,7 +1479,7 @@ static void WindowX11_event_selection_request(struct WindowBase* self, XSelectio
     }
 }
 
-static void WindowX11_event_property_notify(struct WindowBase* self, XPropertyEvent* e)
+static void WindowX11_event_property_notify(WindowBase* self, XPropertyEvent* e)
 {
     if (e->state == PropertyDelete && globalX11->incr_transfer_out.active &&
         globalX11->incr_transfer_out.requestor == e->window) {
@@ -1504,7 +1588,7 @@ static void WindowX11_event_property_notify(struct WindowBase* self, XPropertyEv
     }
 }
 
-static void WindowX11_event_selection_notify(struct WindowBase* self, XSelectionEvent* e)
+static void WindowX11_event_selection_notify(WindowBase* self, XSelectionEvent* e)
 {
     Atom           clip = e->selection;
     Atom           da, actual_type_return;
@@ -1601,37 +1685,38 @@ static void WindowX11_event_selection_notify(struct WindowBase* self, XSelection
     XDeleteProperty(globalX11->display, windowX11(self)->window, clip);
 }
 
-static void WindowX11_events(struct WindowBase* self)
+static void (*const EVENT_HANDLERS[])(WindowBase*, XEvent*) = {
+    [MapNotify]        = (void (*const)(WindowBase*, XEvent*))WindowX11_event_map,
+    [UnmapNotify]      = (void (*const)(WindowBase*, XEvent*))WindowX11_event_unmap,
+    [FocusIn]          = (void (*const)(WindowBase*, XEvent*))WindowX11_event_focus_in,
+    [FocusOut]         = (void (*const)(WindowBase*, XEvent*))WindowX11_event_focus_out,
+    [Expose]           = (void (*const)(WindowBase*, XEvent*))WindowX11_event_expose,
+    [ConfigureNotify]  = (void (*const)(WindowBase*, XEvent*))WindowX11_event_configure,
+    [ClientMessage]    = (void (*const)(WindowBase*, XEvent*))WindowX11_event_client_message,
+    [MappingNotify]    = (void (*const)(WindowBase*, XEvent*))WindowX11_event_mapping,
+    [KeyPress]         = (void (*const)(WindowBase*, XEvent*))WindowX11_event_key_press,
+    [ButtonPress]      = (void (*const)(WindowBase*, XEvent*))WindowX11_event_button_press,
+    [ButtonRelease]    = (void (*const)(WindowBase*, XEvent*))WindowX11_event_button_release,
+    [MotionNotify]     = (void (*const)(WindowBase*, XEvent*))WindowX11_event_motion,
+    [SelectionClear]   = (void (*const)(WindowBase*, XEvent*))WindowX11_event_selection_clear,
+    [SelectionRequest] = (void (*const)(WindowBase*, XEvent*))WindowX11_event_selection_request,
+    [PropertyNotify]   = (void (*const)(WindowBase*, XEvent*))WindowX11_event_property_notify,
+    [SelectionNotify]  = (void (*const)(WindowBase*, XEvent*))WindowX11_event_selection_notify,
+};
+
+static void WindowX11_events(WindowBase* self)
 {
-    static void (*const EVENT_HANDLERS[])(Window_*, XEvent*) = {
-        [MapNotify]        = (void (*const)(Window_*, XEvent*))WindowX11_event_map,
-        [UnmapNotify]      = (void (*const)(Window_*, XEvent*))WindowX11_event_unmap,
-        [FocusIn]          = (void (*const)(Window_*, XEvent*))WindowX11_event_focus_in,
-        [FocusOut]         = (void (*const)(Window_*, XEvent*))WindowX11_event_focus_out,
-        [Expose]           = (void (*const)(Window_*, XEvent*))WindowX11_event_expose,
-        [ConfigureNotify]  = (void (*const)(Window_*, XEvent*))WindowX11_event_configure,
-        [ClientMessage]    = (void (*const)(Window_*, XEvent*))WindowX11_event_client_message,
-        [MappingNotify]    = (void (*const)(Window_*, XEvent*))WindowX11_event_mapping,
-        [KeyPress]         = (void (*const)(Window_*, XEvent*))WindowX11_event_key_press,
-        [ButtonPress]      = (void (*const)(Window_*, XEvent*))WindowX11_event_button_press,
-        [ButtonRelease]    = (void (*const)(Window_*, XEvent*))WindowX11_event_button_release,
-        [MotionNotify]     = (void (*const)(Window_*, XEvent*))WindowX11_event_motion,
-        [SelectionClear]   = (void (*const)(Window_*, XEvent*))WindowX11_event_selection_clear,
-        [SelectionRequest] = (void (*const)(Window_*, XEvent*))WindowX11_event_selection_request,
-        [PropertyNotify]   = (void (*const)(Window_*, XEvent*))WindowX11_event_property_notify,
-        [SelectionNotify]  = (void (*const)(Window_*, XEvent*))WindowX11_event_selection_notify,
-    };
 
     while (XPending(globalX11->display)) {
         XNextEvent(globalX11->display, &windowX11(self)->event);
 
-        uint32_t tp = windowX11(self)->event.type;
+        int tp = windowX11(self)->event.type;
 
-        if (tp >= ARRAY_SIZE(EVENT_HANDLERS)) {
+        if (tp >= (int)ARRAY_SIZE(EVENT_HANDLERS)) {
             continue;
         }
 
-        void (*const handler)(struct WindowBase*, XEvent*) = EVENT_HANDLERS[tp];
+        void (*handler)(WindowBase*, XEvent*) = EVENT_HANDLERS[tp];
 
         if (handler) {
             handler(self, &windowX11(self)->event);
@@ -1639,7 +1724,7 @@ static void WindowX11_events(struct WindowBase* self)
     }
 }
 
-static void WindowX11_set_current_context(struct WindowBase* self, bool is_this)
+static void WindowX11_set_current_context(WindowBase* self, bool is_this)
 {
     if (is_this) {
         glXMakeCurrent(globalX11->display, windowX11(self)->window, windowX11(self)->glx_context);
@@ -1648,19 +1733,19 @@ static void WindowX11_set_current_context(struct WindowBase* self, bool is_this)
     }
 }
 
-static void WindowX11_set_swap_interval(struct WindowBase* self, int32_t ival)
+static void WindowX11_set_swap_interval(WindowBase* self, int32_t ival)
 {
     if (glXSwapIntervalEXT) {
         glXSwapIntervalEXT(globalX11->display, windowX11(self)->window, ival);
     }
 }
 
-static int64_t WindowX11_get_window_id(struct WindowBase* self)
+static int64_t WindowX11_get_window_id(WindowBase* self)
 {
     return windowX11(self)->window;
 }
 
-static void WindowX11_set_title(struct WindowBase* self, const char* title)
+static void WindowX11_set_title(WindowBase* self, const char* title)
 {
     ASSERT(title, "string is NULL");
 
@@ -1676,29 +1761,48 @@ static void WindowX11_set_title(struct WindowBase* self, const char* title)
     XFlush(globalX11->display);
 }
 
-static void WindowX11_set_wm_name(struct WindowBase* self,
-                                  const char*        class_name,
-                                  const char*        opt_name)
+static void WindowX11_set_wm_name(WindowBase* self, const char* class_name, const char* opt_name)
 {
     ASSERT(class_name, "class name is not NULL");
     XClassHint class_hint = { (char*)class_name, (char*)OR(opt_name, class_name) };
     XSetClassHint(globalX11->display, windowX11(self)->window, &class_hint);
 }
 
-static bool WindowX11_maybe_swap(struct WindowBase* self)
+static bool WindowX11_maybe_swap(WindowBase* self)
 {
     if (self->paint && !FLAG_IS_SET(self->state_flags, WINDOW_IS_MINIMIZED)) {
-        self->paint = false;
-        CALL(self->callbacks.on_redraw_requested, self->callbacks.user_data);
-        glXSwapBuffers(globalX11->display, windowX11(self)->window);
+
+        unsigned int age;
+        glXQueryDrawable(globalX11->display,
+                         windowX11(self)->window,
+                         GLX_BACK_BUFFER_AGE_EXT,
+                         &age);
+
+        window_partial_swap_request_t* swap_req = NULL;
+        if (likely(self->callbacks.on_redraw_requested)) {
+            swap_req = self->callbacks.on_redraw_requested(self->callbacks.user_data, age);
+        }
+
+        if (glXCopySubBufferMESA && glXSwapIntervalEXT && age && swap_req && swap_req->count > 0) {
+            for (int i = 0; i < swap_req->count; ++i) {
+                glXCopySubBufferMESA(globalX11->display,
+                                     windowX11(self)->window,
+                                     swap_req->regions[i].x,
+                                     swap_req->regions[i].y,
+                                     swap_req->regions[i].w,
+                                     swap_req->regions[i].h);
+            }
+        } else {
+            glXSwapBuffers(globalX11->display, windowX11(self)->window);
+        }
+
         return true;
     } else {
         return false;
     }
 }
 
-static void WindowX11_set_decoration_theme_hint(struct WindowBase*      self,
-                                                enum decoration_theme_e theme)
+static void WindowX11_set_decoration_theme_hint(WindowBase* self, enum decoration_theme_e theme)
 {
     const char* name = NULL;
 
@@ -1736,7 +1840,7 @@ static void WindowX11_set_decoration_theme_hint(struct WindowBase*      self,
     }
 }
 
-static void WindowX11_destroy(struct WindowBase* self)
+static void WindowX11_destroy(WindowBase* self)
 {
     RcPtr_destroy_clipboard_content_t(&windowX11(self)->clipboard_content);
     RcPtr_destroy_clipboard_content_t(&windowX11(self)->primary_content);
@@ -1745,6 +1849,11 @@ static void WindowX11_destroy(struct WindowBase* self)
     XUnmapWindow(globalX11->display, windowX11(self)->window);
     glXMakeCurrent(globalX11->display, 0, 0);
     glXDestroyContext(globalX11->display, windowX11(self)->glx_context);
+    XFree(windowX11(self)->size_hints);
+
+    if (glXReleaseBuffersMESA) {
+        glXReleaseBuffersMESA(globalX11->display, windowX11(self)->window);
+    }
     XDestroyWindow(globalX11->display, windowX11(self)->window);
 
     XFreeCursor(globalX11->display, globalX11->cursor_beam);
@@ -1761,18 +1870,18 @@ static void WindowX11_destroy(struct WindowBase* self)
     free(self);
 }
 
-static int WindowX11_get_connection_fd(struct WindowBase* self)
+static int WindowX11_get_connection_fd(WindowBase* self)
 {
     return ConnectionNumber(globalX11->display);
 }
 
-static uint32_t WindowX11_get_keycode_from_name(struct WindowBase* self, char* name)
+static uint32_t WindowX11_get_keycode_from_name(WindowBase* self, char* name)
 {
     KeyCode kcode = XStringToKeysym(name);
     return kcode == NoSymbol ? 0 : kcode;
 }
 
-static void WindowX11_set_pointer_style(struct WindowBase* self, enum MousePointerStyle style)
+static void WindowX11_set_pointer_style(WindowBase* self, enum MousePointerStyle style)
 {
     switch (style) {
         case MOUSE_POINTER_HIDDEN:

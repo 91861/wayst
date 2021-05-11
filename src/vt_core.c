@@ -1537,7 +1537,7 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
         case 12:
         /* Start blinking cursor (xterm non-standard) */
         case 13:
-            self->cursor.blinking = on;
+            self->cursor.blinking = !on;
             break;
 
         /* Printer status request (DSR) */
@@ -2496,6 +2496,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                             case 'K': {
                                 MULTI_ARG_IS_ERROR
                                 int arg = *seq == 'K' ? 0 : short_sequence_get_int_argument(seq);
+
                                 switch (arg) {
                                     case 0:
                                         Vt_clear_right(self);
@@ -2651,7 +2652,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                             /* <ESC>[ Ps ; Ps r - Set scroll region (top;bottom) (DECSTBM)
                              * default: full window */
                             case 'r': {
-                                int32_t top, bottom;
+                                int32_t top = Vt_top_line(self), bottom = Vt_bottom_line(self);
 
                                 if (*seq != 'r') {
                                     if (sscanf(seq, "%d;%d", &top, &bottom) == EOF) {
@@ -5263,10 +5264,10 @@ __attribute__((hot, flatten)) void Vt_handle_literal(Vt* self, char c)
             case '\n':
                 Vt_grapheme_break(self);
                 Vt_uri_break_match(self);
-                Vt_insert_new_line(self);
                 if (self->modes.new_line_mode) {
-                    // Vt_carriage_return(self);
+                    Vt_carriage_return(self);
                 }
+                Vt_insert_new_line(self);
                 break;
 
             case '\e':
@@ -5354,7 +5355,7 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
                 case '\n':
                     Vt_insert_new_line(self);
                     if (self->modes.new_line_mode) {
-                        // Vt_carriage_return(self);
+                        Vt_carriage_return(self);
                     }
                     break;
                 default:

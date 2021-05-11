@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "settings.h"
 #include "timing.h"
 #include "util.h"
 #include "vt.h"
@@ -48,3 +49,9 @@ typedef struct
     VtLineProxy      cursor_proxy;
     vt_line_damage_t cursor_damage;
 } Ui;
+
+static bool Ui_any_overlay_element_visible(Ui* ui)
+{
+    return ui->scrollbar.visible || (ui->draw_out_of_focus_tint && settings.dim_tint.a != 0.0) ||
+           ui->flash_fraction != 0.0;
+}

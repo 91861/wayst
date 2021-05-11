@@ -13,6 +13,7 @@
 #include "ui.h"
 #include "util.h"
 #include "vt.h"
+#include "window.h"
 
 /*
 TODO:
@@ -66,7 +67,7 @@ typedef struct
 
 struct IGfx
 {
-    void (*draw)(Gfx* self, const Vt*, Ui* ui);
+    window_partial_swap_request_t* (*draw)(Gfx* self, const Vt*, Ui* ui, uint8_t buffer_age);
     void (*resize)(Gfx* self, uint32_t w, uint32_t h);
     Pair_uint32_t (*get_char_size)(Gfx* self);
     void (*init_with_context_activated)(Gfx* self);
@@ -80,9 +81,9 @@ struct IGfx
     void (*destroy_sixel_proxy)(Gfx* self, uint32_t proxy[static 6]);
 };
 
-static void Gfx_draw(Gfx* self, const Vt* vt, Ui* ui)
+static window_partial_swap_request_t* Gfx_draw(Gfx* self, const Vt* vt, Ui* ui, uint8_t buffer_age)
 {
-    self->interface->draw(self, vt, ui);
+    return self->interface->draw(self, vt, ui, buffer_age);
 }
 
 /**

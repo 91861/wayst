@@ -281,6 +281,7 @@ typedef struct
     uint32_t pty_chunk_timeout_ms;
 
     bool smooth_cursor;
+    bool incremental_windw_resize;
 
 } Settings;
 

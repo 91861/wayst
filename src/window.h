@@ -19,10 +19,11 @@
 #define WINDOW_IS_POINTER_HIDDEN (1 << 5)
 #define WINDOW_IS_MINIMIZED      (1 << 6)
 
-#define MOUSE_BUTTON_RELEASE (1 << 0)
-#define MOUSE_BUTTON_1       (1 << 1)
-#define MOUSE_BUTTON_2       (1 << 2)
-#define MOUSE_BUTTON_3       (1 << 3)
+#define MOUSE_BUTTON_RELEASE         (1 << 0)
+#define MOUSE_BUTTON_1               (1 << 1)
+#define MOUSE_BUTTON_2               (1 << 2)
+#define MOUSE_BUTTON_3               (1 << 3)
+#define WINDOW_MAX_SWAP_REGION_COUNT 5
 
 typedef struct
 {
@@ -31,6 +32,12 @@ typedef struct
     alignas(alignof(void*)) uint8_t extend_data;
 
 } WindowStatic;
+
+typedef struct
+{
+    int8_t count;
+    rect_t regions[WINDOW_MAX_SWAP_REGION_COUNT];
+} window_partial_swap_request_t;
 
 enum MousePointerStyle
 {
@@ -59,6 +66,7 @@ struct IWindow
     void (*primary_get)(struct WindowBase* self);
     void (*set_swap_interval)(struct WindowBase* self, int val);
     void (*set_current_context)(struct WindowBase* self, bool this);
+    void (*set_incremental_resize)(struct WindowBase* self, uint32_t x, uint32_t y);
     void (*set_pointer_style)(struct WindowBase* self, enum MousePointerStyle);
     void* (*get_gl_ext_proc_adress)(struct WindowBase* self, const char* name);
     uint32_t (*get_keycode_from_name)(struct WindowBase* self, char* name);
@@ -100,7 +108,7 @@ typedef struct WindowBase
         void (*motion_handler)(void* user_data, uint32_t code, int32_t x, int32_t y);
         void (*clipboard_handler)(void* user_data, const char* text);
         void (*activity_notify_handler)(void* user_data);
-        void (*on_redraw_requested)(void* user_data);
+        window_partial_swap_request_t* (*on_redraw_requested)(void* user_data, uint8_t buffer_age);
         void (*on_focus_changed)(void* user_data, bool current_state);
         void (*on_primary_changed)(void* user_data);
     } callbacks;
@@ -111,7 +119,7 @@ typedef struct WindowBase
 
     alignas(alignof(void*)) uint8_t extend_data;
 
-} Window_;
+} WindowBase;
 
 static void Window_update_title(struct WindowBase* self, const char* title)
 {
@@ -174,6 +182,11 @@ static inline bool Window_maybe_swap(struct WindowBase* self)
 static inline void Window_destroy(struct WindowBase* self)
 {
     self->interface->destroy(self);
+}
+
+static inline void Window_set_incremental_resize(struct WindowBase* self, uint32_t x, uint32_t y)
+{
+    self->interface->set_incremental_resize(self, x, y);
 }
 
 static inline void Window_clipboard_get(struct WindowBase* self)

@@ -57,7 +57,7 @@
 
 typedef struct
 {
-    Window_*     win;
+    WindowBase*  win;
     Gfx*         gfx;
     Vt           vt;
     Freetype     freetype;
@@ -136,18 +136,18 @@ static void* App_load_extension_proc_address(void* self, const char* name)
     return addr;
 }
 
-static void App_create_window(App* self, Pair_uint32_t res)
+static void App_create_window(App* self, Pair_uint32_t res, Pair_uint32_t cell_dims)
 {
 #if !defined(NOX) && !defined(NOWL)
     if (!settings.x11_is_default)
-        self->win = Window_new_wayland(res);
+        self->win = Window_new_wayland(res, cell_dims);
     if (!self->win) {
-        self->win = Window_new_x11(res);
+        self->win = Window_new_x11(res, cell_dims);
     }
 #elif !defined(NOWL)
-    self->win = Window_new_wayland(res);
+    self->win = Window_new_wayland(res, cell_dims);
 #else
-    self->win = Window_new_x11(res);
+    self->win = Window_new_x11(res, cell_dims);
 #endif
 
     if (!self->win) {
@@ -218,7 +218,8 @@ static void App_cursor_blink_end_timer_handler(void* self)
 static void App_cursor_blink_switch_timer_handler(void* self)
 {
     App* app = self;
-    if (app->cursor_blink_animation_should_play || !app->ui.draw_cursor_blinking) {
+    if ((app->cursor_blink_animation_should_play || !app->ui.draw_cursor_blinking) &&
+        Window_is_focused(app->win)) {
         app->ui.draw_cursor_blinking = !app->ui.draw_cursor_blinking;
         TimerManager_schedule_point(&app->timer_manager,
                                     app->cursor_blink_switch_timer,
@@ -284,7 +285,11 @@ static void App_init(App* self)
     self->freetype     = Freetype_new();
     self->gfx          = Gfx_new_OpenGL21(&self->freetype);
 
-    App_create_window(self, Gfx_pixels(self->gfx, settings.cols, settings.rows));
+    Pair_uint32_t pixels    = Gfx_pixels(self->gfx, settings.cols, settings.rows);
+    Pair_uint32_t cell_dims = { .first  = pixels.first / settings.cols,
+                                .second = pixels.second / settings.rows };
+    App_create_window(self, pixels, cell_dims);
+
     App_set_callbacks(self);
 
     /* We may have gotten events during initialization. We can ignore everything except for focus */
@@ -375,7 +380,7 @@ static void App_run(App* self)
                 usleep(settings.pty_chunk_wait_delay_ns);
             }
         } while (bytes && likely(!settings.debug_vt));
-        
+
         char*        buf;
         size_t       len;
         Vector_char* out = Vt_get_output(&self->vt, PIPE_BUF, &buf, &len);
@@ -443,10 +448,10 @@ static void App_selection_end_handler(void* self)
     LOG("App::selection_end\n");
 }
 
-static void App_redraw(void* self)
+static window_partial_swap_request_t* App_redraw(void* self, uint8_t buffer_age)
 {
     App* app = self;
-    Gfx_draw(app->gfx, &app->vt, &app->ui);
+    return Gfx_draw(app->gfx, &app->vt, &app->ui, buffer_age);
 }
 
 static void App_update_padding(App* self)
@@ -476,8 +481,8 @@ static void App_maybe_resize(App* self, Pair_uint32_t newres)
         App_clamp_cursor(self, chars);
         chars = Gfx_get_char_size(self->gfx);
         Vt_resize(&self->vt, chars.first, chars.second);
-
         Window_notify_content_change(self->win);
+        App_update_cursor(self);
 
         if (settings.dynamic_title) {
             App_set_title(self);
@@ -496,10 +501,18 @@ static void App_reload_font(void* self)
     App* app = self;
     Freetype_reload_fonts(&app->freetype);
     Gfx_reload_font(app->gfx);
-    Gfx_draw(app->gfx, &app->vt, &app->ui);
+    Gfx_draw(app->gfx, &app->vt, &app->ui, 0);
     App_update_padding(self);
     Window_notify_content_change(app->win);
     Window_maybe_swap(app->win);
+}
+
+static Pair_uint32_t App_get_cell_dims(App* self)
+{
+    Pair_uint32_t cells  = Gfx_get_char_size(self->gfx);
+    Pair_uint32_t pixels = Gfx_pixels(self->gfx, cells.first, cells.second);
+    return (Pair_uint32_t){ .first  = pixels.first / cells.first,
+                            .second = pixels.second / cells.second };
 }
 
 static uint32_t App_get_key_code(void* self, char* name)
@@ -1168,6 +1181,8 @@ static bool App_maybe_handle_application_key(App*     self,
             App_update_padding(self);
             App_update_scrollbar_dims(self);
             App_notify_content_change(self);
+            Pair_uint32_t cell = App_get_cell_dims(self);
+            Window_set_incremental_resize(self->win, cell.first, cell.second);
         } else {
             App_flash(self);
         }
@@ -1182,6 +1197,8 @@ static bool App_maybe_handle_application_key(App*     self,
         App_notify_content_change(self);
         App_update_scrollbar_dims(self);
         App_notify_content_change(self);
+        Pair_uint32_t cell = App_get_cell_dims(self);
+        Window_set_incremental_resize(self->win, cell.first, cell.second);
         return true;
     } else if (KeyCommand_is_active(&cmd[KCMD_HTML_DUMP], key, rawkey, mods)) {
         time_t     current_time;

@@ -27,6 +27,8 @@ DEF_PAIR(GLuint);
 
 #define NUM_BUCKETS 513
 
+#define MAX_TRACKED_FRAME_DAMAGE 6
+
 #ifndef ATLAS_SIZE_LIMIT
 #define ATLAS_SIZE_LIMIT INT32_MAX
 #endif
@@ -324,6 +326,21 @@ typedef struct
     uint32_t width, height, top, left;
 } freetype_output_scaling_t;
 
+typedef struct
+{
+    uint32_t curosr_position_x;
+    uint32_t curosr_position_y;
+    uint16_t line_index;
+    bool     cursor_drawn;
+    bool     overlay_state;
+} overlay_damage_record_t;
+
+typedef struct
+{
+    bool*    damage_history;
+    uint16_t n_lines;
+} lines_damage_record_t;
+
 typedef struct _GfxOpenGL21
 {
     GLint max_tex_res;
@@ -383,6 +400,11 @@ typedef struct _GfxOpenGL21
     Freetype* freetype;
 
     int_fast8_t bound_resources;
+
+    window_partial_swap_request_t modified_region;
+
+    lines_damage_record_t   line_damage;
+    overlay_damage_record_t frame_overlay_damage[MAX_TRACKED_FRAME_DAMAGE];
 } GfxOpenGL21;
 
 #define gfxOpenGL21(gfx) ((GfxOpenGL21*)&gfx->extend_data)
@@ -393,19 +415,19 @@ Pair_GLuint                      GfxOpenGL21_pop_recycled(GfxOpenGL21* self);
 void                             GfxOpenGL21_load_font(Gfx* self);
 void                             GfxOpenGL21_destroy_recycled(GfxOpenGL21* self);
 
-void          GfxOpenGL21_destroy(Gfx* self);
-void          GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui);
-Pair_uint32_t GfxOpenGL21_get_char_size(Gfx* self);
-void          GfxOpenGL21_resize(Gfx* self, uint32_t w, uint32_t h);
-void          GfxOpenGL21_init_with_context_activated(Gfx* self);
-bool          GfxOpenGL21_set_focus(Gfx* self, bool focus);
-Pair_uint32_t GfxOpenGL21_pixels(Gfx* self, uint32_t c, uint32_t r);
-void          GfxOpenGL21_reload_font(Gfx* self);
-void          GfxOpenGL21_destroy_proxy(Gfx* self, uint32_t* proxy);
-void          GfxOpenGL21_destroy_image_proxy(Gfx* self, uint32_t* proxy);
-void          GfxOpenGL21_destroy_image_view_proxy(Gfx* self, uint32_t* proxy);
-void          GfxOpenGL21_destroy_sixel_proxy(Gfx* self, uint32_t* proxy);
-static void   GfxOpenGL21_regenerate_line_quad_vbo(GfxOpenGL21* gfx);
+void                           GfxOpenGL21_destroy(Gfx* self);
+window_partial_swap_request_t* GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui, uint8_t age);
+Pair_uint32_t                  GfxOpenGL21_get_char_size(Gfx* self);
+void                           GfxOpenGL21_resize(Gfx* self, uint32_t w, uint32_t h);
+void                           GfxOpenGL21_init_with_context_activated(Gfx* self);
+bool                           GfxOpenGL21_set_focus(Gfx* self, bool focus);
+Pair_uint32_t                  GfxOpenGL21_pixels(Gfx* self, uint32_t c, uint32_t r);
+void                           GfxOpenGL21_reload_font(Gfx* self);
+void                           GfxOpenGL21_destroy_proxy(Gfx* self, uint32_t* proxy);
+void                           GfxOpenGL21_destroy_image_proxy(Gfx* self, uint32_t* proxy);
+void                           GfxOpenGL21_destroy_image_view_proxy(Gfx* self, uint32_t* proxy);
+void                           GfxOpenGL21_destroy_sixel_proxy(Gfx* self, uint32_t* proxy);
+static void                    GfxOpenGL21_regenerate_line_quad_vbo(GfxOpenGL21* gfx);
 
 static struct IGfx gfx_interface_opengl21 = {
     .draw                        = GfxOpenGL21_draw,
@@ -1228,6 +1250,15 @@ void GfxOpenGL21_resize(Gfx* self, uint32_t w, uint32_t h)
     gl21->max_cells_in_line = gl21->win_w / gl21->glyph_width_pixels;
 
     glViewport(0, 0, gl21->win_w, gl21->win_h);
+
+    uint16_t n_lines = GfxOpenGL21_get_char_size(gfxBase(gl21)).second;
+    free(gl21->line_damage.damage_history);
+    gl21->line_damage.damage_history = calloc(MAX_TRACKED_FRAME_DAMAGE, n_lines);
+    memset(gl21->line_damage.damage_history, 1, MAX_TRACKED_FRAME_DAMAGE * n_lines);
+    for (int i = 0; i < MAX_TRACKED_FRAME_DAMAGE; ++i) {
+        gl21->frame_overlay_damage[i].overlay_state = 1;
+    }
+
     GfxOpenGL21_regenerate_line_quad_vbo(gl21);
 }
 
@@ -2319,16 +2350,33 @@ static void line_reder_pass_run_subpass(line_render_pass_t* pass, line_render_su
     }
 }
 
-static void line_reder_pass_run(line_render_pass_t* self)
+static void line_reder_pass_run_initial_setup(line_render_pass_t* self)
 {
     line_render_pass_try_to_recover_proxies(self);
     line_render_pass_set_up_framebuffer(self);
     line_render_pass_set_up_subpasses(self);
+}
+
+static Pair_uint16_t line_reder_pass_run_subpasses(line_render_pass_t* self)
+{
+    Pair_uint16_t retval = { .first = self->args.vt_line->data.size - 1, .second = 0 };
 
     for (int i = 0; i < self->n_queued_subpasses; ++i) {
         line_render_subpass_t sub = line_render_pass_create_subpass(self, &self->subpass_args[i]);
+
+        retval.first  = MIN(retval.first, sub.args.render_range_begin);
+        retval.second = MAX(retval.second, sub.args.render_range_end);
+
         line_reder_pass_run_subpass(self, &sub);
     }
+
+    return retval;
+}
+
+static void line_reder_pass_run(line_render_pass_t* self)
+{
+    line_reder_pass_run_initial_setup(self);
+    line_reder_pass_run_subpasses(self);
 }
 
 static void _GfxOpenGL21_draw_block_cursor(GfxOpenGL21* gfx,
@@ -2426,85 +2474,107 @@ static void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const Ui* ui
     bool show_blink = !settings.enable_cursor_blink || !ui->window_in_focus ||
                       !ui->cursor->blinking || (ui->cursor->blinking && ui->draw_cursor_blinking);
 
-    if (show_blink && !ui->cursor->hidden) {
-        bool   filled_block = false;
-        size_t row = ui->cursor->row - Vt_visual_top_line(vt), st_col = ui->cursor->col;
-        double col = ui->cursor_cell_fraction;
+    gfx->frame_overlay_damage->curosr_position_x =
+      ui->cursor_cell_fraction * gfx->glyph_width_pixels + gfx->pixel_offset_x;
 
-        if (row >= Vt_row(vt))
-            return;
+    size_t row = ui->cursor->row - Vt_visual_top_line(vt), st_col = ui->cursor->col;
+    double col = ui->cursor_cell_fraction;
 
-        Vector_clear_vertex_t(&gfx->vec_vertex_buffer);
-        switch (ui->cursor->type) {
-            case CURSOR_BEAM:
-                Vector_pushv_vertex_t(
-                  &gfx->vec_vertex_buffer,
-                  (vertex_t[2]){ { .x = -1.0f + (1 + col * gfx->glyph_width_pixels) * gfx->sx,
-                                   .y = 1.0f - row * gfx->line_height_pixels * gfx->sy },
-                                 { .x = -1.0f + (1 + col * gfx->glyph_width_pixels) * gfx->sx,
-                                   .y = 1.0f - (row + 1) * gfx->line_height_pixels * gfx->sy } },
-                  2);
-                break;
-            case CURSOR_UNDERLINE:
-                Vector_pushv_vertex_t(
-                  &gfx->vec_vertex_buffer,
-                  (vertex_t[2]){ { .x = -1.0f + col * gfx->glyph_width_pixels * gfx->sx,
-                                   .y = 1.0f - ((row + 1) * gfx->line_height_pixels) * gfx->sy },
-                                 { .x = -1.0f + (col + 1) * gfx->glyph_width_pixels * gfx->sx,
-                                   .y = 1.0f - ((row + 1) * gfx->line_height_pixels) * gfx->sy } },
-                  2);
-                break;
-            case CURSOR_BLOCK:
-                if (!ui->window_in_focus)
-                    Vector_pushv_vertex_t(
-                      &gfx->vec_vertex_buffer,
-                      (vertex_t[4]){
-                        { .x = -1.0f + (col * gfx->glyph_width_pixels) * gfx->sx + 0.9f * gfx->sx,
-                          .y = 1.0f - ((row + 1) * gfx->line_height_pixels) * gfx->sy +
-                               0.5f * gfx->sy },
-                        { .x = -1.0f + ((col + 1) * gfx->glyph_width_pixels) * gfx->sx,
-                          .y = 1.0f - ((row + 1) * gfx->line_height_pixels) * gfx->sy +
-                               0.5f * gfx->sy },
-                        { .x = -1.0f + ((col + 1) * gfx->glyph_width_pixels) * gfx->sx,
-                          .y = 1.0f - (row * gfx->line_height_pixels) * gfx->sy - 0.5f * gfx->sy },
-                        { .x = -1.0f + (col * gfx->glyph_width_pixels) * gfx->sx + 0.9f * gfx->sx,
-                          .y = 1.0f - (row * gfx->line_height_pixels) * gfx->sy } },
-                      4);
-                else
-                    filled_block = true;
-                break;
-        }
+    gfx->frame_overlay_damage->curosr_position_y =
+      row * gfx->line_height_pixels + gfx->pixel_offset_y;
+    gfx->frame_overlay_damage->line_index = row;
 
-        VtRune* cursor_rune = NULL;
-        if (vt->lines.size > ui->cursor->row && vt->lines.buf[ui->cursor->row].data.size > st_col) {
-            cursor_rune = &vt->lines.buf[ui->cursor->row].data.buf[st_col];
-        }
-        ColorRGBA clr = Vt_rune_cursor_bg(vt, cursor_rune);
+    bool hidden = (!show_blink || ui->cursor->hidden);
 
-        if (!filled_block) {
-            Shader_use(&gfx->line_shader);
-            glBindTexture(GL_TEXTURE_2D, 0);
+    gfx->frame_overlay_damage->cursor_drawn = !hidden;
 
-            glBindBuffer(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
-            glVertexAttribPointer(gfx->line_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
-
-            glUniform3f(gfx->line_shader.uniforms[1].location,
-                        ColorRGBA_get_float(clr, 0),
-                        ColorRGBA_get_float(clr, 1),
-                        ColorRGBA_get_float(clr, 2));
-
-            size_t newsize = gfx->vec_vertex_buffer.size * sizeof(vertex_t);
-            ARRAY_BUFFER_SUB_OR_SWAP(gfx->vec_vertex_buffer.buf, gfx->flex_vbo.size, newsize);
-            glDrawArrays(gfx->vec_vertex_buffer.size == 2 ? GL_LINES : GL_LINE_LOOP,
-                         0,
-                         gfx->vec_vertex_buffer.size);
-        } else {
-            _GfxOpenGL21_draw_block_cursor(gfx, vt, ui, clr, row);
-        }
-
-        glDisable(GL_SCISSOR_TEST);
-        glDisable(GL_BLEND);
+    if (hidden) {
+        return;
     }
+
+    bool filled_block = false;
+
+    if (row >= Vt_row(vt)) {
+        return;
+    }
+
+    gfx->frame_overlay_damage->cursor_drawn = true;
+
+    Vector_clear_vertex_t(&gfx->vec_vertex_buffer);
+
+    switch (ui->cursor->type) {
+        case CURSOR_BEAM:
+            Vector_pushv_vertex_t(
+              &gfx->vec_vertex_buffer,
+              (vertex_t[2]){ { .x = -1.0f + (1 + col * gfx->glyph_width_pixels) * gfx->sx,
+                               .y = 1.0f - row * gfx->line_height_pixels * gfx->sy },
+                             { .x = -1.0f + (1 + col * gfx->glyph_width_pixels) * gfx->sx,
+                               .y = 1.0f - (row + 1) * gfx->line_height_pixels * gfx->sy } },
+              2);
+            break;
+
+        case CURSOR_UNDERLINE:
+            Vector_pushv_vertex_t(
+              &gfx->vec_vertex_buffer,
+              (vertex_t[2]){ { .x = -1.0f + col * gfx->glyph_width_pixels * gfx->sx,
+                               .y = 1.0f - ((row + 1) * gfx->line_height_pixels) * gfx->sy },
+                             { .x = -1.0f + (col + 1) * gfx->glyph_width_pixels * gfx->sx,
+                               .y = 1.0f - ((row + 1) * gfx->line_height_pixels) * gfx->sy } },
+              2);
+            break;
+
+        case CURSOR_BLOCK:
+            if (!ui->window_in_focus)
+                Vector_pushv_vertex_t(
+                  &gfx->vec_vertex_buffer,
+                  (vertex_t[4]){
+                    { .x = -1.0f + (col * gfx->glyph_width_pixels) * gfx->sx + 0.9f * gfx->sx,
+                      .y =
+                        1.0f - ((row + 1) * gfx->line_height_pixels) * gfx->sy + 0.5f * gfx->sy },
+                    { .x = -1.0f + ((col + 1) * gfx->glyph_width_pixels) * gfx->sx,
+                      .y =
+                        1.0f - ((row + 1) * gfx->line_height_pixels) * gfx->sy + 0.5f * gfx->sy },
+                    { .x = -1.0f + ((col + 1) * gfx->glyph_width_pixels) * gfx->sx,
+                      .y = 1.0f - (row * gfx->line_height_pixels) * gfx->sy - 0.5f * gfx->sy },
+                    { .x = -1.0f + (col * gfx->glyph_width_pixels) * gfx->sx + 0.9f * gfx->sx,
+                      .y = 1.0f - (row * gfx->line_height_pixels) * gfx->sy } },
+                  4);
+            else
+                filled_block = true;
+            break;
+    }
+
+    VtRune* cursor_rune = NULL;
+
+    if (vt->lines.size > ui->cursor->row && vt->lines.buf[ui->cursor->row].data.size > st_col) {
+        cursor_rune = &vt->lines.buf[ui->cursor->row].data.buf[st_col];
+    }
+
+    ColorRGBA clr = Vt_rune_cursor_bg(vt, cursor_rune);
+
+    if (!filled_block) {
+        Shader_use(&gfx->line_shader);
+        glBindTexture(GL_TEXTURE_2D, 0);
+
+        glBindBuffer(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
+        glVertexAttribPointer(gfx->line_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
+
+        glUniform3f(gfx->line_shader.uniforms[1].location,
+                    ColorRGBA_get_float(clr, 0),
+                    ColorRGBA_get_float(clr, 1),
+                    ColorRGBA_get_float(clr, 2));
+
+        size_t newsize = gfx->vec_vertex_buffer.size * sizeof(vertex_t);
+        ARRAY_BUFFER_SUB_OR_SWAP(gfx->vec_vertex_buffer.buf, gfx->flex_vbo.size, newsize);
+        glDrawArrays(gfx->vec_vertex_buffer.size == 2 ? GL_LINES : GL_LINE_LOOP,
+                     0,
+                     gfx->vec_vertex_buffer.size);
+    } else {
+        _GfxOpenGL21_draw_block_cursor(gfx, vt, ui, clr, row);
+    }
+
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_BLEND);
 }
 
 __attribute__((cold)) static void GfxOpenGL21_draw_unicode_input(GfxOpenGL21* gfx, const Vt* vt)
@@ -2927,9 +2997,12 @@ void GfxOpenGL21_draw_sixels(GfxOpenGL21* self, Vt* vt)
     for (RcPtr_VtSixelSurface* i = NULL;
          (i = Vector_iter_RcPtr_VtSixelSurface(&vt->scrolled_sixels, i));) {
         VtSixelSurface* ptr = RcPtr_get_VtSixelSurface(i);
+
         if (!ptr) {
             continue;
         }
+
+        self->frame_overlay_damage->overlay_state = true;
 
         uint32_t six_ycells = Vt_pixels_to_cells(vt, 0, ptr->height).second + 1;
         if (ptr->anchor_global_index < Vt_visual_bottom_line(vt) &&
@@ -2945,8 +3018,12 @@ void GfxOpenGL21_draw_images(GfxOpenGL21* self, const Vt* vt, bool up_to_zero_z)
         if (l->graphic_attachments && l->graphic_attachments->images) {
             for (RcPtr_VtImageSurfaceView* i = NULL;
                  (i = Vector_iter_RcPtr_VtImageSurfaceView(l->graphic_attachments->images, i));) {
+
+                self->frame_overlay_damage->overlay_state = true;
+
                 VtImageSurfaceView* view = RcPtr_get_VtImageSurfaceView(i);
                 VtImageSurface*     surf = RcPtr_get_VtImageSurface(&view->source_image_surface);
+
                 if (surf->state == VT_IMAGE_SURFACE_READY &&
                     ((view->z_layer >= 0 && !up_to_zero_z) ||
                      (view->z_layer < 0 && up_to_zero_z))) {
@@ -2957,11 +3034,141 @@ void GfxOpenGL21_draw_images(GfxOpenGL21* self, const Vt* vt, bool up_to_zero_z)
     }
 }
 
-void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
+static window_partial_swap_request_t* GfxOpenGL21_merge_into_modified_rect(GfxOpenGL21* self,
+                                                                           rect_t       rect,
+                                                                           uint8_t      idx)
+{
+    rect_t* tgt  = &self->modified_region.regions[idx];
+    int32_t xmin = MIN(tgt->x, rect.x);
+    int32_t xmax = MAX(tgt->x + tgt->w, rect.x + rect.w);
+    int32_t ymin = MIN(tgt->y, rect.y);
+    int32_t ymax = MAX(tgt->y + tgt->h, rect.y + rect.h);
+    tgt->x       = xmin;
+    tgt->w       = xmax - xmin;
+    tgt->y       = ymin;
+    tgt->h       = ymax - ymin;
+    return &self->modified_region;
+}
+
+static window_partial_swap_request_t* GfxOpenGL21_try_push_modified_rect(GfxOpenGL21* self,
+                                                                         rect_t       rect)
+{
+    if (self->modified_region.count >= WINDOW_MAX_SWAP_REGION_COUNT)
+        return NULL;
+
+    self->modified_region.regions[self->modified_region.count++] = rect;
+    return &self->modified_region;
+}
+
+static window_partial_swap_request_t* GfxOpenGL21_merge_or_push_modified_rect(GfxOpenGL21* self,
+                                                                              rect_t       rect)
+{
+    for (int i = 0; i < self->modified_region.count; ++i) {
+        if (rect_intersects(&self->modified_region.regions[i], &rect)) {
+            return GfxOpenGL21_merge_into_modified_rect(self, rect, i);
+        }
+    }
+
+    return GfxOpenGL21_try_push_modified_rect(self, rect);
+}
+
+static window_partial_swap_request_t* GfxOpenGL21_merge_into_last_modified_rect(GfxOpenGL21* self,
+                                                                                rect_t       rect)
+{
+    return GfxOpenGL21_merge_into_modified_rect(self, rect, self->modified_region.count - 1);
+}
+
+static rect_t GfxOpenGL21_translate_coords(GfxOpenGL21* self,
+                                           int32_t      x,
+                                           int32_t      y,
+                                           int32_t      w,
+                                           int32_t      h)
+{
+    return (rect_t){
+        .x = x,
+        .y = self->win_h - y - h,
+        .w = w,
+        .h = h,
+    };
+}
+
+static bool GfxOpenGL21_get_accumulated_line_damaged(GfxOpenGL21* self,
+                                                     uint16_t     line_index,
+                                                     uint8_t      age)
+{
+    bool     rv               = false;
+    bool     cursor_drawn_now = self->frame_overlay_damage->cursor_drawn;
+    uint32_t cursor_now_x     = self->frame_overlay_damage->curosr_position_x;
+
+    for (int i = 0; i < age && !rv; ++i) {
+        rv |= (self->line_damage.damage_history[line_index + self->line_damage.n_lines * i] ||
+               (self->frame_overlay_damage[i].line_index == line_index &&
+                self->frame_overlay_damage[i].cursor_drawn != cursor_drawn_now &&
+                self->frame_overlay_damage[i].curosr_position_x != cursor_now_x) ||
+               self->frame_overlay_damage[i].overlay_state);
+    }
+    return rv;
+}
+
+static window_partial_swap_request_t* GfxOpenGL21_try_push_accumulated_cursor_damage(
+  GfxOpenGL21* self,
+  uint8_t      age)
+{
+    window_partial_swap_request_t* rv = NULL;
+    for (int i = 0; i < age; ++i) {
+        rv = GfxOpenGL21_merge_or_push_modified_rect(
+          self,
+          GfxOpenGL21_translate_coords(self,
+                                       self->frame_overlay_damage[i].curosr_position_x,
+                                       self->frame_overlay_damage[i].curosr_position_y,
+                                       self->glyph_width_pixels,
+                                       self->line_height_pixels));
+        if (!rv)
+            break;
+    }
+    return rv;
+}
+
+static bool GfxOpenGL21_get_accumulated_overlay_damaged(GfxOpenGL21* self, uint8_t age)
+{
+    bool rv = false;
+    for (int i = 0; i < age && !rv; ++i) {
+        rv |= self->frame_overlay_damage[i].overlay_state;
+    }
+    return rv;
+}
+
+static void GfxOpenGL21_shift_damage_record(GfxOpenGL21* self)
+{
+    memmove(self->line_damage.damage_history + self->line_damage.n_lines,
+            self->line_damage.damage_history,
+            (MAX_TRACKED_FRAME_DAMAGE - 1) * sizeof(bool));
+    memset(self->line_damage.damage_history, 0, self->line_damage.n_lines * sizeof(bool));
+
+    memmove(self->frame_overlay_damage + 1,
+            self->frame_overlay_damage,
+            (MAX_TRACKED_FRAME_DAMAGE - 1) * sizeof(*self->frame_overlay_damage));
+    self->frame_overlay_damage->overlay_state = false;
+}
+
+window_partial_swap_request_t* GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui, uint8_t buffer_age)
 {
     GfxOpenGL21* gfx    = gfxOpenGL21(self);
     gfx->pixel_offset_x = ui->pixel_offset_x;
     gfx->pixel_offset_y = ui->pixel_offset_y;
+
+    GfxOpenGL21_shift_damage_record(gfx);
+    gfx->modified_region.count = 0;
+    gfx->frame_overlay_damage->overlay_state =
+      Ui_any_overlay_element_visible(ui) | Vt_is_scrolling_visual(vt);
+
+    window_partial_swap_request_t* retval = retval = &gfx->modified_region;
+
+    if (buffer_age == 0 || buffer_age > MAX_TRACKED_FRAME_DAMAGE ||
+        GfxOpenGL21_get_accumulated_overlay_damaged(gfx, buffer_age) ||
+        gfx->frame_overlay_damage->overlay_state) {
+        retval = NULL;
+    }
 
     VtLine *begin, *end;
     Vt_get_visible_lines(vt, &begin, &end);
@@ -2985,10 +3192,33 @@ void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
             .is_for_cursor   = false,
             .is_for_blinking = false,
         };
-        if (should_create_line_render_pass(&rp_args)) {
+
+        bool should_repaint = should_create_line_render_pass(&rp_args);
+
+        gfx->line_damage.damage_history[rp_args.visual_index] = should_repaint;
+
+        if (should_repaint) {
             gfx->bound_resources  = BOUND_RESOURCES_NONE;
             line_render_pass_t rp = create_line_render_pass(&rp_args);
-            line_reder_pass_run(&rp);
+            line_reder_pass_run_initial_setup(&rp);
+            uint8_t       n_subs = rp.n_queued_subpasses;
+            Pair_uint16_t damage = line_reder_pass_run_subpasses(&rp);
+
+            uint16_t dam_len = (damage.second < damage.first) ? (uint16_t)i->data.size
+                                                              : (damage.second - damage.first) + 1;
+
+            if (retval && n_subs > 0 && dam_len < 10 && !unlikely(rp.has_blinking_chars)) {
+                retval = GfxOpenGL21_merge_or_push_modified_rect(
+                  gfx,
+                  GfxOpenGL21_translate_coords(
+                    gfx,
+                    gfx->pixel_offset_x + gfx->glyph_width_pixels * damage.first,
+                    gfx->pixel_offset_y + gfx->line_height_pixels * rp.args.visual_index,
+                    gfx->glyph_width_pixels * dam_len,
+                    gfx->line_height_pixels));
+            } else {
+                retval = NULL;
+            }
 
             if (unlikely(rp.has_blinking_chars)) {
                 self->has_blinking_text = true;
@@ -3008,6 +3238,7 @@ void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
     glDisable(GL_BLEND);
     glEnable(GL_SCISSOR_TEST);
     Pair_uint32_t chars = Gfx_get_char_size(self);
+
     if (vt->scrolling_visual) {
         glScissor(gfx->pixel_offset_x,
                   gfx->pixel_offset_y,
@@ -3029,7 +3260,9 @@ void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
     glViewport(gfx->pixel_offset_x, -gfx->pixel_offset_y, gfx->win_w, gfx->win_h);
 
     for (VtLine* i = begin; i < end; ++i) {
-        GfxOpenGL21_draw_line_quads(gfx, ui, i, i - begin);
+        uint32_t vis_idx = i - begin;
+        // TODO: maybe this is up to date and we can get away without drawing?
+        GfxOpenGL21_draw_line_quads(gfx, ui, i, vis_idx);
     }
 
     GfxOpenGL21_draw_images(gfx, vt, false);
@@ -3037,23 +3270,33 @@ void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
     GfxOpenGL21_draw_overlays(gfx, vt, ui);
 
     if (ui->flash_fraction != 0.0) {
+        retval = NULL;
         glViewport(0, 0, gfx->win_w, gfx->win_h);
         GfxOpenGL21_draw_flash(gfx, ui->flash_fraction);
     }
 
     if (unlikely(ui->draw_out_of_focus_tint && settings.dim_tint.a)) {
+        retval = NULL;
         GfxOpenGL21_draw_tint(gfx);
+    }
+
+    if (retval) {
+        retval = GfxOpenGL21_try_push_accumulated_cursor_damage(gfx, buffer_age);
     }
 
     if (unlikely(settings.debug_gfx)) {
         static bool repaint_indicator_visible = true;
         if (repaint_indicator_visible) {
+            retval                                   = NULL;
+            gfx->frame_overlay_damage->overlay_state = true;
             Shader_use(&gfx->solid_fill_shader);
             glBindTexture(GL_TEXTURE_2D, 0);
+
             float vertex_data[] = { -1.0f, 1.0f,  -1.0f + gfx->sx * 50.0f,
                                     1.0f,  -1.0f, 1.0f - gfx->sy * 50.0f };
             glBindBuffer(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
             ARRAY_BUFFER_SUB_OR_SWAP(vertex_data, gfx->flex_vbo.size, (sizeof vertex_data));
+
             glVertexAttribPointer(gfx->solid_fill_shader.attribs->location,
                                   2,
                                   GL_FLOAT,
@@ -3064,6 +3307,8 @@ void GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui)
         }
         repaint_indicator_visible = !repaint_indicator_visible;
     }
+
+    return gfx->frame_overlay_damage->overlay_state ? NULL : retval;
 }
 
 void GfxOpenGL21_destroy_recycled(GfxOpenGL21* self)
@@ -3182,6 +3427,7 @@ __attribute__((hot)) void GfxOpenGL21_destroy_proxy(Gfx* self, uint32_t* proxy)
 void GfxOpenGL21_destroy(Gfx* self)
 {
     glUseProgram(0);
+    free(gfxOpenGL21(self)->line_damage.damage_history);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glBindTexture(GL_TEXTURE_2D, 0);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
