@@ -2582,6 +2582,22 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                 Vt_move_cursor(self, self->cursor.col, Vt_cursor_row(self) + arg);
                             } break;
 
+                            case 'E': {
+                                MULTI_ARG_IS_ERROR
+                                int arg = short_sequence_get_int_argument(seq);
+                                if (arg <= 0)
+                                    arg = 1;
+                                Vt_move_cursor(self, 0, Vt_cursor_row(self) + arg);
+                            } break;
+
+                            case 'F': {
+                                MULTI_ARG_IS_ERROR
+                                int arg = short_sequence_get_int_argument(seq);
+                                if (arg <= 0)
+                                    arg = 1;
+                                Vt_move_cursor(self, 0, Vt_cursor_row(self) - arg);
+                            } break;
+
                             /* <ESC>[ Ps ` - move cursor to column Ps (CBT)*/
                             case '`':
                             /* <ESC>[ Ps G - move cursor to column Ps (CHA)*/
