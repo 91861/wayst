@@ -223,6 +223,12 @@ static const char* const colors_default[8][18] = {
 
 Settings settings;
 
+const char* _lcd_filt_names[] = {
+    [LCD_FILTER_UNDEFINED] = "Undefined",  [LCD_FILTER_NONE] = "None",
+    [LCD_FILTER_H_RGB] = "Horizontal RGB", [LCD_FILTER_H_BGR] = "Horizontal BGR",
+    [LCD_FILTER_V_RGB] = "Vertical RGB",   [LCD_FILTER_V_BGR] = "Vertical BGR"
+};
+
 static void settings_colorscheme_load_preset(uint8_t idx)
 {
     if (idx >= ARRAY_SIZE(colors_default)) {
@@ -781,6 +787,7 @@ static void settings_make_default()
         .font_style_bold        = AString_new_uninitialized(),
         .font_style_italic      = AString_new_uninitialized(),
         .font_style_bold_italic = AString_new_uninitialized(),
+        .output_preferences     = Vector_new_output_prefs_t(),
 
         .lcd_exclude_ranges = Vector_new_Pair_char32_t(),
 
@@ -788,7 +795,10 @@ static void settings_make_default()
         .font_size          = 9,
         .font_size_fallback = 0,
         .font_dpi           = 96,
+        .general_font_dpi   = 96,
+        .font_dpi_calculate_from_phisical = false,
         .lcd_filter         = LCD_FILTER_H_RGB,
+        .general_lcd_filter = LCD_FILTER_H_RGB,
 
         .bg        = { .r = 0,   .g = 0,   .b = 0,   .a = 240 },
         .bghl      = { .r = 50,  .g = 50,  .b = 50,  .a = 240 },
@@ -912,6 +922,8 @@ static void settings_complete_defaults()
     settings_colorscheme_load_preset(settings.colorscheme_preset);
     free(settings._explicit_colors_set);
     settings._explicit_colors_set = NULL;
+    settings.general_font_dpi     = settings.font_dpi;
+    settings.general_lcd_filter   = settings.general_lcd_filter;
 }
 
 static void print_help_and_exit()
@@ -1183,6 +1195,84 @@ static void handle_option(const char opt, const int array_index, const char* val
                 L_PROCESS_MULTI_ARG_PACK_END
         } break;
 
+        case OPT_OUTPUT_IDX: {
+            bool           ok    = false;
+            output_prefs_t prefs = {
+                .output_name  = NULL,
+                .lcd_filter   = LCD_FILTER_UNDEFINED,
+                .dpi          = 0,
+                .output_index = 0,
+            };
+
+            {
+                L_PROCESS_MULTI_ARG_PACK_BEGIN(value)
+                case 0:
+                    if (buf.size > 1 && *buf.buf != '0' &&
+                        buf.size - 1 == strspn(buf.buf, "0123456789")) {
+                        prefs.output_index = atoi(buf.buf);
+                    } else {
+                        prefs.output_name = strdup(buf.buf);
+                    }
+                    break;
+                case 1:
+                    ok = true;
+                    if (!strcasecmp(buf.buf, "rgb")) {
+                        prefs.lcd_filter = LCD_FILTER_H_RGB;
+                    } else if (!strcasecmp(buf.buf, "bgr")) {
+                        prefs.lcd_filter = LCD_FILTER_H_BGR;
+                    } else if (!strcasecmp(buf.buf, "vrgb") || !strcasecmp(buf.buf, "rgbv")) {
+                        prefs.lcd_filter = LCD_FILTER_V_BGR;
+                    } else if (!strcasecmp(buf.buf, "vbgr") || !strcasecmp(buf.buf, "bgrv")) {
+                        prefs.lcd_filter = LCD_FILTER_V_BGR;
+                    } else if (!strcasecmp(buf.buf, "none")) {
+                        prefs.lcd_filter = LCD_FILTER_NONE;
+                    } else {
+                        ok = false;
+                        WRN("Unknown value \'%s\' for option \'%s\'(1)\n",
+                            buf.buf,
+                            long_options[array_index].name);
+                    }
+                    break;
+                case 2:
+                    if (!strcasecmp(buf.buf, "auto")) {
+                        ok        = true;
+                        prefs.dpi = 0;
+                    } else {
+                        errno     = 0;
+                        prefs.dpi = strtol(buf.buf, NULL, 10);
+                        ok        = true;
+                        if (errno) {
+                            L_WARN_BAD_VALUE;
+                            prefs.dpi = 0;
+                        }
+                    }
+                    break;
+                    L_PROCESS_MULTI_ARG_PACK_END
+            }
+
+            if (ok) {
+                output_prefs_t* matching_entry = NULL;
+                for (output_prefs_t* i = NULL;
+                     (i = Vector_iter_output_prefs_t(&settings.output_preferences, i));) {
+                    if ((prefs.output_name && i->output_name &&
+                         !strcmp(prefs.output_name, i->output_name)) ||
+                        (prefs.output_index && prefs.output_index == i->output_index)) {
+                        matching_entry = i;
+                    }
+                    break;
+                }
+
+                if (matching_entry) {
+                    WRN("Duplicate entry for option %s output glob: '%s'\n",
+                        long_options[array_index].name,
+                        matching_entry->output_name);
+                    *matching_entry = prefs;
+                } else {
+                    Vector_push_output_prefs_t(&settings.output_preferences, prefs);
+                }
+            }
+        } break;
+
         case OPT_EXTERN_PIPE_HANDLER_IDX: {
 
             L_PROCESS_MULTI_ARG_PACK_BEGIN(value)
@@ -1405,7 +1495,11 @@ static void handle_option(const char opt, const int array_index, const char* val
         } break;
 
         case OPT_DPI_IDX:
-            settings.font_dpi = strtoul(value, NULL, 10);
+            if (!strcasecmp(value, "auto")) {
+                settings.font_dpi_calculate_from_phisical = true;
+            } else {
+                settings.general_font_dpi = settings.font_dpi = strtoul(value, NULL, 10);
+            }
             break;
 
         case OPT_DECORATIONS: {
@@ -1458,15 +1552,17 @@ static void handle_option(const char opt, const int array_index, const char* val
                 settings.lcd_filter = LCD_FILTER_H_RGB;
             } else if (!strcasecmp(value, "bgr")) {
                 settings.lcd_filter = LCD_FILTER_H_BGR;
-            } else if (!strcasecmp(value, "vrgb")) {
+            } else if (!strcasecmp(value, "vrgb") || !strcasecmp(value, "rgbv")) {
                 settings.lcd_filter = LCD_FILTER_V_RGB;
-            } else if (!strcasecmp(value, "vbgr")) {
+            } else if (!strcasecmp(value, "vbgr") || !strcasecmp(value, "bgrv")) {
                 settings.lcd_filter = LCD_FILTER_V_BGR;
             } else if (!strcasecmp(value, "none")) {
                 settings.lcd_filter = LCD_FILTER_NONE;
             } else {
                 L_WARN_BAD_VALUE;
             }
+
+            settings.general_lcd_filter = settings.lcd_filter;
             break;
 
         case OPT_TITLE_IDX: {
@@ -1901,6 +1997,7 @@ void settings_cleanup()
     Vector_destroy_UnstyledFontInfo(&settings.symbol_fonts);
     Vector_destroy_UnstyledFontInfo(&settings.color_fonts);
     Vector_destroy_Pair_char32_t(&settings.lcd_exclude_ranges);
+    Vector_destroy_output_prefs_t(&settings.output_preferences);
 
     AString_destroy(&settings.config_path);
     AString_destroy(&settings.title_format);

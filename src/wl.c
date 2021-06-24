@@ -199,9 +199,31 @@ typedef struct
 typedef struct
 {
     struct wl_output* output;
-    bool              is_active;
-    int32_t           target_frame_time_ms;
+
+    /* is the window within this output */
+    bool is_active;
+
+    /* lcd geometry the compositor told us */
+    lcd_filter_e lcd_filter;
+
+    /* based on display refresh rate */
+    int32_t target_frame_time_ms;
+
+    /* dots per inch calculated from physical dimensions and resolution */
+    uint16_t dpi;
+
+    /* output index, we can use this to distinguish displays with the same name */
+    uint8_t global_index;
+
+    /* output name */
+    char* name;
 } WlOutputInfo;
+
+static void WlOutputInfo_destroy(WlOutputInfo* self)
+{
+    free(self->name);
+    self->name = NULL;
+}
 
 DEF_VECTOR(WlOutputInfo, NULL);
 
@@ -584,8 +606,8 @@ static void wl_surface_handle_enter(void*              data,
                                     struct wl_surface* wl_surface,
                                     struct wl_output*  output)
 {
-    struct WindowBase* win_base = data;
-    WindowWl*          win      = windowWl(win_base);
+    WindowBase* win_base = data;
+    WindowWl*   win      = windowWl(win_base);
 
     for (WlOutputInfo* i = NULL; (i = Vector_iter_WlOutputInfo(&win->outputs, i));) {
         if (output == i->output) {
@@ -595,12 +617,11 @@ static void wl_surface_handle_enter(void*              data,
             break;
         }
     }
+
     FLAG_UNSET(win_base->state_flags, WINDOW_IS_MINIMIZED);
 }
 
-static void wl_surface_handle_leave(void*              data,
-                                    struct wl_surface* wl_surface,
-                                    struct wl_output*  output)
+static void wl_surface_handle_leave(void* data, struct wl_surface* _, struct wl_output* output)
 {
     struct WindowBase* win_base = data;
     WindowWl*          win      = windowWl(win_base);
@@ -613,8 +634,16 @@ static void wl_surface_handle_leave(void*              data,
             win->active_output = i;
         }
     }
+
     if (!win->active_output) {
         FLAG_SET(win_base->state_flags, WINDOW_IS_MINIMIZED);
+    } else {
+        win_base->lcd_filter   = win->active_output->lcd_filter;
+        win_base->output_index = win->active_output->global_index;
+        free(win_base->output_name);
+        win_base->output_name  = strdup(win->active_output->name);
+        win_base->dpi          = win->active_output->dpi;
+        Window_emit_output_change_event(win_base);
     }
 }
 
@@ -1151,6 +1180,20 @@ static const struct wl_shell_surface_listener shell_surface_listener = {
     .popup_done = shell_surface_popup_done,
 };
 
+static lcd_filter_e wl_subpixel_to_lcd_filter(int32_t subpixel)
+{
+    lcd_filter_e filter[] = {
+        LCD_FILTER_UNDEFINED, LCD_FILTER_NONE,  LCD_FILTER_H_RGB,
+        LCD_FILTER_H_BGR,     LCD_FILTER_V_RGB, LCD_FILTER_V_BGR,
+    };
+    return filter[subpixel];
+}
+
+static lcd_filter_e last_recorded_geometry_filter;
+static char*        last_recorded_dpy_name;
+static double       last_recorded_physical_width_inch;
+static uint8_t      last_global_output_index = 0;
+
 /* Output listener */
 static void output_handle_geometry(void*             data,
                                    struct wl_output* wl_output,
@@ -1163,27 +1206,14 @@ static void output_handle_geometry(void*             data,
                                    const char*       model,
                                    int32_t           transform)
 {
-    enum lcd_filter_e settings_value = LCD_FILTER_UNDEFINED;
+    last_recorded_geometry_filter     = wl_subpixel_to_lcd_filter(subpixel);
+    last_recorded_physical_width_inch = (double)physical_width * INCH_IN_MM;
 
-    switch (subpixel) {
-        case WL_OUTPUT_SUBPIXEL_NONE:
-            break;
-        case WL_OUTPUT_SUBPIXEL_VERTICAL_BGR:
-            settings_value = LCD_FILTER_V_BGR;
-            break;
-        case WL_OUTPUT_SUBPIXEL_VERTICAL_RGB:
-            settings_value = LCD_FILTER_V_RGB;
-            break;
-        case WL_OUTPUT_SUBPIXEL_HORIZONTAL_BGR:
-            settings_value = LCD_FILTER_H_BGR;
-            break;
-        case WL_OUTPUT_SUBPIXEL_HORIZONTAL_RGB:
-            settings_value = LCD_FILTER_H_RGB;
-            break;
-    }
+    free(last_recorded_dpy_name);
+    last_recorded_dpy_name = strdup(model);
 
     if (settings.lcd_filter == LCD_FILTER_UNDEFINED) {
-        settings.lcd_filter = settings_value;
+        settings.lcd_filter = last_recorded_geometry_filter;
     }
 }
 
@@ -1204,7 +1234,13 @@ static void output_handle_mode(void*             data,
                                    .output               = wl_output,
                                    .is_active            = make_active,
                                    .target_frame_time_ms = frame_time_ms,
+                                   .lcd_filter           = last_recorded_geometry_filter,
+                                   .name                 = last_recorded_dpy_name,
+                                   .dpi          = (double)w / last_recorded_physical_width_inch,
+                                   .global_index = ++last_global_output_index,
                                  });
+
+        last_recorded_dpy_name = NULL;
         if (make_active) {
             win->active_output = Vector_last_WlOutputInfo(&win->outputs);
         }
@@ -1884,6 +1920,18 @@ TimePoint* WindowWl_process_timers(struct WindowBase* self)
 
 void WindowWl_events(struct WindowBase* self)
 {
+    static bool initial_event_emited = false;
+
+    if (unlikely(!initial_event_emited && self->callbacks.on_output_changed)) {
+        initial_event_emited = true;
+        CALL(self->callbacks.on_output_changed,
+             self->callbacks.user_data,
+             windowWl(self)->active_output->global_index,
+             windowWl(self)->active_output->name,
+             windowWl(self)->active_output->lcd_filter,
+             windowWl(self)->active_output->dpi);
+    }
+
     /* Wayland docs:
      *
      * A real world example of event queue usage is Mesa's implementation of

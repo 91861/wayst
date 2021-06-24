@@ -125,6 +125,12 @@ static void App_update_padding(App* self);
 static void App_set_title(void* self);
 static void App_focus_changed(void* self, bool current_state);
 static void App_action(void* self);
+static void App_framebuffer_damage(void* self);
+static void App_primary_output_changed(void*          self,
+                                       const uint32_t display_index,
+                                       const char*    display_name,
+                                       lcd_filter_e   new_filter,
+                                       uint16_t       physical_dpi);
 
 static void* App_load_extension_proc_address(void* self, const char* name)
 {
@@ -288,9 +294,16 @@ static void App_init(App* self)
     Pair_uint32_t pixels    = Gfx_pixels(self->gfx, settings.cols, settings.rows);
     Pair_uint32_t cell_dims = { .first  = pixels.first / settings.cols,
                                 .second = pixels.second / settings.rows };
+
     App_create_window(self, pixels, cell_dims);
 
     App_set_callbacks(self);
+
+    App_primary_output_changed(self,
+                               self->win->output_index,
+                               self->win->output_name,
+                               self->win->lcd_filter,
+                               self->win->dpi);
 
     /* We may have gotten events during initialization. We can ignore everything except for focus */
     App_focus_changed(self, FLAG_IS_SET(self->win->state_flags, WINDOW_IS_IN_FOCUS));
@@ -331,6 +344,7 @@ static void App_init(App* self)
 
     App_update_padding(self);
     App_action(self);
+    App_framebuffer_damage(self);
 }
 
 static void App_run(App* self)
@@ -482,6 +496,7 @@ static void App_maybe_resize(App* self, Pair_uint32_t newres)
         chars = Gfx_get_char_size(self->gfx);
         Vt_resize(&self->vt, chars.first, chars.second);
         Window_notify_content_change(self->win);
+        App_framebuffer_damage(self);
         App_update_cursor(self);
 
         if (settings.dynamic_title) {
@@ -504,6 +519,7 @@ static void App_reload_font(void* self)
     Gfx_draw(app->gfx, &app->vt, &app->ui, 0);
     App_update_padding(self);
     Window_notify_content_change(app->win);
+    App_framebuffer_damage(self);
     Window_maybe_swap(app->win);
 }
 
@@ -1183,6 +1199,7 @@ static bool App_maybe_handle_application_key(App*     self,
             App_notify_content_change(self);
             Pair_uint32_t cell = App_get_cell_dims(self);
             Window_set_incremental_resize(self->win, cell.first, cell.second);
+            App_framebuffer_damage(self);
         } else {
             App_flash(self);
         }
@@ -1199,6 +1216,7 @@ static bool App_maybe_handle_application_key(App*     self,
         App_notify_content_change(self);
         Pair_uint32_t cell = App_get_cell_dims(self);
         Window_set_incremental_resize(self->win, cell.first, cell.second);
+        App_framebuffer_damage(self);
         return true;
     } else if (KeyCommand_is_active(&cmd[KCMD_HTML_DUMP], key, rawkey, mods)) {
         time_t     current_time;
@@ -1914,6 +1932,7 @@ static void App_set_window_size(void* self, int32_t width, int32_t height)
 {
     App* app = self;
     Window_resize(app->win, width, height);
+    App_framebuffer_damage(self);
 }
 
 static void App_set_text_area_size(void* self, int32_t width, int32_t height)
@@ -1962,6 +1981,71 @@ static const char* App_get_hostname(void* self)
     return app->hostname;
 }
 
+static void App_framebuffer_damage(void* self)
+{
+    App* app = self;
+    Gfx_external_framebuffer_damage(app->gfx);
+}
+
+static void App_primary_output_changed(void*          self,
+                                       const uint32_t display_index,
+                                       const char*    display_name,
+                                       lcd_filter_e   new_filter,
+                                       uint16_t       physical_dpi)
+{
+    App* app = self;
+
+    uint16_t new_dpi         = settings.font_dpi;
+    bool     get_lcd         = new_filter == LCD_FILTER_UNDEFINED || new_filter == LCD_FILTER_NONE;
+    bool     no_rule_applies = true;
+
+    if (settings.font_dpi_calculate_from_phisical && physical_dpi) {
+        new_dpi = physical_dpi;
+    }
+
+    new_filter = LCD_FILTER_UNDEFINED;
+    for (output_prefs_t* i = NULL;
+         (i = Vector_iter_output_prefs_t(&settings.output_preferences, i));) {
+        if (streq_glob(display_name, i->output_name) ||
+            (display_index && display_index == i->output_index)) {
+            no_rule_applies = false;
+
+            if (i->lcd_filter != LCD_FILTER_UNDEFINED && get_lcd) {
+                new_filter = i->lcd_filter;
+            }
+            if (i->dpi) {
+                new_dpi = i->dpi;
+            }
+            break;
+        }
+    }
+
+    if (no_rule_applies) {
+        new_filter = settings.general_lcd_filter;
+        new_dpi    = settings.general_font_dpi;
+    }
+
+    if ((new_filter != LCD_FILTER_UNDEFINED && new_filter != settings.lcd_filter) ||
+        new_dpi != settings.font_dpi) {
+        settings.lcd_filter = new_filter;
+        settings.font_dpi   = new_dpi;
+
+        Vt_clear_all_proxies(&app->vt);
+        Gfx_destroy_proxy(app->gfx, app->ui.cursor_proxy.data);
+        Freetype_reload_fonts_with_output_type(
+          &app->freetype,
+          output_texture_type_from_lcd_filter(settings.lcd_filter));
+        App_reload_font(app);
+
+        INFO("Window moved to output %u '%s' " LCD_FILTER_FMT ", %u(%u) dpi.",
+             display_index,
+             display_name,
+             LCD_FILTER_AP(new_filter),
+             new_dpi,
+             physical_dpi);
+    }
+}
+
 static void App_set_callbacks(App* self)
 {
     self->vt.callbacks.user_data                           = self;
@@ -2008,6 +2092,8 @@ static void App_set_callbacks(App* self)
     self->win->callbacks.on_redraw_requested     = App_redraw;
     self->win->callbacks.on_focus_changed        = App_focus_changed;
     self->win->callbacks.on_primary_changed      = App_primary_claimed_by_other_client;
+    self->win->callbacks.on_output_changed       = App_primary_output_changed;
+    self->win->callbacks.on_framebuffer_damaged  = App_framebuffer_damage;
 
     self->gfx->callbacks.user_data                   = self;
     self->gfx->callbacks.load_extension_proc_address = App_load_extension_proc_address;

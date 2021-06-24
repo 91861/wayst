@@ -512,27 +512,7 @@ Freetype Freetype_new()
         self.initialized = true;
     }
 
-    enum FreetypeOutputTextureType output_type;
-    switch (settings.lcd_filter) {
-        case LCD_FILTER_V_BGR:
-            output_type = FT_OUTPUT_BGR_V;
-            break;
-        case LCD_FILTER_V_RGB:
-            output_type = FT_OUTPUT_RGB_V;
-            break;
-        case LCD_FILTER_H_BGR:
-            output_type = FT_OUTPUT_BGR_H;
-            break;
-        case LCD_FILTER_H_RGB:
-            output_type = FT_OUTPUT_RGB_H;
-            break;
-        case LCD_FILTER_NONE:
-            output_type = FT_OUTPUT_GRAYSCALE;
-            break;
-        default:
-            ASSERT_UNREACHABLE
-    }
-    self.target_output_type = output_type;
+    self.target_output_type = output_texture_type_from_lcd_filter(settings.lcd_filter);
 
     for (StyledFontInfo* i = NULL; (i = Vector_iter_StyledFontInfo(&settings.styled_fonts, i));) {
         if (i->regular_file_name) {

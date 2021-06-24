@@ -140,6 +140,8 @@ static TimePoint*  WindowX11_process_timers(WindowBase* self)
 {
     return NULL;
 }
+static void WindowX11_update_monitors_info(WindowBase* self);
+static void WindowX11_update_monitor_placement(WindowBase* self);
 
 static struct IWindow window_interface_x11 = {
     .set_fullscreen         = WindowX11_set_fullscreen,
@@ -225,6 +227,9 @@ typedef struct
     XIM im;
     XIC ic;
 
+    int xrr_event_type_base;
+
+    lcd_filter_e root_win_geometry;
 } GlobalX11;
 
 typedef struct
@@ -236,6 +241,10 @@ typedef struct
     Colormap             colormap;
     uint32_t             last_button_pressed;
     XSizeHints*          size_hints;
+
+    int             n_monitors;
+    XRRMonitorInfo* monitors;
+    XRRMonitorInfo* active_monitor;
 
     RcPtr_clipboard_content_t clipboard_content, primary_content;
 
@@ -459,6 +468,15 @@ static WindowBase* WindowX11_new(uint32_t w, uint32_t h, uint32_t cellx, uint32_
 
         if (!XSupportsLocale()) {
             ERR("Xorg does not support locales\n");
+        }
+
+        int xrr_error;
+        if (!XRRQueryExtension(globalX11->display, &globalX11->xrr_event_type_base, &xrr_error)) {
+            WRN("XRandR not supported by server\n");
+        } else {
+            XRRSelectInput(globalX11->display,
+                           DefaultRootWindow(globalX11->display),
+                           RROutputChangeNotifyMask);
         }
     }
 
@@ -839,6 +857,8 @@ static WindowBase* WindowX11_new(uint32_t w, uint32_t h, uint32_t cellx, uint32_
                     (unsigned char*)&xdnd_proto_version,
                     1);
 
+    WindowX11_update_monitors_info(win);
+    WindowX11_update_monitor_placement(win);
     WindowX11_set_decoration_theme_hint(win, settings.decoration_theme);
     XFlush(globalX11->display);
 
@@ -862,6 +882,52 @@ WindowBase* Window_new_x11(Pair_uint32_t res, Pair_uint32_t cell_dims)
     // TODO: WM_COMMAND(STRING) = { "wayst", "--foo", "bar" }
 
     return win;
+}
+
+static void WindowX11_update_monitor_placement(WindowBase* self)
+{
+    rect_t win_rect = { .x = self->x + 1, .y = self->y + 1, .w = self->w - 1, .h = self->h - 1 };
+
+    XRRMonitorInfo* old_active      = windowX11(self)->active_monitor;
+    windowX11(self)->active_monitor = NULL;
+
+    uint32_t dpi   = 0;
+    int      index = 0;
+
+    for (int i = 0; i < windowX11(self)->n_monitors; ++i) {
+        XRRMonitorInfo* info = &windowX11(self)->monitors[i];
+        rect_t monitor_rect  = { .x = info->x, .y = info->y, .w = info->width, .h = info->height };
+
+        if (rect_overlaps(&win_rect, &monitor_rect)) {
+            if ((old_active && info == old_active) || !windowX11(self)->active_monitor) {
+                windowX11(self)->active_monitor = info;
+                dpi   = (double)info->width / ((double)info->mwidth * INCH_IN_MM);
+                index = i + 1;
+            }
+        }
+    }
+
+    if (windowX11(self)->active_monitor && old_active != windowX11(self)->active_monitor) {
+        char* name = XGetAtomName(globalX11->display, windowX11(self)->active_monitor->name);
+
+        self->lcd_filter   = globalX11->root_win_geometry;
+        self->output_index = index;
+        free(self->output_name);
+        self->output_name = strdup(name);
+        self->dpi         = dpi;
+        Window_emit_output_change_event(self);
+        XFree(name);
+    }
+}
+
+static void WindowX11_update_monitors_info(WindowBase* self)
+{
+    if (globalX11->xrr_event_type_base) {
+        windowX11(self)->monitors = XRRGetMonitors(globalX11->display,
+                                                   windowX11(self)->window,
+                                                   True,
+                                                   &windowX11(self)->n_monitors);
+    }
 }
 
 static void WindowX11_set_incremental_resize(WindowBase* self, uint32_t x, uint32_t y)
@@ -1078,6 +1144,7 @@ static void WindowX11_event_focus_out(WindowBase* self, XFocusOutEvent* e)
 
 static void WindowX11_event_expose(WindowBase* self, XExposeEvent* e)
 {
+    CALL(self->callbacks.on_framebuffer_damaged, self->callbacks.user_data);
     Window_notify_content_change(self);
 }
 
@@ -1088,8 +1155,9 @@ static void WindowX11_event_configure(WindowBase* self, XConfigureEvent* e)
     if (self->w != e->width || self->h != e->height) {
         self->w = e->width;
         self->h = e->height;
-        Window_notify_content_change(self);
     }
+
+    WindowX11_update_monitor_placement(self);
 }
 
 static void WindowX11_event_client_message(WindowBase* self, XClientMessageEvent* e)
@@ -1685,6 +1753,31 @@ static void WindowX11_event_selection_notify(WindowBase* self, XSelectionEvent* 
     XDeleteProperty(globalX11->display, windowX11(self)->window, clip);
 }
 
+static lcd_filter_e x11_convert_subpixel(SubpixelOrder so)
+{
+    switch (so) {
+        case SubPixelHorizontalBGR:
+            return LCD_FILTER_H_BGR;
+        case SubPixelHorizontalRGB:
+            return LCD_FILTER_H_RGB;
+        case SubPixelVerticalBGR:
+            return LCD_FILTER_V_BGR;
+        case SubPixelVerticalRGB:
+            return LCD_FILTER_V_RGB;
+        case SubPixelNone:
+            return LCD_FILTER_NONE;
+        case SubPixelUnknown:
+        default:
+            return LCD_FILTER_UNDEFINED;
+    }
+}
+
+static void WindowX11_xrr_output_change_notify(WindowBase* self, XRROutputChangeNotifyEvent* e)
+{
+    WindowX11_update_monitors_info(self);
+    WindowX11_update_monitor_placement(self);
+}
+
 static void (*const EVENT_HANDLERS[])(WindowBase*, XEvent*) = {
     [MapNotify]        = (void (*const)(WindowBase*, XEvent*))WindowX11_event_map,
     [UnmapNotify]      = (void (*const)(WindowBase*, XEvent*))WindowX11_event_unmap,
@@ -1706,11 +1799,18 @@ static void (*const EVENT_HANDLERS[])(WindowBase*, XEvent*) = {
 
 static void WindowX11_events(WindowBase* self)
 {
-
     while (XPending(globalX11->display)) {
         XNextEvent(globalX11->display, &windowX11(self)->event);
 
         int tp = windowX11(self)->event.type;
+
+        if (tp == globalX11->xrr_event_type_base + RRNotify) {
+            if (((XRRNotifyEvent*)&windowX11(self)->event)->subtype == RRNotify_OutputChange) {
+                WindowX11_xrr_output_change_notify(
+                  self,
+                  (XRROutputChangeNotifyEvent*)&windowX11(self)->event);
+            }
+        }
 
         if (tp >= (int)ARRAY_SIZE(EVENT_HANDLERS)) {
             continue;
@@ -1770,30 +1870,34 @@ static void WindowX11_set_wm_name(WindowBase* self, const char* class_name, cons
 
 static bool WindowX11_maybe_swap(WindowBase* self)
 {
-    if (self->paint && !FLAG_IS_SET(self->state_flags, WINDOW_IS_MINIMIZED)) {
+    WindowX11* winx = windowX11(self);
 
-        unsigned int age;
-        glXQueryDrawable(globalX11->display,
-                         windowX11(self)->window,
-                         GLX_BACK_BUFFER_AGE_EXT,
-                         &age);
+    if (self->paint && !FLAG_IS_SET(self->state_flags, WINDOW_IS_MINIMIZED)) {
+        self->paint = false;
+        unsigned int age, preserved;
+        glXQueryDrawable(globalX11->display, winx->window, GLX_BACK_BUFFER_AGE_EXT, &age);
+        glXQueryDrawable(globalX11->display, winx->window, GLX_PRESERVED_CONTENTS, &preserved);
 
         window_partial_swap_request_t* swap_req = NULL;
         if (likely(self->callbacks.on_redraw_requested)) {
             swap_req = self->callbacks.on_redraw_requested(self->callbacks.user_data, age);
-        }
 
-        if (glXCopySubBufferMESA && glXSwapIntervalEXT && age && swap_req && swap_req->count > 0) {
-            for (int i = 0; i < swap_req->count; ++i) {
-                glXCopySubBufferMESA(globalX11->display,
-                                     windowX11(self)->window,
-                                     swap_req->regions[i].x,
-                                     swap_req->regions[i].y,
-                                     swap_req->regions[i].w,
-                                     swap_req->regions[i].h);
+            if (glXCopySubBufferMESA && glXSwapIntervalEXT && age && preserved && swap_req &&
+                swap_req->count > 0) {
+
+                for (int i = 0; i < swap_req->count; ++i) {
+                    glXCopySubBufferMESA(globalX11->display,
+                                         winx->window,
+                                         swap_req->regions[i].x,
+                                         swap_req->regions[i].y,
+                                         swap_req->regions[i].w,
+                                         swap_req->regions[i].h);
+                }
+            } else {
+                glXSwapBuffers(globalX11->display, windowX11(self)->window);
             }
         } else {
-            glXSwapBuffers(globalX11->display, windowX11(self)->window);
+            return false;
         }
 
         return true;
@@ -1850,7 +1954,7 @@ static void WindowX11_destroy(WindowBase* self)
     glXMakeCurrent(globalX11->display, 0, 0);
     glXDestroyContext(globalX11->display, windowX11(self)->glx_context);
     XFree(windowX11(self)->size_hints);
-
+    XRRFreeMonitors(windowX11(self)->monitors);
     if (glXReleaseBuffersMESA) {
         glXReleaseBuffersMESA(globalX11->display, windowX11(self)->window);
     }

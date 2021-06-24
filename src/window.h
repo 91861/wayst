@@ -94,6 +94,11 @@ typedef struct WindowBase
     bool                   paint;
     enum MousePointerStyle current_pointer_style;
 
+    lcd_filter_e lcd_filter;
+    uint32_t     dpi;
+    uint8_t      output_index;
+    char*        output_name;
+
     struct window_callbacks_t
     {
         void* user_data;
@@ -111,6 +116,12 @@ typedef struct WindowBase
         window_partial_swap_request_t* (*on_redraw_requested)(void* user_data, uint8_t buffer_age);
         void (*on_focus_changed)(void* user_data, bool current_state);
         void (*on_primary_changed)(void* user_data);
+        void (*on_output_changed)(void*          user_data,
+                                  const uint32_t display_index,
+                                  const char*    display_name,
+                                  lcd_filter_e   new_order,
+                                  uint16_t       dpi);
+        void (*on_framebuffer_damaged)(void* user_data);
     } callbacks;
 
     char* title;
@@ -181,6 +192,9 @@ static inline bool Window_maybe_swap(struct WindowBase* self)
 
 static inline void Window_destroy(struct WindowBase* self)
 {
+    free(self->output_name);
+    self->output_name = NULL;
+    
     self->interface->destroy(self);
 }
 
@@ -287,4 +301,14 @@ static inline Pair_uint32_t Window_position(struct WindowBase* self)
 static inline void Window_notify_content_change(struct WindowBase* self)
 {
     self->paint = true;
+}
+
+static inline void Window_emit_output_change_event(struct WindowBase* self)
+{
+    TRY_CALL(self->callbacks.on_output_changed,
+             self->callbacks.user_data,
+             self->output_index,
+             self->output_name,
+             self->lcd_filter,
+             self->dpi);
 }

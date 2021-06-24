@@ -27,7 +27,32 @@
 #define MODIFIER_ALT     (1 << 1)
 #define MODIFIER_CONTROL (1 << 2)
 
+typedef enum
+{
+    LCD_FILTER_UNDEFINED, // not set by user, get it from the window system
+    LCD_FILTER_NONE,
+    LCD_FILTER_H_RGB,
+    LCD_FILTER_H_BGR,
+    LCD_FILTER_V_RGB,
+    LCD_FILTER_V_BGR,
+} lcd_filter_e;
+
+typedef struct
+{
+    char*        output_name;
+    uint32_t     output_index;
+    lcd_filter_e lcd_filter;
+    int32_t      dpi;
+} output_prefs_t;
+
+static void output_prefs_destroy(output_prefs_t* self)
+{
+    free(self->output_name);
+    self->output_name = NULL;
+}
+
 DEF_VECTOR(Pair_char32_t, NULL);
+DEF_VECTOR(output_prefs_t, output_prefs_destroy);
 
 typedef struct
 {
@@ -122,15 +147,10 @@ enum key_command_e
     NUM_KEY_COMMANDS, // array size
 };
 
-enum lcd_filter_e
-{
-    LCD_FILTER_UNDEFINED, // use window system if available
-    LCD_FILTER_NONE,
-    LCD_FILTER_H_RGB,
-    LCD_FILTER_H_BGR,
-    LCD_FILTER_V_RGB,
-    LCD_FILTER_V_BGR,
-};
+extern const char* _lcd_filt_names[];
+
+#define LCD_FILTER_FMT        "%s"
+#define LCD_FILTER_AP(filter) (_lcd_filt_names[(filter)])
 
 enum extern_pipe_source_e
 {
@@ -175,18 +195,22 @@ typedef struct
 
     bool has_bold_fonts, has_italic_fonts, has_bold_italic_fonts, has_symbol_fonts, has_color_fonts;
 
-    bool                 lcd_ranges_set_by_user;
-    Vector_Pair_char32_t lcd_exclude_ranges;
+    bool                  lcd_ranges_set_by_user;
+    Vector_Pair_char32_t  lcd_exclude_ranges;
+    Vector_output_prefs_t output_preferences;
 
     AString term, vte_version, locale, title, directory, uri_handler, extern_pipe_handler;
 
     char* user_app_id;
     char* user_app_id_2;
 
-    uint16_t          font_size;
-    uint16_t          font_size_fallback;
-    uint16_t          font_dpi;
-    enum lcd_filter_e lcd_filter;
+    uint16_t font_size;
+    uint16_t font_size_fallback;
+    uint16_t font_dpi;
+    uint16_t general_font_dpi;
+    bool     font_dpi_calculate_from_phisical;
+
+    lcd_filter_e lcd_filter, general_lcd_filter;
 
     /* colors - normal, highlight */
     ColorRGBA bg, bghl, cursor_bg;

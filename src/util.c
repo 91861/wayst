@@ -9,9 +9,12 @@ bool strneqci(const char* restrict s1, const char* restrict s2, const size_t n)
     return true;
 }
 
-/** match string against wildcard pattern */
-bool streq_wildcard(const char* restrict str, const char* restrict pattern)
+bool streq_glob(const char* restrict str, const char* restrict pattern)
 {
+    if (unlikely(!str || !pattern)) {
+        return false;
+    }
+
     while (*pattern && *str)
         switch (*pattern) {
             default:
@@ -27,7 +30,7 @@ bool streq_wildcard(const char* restrict str, const char* restrict pattern)
                     return true;
                 ++pattern;
                 while (*pattern && *str)
-                    if (streq_wildcard(str++, pattern))
+                    if (streq_glob(str++, pattern))
                         return true;
                 return false;
         }

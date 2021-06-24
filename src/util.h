@@ -19,6 +19,8 @@
 #include <uchar.h>
 #include <unistd.h>
 
+#define INCH_IN_MM 0.03937008
+
 #define TERMCOLOR_RESET "\e[m"
 
 #define TERMCOLOR_BOLD   "\e[1m"
@@ -172,6 +174,13 @@ static inline void* _call_fp_helper(const char* const msg,
 
 #endif
 
+#define INFO(...)                                                                                  \
+    {                                                                                              \
+        fputs("[\e[36minfo\e[m] ", stderr);                                                        \
+        fprintf(stderr, __VA_ARGS__);                                                              \
+        fputs("\n", stderr);                                                                       \
+    }
+
 #ifndef asprintf
 #define asprintf(...) _asprintf(__VA_ARGS__)
 #endif
@@ -256,7 +265,8 @@ typedef struct
     int32_t x, y, w, h;
 } rect_t;
 
-static void print_rect(rect_t* rect) {
+static void print_rect(rect_t* rect)
+{
     printf("rect{ x: %d, y: %d, w: %d, h :%d }\n", rect->x, rect->y, rect->w, rect->h);
 }
 
@@ -265,9 +275,19 @@ static bool regions_intersect(int32_t a, int32_t as, int32_t b, int32_t bs)
     return (a <= b && a + as >= b) || (a >= b && a <= b + bs);
 }
 
+static bool regions_overlap(int32_t a, int32_t as, int32_t b, int32_t bs)
+{
+    return (a < b && a + as > b) || (a > b && a < b + bs);
+}
+
 static bool rect_intersects_horizontal(rect_t* a, rect_t* b)
 {
     return regions_intersect(a->x, a->w, b->x, b->w);
+}
+
+static bool rect_overlaps_horizontal(rect_t* a, rect_t* b)
+{
+    return regions_overlap(a->x, a->w, b->x, b->w);
 }
 
 static bool rect_intersects_vertical(rect_t* a, rect_t* b)
@@ -275,9 +295,19 @@ static bool rect_intersects_vertical(rect_t* a, rect_t* b)
     return regions_intersect(a->y, a->h, b->y, b->h);
 }
 
+static bool rect_overlaps_vertical(rect_t* a, rect_t* b)
+{
+    return regions_overlap(a->y, a->h, b->y, b->h);
+}
+
 static bool rect_intersects(rect_t* a, rect_t* b)
 {
     return rect_intersects_horizontal(a, b) && rect_intersects_vertical(a, b);
+}
+
+static bool rect_overlaps(rect_t* a, rect_t* b)
+{
+    return rect_overlaps_horizontal(a, b) && rect_overlaps_vertical(a, b);
 }
 
 /* Pair struct */
@@ -329,8 +359,8 @@ DEF_PAIR(bool);
 /** check string equality case insensitive */
 bool strneqci(const char* restrict s1, const char* restrict s2, const size_t n);
 
-/** match string against wildcard pattern */
-bool streq_wildcard(const char* restrict str, const char* restrict pattern);
+/** match string against pattern */
+bool streq_glob(const char* restrict str, const char* restrict pattern);
 
 /**
  * Get hostname. Caller should free() */

@@ -61,6 +61,17 @@ static void FreetypeOutput_print(FreetypeOutput* self)
            self->type);
 }
 
+static enum FreetypeOutputTextureType output_texture_type_from_lcd_filter(lcd_filter_e lcd_filter)
+{
+    enum FreetypeOutputTextureType ltbl[] = { [LCD_FILTER_V_BGR] = FT_OUTPUT_BGR_V,
+                                              [LCD_FILTER_V_RGB] = FT_OUTPUT_RGB_V,
+                                              [LCD_FILTER_H_BGR] = FT_OUTPUT_BGR_H,
+                                              [LCD_FILTER_H_RGB] = FT_OUTPUT_RGB_H,
+                                              [LCD_FILTER_NONE]  = FT_OUTPUT_GRAYSCALE };
+
+    return ltbl[lcd_filter];
+}
+
 typedef struct
 {
     FT_Face                        face;
@@ -154,8 +165,37 @@ FreetypeOutput* Freetype_load_and_render_glyph(Freetype*              self,
                                                char32_t               codepoint,
                                                enum FreetypeFontStyle style);
 
+void Freetype_unload_fonts(Freetype* self);
 void Freetype_load_fonts(Freetype* self);
 
 void Freetype_reload_fonts(Freetype* self);
+
+static void Freetype_reload_fonts_with_output_type(Freetype*                      self,
+                                                   enum FreetypeOutputTextureType output_type)
+{
+
+    Freetype_unload_fonts(self);
+
+    self->target_output_type = output_type;
+
+    for (FreetypeStyledFamily* i = NULL;
+         (i = Vector_iter_FreetypeStyledFamily(&self->primaries, i));) {
+        i->output_type = output_type;
+
+        for (FreetypeFace* j = NULL; (j = Vector_iter_FreetypeFace(&i->faces, j));) {
+            j->output_type = output_type;
+        }
+    }
+
+    for (FreetypeFace* i = NULL; (i = Vector_iter_FreetypeFace(&self->symbol_faces, i));) {
+        i->output_type = output_type;
+    }
+
+    for (FreetypeFace* i = NULL; (i = Vector_iter_FreetypeFace(&self->color_faces, i));) {
+        i->output_type = output_type;
+    }
+
+    Freetype_load_fonts(self);
+}
 
 void Freetype_destroy(Freetype* self);

@@ -208,108 +208,111 @@ static struct option long_options[] = {
     [OPT_GLYPH_ALIGN_IDX] = { "glyph-align", required_argument, 0, 0 },
 
 #define OPT_LCD_ORDER_IDX 61
-    [OPT_LCD_ORDER_IDX] = { "lcd-order", required_argument, 0, 0 },
+    [OPT_LCD_ORDER_IDX] = { "fixed-lcd-order", required_argument, 0, 0 },
 
-#define OPT_CURSOR_STYLE_IDX 62
+#define OPT_OUTPUT_IDX 62
+    [OPT_OUTPUT_IDX] = { "output", required_argument, 0, 0 },
+
+#define OPT_CURSOR_STYLE_IDX 63
     [OPT_CURSOR_STYLE_IDX] = { "cursor-style", required_argument, 0, 0 },
 
-#define OPT_BLINK_IDX 63
+#define OPT_BLINK_IDX 64
     [OPT_BLINK_IDX] = { "blink", required_argument, 0, 0 },
 
-#define OPT_PADDING_IDX 64
+#define OPT_PADDING_IDX 65
     [OPT_PADDING_IDX] = { "padding", required_argument, 0, 0 },
 
-#define OPT_SCROLLBAR_IDX 65
+#define OPT_SCROLLBAR_IDX 66
     [OPT_SCROLLBAR_IDX] = { "scrollbar", required_argument, 0, 0 },
 
-#define OPT_SCROLL_LINES_IDX 66
+#define OPT_SCROLL_LINES_IDX 67
     [OPT_SCROLL_LINES_IDX] = { "scroll-lines", required_argument, 0, 0 },
 
-#define OPT_SCROLLBACK_IDX 67
+#define OPT_SCROLLBACK_IDX 68
     [OPT_SCROLLBACK_IDX] = { "scrollback", required_argument, 0, 0 },
 
-#define OPT_URI_HANDLER_IDX 68
+#define OPT_URI_HANDLER_IDX 69
     [OPT_URI_HANDLER_IDX] = { "uri-handler", required_argument, 0, 0 },
 
-#define OPT_EXTERN_PIPE_HANDLER_IDX 69
+#define OPT_EXTERN_PIPE_HANDLER_IDX 70
     [OPT_EXTERN_PIPE_HANDLER_IDX] = { "extern-pipe", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_COPY_IDX 70
+#define OPT_BIND_KEY_COPY_IDX 71
     [OPT_BIND_KEY_COPY_IDX] = { "bind-key-copy", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_PASTE_IDX 71
+#define OPT_BIND_KEY_PASTE_IDX 72
     [OPT_BIND_KEY_PASTE_IDX] = { "bind-key-paste", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_ENLARGE_IDX 72
+#define OPT_BIND_KEY_ENLARGE_IDX 73
     [OPT_BIND_KEY_ENLARGE_IDX] = { "bind-key-enlarge", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_SHRINK_IDX 73
+#define OPT_BIND_KEY_SHRINK_IDX 74
     [OPT_BIND_KEY_SHRINK_IDX] = { "bind-key-shrink", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_UNI_IDX 74
+#define OPT_BIND_KEY_UNI_IDX 75
     [OPT_BIND_KEY_UNI_IDX] = { "bind-key-unicode", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_PG_UP_IDX 75
+#define OPT_BIND_KEY_PG_UP_IDX 76
     [OPT_BIND_KEY_PG_UP_IDX] = { "bind-key-pg-up", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_PG_DN_IDX 76
+#define OPT_BIND_KEY_PG_DN_IDX 77
     [OPT_BIND_KEY_PG_DN_IDX] = { "bind-key-pg-down", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_LN_UP_IDX 77
+#define OPT_BIND_KEY_LN_UP_IDX 78
     [OPT_BIND_KEY_LN_UP_IDX] = { "bind-key-ln-up", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_LN_DN_IDX 78
+#define OPT_BIND_KEY_LN_DN_IDX 79
     [OPT_BIND_KEY_LN_DN_IDX] = { "bind-key-ln-down", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_MRK_UP_IDX 79
+#define OPT_BIND_KEY_MRK_UP_IDX 80
     [OPT_BIND_KEY_MRK_UP_IDX] = { "bind-key-mark-up", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_MRK_DN_IDX 80
+#define OPT_BIND_KEY_MRK_DN_IDX 81
     [OPT_BIND_KEY_MRK_DN_IDX] = { "bind-key-mark-down", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_COPY_CMD_IDX 81
+#define OPT_BIND_KEY_COPY_CMD_IDX 82
     [OPT_BIND_KEY_COPY_CMD_IDX] = { "bind-key-copy-output", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_EXTERN_PIPE_IDX 82
+#define OPT_BIND_KEY_EXTERN_PIPE_IDX 83
     [OPT_BIND_KEY_EXTERN_PIPE_IDX] = { "bind-key-extern-pipe", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_KSM_IDX 83
+#define OPT_BIND_KEY_KSM_IDX 84
     [OPT_BIND_KEY_KSM_IDX] = { "bind-key-kbd-select", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_OPEN_PWD 84
+#define OPT_BIND_KEY_OPEN_PWD 85
     [OPT_BIND_KEY_OPEN_PWD] = { "bind-key-open-pwd", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_HTML_DUMP_IDX 85
+#define OPT_BIND_KEY_HTML_DUMP_IDX 86
     [OPT_BIND_KEY_HTML_DUMP_IDX] = { "bind-key-html-dump", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_DUP_IDX 86
+#define OPT_BIND_KEY_DUP_IDX 87
     [OPT_BIND_KEY_DUP_IDX] = { "bind-key-duplicate", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_DEBUG_IDX 87
+#define OPT_BIND_KEY_DEBUG_IDX 88
     [OPT_BIND_KEY_DEBUG_IDX] = { "bind-key-debug", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_QUIT_IDX 88
+#define OPT_BIND_KEY_QUIT_IDX 89
     [OPT_BIND_KEY_QUIT_IDX] = { "bind-key-quit", required_argument, 0, 0 },
 
-#define OPT_DEBUG_PTY_IDX 89
+#define OPT_DEBUG_PTY_IDX 90
     [OPT_DEBUG_PTY_IDX] = { "debug-pty", no_argument, 0, 'D' },
 
-#define OPT_DEBUG_VT_IDX 90
+#define OPT_DEBUG_VT_IDX 91
     [OPT_DEBUG_VT_IDX] = { "debug-vt", required_argument, 0, 0 },
 
-#define OPT_DEBUG_GFX_IDX 91
+#define OPT_DEBUG_GFX_IDX 92
     [OPT_DEBUG_GFX_IDX] = { "debug-gfx", no_argument, 0, 'G' },
 
-#define OPT_DEBUG_FONT_IDX 92
+#define OPT_DEBUG_FONT_IDX 93
     [OPT_DEBUG_FONT_IDX] = { "debug-font", no_argument, 0, 'F' },
 
-#define OPT_VERSION_IDX 93
+#define OPT_VERSION_IDX 94
     [OPT_VERSION_IDX] = { "version", no_argument, 0, 'v' },
 
-#define OPT_HELP_IDX 94
+#define OPT_HELP_IDX 95
     [OPT_HELP_IDX] = { "help", no_argument, 0, 'h' },
 
-#define OPT_SENTINEL_IDX 95
+#define OPT_SENTINEL_IDX 96
     [OPT_SENTINEL_IDX] = { 0 }
 };
 
@@ -403,12 +406,14 @@ static const char* long_options_descriptions[][2] = {
     [OPT_EXCLUDE_LCD_IDX] = { "[chr..chr, ...]", "Ranges of characters without lcd filtering" },
 
     [OPT_FONT_SIZE_IDX]     = { arg_int, "Font size" },
-    [OPT_DPI_IDX]           = { arg_int, "Font dpi (default: 96)" },
+    [OPT_DPI_IDX]           = { "int/auto", "Fixed font dpi (default: 96)" },
     [OPT_GLYPH_PADDING_IDX] = { "int:int?", "Glyph padding - horizontal[px]:vertical[px]" },
     [OPT_GLYPH_ALIGN_IDX]   = { "char:int?:int?",
                               "Adjust glyph alignment - center character:y offset[px]:x offset[px] "
                               "(default: (:0:0)" },
     [OPT_LCD_ORDER_IDX]     = { arg_name, "Force LCD subpixel order: none, rgb, bgr, vrgb, vbgr" },
+    [OPT_OUTPUT_IDX]        = { "glob/int:none/rgb/bgr/vrgb/vbgr:int?/auto",
+                         "Set lcd order and DPI for a display" },
 
     [OPT_CURSOR_STYLE_IDX] = { "name:bool?",
                                "Set initial cursor style - block/beam/underline:blinking (default: "

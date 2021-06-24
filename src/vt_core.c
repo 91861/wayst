@@ -207,7 +207,7 @@ static void Vt_uri_break_match(Vt* self)
         Vt_uri_complete(self);
     } else if (self->uri_matcher.state == VT_URI_MATCHER_SUFFIX_REFERENCE) {
         Vector_push_char(&self->uri_matcher.match, '\0');
-        if (streq_wildcard(self->uri_matcher.match.buf, "www.*.*")) {
+        if (streq_glob(self->uri_matcher.match.buf, "www.*.*")) {
             Vt_uri_complete(self);
         }
     } else if (self->uri_matcher.state == VT_URI_MATCHER_AUTHORITY) {
@@ -4231,7 +4231,7 @@ static void Vt_handle_OSC(Vt* self, char c)
                 free(self->work_dir);
                 free(self->client_host);
                 char* uri = seq + 2; // 7;
-                if (streq_wildcard(uri, "file:*") && strnlen(uri, 8) == 8) {
+                if (streq_glob(uri, "file:*") && strnlen(uri, 8) == 8) {
                     uri += 6; // skip 'file://'
                     char* host = uri;
                     while (*uri && *uri != '/')
@@ -4919,7 +4919,7 @@ static inline void Vt_clear_left(Vt* self)
     if (self->cursor.col >= Vt_cursor_line(self)->data.size) {
         to_add = self->cursor.col - Vt_cursor_line(self)->data.size;
     }
-    for (size_t i = 0; i < to_add; ++i) {
+    for (size_t i = 0; i <= to_add; ++i) {
         Vector_push_VtRune(&Vt_cursor_line(self)->data, self->parser.char_state);
     }
     for (size_t i = 0; i <= self->cursor.col; ++i) {

@@ -74,12 +74,20 @@ struct IGfx
     void (*reload_font)(Gfx* self);
     Pair_uint32_t (*pixels)(Gfx* self, uint32_t rows, uint32_t columns);
     void (*destroy)(Gfx* self);
+    void (*external_framebuffer_damage)(Gfx* self);
+    bool (*is_framebuffer_dirty)(Gfx* self);
 
     void (*destroy_proxy)(Gfx* self, uint32_t proxy[static 6]);
     void (*destroy_image_proxy)(Gfx* self, uint32_t proxy[static 6]);
     void (*destroy_image_view_proxy)(Gfx* self, uint32_t proxy[static 6]);
     void (*destroy_sixel_proxy)(Gfx* self, uint32_t proxy[static 6]);
 };
+
+/**
+ * Set window dimensions */
+static bool Window_is_framebuffer_dirty(Gfx* self) {
+    return self->interface->is_framebuffer_dirty(self);
+}
 
 static window_partial_swap_request_t* Gfx_draw(Gfx* self, const Vt* vt, Ui* ui, uint8_t buffer_age)
 {
@@ -145,4 +153,9 @@ static void Gfx_destroy_image_view_proxy(Gfx* self, uint32_t proxy[static 4])
 static void Gfx_destroy_sixel_proxy(Gfx* self, uint32_t proxy[static 4])
 {
     self->interface->destroy_sixel_proxy(self, proxy);
+}
+
+static void Gfx_external_framebuffer_damage(Gfx* self)
+{
+    self->interface->external_framebuffer_damage(self);
 }

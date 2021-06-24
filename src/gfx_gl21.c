@@ -27,19 +27,17 @@ DEF_PAIR(GLuint);
 
 #define NUM_BUCKETS 513
 
+/* Maximum number of frames we record damage for */
 #define MAX_TRACKED_FRAME_DAMAGE 6
 
-#ifndef ATLAS_SIZE_LIMIT
+/* Maximum number of damaged cells that don't cause full surface damage */
+#define CELL_DAMAGE_TO_SURF_LIMIT 10
+
 #define ATLAS_SIZE_LIMIT INT32_MAX
-#endif
 
-#ifndef DIM_COLOR_BLEND_FACTOR
 #define DIM_COLOR_BLEND_FACTOR 0.4f
-#endif
 
-#ifndef N_RECYCLED_TEXTURES
 #define N_RECYCLED_TEXTURES 5
-#endif
 
 #define PROXY_INDEX_TEXTURE           0
 #define PROXY_INDEX_TEXTURE_BLINK     1
@@ -339,7 +337,9 @@ typedef struct
 {
     bool*     damage_history;
     uint32_t* proxy_color_component;
-    uint16_t  n_lines;
+    uint16_t* line_length;
+
+    uint16_t n_lines;
 } lines_damage_record_t;
 
 typedef struct _GfxOpenGL21
@@ -408,8 +408,70 @@ typedef struct _GfxOpenGL21
     overlay_damage_record_t frame_overlay_damage[MAX_TRACKED_FRAME_DAMAGE];
 } GfxOpenGL21;
 
-#define gfxOpenGL21(gfx) ((GfxOpenGL21*)&gfx->extend_data)
 #define gfxBase(gfxGl21) ((Gfx*)(((uint8_t*)(gfxGl21)) - offsetof(Gfx, extend_data)))
+Pair_uint32_t GfxOpenGL21_get_char_size(Gfx* self);
+#define gfxOpenGL21(gfx) ((GfxOpenGL21*)&gfx->extend_data)
+
+void GfxOpenGL21_external_framebuffer_damage(Gfx* self)
+{
+    GfxOpenGL21* gl21    = gfxOpenGL21(self);
+    uint16_t     n_lines = GfxOpenGL21_get_char_size(self).second;
+
+    for (int i = 0; i < MAX_TRACKED_FRAME_DAMAGE; ++i) {
+        gl21->frame_overlay_damage[i].overlay_state = 1;
+    }
+
+    memset(gl21->line_damage.damage_history, 1, MAX_TRACKED_FRAME_DAMAGE * n_lines);
+    memset(gl21->line_damage.proxy_color_component,
+           0,
+           MAX_TRACKED_FRAME_DAMAGE * n_lines * sizeof(uint32_t));
+}
+
+static void GfxOpenGL21_realloc_damage_record(GfxOpenGL21* self)
+{
+    uint16_t n_lines = GfxOpenGL21_get_char_size(gfxBase(self)).second;
+
+    free(self->line_damage.damage_history);
+    free(self->line_damage.proxy_color_component);
+    free(self->line_damage.line_length);
+
+    self->line_damage.damage_history = calloc(MAX_TRACKED_FRAME_DAMAGE, n_lines);
+    self->line_damage.line_length    = calloc(MAX_TRACKED_FRAME_DAMAGE * sizeof(uint16_t), n_lines);
+
+    self->line_damage.proxy_color_component =
+      calloc(MAX_TRACKED_FRAME_DAMAGE * sizeof(uint32_t), n_lines);
+
+    memset(self->line_damage.damage_history, 1, MAX_TRACKED_FRAME_DAMAGE * n_lines);
+
+    for (int i = 0; i < MAX_TRACKED_FRAME_DAMAGE; ++i) {
+        self->frame_overlay_damage[i].overlay_state = 1;
+    }
+}
+
+static void GfxOpenGL21_shift_damage_record(GfxOpenGL21* self)
+{
+    memmove(self->line_damage.damage_history + self->line_damage.n_lines,
+            self->line_damage.damage_history,
+            (MAX_TRACKED_FRAME_DAMAGE - 1) * sizeof(bool));
+    memset(self->line_damage.damage_history, 0, self->line_damage.n_lines * sizeof(bool));
+
+    memmove(self->line_damage.proxy_color_component + self->line_damage.n_lines,
+            self->line_damage.proxy_color_component,
+            (MAX_TRACKED_FRAME_DAMAGE - 1) * sizeof(uint32_t));
+    memset(self->line_damage.proxy_color_component,
+           0,
+           self->line_damage.n_lines * sizeof(uint32_t));
+
+    memmove(self->line_damage.line_length + self->line_damage.n_lines,
+            self->line_damage.line_length,
+            (MAX_TRACKED_FRAME_DAMAGE - 1) * sizeof(uint16_t));
+
+    memmove(self->frame_overlay_damage + 1,
+            self->frame_overlay_damage,
+            (MAX_TRACKED_FRAME_DAMAGE - 1) * sizeof(*self->frame_overlay_damage));
+
+    self->frame_overlay_damage->overlay_state = false;
+}
 
 static freetype_output_scaling_t scale_ft_glyph(GfxOpenGL21* gfx, FreetypeOutput* glyph);
 Pair_GLuint                      GfxOpenGL21_pop_recycled(GfxOpenGL21* self);
@@ -424,6 +486,7 @@ void                           GfxOpenGL21_init_with_context_activated(Gfx* self
 bool                           GfxOpenGL21_set_focus(Gfx* self, bool focus);
 Pair_uint32_t                  GfxOpenGL21_pixels(Gfx* self, uint32_t c, uint32_t r);
 void                           GfxOpenGL21_reload_font(Gfx* self);
+void                           GfxOpenGL21_external_framebuffer_damage(Gfx* self);
 void                           GfxOpenGL21_destroy_proxy(Gfx* self, uint32_t* proxy);
 void                           GfxOpenGL21_destroy_image_proxy(Gfx* self, uint32_t* proxy);
 void                           GfxOpenGL21_destroy_image_view_proxy(Gfx* self, uint32_t* proxy);
@@ -442,6 +505,7 @@ static struct IGfx gfx_interface_opengl21 = {
     .destroy_image_proxy         = GfxOpenGL21_destroy_image_proxy,
     .destroy_image_view_proxy    = GfxOpenGL21_destroy_image_view_proxy,
     .destroy_sixel_proxy         = GfxOpenGL21_destroy_sixel_proxy,
+    .external_framebuffer_damage = GfxOpenGL21_external_framebuffer_damage,
 };
 
 Gfx* Gfx_new_OpenGL21(Freetype* freetype)
@@ -613,6 +677,14 @@ static GlyphAtlasEntry GlyphAtlasPage_push_tex(GfxOpenGL21*               gfx,
 
     restore_gl_state(&old_state);
 
+    float tc[] = {
+        (float)self->current_offset_x / self->width_px,
+        1.0f - (((float)self->height_px - (float)self->current_offset_y) / self->height_px),
+        (float)self->current_offset_x / self->width_px + (float)final_width / self->width_px,
+        1.0f - (((float)self->height_px - (float)self->current_offset_y) / self->height_px -
+                (float)final_height / self->height_px)
+    };
+
     GlyphAtlasEntry retval = {
         .page_id    = self->page_id,
         .texture_id = self->texture_id,
@@ -620,14 +692,7 @@ static GlyphAtlasEntry GlyphAtlasPage_push_tex(GfxOpenGL21*               gfx,
         .top        = final_top,
         .height     = final_height,
         .width      = final_width,
-        .tex_coords = { (float)self->current_offset_x / self->width_px,
-                        1.0f - (((float)self->height_px - (float)self->current_offset_y) /
-                                self->height_px),
-                        (float)self->current_offset_x / self->width_px +
-                          (float)final_width / self->width_px,
-                        1.0f - (((float)self->height_px - (float)self->current_offset_y) /
-                                  self->height_px -
-                                (float)final_height / self->height_px) },
+        .tex_coords = { tc[0], tc[1], tc[2], tc[3] },
     };
 
     self->current_offset_x += final_width;
@@ -745,6 +810,14 @@ static GlyphAtlasEntry GlyphAtlasPage_push(GfxOpenGL21*    gfx,
         glGenerateMipmap(GL_TEXTURE_2D);
     }
 
+    float tc[] = {
+        (float)self->current_offset_x / self->width_px,
+        1.0f - (((float)self->height_px - (float)self->current_offset_y) / self->height_px),
+        (float)self->current_offset_x / self->width_px + (float)final_width / self->width_px,
+        1.0f - (((float)self->height_px - (float)self->current_offset_y) / self->height_px -
+                (float)final_height / self->height_px)
+    };
+
     GlyphAtlasEntry retval = {
         .page_id    = self->page_id,
         .texture_id = self->texture_id,
@@ -752,14 +825,7 @@ static GlyphAtlasEntry GlyphAtlasPage_push(GfxOpenGL21*    gfx,
         .top        = final_top,
         .height     = final_height,
         .width      = final_width,
-        .tex_coords = { (float)self->current_offset_x / self->width_px,
-                        1.0f - (((float)self->height_px - (float)self->current_offset_y) /
-                                self->height_px),
-                        (float)self->current_offset_x / self->width_px +
-                          (float)final_width / self->width_px,
-                        1.0f - (((float)self->height_px - (float)self->current_offset_y) /
-                                  self->height_px -
-                                (float)final_height / self->height_px) },
+        .tex_coords = { tc[0], tc[1], tc[2], tc[3] },
     };
 
     self->current_offset_x += final_width;
@@ -1252,17 +1318,7 @@ void GfxOpenGL21_resize(Gfx* self, uint32_t w, uint32_t h)
 
     glViewport(0, 0, gl21->win_w, gl21->win_h);
 
-    uint16_t n_lines = GfxOpenGL21_get_char_size(gfxBase(gl21)).second;
-    free(gl21->line_damage.damage_history);
-    free(gl21->line_damage.proxy_color_component);
-    gl21->line_damage.damage_history = calloc(MAX_TRACKED_FRAME_DAMAGE, n_lines);
-    gl21->line_damage.proxy_color_component =
-      calloc(MAX_TRACKED_FRAME_DAMAGE, n_lines * sizeof(int32_t));
-    memset(gl21->line_damage.damage_history, 1, MAX_TRACKED_FRAME_DAMAGE * n_lines);
-    for (int i = 0; i < MAX_TRACKED_FRAME_DAMAGE; ++i) {
-        gl21->frame_overlay_damage[i].overlay_state = 1;
-    }
-
+    GfxOpenGL21_realloc_damage_record(gl21);
     GfxOpenGL21_regenerate_line_quad_vbo(gl21);
 }
 
@@ -2389,7 +2445,7 @@ static void _GfxOpenGL21_draw_block_cursor(GfxOpenGL21* gfx,
                                            ColorRGBA    clr,
                                            size_t       row)
 {
-    ((vt_line_damage_t*)&ui->cursor_damage)->type = VT_LINE_DAMAGE_FULL; // test
+    ((vt_line_damage_t*)&ui->cursor_damage)->type = VT_LINE_DAMAGE_FULL;
     VtLine* vt_line                               = Vt_cursor_line(vt);
 
     line_render_pass_args_t rp_args = {
@@ -2475,6 +2531,10 @@ static void _GfxOpenGL21_draw_block_cursor(GfxOpenGL21* gfx,
 
 static void GfxOpenGL21_draw_cursor(GfxOpenGL21* gfx, const Vt* vt, const Ui* ui)
 {
+    if (!ui || !ui->cursor) {
+        return;
+    }
+
     bool show_blink = !settings.enable_cursor_blink || !ui->window_in_focus ||
                       !ui->cursor->blinking || (ui->cursor->blinking && ui->draw_cursor_blinking);
 
@@ -2881,6 +2941,7 @@ static void GfxOpenGL21_load_image_view(GfxOpenGL21* self, VtImageSurfaceView* v
     float w = self->sx * (view->cell_scale_rect.first
                             ? (view->cell_scale_rect.first * self->glyph_width_pixels)
                             : OR(view->sample_dims_px.first, surf->width));
+
     float h = self->sy * (view->cell_scale_rect.second
                             ? (view->cell_scale_rect.second * self->line_height_pixels)
                             : OR(view->sample_dims_px.second, surf->height));
@@ -3100,6 +3161,10 @@ static bool GfxOpenGL21_get_accumulated_line_damaged(GfxOpenGL21* self,
                                                      uint16_t     line_index,
                                                      uint8_t      age)
 {
+    if (age < 2) {
+        return true;
+    }
+
     bool     rv               = false;
     bool     cursor_drawn_now = self->frame_overlay_damage->cursor_drawn;
     uint32_t cursor_now_x     = self->frame_overlay_damage->curosr_position_x;
@@ -3135,6 +3200,10 @@ static window_partial_swap_request_t* GfxOpenGL21_try_push_accumulated_cursor_da
 
 static bool GfxOpenGL21_get_accumulated_overlay_damaged(GfxOpenGL21* self, uint8_t age)
 {
+    if (age > MAX_TRACKED_FRAME_DAMAGE || age < 2) {
+        return true;
+    }
+
     bool rv = false;
     for (int i = 0; i < age && !rv; ++i) {
         rv |= self->frame_overlay_damage[i].overlay_state;
@@ -3142,29 +3211,25 @@ static bool GfxOpenGL21_get_accumulated_overlay_damaged(GfxOpenGL21* self, uint8
     return rv;
 }
 
-static void GfxOpenGL21_shift_damage_record(GfxOpenGL21* self)
+static bool GfxOpenGL21_is_framebuffer_dirty(Gfx* self, uint8_t buffer_age)
 {
-    memmove(self->line_damage.damage_history + self->line_damage.n_lines,
-            self->line_damage.damage_history,
-            (MAX_TRACKED_FRAME_DAMAGE - 1) * sizeof(bool));
-    memset(self->line_damage.damage_history, 0, self->line_damage.n_lines * sizeof(bool));
-
-    memmove(self->line_damage.proxy_color_component + self->line_damage.n_lines,
-            self->line_damage.proxy_color_component,
-            (MAX_TRACKED_FRAME_DAMAGE - 1) * sizeof(uint32_t));
-    memset(self->line_damage.proxy_color_component,
-           0,
-           self->line_damage.n_lines * sizeof(uint32_t));
-
-    memmove(self->frame_overlay_damage + 1,
-            self->frame_overlay_damage,
-            (MAX_TRACKED_FRAME_DAMAGE - 1) * sizeof(*self->frame_overlay_damage));
-    self->frame_overlay_damage->overlay_state = false;
+    GfxOpenGL21* gfx = gfxOpenGL21(self);
+    return GfxOpenGL21_get_accumulated_overlay_damaged(gfx, buffer_age);
 }
 
 window_partial_swap_request_t* GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui, uint8_t buffer_age)
 {
-    GfxOpenGL21* gfx    = gfxOpenGL21(self);
+    GfxOpenGL21* gfx = gfxOpenGL21(self);
+
+    window_partial_swap_request_t* retval = retval = &gfx->modified_region;
+
+    static uint8_t old_age = 0;
+    if (buffer_age == 0 || buffer_age != old_age) {
+        GfxOpenGL21_external_framebuffer_damage(self);
+        old_age = buffer_age;
+        retval  = NULL;
+    }
+
     gfx->pixel_offset_x = ui->pixel_offset_x;
     gfx->pixel_offset_y = ui->pixel_offset_y;
 
@@ -3173,10 +3238,7 @@ window_partial_swap_request_t* GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui,
     gfx->frame_overlay_damage->overlay_state =
       Ui_any_overlay_element_visible(ui) | Vt_is_scrolling_visual(vt);
 
-    window_partial_swap_request_t* retval = retval = &gfx->modified_region;
-
-    if (buffer_age == 0 || buffer_age > MAX_TRACKED_FRAME_DAMAGE ||
-        GfxOpenGL21_get_accumulated_overlay_damaged(gfx, buffer_age) ||
+    if (GfxOpenGL21_get_accumulated_overlay_damaged(gfx, buffer_age) ||
         gfx->frame_overlay_damage->overlay_state) {
         retval = NULL;
     }
@@ -3184,6 +3246,7 @@ window_partial_swap_request_t* GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui,
     VtLine *begin, *end;
     Vt_get_visible_lines(vt, &begin, &end);
     glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_DEPTH_TEST);
     glViewport(0, 0, gfx->win_w, gfx->win_h);
     glClearColor(ColorRGBA_get_float(vt->colors.bg, 0),
                  ColorRGBA_get_float(vt->colors.bg, 1),
@@ -3217,7 +3280,13 @@ window_partial_swap_request_t* GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui,
             uint16_t dam_len = (damage.second < damage.first) ? (uint16_t)i->data.size
                                                               : (damage.second - damage.first) + 1;
 
-            if (retval && n_subs > 0 && dam_len < 10 && !unlikely(rp.has_blinking_chars)) {
+            bool surface_fragment_repaint =
+              GfxOpenGL21_get_accumulated_line_damaged(gfx, i - begin, buffer_age);
+
+            bool length_in_limit = dam_len < CELL_DAMAGE_TO_SURF_LIMIT;
+
+            if (retval && surface_fragment_repaint && n_subs > 0 && length_in_limit &&
+                !unlikely(rp.has_blinking_chars)) {
                 retval = GfxOpenGL21_merge_or_push_modified_rect(
                   gfx,
                   GfxOpenGL21_translate_coords(
@@ -3244,21 +3313,28 @@ window_partial_swap_request_t* GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui,
             line_render_pass_finalize(&rp);
         } else {
             uint16_t n_lines = GfxOpenGL21_get_char_size(gfxBase(gfx)).second;
-            uint32_t idx     = rp_args.visual_index + buffer_age * n_lines * sizeof(uint32_t);
-            if (gfx->line_damage.proxy_color_component[idx] != i->proxy.data[PROXY_INDEX_TEXTURE]) {
+            uint32_t ix      = rp_args.visual_index + buffer_age * n_lines;
+
+            if (retval &&
+                gfx->line_damage.proxy_color_component[ix] != i->proxy.data[PROXY_INDEX_TEXTURE]) {
+
+                uint16_t len = MAX(i->data.size, gfx->line_damage.line_length[ix]);
+
                 retval = GfxOpenGL21_merge_or_push_modified_rect(
                   gfx,
                   GfxOpenGL21_translate_coords(gfx,
                                                gfx->pixel_offset_x,
                                                gfx->pixel_offset_y +
                                                  gfx->line_height_pixels * rp_args.visual_index,
-                                               gfx->glyph_width_pixels * i->data.size,
+                                               gfx->glyph_width_pixels * len,
                                                gfx->line_height_pixels));
             }
         }
 
         gfx->line_damage.proxy_color_component[rp_args.visual_index] =
           i->proxy.data[PROXY_INDEX_TEXTURE];
+
+        gfx->line_damage.line_length[rp_args.visual_index] = i->data.size;
     }
 
     glDisable(GL_BLEND);
@@ -3455,6 +3531,7 @@ void GfxOpenGL21_destroy(Gfx* self)
     glUseProgram(0);
     free(gfxOpenGL21(self)->line_damage.damage_history);
     free(gfxOpenGL21(self)->line_damage.proxy_color_component);
+    free(gfxOpenGL21(self)->line_damage.line_length);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     glBindTexture(GL_TEXTURE_2D, 0);
     glBindBuffer(GL_ARRAY_BUFFER, 0);

@@ -45,7 +45,7 @@ CCWNO = -Wall -Wextra -Wno-unused-parameter -Wno-unused-function -Werror=implici
 SRCS = $(wildcard $(SRC_DIR)/*.c wildcard $(SRC_DIR)/wcwidth/wcwidth.c)
 SRCS_WLEXTS = $(wildcard $(SRC_DIR)/wl_exts/*.c)
 
-XLDLIBS = -lX11 -lXrender
+XLDLIBS = -lX11 -lXrender -lXrandr
 WLLDLIBS = -lwayland-client -lwayland-egl -lwayland-cursor -lxkbcommon -lEGL
 
 ifeq ($(window_protocol), x11)
