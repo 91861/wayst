@@ -4855,8 +4855,8 @@ static inline void Vt_scroll_out_all_content(Vt* self)
     }
 
     int64_t to_add = 0;
-    for (size_t i = Vt_visual_bottom_line(self); i >= Vt_visual_top_line(self); --i) {
-        if (self->lines.buf[i].data.size) {
+    for (size_t i = 0; i <= Vt_visual_bottom_line(self) - Vt_visual_top_line(self); ++i) {
+        if (self->lines.buf[Vt_visual_bottom_line(self) - i].data.size) {
             to_add += i;
             break;
         }
