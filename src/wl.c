@@ -969,9 +969,10 @@ static void keyboard_handle_key(void*               data,
         utf);
 
     // xkb will signal a failed conversion to utf32 by returning 0, but 0 is the expected result for
-    // Ctrl + `
+    // Ctrl + ` and Ctrl + @
     bool utf_conversion_success =
-      utf || (sym == XKB_KEY_grave && FLAG_IS_SET(mods, globalWl->xkb.ctrl_mask));
+      utf || ((sym == XKB_KEY_grave || sym == XKB_KEY_at ) &&
+        FLAG_IS_SET(mods, globalWl->xkb.ctrl_mask));
 
     bool is_not_consumed = utf_conversion_success ? true : !keysym_is_consumed(sym);
 
