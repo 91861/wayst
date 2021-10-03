@@ -8,12 +8,14 @@ SRC_DIR = src
 BLD_DIR = build
 TGT_DIR = .
 
-LDLIBS = -lGL -lfreetype -lfontconfig -lutil -L/usr/lib -lm
 
 ifeq ($(shell uname -s),FreeBSD)
 	INCLUDES = -I/usr/local/include/freetype2/
+	INCLUDES += -I/usr/local/include
+	LDLIBS = -lGL -lfreetype -lfontconfig -lutil -L/usr/local/lib -lm
 else
 	INCLUDES = -I/usr/include/freetype2/
+	LDLIBS = -lGL -lfreetype -lfontconfig -lutil -L/usr/lib -lm
 endif
 
 ifeq ($(mode),sanitized)

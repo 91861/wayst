@@ -5,7 +5,11 @@
 #include <signal.h>
 #include <sys/poll.h>
 #include <sys/wait.h>
+#ifdef __FreeBSD__
+#include <utmpx.h>
+#else
 #include <utmp.h>
+#endif
 
 #include <errno.h>
 #include <stdbool.h>
