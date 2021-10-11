@@ -50,7 +50,7 @@
 /* point size in inches for converting font sizes */
 #define PT_AS_INCH 0.0138889
 
-static const char* const colors_default[8][18] = {
+static const char* const colors_default[9][18] = {
     {
       /* wayst */
       "000000",
@@ -218,6 +218,27 @@ static const char* const colors_default[8][18] = {
       "FDF6E3",
       "002B36",
       "839496",
+    },
+    {
+      /* gruvbox */
+      "1d2021",
+      "cc241d",
+      "98971a",
+      "d79921",
+      "458588",
+      "b16286",
+      "689d6a",
+      "a89984",
+      "928374",
+      "fb4934",
+      "b8bb26",
+      "fabd2f",
+      "93a598",
+      "d3869b",
+      "8ec07c",
+      "ebdbb2",
+      "1d2021",
+      "ebdbb2",
     },
 };
 
@@ -1541,6 +1562,8 @@ static void handle_option(const char opt, const int array_index, const char* val
                 settings.colorscheme_preset = 6;
             } else if (!strcasecmp(value, "solarized")) {
                 settings.colorscheme_preset = 7;
+            } else if (!strcasecmp(value, "gruvbox")) {
+                settings.colorscheme_preset = 8;
             } else {
                 settings.colorscheme_preset =
                   MIN(strtoul(value, NULL, 10), sizeof(colors_default) - 1);
