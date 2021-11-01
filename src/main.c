@@ -647,7 +647,10 @@ static void App_command_changed(void* self)
 
 static void App_buffer_changed(void* self)
 {
-    App_set_title(self);
+    App* app = self;
+    App_set_title(app);
+    Vt_clear_all_proxies(&app->vt);
+    Gfx_external_framebuffer_damage(app->gfx);
 }
 
 static void App_mouse_report_changed(void* self)
@@ -1945,8 +1948,8 @@ static Pair_uint32_t App_text_area_size(void* self)
 {
     App*          app      = self;
     Pair_uint32_t win_size = Window_size(app->win);
-    win_size.first -= settings.padding;
-    win_size.second -= settings.padding;
+    win_size.first -= settings.padding * 2;
+    win_size.second -= settings.padding * 2;
     return win_size;
 }
 

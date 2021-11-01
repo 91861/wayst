@@ -1324,14 +1324,20 @@ void GfxOpenGL21_resize(Gfx* self, uint32_t w, uint32_t h)
 
 Pair_uint32_t GfxOpenGL21_get_char_size(Gfx* self)
 {
+	ASSERT(gfxOpenGL21(self)->freetype, "font renderer active");
+
     GfxOpenGL21* gl21 = gfxOpenGL21(self);
 
-    int32_t cols = MAX((gl21->win_w - 2 * settings.padding) /
-                         (gfxOpenGL21(self)->freetype->glyph_width_pixels + settings.padd_glyph_x),
-                       0);
-    int32_t rows = MAX((gl21->win_h - 2 * settings.padding) /
-                         (gfxOpenGL21(self)->freetype->line_height_pixels + settings.padd_glyph_y),
-                       0);
+	uint32_t minsize = settings.padding * 2;
+	int32_t cellx = gfxOpenGL21(self)->freetype->glyph_width_pixels + settings.padd_glyph_x;
+	int32_t celly = gfxOpenGL21(self)->freetype->line_height_pixels + settings.padd_glyph_y;
+
+	if (gl21->win_w <= minsize || gl21->win_h <= minsize) {
+		return (Pair_uint32_t){ .first = 0, .second = 0 };
+	}
+
+    int32_t cols = MAX((gl21->win_w - 2 * settings.padding) / cellx, 0);
+    int32_t rows = MAX((gl21->win_h - 2 * settings.padding) / celly, 0);
 
     return (Pair_uint32_t){ .first = cols, .second = rows };
 }

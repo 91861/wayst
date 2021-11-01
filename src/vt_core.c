@@ -817,6 +817,8 @@ static void Vt_hard_reset(Vt* self)
     Vt_alt_buffer_off(self, false);
     Vt_select_end(self);
     Vt_clear_display_and_scrollback(self);
+    Vector_clear_RcPtr_VtSixelSurface(&self->alt_scrolled_sixels);
+    Vector_clear_RcPtr_VtImageSurfaceView(&self->alt_image_views);
     Vt_move_cursor(self, 0, 0);
 
     self->parser.state = PARSER_STATE_LITERAL;
@@ -4908,6 +4910,10 @@ static inline void Vt_clear_display_and_scrollback(Vt* self)
         Vt_empty_line_fill_bg(self, self->lines.size - 1);
     }
     self->cursor.row = 0;
+
+    Vector_clear_RcPtr_VtSixelSurface(&self->scrolled_sixels);
+    Vector_clear_RcPtr_VtImageSurfaceView(&self->image_views);
+    Vector_clear_RcPtr_VtImageSurface(&self->images);
 }
 
 /**
