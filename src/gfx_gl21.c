@@ -1324,17 +1324,17 @@ void GfxOpenGL21_resize(Gfx* self, uint32_t w, uint32_t h)
 
 Pair_uint32_t GfxOpenGL21_get_char_size(Gfx* self)
 {
-	ASSERT(gfxOpenGL21(self)->freetype, "font renderer active");
+    ASSERT(gfxOpenGL21(self)->freetype, "font renderer active");
 
     GfxOpenGL21* gl21 = gfxOpenGL21(self);
 
-	uint32_t minsize = settings.padding * 2;
-	int32_t cellx = gfxOpenGL21(self)->freetype->glyph_width_pixels + settings.padd_glyph_x;
-	int32_t celly = gfxOpenGL21(self)->freetype->line_height_pixels + settings.padd_glyph_y;
+    uint32_t minsize = settings.padding * 2;
+    int32_t  cellx   = gfxOpenGL21(self)->freetype->glyph_width_pixels + settings.padd_glyph_x;
+    int32_t  celly   = gfxOpenGL21(self)->freetype->line_height_pixels + settings.padd_glyph_y;
 
-	if (gl21->win_w <= minsize || gl21->win_h <= minsize) {
-		return (Pair_uint32_t){ .first = 0, .second = 0 };
-	}
+    if (gl21->win_w <= minsize || gl21->win_h <= minsize) {
+        return (Pair_uint32_t){ .first = 0, .second = 0 };
+    }
 
     int32_t cols = MAX((gl21->win_w - 2 * settings.padding) / cellx, 0);
     int32_t rows = MAX((gl21->win_h - 2 * settings.padding) / celly, 0);
@@ -1533,16 +1533,16 @@ typedef struct
 {
     line_render_subpass_args_t* prepared_subpass;
     line_render_pass_args_t     args;
+    line_render_subpass_args_t  subpass_args[2];
     GLuint                      final_texture;
     GLuint                      final_depthbuffer;
-    line_render_subpass_args_t  subpass_args[2];
+    uint32_t                    texture_width;
+    uint32_t                    texture_height;
     uint16_t                    length;
     uint8_t                     n_queued_subpasses;
     bool                        has_blinking_chars;
     bool                        has_underlined_chars;
     bool                        is_reusing;
-    uint32_t                    texture_width;
-    uint32_t                    texture_height;
 } line_render_pass_t;
 
 static void line_reder_pass_run(line_render_pass_t* self);
@@ -3317,30 +3317,32 @@ window_partial_swap_request_t* GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui,
             }
 
             line_render_pass_finalize(&rp);
-        } else {
-            uint16_t n_lines = GfxOpenGL21_get_char_size(gfxBase(gfx)).second;
-            uint32_t ix      = rp_args.visual_index + buffer_age * n_lines;
+        }
+    }
 
-            if (retval &&
-                gfx->line_damage.proxy_color_component[ix] != i->proxy.data[PROXY_INDEX_TEXTURE]) {
-
-                uint16_t len = MAX(i->data.size, gfx->line_damage.line_length[ix]);
-
+    // check if the not repainted lines should generate fb damage
+    for (VtLine* i = begin; i < end; ++i) {
+        ptrdiff_t visual_index = i - begin;
+        bool      repainted    = gfx->line_damage.damage_history[visual_index];
+        if (!repainted) {
+            uint16_t n_lines = gfx->line_damage.n_lines;
+            uint32_t ix      = visual_index + 1 * n_lines;
+            uint16_t len     = MAX(i->data.size, gfx->line_damage.line_length[ix]);
+            if (retval && len > 0) {
                 retval = GfxOpenGL21_merge_or_push_modified_rect(
                   gfx,
                   GfxOpenGL21_translate_coords(gfx,
                                                gfx->pixel_offset_x,
                                                gfx->pixel_offset_y +
-                                                 gfx->line_height_pixels * rp_args.visual_index,
+                                                 gfx->line_height_pixels * visual_index,
                                                gfx->glyph_width_pixels * len,
                                                gfx->line_height_pixels));
             }
         }
 
-        gfx->line_damage.proxy_color_component[rp_args.visual_index] =
-          i->proxy.data[PROXY_INDEX_TEXTURE];
-
-        gfx->line_damage.line_length[rp_args.visual_index] = i->data.size;
+        // update the rest of damage history data
+        gfx->line_damage.proxy_color_component[i - begin] = i->proxy.data[PROXY_INDEX_TEXTURE];
+        gfx->line_damage.line_length[i - begin]           = i->data.size;
     }
 
     glDisable(GL_BLEND);
