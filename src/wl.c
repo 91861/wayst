@@ -26,6 +26,7 @@
 #include <wayland-egl.h>
 
 #include "window.h"
+#include "wl_exts/kwin-blur.h"
 #include "wl_exts/wp-primary-selection.h"
 #include "wl_exts/xdg-decoration.h"
 #include "wl_exts/xdg-shell.h"
@@ -185,6 +186,8 @@ typedef struct
     struct wl_cursor_theme* cursor_theme;
     struct wl_surface*      cursor_surface;
 
+    struct org_kde_kwin_blur_manager* kde_kwin_blur_manager;
+
     int32_t   kbd_repeat_dealy, kbd_repeat_rate;
     uint32_t  keycode_to_repeat;
     uint32_t  last_button_pressed;
@@ -239,6 +242,8 @@ typedef struct
     struct xdg_surface*                 xdg_surface;
     struct xdg_toplevel*                xdg_toplevel;
     struct zxdg_toplevel_decoration_v1* toplevel_decoration;
+
+    struct org_kde_kwin_blur* kde_kwin_blur;
 
     struct wl_data_offer*  data_offer;
     struct wl_data_source* data_source;
@@ -641,8 +646,8 @@ static void wl_surface_handle_leave(void* data, struct wl_surface* _, struct wl_
         win_base->lcd_filter   = win->active_output->lcd_filter;
         win_base->output_index = win->active_output->global_index;
         free(win_base->output_name);
-        win_base->output_name  = strdup(win->active_output->name);
-        win_base->dpi          = win->active_output->dpi;
+        win_base->output_name = strdup(win->active_output->name);
+        win_base->dpi         = win->active_output->dpi;
         Window_emit_output_change_event(win_base);
     }
 }
@@ -970,9 +975,8 @@ static void keyboard_handle_key(void*               data,
 
     // xkb will signal a failed conversion to utf32 by returning 0, but 0 is the expected result for
     // Ctrl + ` and Ctrl + @
-    bool utf_conversion_success =
-      utf || ((sym == XKB_KEY_grave || sym == XKB_KEY_at ) &&
-        FLAG_IS_SET(mods, globalWl->xkb.ctrl_mask));
+    bool utf_conversion_success = utf || ((sym == XKB_KEY_grave || sym == XKB_KEY_at) &&
+                                          FLAG_IS_SET(mods, globalWl->xkb.ctrl_mask));
 
     bool is_not_consumed = utf_conversion_success ? true : !keysym_is_consumed(sym);
 
@@ -1571,6 +1575,9 @@ static void registry_add(void*               data,
                            name,
                            &zwp_primary_selection_device_manager_v1_interface,
                            version);
+    } else if (!strcmp(interface, org_kde_kwin_blur_manager_interface.name)) {
+        globalWl->kde_kwin_blur_manager =
+          wl_registry_bind(registry, name, &org_kde_kwin_blur_manager_interface, version);
     } else {
         LOG(" (unused)");
     }
@@ -1809,6 +1816,16 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h)
     EGLint eglerror = eglGetError();
     if (eglerror != EGL_SUCCESS) {
         WRN("EGL Error %s\n", egl_get_error_string(eglerror));
+    }
+
+    if (settings.background_blur && globalWl->kde_kwin_blur_manager) {
+        windowWl(win)->kde_kwin_blur =
+          org_kde_kwin_blur_manager_create(globalWl->kde_kwin_blur_manager, windowWl(win)->surface);
+        org_kde_kwin_blur_set_user_data(windowWl(win)->kde_kwin_blur, win);
+
+        // null region implies complete surface
+        org_kde_kwin_blur_set_region(windowWl(win)->kde_kwin_blur, NULL);
+        org_kde_kwin_blur_commit(windowWl(win)->kde_kwin_blur);
     }
 
     struct wl_callback* frame_callback = wl_surface_frame(windowWl(win)->surface);
@@ -2075,6 +2092,14 @@ static void WindowWl_destroy(struct WindowBase* self)
     if (globalWl->cursor_theme) {
         wl_surface_destroy(globalWl->cursor_surface);
         wl_cursor_theme_destroy(globalWl->cursor_theme);
+    }
+
+    if (windowWl(self)->kde_kwin_blur) {
+        org_kde_kwin_blur_destroy(windowWl(self)->kde_kwin_blur);
+    }
+
+    if (globalWl->kde_kwin_blur_manager) {
+        org_kde_kwin_blur_manager_destroy(globalWl->kde_kwin_blur_manager);
     }
 
     wl_egl_window_destroy(windowWl(self)->egl_window);

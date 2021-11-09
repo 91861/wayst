@@ -385,6 +385,25 @@ static inline bool strtob(const char* restrict str)
     }
     return strneqci("true", str, 4) || strneqci("1", str, 1);
 }
+/** convert string to bool (false if fails) */
+static inline bool strtob2(const char* restrict str, bool* opt_fail)
+{
+    if (str) {
+        if (strneqci("true", str, 4) || strneqci("1", str, 1)) {
+            return true;
+        }
+
+        if (strneqci("false", str, 4) || strneqci("0", str, 1)) {
+            return false;
+        }
+    }
+
+    if (opt_fail) {
+        *opt_fail = true;
+    }
+
+    return false;
+}
 
 static inline bool unicode_is_combining(char32_t codepoint)
 {

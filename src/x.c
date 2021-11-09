@@ -857,6 +857,18 @@ static WindowBase* WindowX11_new(uint32_t w, uint32_t h, uint32_t cellx, uint32_
                     (unsigned char*)&xdnd_proto_version,
                     1);
 
+    if (settings.background_blur) {
+        int zero = 0;
+        XChangeProperty(globalX11->display,
+                        windowX11(win)->window,
+                        XInternAtom(globalX11->display, "_KDE_NET_WM_BLUR_BEHIND_REGION", False),
+                        XA_CARDINAL,
+                        32,
+                        PropModeReplace,
+                        (unsigned char*)&zero,
+                        1);
+    }
+
     WindowX11_update_monitors_info(win);
     WindowX11_update_monitor_placement(win);
     WindowX11_set_decoration_theme_hint(win, settings.decoration_theme);

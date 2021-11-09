@@ -828,6 +828,7 @@ static void settings_make_default()
         .fg        = { .r = 255, .g = 255, .b = 255 },
         .fghl      = { .r = 255, .g = 255, .b = 255 },
 
+        .background_blur = true,
         .cursor_color_static_bg = false,
         .cursor_color_static_fg = false,
 
@@ -962,17 +963,20 @@ static void print_help_and_exit()
             printf("     ");
         }
         if (long_options[i].has_arg == required_argument) {
+            size_t l       = strlen(long_options[i].name) + strlen(long_options_descriptions[i][0]);
+            int    padding = l >= MAX_OPT_PADDING ? 1 : MAX_OPT_PADDING - l;
             printf(" " TERMCOLOR_BOLD "--%-s " TERMCOLOR_RESET "<%s>"
                    "%-*s",
                    long_options[i].name,
                    long_options_descriptions[i][0],
-                   (int)(MAX_OPT_PADDING - strlen(long_options[i].name) -
-                         strlen(long_options_descriptions[i][0])),
+                   padding,
                    "");
         } else {
+            size_t l       = strlen(long_options[i].name);
+            int    padding = l >= MAX_OPT_PADDING ? 1 : MAX_OPT_PADDING - l;
             printf(" " TERMCOLOR_BOLD "--%s" TERMCOLOR_RESET " %*s",
                    long_options[i].name,
-                   (int)((MAX_OPT_PADDING + 2) - strlen(long_options[i].name)),
+                   padding,
                    "");
         }
         printf("%s\n", long_options_descriptions[i][1]);
@@ -1119,22 +1123,42 @@ static void handle_option(const char opt, const int array_index, const char* val
 #define L_WARN_BAD_VALUE                                                                           \
     WRN("Unknown value \'%s\' for option \'%s\'\n", value, long_options[array_index].name);
 
+#define L_WARN_BAD_VALUE_T(_type_name)                                                             \
+    WRN("Failed to parse \'%s\' as " _type_name " for option \'%s\'\n",                            \
+        value,                                                                                     \
+        long_options[array_index].name);
+
 #define L_WARN_BAD_COLOR                                                                           \
     WRN("Failed to parse \'%s\' as color for option \'%s\'%s.\n",                                  \
         value,                                                                                     \
         long_options[array_index].name,                                                            \
-        strlen(value) ? "" : ", correct syntax is =\"#rrggbb\" or =rrggbb");
+        strlen(value) ? "" : ", expected syntax =\"#rrggbb\" or =rrggbb");
+
+#define L_ASSIGN_BOOL(_var, _dft)                                                                  \
+    {                                                                                              \
+        if (!value) {                                                                              \
+            (_var) = (_dft);                                                                       \
+        } else {                                                                                   \
+            bool fail = false;                                                                     \
+            bool v    = strtob2(value, &fail);                                                     \
+            if (fail) {                                                                            \
+                L_WARN_BAD_VALUE_T("bool");                                                        \
+            } else {                                                                               \
+                (_var) = v;                                                                        \
+            }                                                                                      \
+        }                                                                                          \
+    }
 
         case OPT_XORG_ONLY_IDX:
-            settings.x11_is_default = value ? strtob(value) : true;
+            L_ASSIGN_BOOL(settings.x11_is_default, true);
             break;
 
         case OPT_SMOOTH_CURSOR:
-            settings.smooth_cursor = value ? strtob(value) : true;
+            L_ASSIGN_BOOL(settings.smooth_cursor, true)
             break;
 
         case OPT_DYNAMIC_TITLE_IDX:
-            settings.dynamic_title = value ? strtob(value) : true;
+            L_ASSIGN_BOOL(settings.dynamic_title, true)
             break;
 
         case OPT_FLUSH_FC_CACHE_IDX:
@@ -1169,7 +1193,7 @@ static void handle_option(const char opt, const int array_index, const char* val
             break;
 
         case OPT_HOLD:
-            settings.hold_after_child_process_exit = value ? strtob(value) : true;
+            L_ASSIGN_BOOL(settings.hold_after_child_process_exit, true)
             break;
 
         case OPT_DEBUG_GFX_IDX:
@@ -1391,7 +1415,7 @@ static void handle_option(const char opt, const int array_index, const char* val
         } break;
 
         case OPT_BOLD_IS_BRIGHT:
-            settings.bold_is_bright = strtob(value);
+            L_ASSIGN_BOOL(settings.bold_is_bright, true);
             break;
 
         case OPT_HELP_IDX:
@@ -1673,6 +1697,10 @@ static void handle_option(const char opt, const int array_index, const char* val
             Vector_Vector_char values = expand_list_value(value, on_list_expand_syntax_error);
             AString_replace_with_dynamic(&settings.title_format, strdup(value));
             Vector_destroy_Vector_char(&values);
+        } break;
+
+        case OPT_WM_BG_BLUR_IDX: {
+            L_ASSIGN_BOOL(settings.background_blur, true)
         } break;
 
         case OPT_BG_COLOR_IDX: {
