@@ -4850,21 +4850,27 @@ static void Vt_delete_chars(Vt* self, size_t n)
     Vt_mark_proxy_fully_damaged(self, self->cursor.row);
 }
 
+/**
+ * Get the number of used lines counting from the top of the viewport and add blanks to scroll them
+ * out. */
 static inline void Vt_scroll_out_all_content(Vt* self)
 {
     if (unlikely(self->selection.mode)) {
         Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
     }
 
-    int64_t to_add = 0;
-    for (size_t i = 0; i <= Vt_visual_bottom_line(self) - Vt_visual_top_line(self); ++i) {
-        if (self->lines.buf[Vt_visual_bottom_line(self) - i].data.size) {
-            to_add += i;
+    int64_t to_add = Vt_visual_top_line(self);
+    for (size_t i = Vt_visual_bottom_line(self); i > Vt_visual_top_line(self); --i) {
+        if (self->lines.buf[i].data.size) {
+            to_add = i;
             break;
         }
     }
     to_add -= Vt_visual_top_line(self);
-    to_add += 1;
+
+    if (Vt_line_at(self, Vt_visual_top_line(self))->data.size) {
+        to_add += 1;
+    }
 
     for (int64_t i = 0; i < to_add; ++i) {
         Vector_push_VtLine(&self->lines, VtLine_new());
