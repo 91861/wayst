@@ -215,11 +215,17 @@ typedef struct
     /* dots per inch calculated from physical dimensions and resolution */
     uint16_t dpi;
 
+    /* for calculating dpi. we need to store this because any of those values may be updated (and
+     * they come from different events) */
+    int32_t width_px;
+    double  width_inch;
+
     /* output index, we can use this to distinguish displays with the same name */
     uint8_t global_index;
 
     /* output name */
     char* name;
+
 } WlOutputInfo;
 
 static void WlOutputInfo_destroy(WlOutputInfo* self)
@@ -646,8 +652,12 @@ static void wl_surface_handle_leave(void* data, struct wl_surface* _, struct wl_
         win_base->lcd_filter   = win->active_output->lcd_filter;
         win_base->output_index = win->active_output->global_index;
         free(win_base->output_name);
-        win_base->output_name = strdup(win->active_output->name);
-        win_base->dpi         = win->active_output->dpi;
+        if (win->active_output->name) {
+            win_base->output_name = strdup(win->active_output->name);
+        } else {
+            win_base->output_name = NULL;
+        }
+        win_base->dpi = win->active_output->dpi;
         Window_emit_output_change_event(win_base);
     }
 }
@@ -1194,10 +1204,29 @@ static lcd_filter_e wl_subpixel_to_lcd_filter(int32_t subpixel)
     return filter[subpixel];
 }
 
-static lcd_filter_e last_recorded_geometry_filter;
-static char*        last_recorded_dpy_name;
-static double       last_recorded_physical_width_inch;
-static uint8_t      last_global_output_index = 0;
+/* Information about an output is sent (initially or updated) by wl_output.geometry and/or
+ * wl_output.mode events that can come in any order. The wl_output.done event is used to indicate
+ * that the compositor has sent all info about a specific output. Record data from last received
+ * 'mode' and 'output' events so we can apply them on 'done'. If the output parameter of 'done'
+ * matches any of the existing wl_output-s we have, interpret it as an update to that output
+ * atherwise add it. */
+typedef struct
+{
+    bool         geometry_event_received;
+    bool         mode_event_received;
+    lcd_filter_e geometry_filter;
+    char*        dpy_name;
+    double       physical_width_inch;
+    uint8_t      global_output_index;
+    int32_t      frame_time_ms;
+    int32_t      pixel_width;
+} output_params_t;
+
+static output_params_t last_recorded_output_params = (output_params_t){
+    .geometry_event_received = false,
+    .mode_event_received     = false,
+    .global_output_index     = 0,
+};
 
 /* Output listener */
 static void output_handle_geometry(void*             data,
@@ -1211,14 +1240,18 @@ static void output_handle_geometry(void*             data,
                                    const char*       model,
                                    int32_t           transform)
 {
-    last_recorded_geometry_filter     = wl_subpixel_to_lcd_filter(subpixel);
-    last_recorded_physical_width_inch = (double)physical_width * INCH_IN_MM;
+    last_recorded_output_params.geometry_event_received = true;
+    last_recorded_output_params.geometry_filter         = wl_subpixel_to_lcd_filter(subpixel);
+    last_recorded_output_params.physical_width_inch     = (double)physical_width * INCH_IN_MM;
 
-    free(last_recorded_dpy_name);
-    last_recorded_dpy_name = strdup(model);
+    free(last_recorded_output_params.dpy_name);
+    last_recorded_output_params.dpy_name = NULL;
+    if (model) {
+        last_recorded_output_params.dpy_name = strdup(model);
+    }
 
     if (settings.lcd_filter == LCD_FILTER_UNDEFINED) {
-        settings.lcd_filter = last_recorded_geometry_filter;
+        settings.lcd_filter = last_recorded_output_params.geometry_filter;
     }
 }
 
@@ -1230,31 +1263,75 @@ static void output_handle_mode(void*             data,
                                int32_t           refresh)
 {
     if (flags & WL_OUTPUT_MODE_CURRENT) {
-        WindowWl* win           = windowWl(((struct WindowBase*)data));
-        int32_t   frame_time_ms = 1000000 / refresh;
-        bool      make_active   = !win->outputs.size;
-
-        Vector_push_WlOutputInfo(&win->outputs,
-                                 (WlOutputInfo){
-                                   .output               = wl_output,
-                                   .is_active            = make_active,
-                                   .target_frame_time_ms = frame_time_ms,
-                                   .lcd_filter           = last_recorded_geometry_filter,
-                                   .name                 = last_recorded_dpy_name,
-                                   .dpi          = (double)w / last_recorded_physical_width_inch,
-                                   .global_index = ++last_global_output_index,
-                                 });
-
-        last_recorded_dpy_name = NULL;
-        if (make_active) {
-            win->active_output = Vector_last_WlOutputInfo(&win->outputs);
-        }
+        last_recorded_output_params.mode_event_received = true;
+        last_recorded_output_params.frame_time_ms       = 1000000 / refresh;
+        last_recorded_output_params.pixel_width         = w;
     }
 }
 
-static void output_handle_done(void* data, struct wl_output* wl_output) {}
+static void output_handle_done(void* data, struct wl_output* wl_output)
+{
+    WindowWl* win = windowWl(((WindowBase*)data));
 
-static void output_handle_scale(void* data, struct wl_output* wl_output, int32_t factor) {}
+    bool is_update = false;
+    for (WlOutputInfo* i = NULL; (i = Vector_iter_WlOutputInfo(&win->outputs, i));) {
+        if (i->output == wl_output) {
+            is_update = true;
+
+            if (last_recorded_output_params.geometry_event_received) {
+                free(i->name);
+                i->name       = last_recorded_output_params.dpy_name;
+                i->lcd_filter = last_recorded_output_params.geometry_filter;
+                i->width_inch = last_recorded_output_params.physical_width_inch;
+            }
+
+            if (last_recorded_output_params.mode_event_received) {
+                i->target_frame_time_ms = last_recorded_output_params.frame_time_ms;
+                i->width_px             = last_recorded_output_params.pixel_width;
+            }
+
+            i->dpi = (double)i->width_px / i->width_inch;
+        }
+        break;
+    }
+
+    bool make_active = !win->outputs.size;
+    if (!is_update && last_recorded_output_params.mode_event_received &&
+        last_recorded_output_params.geometry_event_received) {
+        WlOutputInfo info = {
+            .output               = wl_output,
+            .is_active            = make_active,
+            .target_frame_time_ms = last_recorded_output_params.frame_time_ms,
+            .lcd_filter           = last_recorded_output_params.geometry_filter,
+            .name                 = last_recorded_output_params.dpy_name,
+            .dpi                  = (double)last_recorded_output_params.pixel_width /
+                   last_recorded_output_params.physical_width_inch,
+            .width_px     = last_recorded_output_params.pixel_width,
+            .width_inch   = last_recorded_output_params.physical_width_inch,
+            .global_index = ++last_recorded_output_params.global_output_index,
+        };
+
+        Vector_push_WlOutputInfo(&win->outputs, info);
+    }
+
+    last_recorded_output_params.dpy_name = NULL;
+
+    last_recorded_output_params.geometry_event_received = true;
+    last_recorded_output_params.mode_event_received     = true;
+
+    if (make_active) {
+        win->active_output = Vector_last_WlOutputInfo(&win->outputs);
+    }
+
+    if (is_update) {
+        Window_emit_output_change_event((WindowBase*)win);
+    }
+}
+
+static void output_handle_scale(void* data, struct wl_output* wl_output, int32_t factor)
+{
+    // TODO: scale everything ourselves and use wl_surface.set_buffer_scale.
+}
 
 static const struct wl_output_listener output_listener = {
     .geometry = output_handle_geometry,
@@ -1940,7 +2017,8 @@ void WindowWl_events(struct WindowBase* self)
 {
     static bool initial_event_emited = false;
 
-    if (unlikely(!initial_event_emited && self->callbacks.on_output_changed)) {
+    if (unlikely(!initial_event_emited && self->callbacks.on_output_changed &&
+                 windowWl(self)->active_output)) {
         initial_event_emited = true;
         CALL(self->callbacks.on_output_changed,
              self->callbacks.user_data,

@@ -58,7 +58,7 @@ static inline int64_t TimePoint_get_nsecs(TimePoint self)
 
 static inline int64_t TimePoint_get_ms(TimePoint self)
 {
-    return (self.tv_nsec + self.tv_sec * SEC_IN_NSECS) / MS_IN_NSECS;
+    return (((int64_t)self.tv_nsec) + ((int64_t)self.tv_sec) * SEC_IN_NSECS) / MS_IN_NSECS;
 }
 
 static inline void TimePoint_subtract(TimePoint* self, TimePoint other)

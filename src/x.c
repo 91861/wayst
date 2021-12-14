@@ -925,10 +925,12 @@ static void WindowX11_update_monitor_placement(WindowBase* self)
         self->lcd_filter   = globalX11->root_win_geometry;
         self->output_index = index;
         free(self->output_name);
-        self->output_name = strdup(name);
-        self->dpi         = dpi;
+        self->output_name = NULL;
+        if (name) {
+            self->output_name = strdup(name);
+        }
+        self->dpi = dpi;
         Window_emit_output_change_event(self);
-        XFree(name);
     }
 }
 
