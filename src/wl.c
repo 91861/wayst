@@ -1623,42 +1623,66 @@ static void registry_add(void*               data,
                          const char*         interface,
                          uint32_t            version)
 {
-    LOG("wl::registry_add{ name: %-40s, ver: %2u", interface, version);
+    bool unused = false;
+
+#ifdef DEBUG
+    uint32_t ver_req = 1;
+#define L_RQDBG(v) ver_req = v;
+#else
+#define L_RQDBG(_) ;
+#endif
+
+#define L_REQUIRE_VER(v)                                                                           \
+    L_RQDBG(v);                                                                                    \
+    if ((v) > version) {                                                                           \
+        ERR("Wayland interface \'%s\' version to low. Required " #v ", provided %u.",              \
+            interface,                                                                             \
+            version);                                                                              \
+    }
 
     if (!strcmp(interface, wl_compositor_interface.name)) {
-        globalWl->compositor = wl_registry_bind(registry, name, &wl_compositor_interface, version);
+        L_REQUIRE_VER(4);
+        globalWl->compositor = wl_registry_bind(registry, name, &wl_compositor_interface, 4);
     } else if (!strcmp(interface, wl_shell_interface.name)) {
-        globalWl->wl_shell = wl_registry_bind(registry, name, &wl_shell_interface, version);
+        globalWl->wl_shell = wl_registry_bind(registry, name, &wl_shell_interface, 1);
     } else if (!strcmp(interface, xdg_wm_base_interface.name)) {
-        globalWl->xdg_shell = wl_registry_bind(registry, name, &xdg_wm_base_interface, version);
+        globalWl->xdg_shell = wl_registry_bind(registry, name, &xdg_wm_base_interface, 1);
         xdg_wm_base_add_listener(globalWl->xdg_shell, &wm_base_listener, data);
     } else if (!strcmp(interface, wl_seat_interface.name)) {
-        globalWl->seat = wl_registry_bind(registry, name, &wl_seat_interface, version);
+        L_REQUIRE_VER(5);
+        globalWl->seat = wl_registry_bind(registry, name, &wl_seat_interface, 5);
         wl_seat_add_listener(globalWl->seat, &seat_listener, data);
     } else if (!strcmp(interface, wl_output_interface.name)) {
-        globalWl->output = wl_registry_bind(registry, name, &wl_output_interface, version);
+        L_REQUIRE_VER(2);
+        globalWl->output = wl_registry_bind(registry, name, &wl_output_interface, 2);
         wl_output_add_listener(globalWl->output, &output_listener, data);
     } else if (!strcmp(interface, zxdg_decoration_manager_v1_interface.name)) {
         globalWl->decoration_manager =
-          wl_registry_bind(registry, name, &zxdg_decoration_manager_v1_interface, version);
+          wl_registry_bind(registry, name, &zxdg_decoration_manager_v1_interface, 1);
     } else if (!strcmp(interface, wl_shm_interface.name)) {
-        globalWl->shm = wl_registry_bind(registry, name, &wl_shm_interface, version);
+        globalWl->shm = wl_registry_bind(registry, name, &wl_shm_interface, 1);
     } else if (!strcmp(interface, wl_data_device_manager_interface.name)) {
+        L_REQUIRE_VER(3);
         globalWl->data_device_manager =
-          wl_registry_bind(registry, name, &wl_data_device_manager_interface, version);
+          wl_registry_bind(registry, name, &wl_data_device_manager_interface, 3);
     } else if (!strcmp(interface, zwp_primary_selection_device_manager_v1_interface.name)) {
         globalWl->primary_manager =
-          wl_registry_bind(registry,
-                           name,
-                           &zwp_primary_selection_device_manager_v1_interface,
-                           version);
+          wl_registry_bind(registry, name, &zwp_primary_selection_device_manager_v1_interface, 1);
     } else if (!strcmp(interface, org_kde_kwin_blur_manager_interface.name)) {
         globalWl->kde_kwin_blur_manager =
-          wl_registry_bind(registry, name, &org_kde_kwin_blur_manager_interface, version);
+          wl_registry_bind(registry, name, &org_kde_kwin_blur_manager_interface, 1);
     } else {
-        LOG(" (unused)");
+        unused = true;
     }
-    LOG(" }\n");
+
+    if (unused) {
+        LOG("wl::registry{ name: %-45s ver: %2u unused }\n", interface, version);
+    } else {
+        LOG("wl::registry{ name: %-45s ver: %2u binding to version %u }\n",
+            interface,
+            version,
+            ver_req);
+    }
 }
 
 static void registry_remove(void* data, struct wl_registry* registry, uint32_t name) {}
