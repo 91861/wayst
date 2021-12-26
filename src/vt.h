@@ -562,8 +562,6 @@ typedef struct
         void (*destroy_image_proxy)(void*, VtImageSurfaceProxy*);
         void (*destroy_image_view_proxy)(void*, VtImageSurfaceViewProxy*);
         void (*destroy_sixel_proxy)(void*, VtSixelSurfaceProxy*);
-
-        void (*immediate_pty_write)(void*, char*, size_t);
     } callbacks;
 
     uint32_t last_click_x;
@@ -1102,8 +1100,19 @@ void Vt_init(Vt* self, uint32_t cols, uint32_t rows);
 void Vt_interpret(Vt* self, char* buf, size_t bytes);
 
 /**
- * Ger response message */
-Vector_char* Vt_get_output(Vt* self, size_t len, char** out_buf, size_t* out_size);
+ * Get pty response data up to given size of @param len. */
+void Vt_peek_output(Vt* self, size_t len, char** out_buf, size_t* out_size);
+
+/**
+ * Get size of pending pty response data waiting to be written */
+static inline size_t Vt_get_output_size(const Vt* self)
+{
+    return self->output.size;
+}
+
+/**
+ * Remove @param len bytes of output data from internal buffer. */
+void Vt_consumed_output(Vt* self, size_t len);
 
 /**
  * Get lines that should be visible */

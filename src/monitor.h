@@ -19,8 +19,10 @@
 #include "util.h"
 
 #ifndef MONITOR_INPUT_BUFFER_SZ
-#define MONITOR_INPUT_BUFFER_SZ 256
+#define MONITOR_INPUT_BUFFER_SZ 128
 #endif
+
+#define MONITOR_WRITE_WOULD_BLOCK (-1)
 
 typedef struct
 {

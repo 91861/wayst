@@ -191,6 +191,25 @@
         }                                                                                          \
     }                                                                                              \
                                                                                                    \
+    static inline t* Vector_insertv_##t(Vector_##t* self, t* i, const t* const argv, size_t n)     \
+    {                                                                                              \
+        if (unlikely(!self->size)) {                                                               \
+            ASSERT(i == self->buf, "Vector iterator out of range");                                \
+            Vector_pushv_##t(self, argv, n);                                                       \
+            return i + n;                                                                          \
+        } else if (unlikely(self->cap + n > self->size)) {                                         \
+            size_t idx = i - self->buf;                                                            \
+            self->buf  = realloc(self->buf, (self->cap += n) * sizeof(t));                         \
+            memmove(self->buf + idx + n, self->buf + idx, ((self->size += n) - idx) * sizeof(t));  \
+            memcpy(self->buf + idx, argv, sizeof(t) * n);                                          \
+            return self->buf + idx;                                                                \
+        } else {                                                                                   \
+            memmove(i + n, i, ((self->size += n) - (i - self->buf)) * sizeof(t));                  \
+            memcpy(i, argv, sizeof(t) * n);                                                        \
+            return i + n;                                                                          \
+        }                                                                                          \
+    }                                                                                              \
+                                                                                                   \
     static inline void Vector_insert_at_##t(Vector_##t* self, size_t i, t arg)                     \
     {                                                                                              \
         ASSERT(i <= self->size, "Vector index out of range");                                      \
@@ -209,6 +228,11 @@
     static inline void Vector_insert_front_##t(Vector_##t* self, t arg)                            \
     {                                                                                              \
         Vector_insert_##t(self, self->buf, arg);                                                   \
+    }                                                                                              \
+                                                                                                   \
+    static inline void Vector_insertv_front_##t(Vector_##t* self, t* argv, size_t n)               \
+    {                                                                                              \
+        Vector_insertv_##t(self, self->buf, argv, n);                                              \
     }                                                                                              \
                                                                                                    \
     static inline t* Vector_last_##t(Vector_##t* self)                                             \
@@ -232,6 +256,12 @@
                 ((void (*)(t*))dtor)(&self->buf[i]);                                               \
         }                                                                                          \
         self->size = 0;                                                                            \
+    }                                                                                              \
+                                                                                                   \
+    static inline void Vector_force_resize_##t(Vector_##t* self, size_t new_size)                  \
+    {                                                                                              \
+        ASSERT(self->cap >= new_size, "sufficient capacity");                                      \
+        self->size = new_size;                                                                     \
     }                                                                                              \
                                                                                                    \
     static inline void Vector_shrink_##t(Vector_##t* self)                                         \
@@ -389,6 +419,7 @@
                : (i == self->buf)    ? NULL                                                        \
                                      : i - 1;                                                         \
     }                                                                                              \
+                                                                                                   \
     static inline t* Vector_insert_##t(Vector_##t* self, t* i, t arg)                              \
     {                                                                                              \
         if (unlikely(!self->size)) {                                                               \
@@ -405,6 +436,25 @@
             memmove(i + 1, i, (self->size++ - (i - self->buf)) * sizeof(t));                       \
             *i = arg;                                                                              \
             return i;                                                                              \
+        }                                                                                          \
+    }                                                                                              \
+                                                                                                   \
+    static inline t* Vector_insertv_##t(Vector_##t* self, t* i, const t* const argv, size_t n)     \
+    {                                                                                              \
+        if (unlikely(!self->size)) {                                                               \
+            ASSERT(i == self->buf, "Vector iterator out of range");                                \
+            Vector_pushv_##t(self, argv, n);                                                       \
+            return i + n;                                                                          \
+        } else if (unlikely(self->cap + n > self->size)) {                                         \
+            size_t idx = i - self->buf;                                                            \
+            self->buf  = realloc(self->buf, (self->cap += n) * sizeof(t));                         \
+            memmove(self->buf + idx + n, self->buf + idx, ((self->size += n) - idx) * sizeof(t));  \
+            memcpy(self->buf + idx, argv, sizeof(t) * n);                                          \
+            return self->buf + idx;                                                                \
+        } else {                                                                                   \
+            memmove(i + n, i, ((self->size += n) - (i - self->buf)) * sizeof(t));                  \
+            memcpy(i, argv, sizeof(t) * n);                                                        \
+            return i + n;                                                                          \
         }                                                                                          \
     }                                                                                              \
                                                                                                    \
@@ -426,6 +476,11 @@
     static inline void Vector_insert_front_##t(Vector_##t* self, t arg)                            \
     {                                                                                              \
         Vector_insert_##t(self, self->buf, arg);                                                   \
+    }                                                                                              \
+                                                                                                   \
+    static inline void Vector_insertv_front_##t(Vector_##t* self, t* argv, size_t n)               \
+    {                                                                                              \
+        Vector_insertv_##t(self, self->buf, argv, n);                                              \
     }                                                                                              \
                                                                                                    \
     static inline t* Vector_last_##t(Vector_##t* self)                                             \

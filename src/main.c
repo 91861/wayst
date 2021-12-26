@@ -65,8 +65,7 @@ typedef struct
     Ui           ui;
     TimerManager timer_manager;
 
-    Vector_char   queued_output_buffer;
-    int           written_bytes; /* Bytes written since reading from pty */
+    ssize_t       written_bytes; /* Bytes written since reading from pty */
     Pair_int32_t  autoscroll_autoselect;
     Pair_uint32_t resolution;
 
@@ -351,7 +350,7 @@ static void App_run(App* self)
 {
     while (!(self->exit || Window_is_closed(self->win))) {
         int timeout_ms =
-          (self->vt.output.size)
+          Vt_get_output_size(&self->vt)
             ? 0
             : TimerManager_get_next_action_ms(&self->timer_manager,
                                               TIME_POINT_PTR(self->closest_pending_wakeup),
@@ -377,33 +376,34 @@ static void App_run(App* self)
                 App_notify_content_change(self);
             } else if (unlikely(TimePoint_is_ms_ahead(TimePoint_now()) >
                                 settings.pty_chunk_timeout_ms)) {
+                // if we take more than a user-defined ammount of time to deal with all the data continue on
+                // and draw the display.
                 break;
             }
 
-            self->written_bytes = 0;
-            bytes               = Monitor_read(&self->monitor);
+            bytes = Monitor_read(&self->monitor);
 
             if (bytes > 0) {
+                self->written_bytes = 0;
                 Vt_interpret(&self->vt, self->monitor.input_buffer, bytes);
                 App_action(self);
             } else {
                 break;
             }
 
+            // Wait for any following data chunks. If the client is using multiple write()-s we may
+            // have completed interpreting the initial chunk before everything intended as an atomic
+            // update was sent. This may add latency but reduces flicker and 'screen tearing'.
             if (settings.pty_chunk_wait_delay_ns) {
                 usleep(settings.pty_chunk_wait_delay_ns);
             }
         } while (bytes && likely(!settings.debug_vt));
 
-        char*        buf;
-        size_t       len;
-        Vector_char* out = Vt_get_output(&self->vt, PIPE_BUF, &buf, &len);
-        if (out) {
-            if (out->size) {
-                Monitor_write(&self->monitor, out->buf, self->written_bytes = out->size);
-            }
-        } else if (len) {
-            Monitor_write(&self->monitor, buf, self->written_bytes = len);
+        char*  buf;
+        size_t len;
+        Vt_peek_output(&self->vt, MONITOR_INPUT_BUFFER_SZ, &buf, &len);
+        if (Monitor_write(&self->monitor, buf, len) > 0) {
+            Vt_consumed_output(&self->vt, len);
         }
 
         App_maybe_resize(self, Window_size(self->win));
@@ -435,13 +435,6 @@ static void App_run(App* self)
     Vector_destroy_char(&self->ksm_input_buf);
     free(self->hostname);
     free(self->vt_title);
-}
-
-static void App_immediate_write_pty(void* self, char* buf, size_t size)
-{
-    App* app = self;
-    app->written_bytes += size;
-    Monitor_write(&app->monitor, buf, size);
 }
 
 /* Whenever some other application sets primary selection while we are out of focus, upon focus gain
@@ -2079,7 +2072,6 @@ static void App_set_callbacks(App* self)
     self->vt.callbacks.destroy_image_view_proxy            = App_destroy_image_view_proxy_handler;
     self->vt.callbacks.destroy_sixel_proxy                 = App_destroy_sixel_proxy_handler;
     self->vt.callbacks.on_select_end                       = App_selection_end_handler;
-    self->vt.callbacks.immediate_pty_write                 = App_immediate_write_pty;
     self->vt.callbacks.on_command_state_changed            = App_command_changed;
     self->vt.callbacks.on_mouse_report_state_changed       = App_mouse_report_changed;
     self->vt.callbacks.on_buffer_changed                   = App_buffer_changed;

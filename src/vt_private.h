@@ -9,27 +9,14 @@ static inline void                 Vt_move_cursor(Vt* self, uint16_t column, uin
 __attribute__((hot, flatten)) void Vt_handle_literal(Vt* self, char c);
 __attribute__((cold)) char*        pty_string_prettyfy(const char* str, int32_t max);
 
-void Vt_buffered_output(Vt* self, const char* buf, size_t len);
+void Vt_output(Vt* self, const char* buf, size_t len);
 
-#define Vt_buffered_output_formated(vt, fmt, ...)                                                  \
-    char _tmp[256];                                                                                \
-    int  _len = snprintf(_tmp, sizeof(_tmp), fmt, __VA_ARGS__);                                    \
-    Vt_buffered_output((vt), _tmp, _len);
-
-static inline void Vt_immediate_output(Vt* self, char* str, size_t len)
-{
-    if (unlikely(settings.debug_pty)) {
-        char* p = pty_string_prettyfy(str, len);
-        printf("pty.write(%.3zu) <~ { %s }\n\n", len, p);
-        free(p);
+#define Vt_output_formated(vt, fmt, ...)                                                  \
+    {                                                                                              \
+        char _tmp[256];                                                                            \
+        int  _len = snprintf(_tmp, sizeof(_tmp), fmt, __VA_ARGS__);                                \
+        Vt_output((vt), _tmp, _len);                                                      \
     }
-    self->callbacks.immediate_pty_write(self->callbacks.user_data, str, len);
-}
-
-#define Vt_immediate_output_formated(vt, fmt, ...)                                                 \
-    char _tmp[256];                                                                                \
-    int  _len = snprintf(_tmp, sizeof(_tmp), fmt, __VA_ARGS__);                                    \
-    vt->callbacks.immediate_pty_write(vt->callbacks.user_data, _tmp, _len);
 
 static inline void Vt_mark_line_proxy_fully_damaged(Vt* self, VtLine* line)
 {

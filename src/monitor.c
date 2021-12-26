@@ -2,6 +2,7 @@
 
 #include "monitor.h"
 
+#include <fcntl.h>
 #include <signal.h>
 #include <sys/poll.h>
 #include <sys/wait.h>
@@ -111,6 +112,7 @@ void Monitor_fork_new_pty(Monitor* self, uint32_t cols, uint32_t rows)
         ERR("Failed to fork process %s", strerror(errno));
     }
     close(self->parent_fd);
+    fcntl(self->child_fd, F_SETFL, fcntl(self->child_fd, F_GETFL) | O_NONBLOCK);
     Vector_push_MonitorInfo(&instances,
                             (MonitorInfo){ .child_pid = self->child_pid, .instance = self });
     self->child_is_dead = false;
@@ -169,8 +171,16 @@ ssize_t Monitor_read(Monitor* self)
 ssize_t Monitor_write(Monitor* self, char* buffer, size_t bytes)
 {
     ssize_t ret = write(self->child_fd, buffer, bytes);
-    if (unlikely(ret == -1)) {
-        WRN("Writing to pty failed %s\n", strerror(errno));
+
+    if (ret == -1) {
+        if (likely(errno == EAGAIN || errno == EWOULDBLOCK)) {
+            /* We can't write because the client program has not read enuogh data to free up the os
+             * provided buffer. A blocking write here could potentially (if the client also doesn't
+             * check for this) deadlock the main event loop. Just give up and try next time. */
+            return MONITOR_WRITE_WOULD_BLOCK;
+        } else {
+            ERR("wirte to pty failed %s\n", strerror(errno));
+        }
     }
     return ret;
 }

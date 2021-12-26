@@ -95,7 +95,7 @@ static inline void VtLine_strip_blanks(VtLine* self)
     }
 }
 
-void Vt_buffered_output(Vt* self, const char* buf, size_t len)
+void Vt_output(Vt* self, const char* buf, size_t len)
 {
     Vector_pushv_char(&self->output, buf, len);
 }
@@ -1440,11 +1440,11 @@ static inline void Vt_report_dec_mode(Vt* self, int code)
             break;
         default: {
             WRN("Unknown DECRQM mode: %d\n", code);
-            Vt_immediate_output_formated(self, "\e[?%d;0$y", code);
+            Vt_output_formated(self, "\e[?%d;0$y", code);
             return;
         }
     }
-    Vt_immediate_output_formated(self, "\e[?%d;%c$y", code, value ? '1' : '2');
+    Vt_output_formated(self, "\e[?%d;%c$y", code, value ? '1' : '2');
 }
 
 static inline void Vt_handle_regular_mode(Vt* self, int code, bool on)
@@ -1545,7 +1545,7 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
         /* Printer status request (DSR) */
         case 15:
             /* Printer not connected. */
-            Vt_immediate_output(self, "\e[?13n", 6);
+            Vt_output(self, "\e[?13n", 6);
             break;
 
         /* hide/show cursor (DECTCEM) */
@@ -1866,18 +1866,18 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                 }
 
                                 if (value2) {
-                                    Vt_immediate_output_formated(self,
-                                                                 "\e[?%d;%d;%d;%dS",
-                                                                 args[0],
-                                                                 status,
-                                                                 value,
-                                                                 value2);
+                                    Vt_output_formated(self,
+                                                       "\e[?%d;%d;%d;%dS",
+                                                       args[0],
+                                                       status,
+                                                       value,
+                                                       value2);
                                 } else {
-                                    Vt_immediate_output_formated(self,
-                                                                 "\e[?%d;%d;%dS",
-                                                                 args[0],
-                                                                 status,
-                                                                 value);
+                                    Vt_output_formated(self,
+                                                       "\e[?%d;%d;%dS",
+                                                       args[0],
+                                                       status,
+                                                       value);
                                 }
                             } break;
 
@@ -1886,35 +1886,35 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                 int arg = short_sequence_get_int_argument(seq);
                                 switch (arg) {
                                     case 6: { /* report cursor position */
-                                        Vt_immediate_output_formated(self,
-                                                                     "\e[?%u;%uR",
-                                                                     Vt_cursor_row(self) + 1,
-                                                                     self->cursor.col + 1);
+                                        Vt_output_formated(self,
+                                                           "\e[?%u;%uR",
+                                                           Vt_cursor_row(self) + 1,
+                                                           self->cursor.col + 1);
                                     } break;
 
                                     case 15: /* Report Printer status */
                                              /* not ready */
-                                        Vt_immediate_output(self, "\e[?11n", 6);
+                                        Vt_output(self, "\e[?11n", 6);
                                         break;
 
                                     case 26: /* Report keyboard status */
                                              /* always report US */
-                                        Vt_immediate_output(self, "\e[?27;1;0;0n", 12);
+                                        Vt_output(self, "\e[?27;1;0;0n", 12);
                                         break;
 
                                     case 53: /* Report locator status */
                                              /* No locator (xterm not compiled-in) */
-                                        Vt_immediate_output(self, "\e[?50n", 6);
+                                        Vt_output(self, "\e[?50n", 6);
                                         break;
 
                                     case 56: /* Report locator type */
                                              /* Cannot identify (xterm not compiled-in) */
-                                        Vt_immediate_output(self, "\e[?57;0n", 8);
+                                        Vt_output(self, "\e[?57;0n", 8);
                                         break;
 
                                     case 85: /* Report multi-session configuration */
                                         /* Device not configured for multi-session operation */
-                                        Vt_immediate_output(self, "\e[?83n", 6);
+                                        Vt_output(self, "\e[?83n", 6);
                                         break;
 
                                     default:
@@ -2016,7 +2016,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                         int arg = short_sequence_get_int_argument(seq);
                         if (arg == 0) {
                             /* report VT100, firmware ver. 0, ROM number 0 */
-                            Vt_immediate_output_formated(self, "%s", "\e[>0;0;0c");
+                            Vt_output_formated(self, "%s", "\e[>0;0;0c");
                         }
                     } break;
 
@@ -2064,7 +2064,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                         MULTI_ARG_IS_ERROR
                         int arg = short_sequence_get_int_argument(seq);
                         if (arg == 0) {
-                            Vt_immediate_output(self, "\e[?6c", 5);
+                            Vt_output(self, "\e[?6c", 5);
                         }
                     } break;
 
@@ -2336,7 +2336,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                              */
                             case '|': {
                                 /* locator unavailable */
-                                Vt_immediate_output(self, "\e[0&w", 5);
+                                Vt_output(self, "\e[0&w", 5);
                             } break;
 
                             /* <ESC>['} - Insert Ps Column(s) (default = 1) (DECIC), VT420 and up */
@@ -2567,9 +2567,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                 int arg = short_sequence_get_int_argument(seq);
                                 if (arg <= 0)
                                     arg = 1;
-                                int32_t new_row = Vt_cursor_row(self) <= (uint16_t)arg
-                                                    ? 0
-                                                    : (Vt_cursor_row(self) - arg);
+                                size_t new_row = Vt_cursor_row(self) - arg;
                                 Vt_move_cursor(self, self->cursor.col, new_row);
                             } break;
 
@@ -2614,10 +2612,11 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                             /* <ESC>[ Ps J - Erase display (ED) - clear... */
                             case 'J': {
                                 MULTI_ARG_IS_ERROR
-                                if (*seq == 'J') /* ...from cursor to end of screen */
+                                if (*seq == 'J') { /* ...from cursor to end of screen */
                                     Vt_erase_to_end(self);
-                                else {
+                                } else {
                                     int arg = short_sequence_get_int_argument(seq);
+
                                     switch (arg) {
                                         case 0:
                                             Vt_erase_to_end(self);
@@ -2664,7 +2663,8 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                 int arg = short_sequence_get_int_argument(seq);
                                 if (arg <= 0)
                                     arg = 1;
-                                Vt_move_cursor(self, self->cursor.col, arg - 1);
+                                --arg;
+                                Vt_move_cursor(self, self->cursor.col, arg);
                             } break;
 
                             /* <ESC>[ Ps ; Ps r - Set scroll region (top;bottom) (DECSTBM)
@@ -2798,8 +2798,8 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                             case 'c': {
                                 /* report vt340 type device with sixel ,132column, and window system
                                  * support */
-                                Vt_immediate_output(self, "\e[?63;1;4c", 10);
-                                /* Vt_immediate_output(self, "\e[?64;1;4;18c", 11); */
+                                Vt_output(self, "\e[?63;1;4c", 10);
+                                /* Vt_output(self, "\e[?64;1;4;18c", 11); */
                             } break;
 
                             /* <ESC>[...n - Device status report (DSR) */
@@ -2809,13 +2809,13 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                 if (arg == 5) {
                                     /* 5 - is terminal ok
                                      *  ok - 0, not ok - 3 */
-                                    Vt_immediate_output(self, "\e[0n", 4);
+                                    Vt_output(self, "\e[0n", 4);
                                 } else if (arg == 6) {
                                     /* 6 - report cursor position */
-                                    Vt_immediate_output_formated(self,
-                                                                 "\e[%u;%uR",
-                                                                 Vt_cursor_row(self) + 1,
-                                                                 self->cursor.col + 1);
+                                    Vt_output_formated(self,
+                                                       "\e[%u;%uR",
+                                                       Vt_cursor_row(self) + 1,
+                                                       self->cursor.col + 1);
                                 } else {
                                     WRN("Unimplemented DSR code: %d\n", arg);
                                 }
@@ -3171,9 +3171,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                         bool is_minimized =
                                           CALL(self->callbacks.on_minimized_state_requested,
                                                self->callbacks.user_data);
-                                        Vt_immediate_output_formated(self,
-                                                                     "\e[%d",
-                                                                     is_minimized ? 1 : 2);
+                                        Vt_output_formated(self, "\e[%d", is_minimized ? 1 : 2);
 
                                     } break;
 
@@ -3185,10 +3183,10 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                         Pair_uint32_t pos =
                                           CALL(self->callbacks.on_window_position_requested,
                                                self->callbacks.user_data);
-                                        Vt_immediate_output_formated(self,
-                                                                     "\e[3;%d;%d;t",
-                                                                     pos.first,
-                                                                     pos.second);
+                                        Vt_output_formated(self,
+                                                           "\e[3;%d;%d;t",
+                                                           pos.first,
+                                                           pos.second);
                                     } break;
 
                                     /* Report window size in pixels */
@@ -3196,10 +3194,10 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                         if (!settings.windowops_info) {
                                             break;
                                         }
-                                        Vt_immediate_output_formated(self,
-                                                                     "\e[4;%d;%d;t",
-                                                                     self->ws.ws_xpixel,
-                                                                     self->ws.ws_ypixel);
+                                        Vt_output_formated(self,
+                                                           "\e[4;%d;%d;t",
+                                                           self->ws.ws_xpixel,
+                                                           self->ws.ws_ypixel);
                                     } break;
 
                                     /* Report text area size in chars */
@@ -3207,10 +3205,10 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                         if (!settings.windowops_info) {
                                             break;
                                         }
-                                        Vt_immediate_output_formated(self,
-                                                                     "\e[8;%d;%d;t",
-                                                                     Vt_col(self),
-                                                                     Vt_row(self));
+                                        Vt_output_formated(self,
+                                                           "\e[8;%d;%d;t",
+                                                           Vt_col(self),
+                                                           Vt_row(self));
 
                                     } break;
 
@@ -3219,10 +3217,10 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                         if (!settings.windowops_info) {
                                             break;
                                         }
-                                        Vt_immediate_output_formated(self,
-                                                                     "\e[9;%d;%d;t",
-                                                                     Vt_col(self),
-                                                                     Vt_row(self));
+                                        Vt_output_formated(self,
+                                                           "\e[9;%d;%d;t",
+                                                           Vt_col(self),
+                                                           Vt_row(self));
 
                                     } break;
 
@@ -3233,9 +3231,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                         if (!settings.windowops_info) {
                                             break;
                                         }
-                                        Vt_immediate_output_formated(self,
-                                                                     "\e]L%s\e\\",
-                                                                     self->title);
+                                        Vt_output_formated(self, "\e]L%s\e\\", self->title);
                                     } break;
 
                                     /* push title to stack */
@@ -3771,19 +3767,13 @@ static void Vt_handle_APC(Vt* self, char c)
                           payload);
 
                         if (id) {
-                            Vt_immediate_output_formated(self,
-                                                         "\e_Gi=%u;%s\e\\",
-                                                         id,
-                                                         OR(error_string, "OK"));
+                            Vt_output_formated(self, "\e_Gi=%u;%s\e\\", id, OR(error_string, "OK"));
                         }
                     } break;
                     case VT_IMAGE_PROTO_ACTION_DISPLAY: {
                         Vt_img_proto_display(self, id, display_args);
                         if (id) {
-                            Vt_immediate_output_formated(self,
-                                                         "\e_Gi=%u;%s\e\\",
-                                                         id,
-                                                         OR(error_string, "OK"));
+                            Vt_output_formated(self, "\e_Gi=%u;%s\e\\", id, OR(error_string, "OK"));
                         }
                     } break;
                     case VT_IMAGE_PROTO_ACTION_DELETE: {
@@ -3902,10 +3892,7 @@ static void Vt_handle_APC(Vt* self, char c)
                     case VT_IMAGE_PROTO_ACTION_QUERY: {
                         error_string =
                           Vt_img_proto_validate(self, transmission, compression, format);
-                        Vt_immediate_output_formated(self,
-                                                     "\e_Gi=%u;%s\e\\",
-                                                     id,
-                                                     OR(error_string, "OK"));
+                        Vt_output_formated(self, "\e_Gi=%u;%s\e\\", id, OR(error_string, "OK"));
                     } break;
                 }
 
@@ -4168,12 +4155,12 @@ static void Vt_handle_OSC(Vt* self, char c)
                     }
                     if (*arg_clr == '?') {
                         ColorRGB color = self->colors.palette_256[index];
-                        Vt_immediate_output_formated(self,
-                                                     "\e]4;%u;rgb:%x/%x/%x\a",
-                                                     index,
-                                                     color.r,
-                                                     color.g,
-                                                     color.b);
+                        Vt_output_formated(self,
+                                           "\e]4;%u;rgb:%x/%x/%x\a",
+                                           index,
+                                           color.r,
+                                           color.g,
+                                           color.b);
                     } else {
                         set_rgb_color_from_xterm_string(&self->colors.palette_256[index], arg_clr);
                     }
@@ -4288,42 +4275,42 @@ static void Vt_handle_OSC(Vt* self, char c)
                     switch (arg) {
                         /* VT100 text foreground color */
                         case 10: {
-                            Vt_immediate_output_formated(self,
-                                                         "\e]%u;rgb:%x/%x/%x\e\\",
-                                                         arg,
-                                                         self->colors.fg.r,
-                                                         self->colors.fg.g,
-                                                         self->colors.fg.b);
+                            Vt_output_formated(self,
+                                               "\e]%u;rgb:%x/%x/%x\e\\",
+                                               arg,
+                                               self->colors.fg.r,
+                                               self->colors.fg.g,
+                                               self->colors.fg.b);
                         } break;
 
                         /* VT100 text background color */
                         case 11: {
-                            Vt_immediate_output_formated(self,
-                                                         "\e]%u;rgb:%x/%x/%x\e\\",
-                                                         arg,
-                                                         self->colors.bg.r,
-                                                         self->colors.bg.g,
-                                                         self->colors.bg.b);
+                            Vt_output_formated(self,
+                                               "\e]%u;rgb:%x/%x/%x\e\\",
+                                               arg,
+                                               self->colors.bg.r,
+                                               self->colors.bg.g,
+                                               self->colors.bg.b);
                         } break;
 
                         /* highlight background color */
                         case 17: {
-                            Vt_immediate_output_formated(self,
-                                                         "\e]%u;rgb:%3u/%3u/%3u\e\\",
-                                                         arg,
-                                                         self->colors.highlight.bg.r,
-                                                         self->colors.highlight.bg.g,
-                                                         self->colors.highlight.bg.b);
+                            Vt_output_formated(self,
+                                               "\e]%u;rgb:%3u/%3u/%3u\e\\",
+                                               arg,
+                                               self->colors.highlight.bg.r,
+                                               self->colors.highlight.bg.g,
+                                               self->colors.highlight.bg.b);
                         } break;
 
                         /* highlight foreground color */
                         case 19: {
-                            Vt_immediate_output_formated(self,
-                                                         "\e]%u;rgb:%3u/%3u/%3u\e\\",
-                                                         arg,
-                                                         self->colors.highlight.fg.r,
-                                                         self->colors.highlight.fg.g,
-                                                         self->colors.highlight.fg.b);
+                            Vt_output_formated(self,
+                                               "\e]%u;rgb:%3u/%3u/%3u\e\\",
+                                               arg,
+                                               self->colors.highlight.fg.r,
+                                               self->colors.highlight.fg.g,
+                                               self->colors.highlight.fg.b);
                         } break;
 
                         /* Tektronix background color */
@@ -4982,6 +4969,7 @@ __attribute__((hot)) static void Vt_insert_char_at_cursor(Vt* self, VtRune c)
     }
 
     VtRune* insert_point = &self->lines.buf[self->cursor.row].data.buf[self->cursor.col];
+
     if (likely(memcmp(insert_point, &c, sizeof(VtRune)))) {
 
         if (self->modes.no_insert_replace_mode) {
@@ -5095,6 +5083,7 @@ static inline void Vt_insert_new_line(Vt* self)
         Vector_push_VtLine(&self->lines, VtLine_new());
         Vt_empty_line_fill_bg(self, self->lines.size - 1);
     }
+
     Vt_move_cursor(self, self->cursor.col, Vt_cursor_row(self) + 1);
     Vt_mark_proxy_fully_damaged(self, self->cursor.row);
 }
@@ -5352,7 +5341,6 @@ __attribute__((hot, flatten)) void Vt_handle_literal(Vt* self, char c)
 
                 self->last_codepoint = new_rune.rune.code;
                 Vt_uri_next_char(self, new_rune.rune.code);
-
                 Vt_insert_char_at_cursor(self, new_rune);
             }
         }
@@ -6005,18 +5993,18 @@ void Vt_handle_button(void*    _self,
                           (FLAG_IS_SET(mods, MODIFIER_CONTROL) ? 16 : 0);
             }
             if (self->modes.extended_report) {
-                Vt_immediate_output_formated(self,
-                                             "\e[<%u;%d;%d%c",
-                                             button - 1,
-                                             self->last_click_x + 1,
-                                             self->last_click_y + 1,
-                                             state ? 'M' : 'm');
+                Vt_output_formated(self,
+                                   "\e[<%u;%d;%d%c",
+                                   button - 1,
+                                   self->last_click_x + 1,
+                                   self->last_click_y + 1,
+                                   state ? 'M' : 'm');
             } else if (self->modes.mouse_btn_report) {
-                Vt_immediate_output_formated(self,
-                                             "\e[M%c%c%c",
-                                             32 + button - 1 + !state * 3,
-                                             (char)(32 + self->last_click_x + 1),
-                                             (char)(32 + self->last_click_y + 1));
+                Vt_output_formated(self,
+                                   "\e[M%c%c%c",
+                                   32 + button - 1 + !state * 3,
+                                   (char)(32 + self->last_click_x + 1),
+                                   (char)(32 + self->last_click_y + 1));
             }
         }
     }
@@ -6035,11 +6023,11 @@ void Vt_handle_motion(void* _self, uint32_t button, int32_t x, int32_t y)
             if (click_x != self->last_click_x || click_y != self->last_click_y) {
                 self->last_click_x = click_x;
                 self->last_click_y = click_y;
-                Vt_immediate_output_formated(self,
-                                             "\e[<%d;%zu;%zuM",
-                                             (int)button - 1 + 32,
-                                             click_x + 1,
-                                             click_y + 1);
+                Vt_output_formated(self,
+                                   "\e[<%d;%zu;%zuM",
+                                   (int)button - 1 + 32,
+                                   click_x + 1,
+                                   click_y + 1);
             }
         }
     }
@@ -6049,14 +6037,14 @@ void Vt_handle_clipboard(void* self, const char* text)
 {
     Vt* vt = self;
 
-    if (!text) {
+    size_t len = strlen(text);
+
+    if (!text || !len) {
         return;
     }
 
-    size_t len = strlen(text);
-
     if (vt->modes.bracketed_paste) {
-        Vt_buffered_output(vt, "\e[200~", 6);
+        Vt_output(vt, "\e[200~", 6);
     }
 
     char last = '\0';
@@ -6073,7 +6061,7 @@ void Vt_handle_clipboard(void* self, const char* text)
     }
 
     if (vt->modes.bracketed_paste) {
-        Vt_buffered_output(vt, "\e[201~", 6);
+        Vt_output(vt, "\e[201~", 6);
     }
 }
 
@@ -6084,32 +6072,19 @@ static void Vt_set_title(Vt* self, const char* title)
     CALL(self->callbacks.on_title_changed, self->callbacks.user_data, self->title);
 }
 
-Vector_char* Vt_get_output(Vt* self, size_t len, char** out_buf, size_t* out_size)
+void Vt_peek_output(Vt* self, size_t len, char** out_buf, size_t* out_size)
+{
+    ASSERT(out_buf && out_size, "has output ptrs");
+    *out_buf  = self->output.buf;
+    *out_size = MIN(self->output.size, len);
+}
+
+void Vt_consumed_output(Vt* self, size_t len)
 {
     if (likely(self->output.size < len)) {
-        ASSERT(out_buf && out_size, "has output ptrs");
-        *out_buf  = self->output.buf;
-        *out_size = self->output.size;
-        if (unlikely(settings.debug_pty) && self->output.size) {
-            char* str = pty_string_prettyfy(self->output.buf, self->output.size);
-            fprintf(stderr, "pty.write(%3zu) <= { %s }\n\n", self->output.size, str);
-            free(str);
-        }
         Vector_clear_char(&self->output);
-        return NULL;
     } else {
-        len = MIN(len, self->output.size);
-        Vector_clear_char(&self->staged_output);
-        Vector_pushv_char(&self->staged_output, self->output.buf, len);
-
-        if (unlikely(settings.debug_pty) && self->staged_output.size) {
-            char* str = pty_string_prettyfy(self->staged_output.buf, len);
-            fprintf(stderr, "pty.write(%3zu) <- { %s }\n\n", self->staged_output.size, str);
-            free(str);
-        }
-
         Vector_remove_at_char(&self->output, 0, len);
-        return &self->staged_output;
     }
 }
 

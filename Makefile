@@ -1,4 +1,3 @@
-CC?= cc
 EXEC = wayst
 INSTALL_DIR = /usr/local/bin
 
@@ -8,12 +7,13 @@ SRC_DIR = src
 BLD_DIR = build
 TGT_DIR = .
 
-
 ifeq ($(shell uname -s),FreeBSD)
+	CC?= gcc
 	INCLUDES = -I/usr/local/include/freetype2/
 	INCLUDES += -I/usr/local/include
 	LDLIBS = -lGL -lfreetype -lfontconfig -lutil -L/usr/local/lib -lm
 else
+	CC?= cc
 	INCLUDES = -I/usr/include/freetype2/
 	LDLIBS = -lGL -lfreetype -lfontconfig -lutil -L/usr/lib -lm
 endif
@@ -35,7 +35,7 @@ else
 	LDFLAGS = -O2 -flto
 endif
 
-ifeq ($(shell ldconfig -p | grep libutf8proc.so > /dev/null || echo fail),fail)
+ifeq ($(libutf8proc),off)
 $(info libutf8proc not found. Support for language-specific combining characters and unicode normalization will be disabled.)
 	CFLAGS += -DNOUTF8PROC
 else

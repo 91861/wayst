@@ -95,7 +95,7 @@ static bool Vt_maybe_handle_unicode_input_key(Vt*      self,
                 static mbstate_t mbstate;
                 int              mb_len = c32rtomb(tmp, result, &mbstate);
                 if (mb_len) {
-                    Vt_buffered_output(self, tmp, mb_len);
+                    Vt_output(self, tmp, mb_len);
                 }
             } else {
                 WRN("Failed to parse \'%s\'\n", self->unicode_input.buffer.buf);
@@ -138,60 +138,60 @@ static bool Vt_maybe_handle_function_key(Vt* self, uint32_t key, uint32_t mods)
         int f_num = (key + 1) - KEY(F1);
         if (mods) {
             if (f_num < 5) {
-                Vt_buffered_output_formated(self, "\e[1;%u%c", mods + 1, f_num + 'O');
+                Vt_output_formated(self, "\e[1;%u%c", mods + 1, f_num + 'O');
             } else if (f_num == 5) {
-                Vt_buffered_output_formated(self, "\e[%d;%u~", f_num + 10, mods + 1);
+                Vt_output_formated(self, "\e[%d;%u~", f_num + 10, mods + 1);
             } else if (f_num < 11) {
-                Vt_buffered_output_formated(self, "\e[%d;%u~", f_num + 11, mods + 1);
+                Vt_output_formated(self, "\e[%d;%u~", f_num + 11, mods + 1);
             } else {
-                Vt_buffered_output_formated(self, "\e[%d;%u~", f_num + 12, mods + 1);
+                Vt_output_formated(self, "\e[%d;%u~", f_num + 12, mods + 1);
             }
         } else {
             if (f_num < 5) {
-                Vt_buffered_output_formated(self, "\eO%c", f_num + 'O');
+                Vt_output_formated(self, "\eO%c", f_num + 'O');
             } else if (f_num == 5) {
-                Vt_buffered_output_formated(self, "\e[%d~", f_num + 10);
+                Vt_output_formated(self, "\e[%d~", f_num + 10);
             } else if (f_num < 11) {
-                Vt_buffered_output_formated(self, "\e[%d~", f_num + 11);
+                Vt_output_formated(self, "\e[%d~", f_num + 11);
             } else {
-                Vt_buffered_output_formated(self, "\e[%d~", f_num + 12);
+                Vt_output_formated(self, "\e[%d~", f_num + 12);
             }
         }
         return true;
     } else /* not f-key */ {
         if (mods) {
             if (key == KEY(Insert)) {
-                Vt_buffered_output_formated(self, "\e[2;%u~", mods + 1);
+                Vt_output_formated(self, "\e[2;%u~", mods + 1);
                 return true;
             } else if (key == KEY(Delete)) {
-                Vt_buffered_output_formated(self, "\e[3;%u~", mods + 1);
+                Vt_output_formated(self, "\e[3;%u~", mods + 1);
                 return true;
             } else if (key == KEY(Home)) {
-                Vt_buffered_output_formated(self, "\e[1;%u~", mods + 1);
+                Vt_output_formated(self, "\e[1;%u~", mods + 1);
                 return true;
             } else if (key == KEY(End)) {
-                Vt_buffered_output_formated(self, "\e[4;%u~", mods + 1);
+                Vt_output_formated(self, "\e[4;%u~", mods + 1);
                 return true;
             } else if (key == KEY(Page_Up)) {
-                Vt_buffered_output_formated(self, "\e[5;%u~", mods + 1);
+                Vt_output_formated(self, "\e[5;%u~", mods + 1);
                 return true;
             } else if (key == KEY(Page_Down)) {
-                Vt_buffered_output_formated(self, "\e[6;%u~", mods + 1);
+                Vt_output_formated(self, "\e[6;%u~", mods + 1);
                 return true;
             }
 
         } else /* no mods */ {
             if (key == KEY(Insert)) {
-                Vt_buffered_output(self, "\e[2~", 4);
+                Vt_output(self, "\e[2~", 4);
                 return true;
             } else if (key == KEY(Delete)) {
-                Vt_buffered_output(self, "\e[3~", 4);
+                Vt_output(self, "\e[3~", 4);
                 return true;
             } else if (key == KEY(Page_Up)) {
-                Vt_buffered_output(self, "\e[5~", 4);
+                Vt_output(self, "\e[5~", 4);
                 return true;
             } else if (key == KEY(Page_Down)) {
-                Vt_buffered_output(self, "\e[6~", 4);
+                Vt_output(self, "\e[6~", 4);
                 return true;
             }
         }
@@ -281,13 +281,13 @@ static bool Vt_maybe_handle_keypad_key(Vt* self, uint32_t key, uint32_t mods)
     if (mods) {
         resp = mod_cursor_key_response(key);
         if (resp) {
-            Vt_buffered_output_formated(self, resp, mods + 1);
+            Vt_output_formated(self, resp, mods + 1);
             return true;
         }
     } else {
         resp = Vt_get_normal_cursor_key_response(self, key);
         if (resp) {
-            Vt_buffered_output(self, resp, strlen(resp));
+            Vt_output(self, resp, strlen(resp));
             return true;
         }
     }
@@ -325,7 +325,7 @@ void Vt_handle_key(void* _self, uint32_t key, uint32_t rawkey, uint32_t mods)
         static mbstate_t mbstate;
         size_t           mb_len = c32rtomb(tmp, key, &mbstate);
         if (mb_len) {
-            Vt_buffered_output(self, tmp, mb_len);
+            Vt_output(self, tmp, mb_len);
         }
 
         if (self->modes.send_receive_mode) {

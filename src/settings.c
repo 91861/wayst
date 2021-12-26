@@ -973,7 +973,7 @@ static void print_help_and_exit()
                    "");
         } else {
             size_t l       = strlen(long_options[i].name);
-            int    padding = l >= MAX_OPT_PADDING ? 1 : MAX_OPT_PADDING - l;
+            int    padding = l >= MAX_OPT_PADDING ? 1 : MAX_OPT_PADDING - l + 2;
             printf(" " TERMCOLOR_BOLD "--%s" TERMCOLOR_RESET " %*s",
                    long_options[i].name,
                    padding,

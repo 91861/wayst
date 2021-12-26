@@ -931,6 +931,8 @@ static void WindowX11_update_monitor_placement(WindowBase* self)
         }
         self->dpi = dpi;
         Window_emit_output_change_event(self);
+
+        XFree(name);
     }
 }
 
