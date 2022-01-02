@@ -448,7 +448,7 @@ static void GfxOpenGL21_realloc_damage_record(GfxOpenGL21* self)
     }
 }
 
-static void GfxOpenGL21_shift_damage_record(GfxOpenGL21* self)
+static void GfxOpenGL21_rotate_damage_record(GfxOpenGL21* self)
 {
     memmove(self->line_damage.damage_history + self->line_damage.n_lines,
             self->line_damage.damage_history,
@@ -1569,12 +1569,12 @@ static line_render_pass_t create_line_render_pass(const line_render_pass_args_t*
                               .n_queued_subpasses = 0,
                               .subpass_args       = {
                                 {
-                                  .render_range_begin = 0,
-                                  .render_range_end   = 0,
+                                        .render_range_begin = 0,
+                                        .render_range_end   = 0,
                                 },
                                 {
-                                  .render_range_begin = 0,
-                                  .render_range_end   = 0,
+                                        .render_range_begin = 0,
+                                        .render_range_end   = 0,
                                 },
                               } };
 
@@ -3223,11 +3223,59 @@ static bool GfxOpenGL21_is_framebuffer_dirty(Gfx* self, uint8_t buffer_age)
     return GfxOpenGL21_get_accumulated_overlay_damaged(gfx, buffer_age);
 }
 
+/* check if lines switching positions should generate fb damage */
+static window_partial_swap_request_t* GfxOpenGL21_process_line_position_change_damage(
+  GfxOpenGL21*                   self,
+  window_partial_swap_request_t* swap_request,
+  VtLine*                        line,
+  size_t                         visual_index,
+  uint8_t                        buffer_age)
+{
+    bool repainted = self->line_damage.damage_history[visual_index];
+
+    if (swap_request) {
+        if (!repainted) /* just scrolling */ {
+            uint16_t n_lines = self->line_damage.n_lines;
+            uint32_t ix      = visual_index + 1 * n_lines + (buffer_age * n_lines);
+            uint16_t len     = MAX(line->data.size, self->line_damage.line_length[ix]);
+            if (swap_request && len > 0) {
+                swap_request = GfxOpenGL21_merge_or_push_modified_rect(
+                  self,
+                  GfxOpenGL21_translate_coords(self,
+                                               self->pixel_offset_x,
+                                               self->pixel_offset_y +
+                                                 self->line_height_pixels * visual_index,
+                                               self->glyph_width_pixels * len,
+                                               self->line_height_pixels));
+            }
+        } else /* scrolling, but replaced with shorter content */ {
+            uint16_t n_lines = self->line_damage.n_lines;
+            uint32_t ix      = visual_index + 1 * n_lines + (buffer_age * n_lines);
+            uint16_t new_len = line->data.size;
+            uint16_t old_len = self->line_damage.line_length[ix];
+
+            if (swap_request && old_len > new_len) {
+                swap_request = GfxOpenGL21_merge_or_push_modified_rect(
+                  self,
+                  GfxOpenGL21_translate_coords(self,
+                                               self->pixel_offset_x,
+                                               self->pixel_offset_y +
+                                                 self->line_height_pixels * visual_index,
+                                               self->glyph_width_pixels * old_len,
+                                               self->line_height_pixels));
+            }
+        }
+    }
+
+    return swap_request;
+}
+
 window_partial_swap_request_t* GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui, uint8_t buffer_age)
 {
     GfxOpenGL21* gfx = gfxOpenGL21(self);
 
-    window_partial_swap_request_t* retval = retval = &gfx->modified_region;
+    gfx->modified_region.count            = 0;
+    window_partial_swap_request_t* retval = &gfx->modified_region;
 
     static uint8_t old_age = 0;
     if (buffer_age == 0 || buffer_age != old_age) {
@@ -3239,8 +3287,8 @@ window_partial_swap_request_t* GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui,
     gfx->pixel_offset_x = ui->pixel_offset_x;
     gfx->pixel_offset_y = ui->pixel_offset_y;
 
-    GfxOpenGL21_shift_damage_record(gfx);
-    gfx->modified_region.count = 0;
+    GfxOpenGL21_rotate_damage_record(gfx);
+
     gfx->frame_overlay_damage->overlay_state =
       Ui_any_overlay_element_visible(ui) | Vt_is_scrolling_visual(vt);
 
@@ -3280,7 +3328,6 @@ window_partial_swap_request_t* GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui,
             gfx->bound_resources  = BOUND_RESOURCES_NONE;
             line_render_pass_t rp = create_line_render_pass(&rp_args);
             line_reder_pass_run_initial_setup(&rp);
-            uint8_t       n_subs = rp.n_queued_subpasses;
             Pair_uint16_t damage = line_reder_pass_run_subpasses(&rp);
 
             uint16_t dam_len = (damage.second < damage.first) ? (uint16_t)i->data.size
@@ -3291,8 +3338,8 @@ window_partial_swap_request_t* GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui,
 
             bool length_in_limit = dam_len < CELL_DAMAGE_TO_SURF_LIMIT;
 
-            if (retval && surface_fragment_repaint && n_subs > 0 && length_in_limit &&
-                !unlikely(rp.has_blinking_chars)) {
+            if (retval && surface_fragment_repaint && rp.n_queued_subpasses > 0 &&
+                length_in_limit && !unlikely(rp.has_blinking_chars)) {
                 retval = GfxOpenGL21_merge_or_push_modified_rect(
                   gfx,
                   GfxOpenGL21_translate_coords(
@@ -3320,27 +3367,17 @@ window_partial_swap_request_t* GfxOpenGL21_draw(Gfx* self, const Vt* vt, Ui* ui,
         }
     }
 
-    // check if the not repainted lines should generate fb damage
     for (VtLine* i = begin; i < end; ++i) {
         ptrdiff_t visual_index = i - begin;
-        bool      repainted    = gfx->line_damage.damage_history[visual_index];
-        if (!repainted) {
-            uint16_t n_lines = gfx->line_damage.n_lines;
-            uint32_t ix      = visual_index + 1 * n_lines;
-            uint16_t len     = MAX(i->data.size, gfx->line_damage.line_length[ix]);
-            if (retval && len > 0) {
-                retval = GfxOpenGL21_merge_or_push_modified_rect(
-                  gfx,
-                  GfxOpenGL21_translate_coords(gfx,
-                                               gfx->pixel_offset_x,
-                                               gfx->pixel_offset_y +
-                                                 gfx->line_height_pixels * visual_index,
-                                               gfx->glyph_width_pixels * len,
-                                               gfx->line_height_pixels));
-            }
+        if (retval) {
+            retval = GfxOpenGL21_process_line_position_change_damage(gfx,
+                                                                     retval,
+                                                                     i,
+                                                                     visual_index,
+                                                                     buffer_age);
         }
 
-        // update the rest of damage history data
+        // update damage history data
         gfx->line_damage.proxy_color_component[i - begin] = i->proxy.data[PROXY_INDEX_TEXTURE];
         gfx->line_damage.line_length[i - begin]           = i->data.size;
     }

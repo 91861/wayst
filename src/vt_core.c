@@ -4689,17 +4689,16 @@ static void Vt_delete_line(Vt* self)
     }
 
     self->last_interted = NULL;
-
     Vt_about_to_delete_line_by_scroll_up(self, self->cursor.row);
     Vector_remove_at_VtLine(&self->lines, self->cursor.row, 1);
     Vt_shift_global_line_index_refs(self, self->cursor.row + 1, -1, true);
 
-    size_t insert_idx = MIN(Vt_get_scroll_region_bottom(self), Vt_bottom_line(self));
+    size_t insert_idx = MIN(Vt_get_scroll_region_bottom(self), Vt_bottom_line(self)) +1;
+
     Vector_insert_at_VtLine(&self->lines, insert_idx, VtLine_new());
     Vt_shift_global_line_index_refs(self, insert_idx, 1, true);
-    Vt_empty_line_fill_bg(self, MIN(Vt_get_scroll_region_bottom(self), Vt_bottom_line(self)));
 
-    Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
+    Vt_empty_line_fill_bg(self, MIN(Vt_get_scroll_region_bottom(self), Vt_bottom_line(self)));
 }
 
 static void Vt_scroll_up(Vt* self)
@@ -4846,20 +4845,16 @@ static inline void Vt_scroll_out_all_content(Vt* self)
         Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
     }
 
-    int64_t to_add = Vt_visual_top_line(self);
-    for (size_t i = Vt_visual_bottom_line(self); i > Vt_visual_top_line(self); --i) {
+    size_t to_add = Vt_top_line(self);
+    for (size_t i = Vt_bottom_line(self); i >= Vt_top_line(self); --i) {
         if (self->lines.buf[i].data.size) {
-            to_add = i;
+            to_add = i + 1;
             break;
         }
     }
-    to_add -= Vt_visual_top_line(self);
+    to_add -= Vt_top_line(self);
 
-    if (Vt_line_at(self, Vt_visual_top_line(self))->data.size) {
-        to_add += 1;
-    }
-
-    for (int64_t i = 0; i < to_add; ++i) {
+    for (size_t i = 0; i < to_add; ++i) {
         Vector_push_VtLine(&self->lines, VtLine_new());
         Vt_empty_line_fill_bg(self, self->lines.size - 1);
     }
@@ -4914,16 +4909,15 @@ static inline void Vt_clear_display_and_scrollback(Vt* self)
  * attributes are set */
 static inline void Vt_clear_left(Vt* self)
 {
-    size_t to_add = 0;
     if (self->cursor.col >= Vt_cursor_line(self)->data.size) {
-        to_add = self->cursor.col - Vt_cursor_line(self)->data.size;
+        Vector_reserve_VtRune(&Vt_cursor_line(self)->data, self->cursor.col);
+        Vt_cursor_line(self)->data.size = MAX(Vt_cursor_line(self)->data.size, self->cursor.col);
     }
-    for (size_t i = 0; i <= to_add; ++i) {
-        Vector_push_VtRune(&Vt_cursor_line(self)->data, self->parser.char_state);
-    }
+
     for (size_t i = 0; i <= self->cursor.col; ++i) {
         Vt_cursor_line(self)->data.buf[i] = self->parser.char_state;
     }
+
     Vt_mark_proxy_fully_damaged(self, self->cursor.row);
 }
 
@@ -4932,13 +4926,13 @@ static inline void Vt_clear_left(Vt* self)
  * attributes are set */
 static inline void Vt_clear_right(Vt* self)
 {
-    for (int32_t i = self->cursor.col; i <= (int32_t)Vt_col(self); ++i) {
-        if (i + 1 <= (int32_t)Vt_cursor_line(self)->data.size) {
-            Vt_cursor_line(self)->data.buf[i] = self->parser.char_state;
-        } else {
-            Vector_push_VtRune(&Vt_cursor_line(self)->data, self->parser.char_state);
-        }
+    Vector_reserve_VtRune(&Vt_cursor_line(self)->data, Vt_col(self));
+    Vt_cursor_line(self)->data.size = Vt_col(self);
+
+    for (uint16_t i = self->cursor.col; i < Vt_col(self); ++i) {
+        Vt_cursor_line(self)->data.buf[i] = self->parser.char_state;
     }
+    
     Vt_mark_proxy_fully_damaged(self, self->cursor.row);
 }
 
