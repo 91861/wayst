@@ -4684,21 +4684,22 @@ static void Vt_reverse_line_feed(Vt* self)
  * delete active line, content below scrolls up */
 static void Vt_delete_line(Vt* self)
 {
+    self->last_interted = NULL;
+
     if (unlikely(self->selection.mode)) {
         Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
     }
 
-    self->last_interted = NULL;
-    Vt_about_to_delete_line_by_scroll_up(self, self->cursor.row);
-    Vector_remove_at_VtLine(&self->lines, self->cursor.row, 1);
-    Vt_shift_global_line_index_refs(self, self->cursor.row + 1, -1, true);
-
-    size_t insert_idx = MIN(Vt_get_scroll_region_bottom(self), Vt_bottom_line(self)) +1;
+    size_t insert_idx = MIN(Vt_get_scroll_region_bottom(self), Vt_bottom_line(self)) + 1;
+    size_t remove_idx = self->cursor.row;
 
     Vector_insert_at_VtLine(&self->lines, insert_idx, VtLine_new());
     Vt_shift_global_line_index_refs(self, insert_idx, 1, true);
+    Vt_empty_line_fill_bg(self, insert_idx);
 
-    Vt_empty_line_fill_bg(self, MIN(Vt_get_scroll_region_bottom(self), Vt_bottom_line(self)));
+    Vt_about_to_delete_line_by_scroll_up(self, remove_idx);
+    Vector_remove_at_VtLine(&self->lines, remove_idx, 1);
+    Vt_shift_global_line_index_refs(self, remove_idx + 1, -1, true);
 }
 
 static void Vt_scroll_up(Vt* self)

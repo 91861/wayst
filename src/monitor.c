@@ -153,7 +153,7 @@ ssize_t Monitor_read(Monitor* self)
         self->pollfds[CHILD_FD_IDX].events = POLLIN;
         if (poll(self->pollfds, 1, 0) < 0) {
             if (errno != EINTR && errno != EAGAIN) {
-                ERR("poll failed %s", strerror(errno));
+                ERR("poll failed %s\n", strerror(errno));
             }
         }
         self->read_info_up_to_date = true;
@@ -175,19 +175,26 @@ ssize_t Monitor_read(Monitor* self)
 
 ssize_t Monitor_write(Monitor* self, char* buffer, size_t bytes)
 {
-    ssize_t ret = write(self->child_fd, buffer, bytes);
+    for (uint_fast8_t i = 0; i < 2; ++i) {
+        ssize_t ret = write(self->child_fd, buffer, bytes);
 
-    if (ret == -1) {
-        if (likely(errno == EAGAIN || errno == EWOULDBLOCK)) {
-            /* We can't write because the client program has not read enuogh data to free up the os
-             * provided buffer. A blocking write here could potentially (if the client also doesn't
-             * check for this) deadlock the main event loop. Just give up and try next time. */
-            return MONITOR_WRITE_WOULD_BLOCK;
+        if (ret == -1) {
+            if (likely(errno == EAGAIN || errno == EWOULDBLOCK)) {
+                /* We can't write because the client program has not read enuogh data to free up the
+                 * os provided buffer. A blocking write here could potentially (if the client also
+                 * doesn't check for this) deadlock the main event loop. Just give up and try next
+                 * time. */
+                return MONITOR_WRITE_WOULD_BLOCK;
+            } else if (errno != EINTR) {
+                ERR("wirte to pty failed %s\n", strerror(errno));
+            }
         } else {
-            ERR("wirte to pty failed %s\n", strerror(errno));
+            return ret;
         }
     }
-    return ret;
+
+    WRN("write to pty interrupted\n");
+    return MONITOR_WRITE_WOULD_BLOCK;
 }
 
 void Monitor_kill(Monitor* self)
