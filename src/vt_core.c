@@ -4911,7 +4911,7 @@ static inline void Vt_clear_display_and_scrollback(Vt* self)
 static inline void Vt_clear_left(Vt* self)
 {
     if (self->cursor.col >= Vt_cursor_line(self)->data.size) {
-        Vector_reserve_VtRune(&Vt_cursor_line(self)->data, self->cursor.col);
+        Vector_reserve_VtRune(&Vt_cursor_line(self)->data, self->cursor.col + 1);
         Vt_cursor_line(self)->data.size = MAX(Vt_cursor_line(self)->data.size, self->cursor.col);
     }
 
