@@ -8,7 +8,7 @@ Simple terminal emulator for Wayland and X11 with OpenGL rendering and minimal d
 
 **This is roughly alpha quality, expect bugs!**
 
-# Features
+### Features
 * Unicode support
 * Text reflow
 * 24-bit colors
@@ -23,11 +23,17 @@ Simple terminal emulator for Wayland and X11 with OpenGL rendering and minimal d
 * Configurable keybindings
 * Clickable links, OSC 8 links
 * Command history and marks[*](https://github.com/91861/wayst#shell-integration)
-* kitty image protocol (experimental)
+* [Terminal image protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/) and sixel graphics (experimental)
 
-# To-Do
-* Ligatures
-* Sixel graphics
+### Limitations
+* UTF8 mode only
+* No Bidi support
+* No font ligatures
+
+### To-Do
+* OpenGL ES 2.0 compatible renderer
+* Text search
+* Single instance - multi window mode
 * All xterm and vte control sequences
 
 # Building
@@ -36,7 +42,7 @@ make
 make install
 ```
 
-#### Dependencies:
+### Dependencies:
 * OpenGL >= 2.1
 * freetype >= 2.10
 * fontconfig
@@ -89,6 +95,7 @@ Keys|Action|
 ```Ctrl```+```Shift```+```\```            | Pipe to external program
 ```LMB```                                 | Select text
 ```RMB```                                 | Change selected region
+```MMB```                                 | Paste from primary selection
 ```Shift```+```LMB```                     | Select text in mouse reporting mode
 ```Ctrl``` + ```LMB```                    | Open link/Box select
 
