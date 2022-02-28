@@ -823,12 +823,12 @@ static void Vt_hard_reset(Vt* self)
 
     self->parser.state = PARSER_STATE_LITERAL;
 
-    self->charset_g0           = NULL;
-    self->charset_g1           = NULL;
-    self->charset_g2           = NULL;
-    self->charset_g3           = NULL;
-    self->charset_single_shift = NULL;
-    self->last_interted        = NULL;
+    self->charset_g0             = NULL;
+    self->charset_g1             = NULL;
+    self->charset_g2             = NULL;
+    self->charset_g3             = NULL;
+    self->charset_single_shift   = NULL;
+    self->has_last_inserted_rune = false;
 
     self->scroll_region_top    = 0;
     self->scroll_region_bottom = Vt_row(self) - 1;
@@ -866,7 +866,7 @@ static void Vt_soft_reset(Vt* self)
     self->charset_g2           = NULL;
     self->charset_g3           = NULL;
     self->charset_single_shift = NULL;
-    self->last_interted        = NULL;
+    self->has_last_inserted_rune = false;
     self->scroll_region_top    = 0;
     self->scroll_region_bottom = Vt_row(self) - 1;
     self->scroll_region_left   = 0;
@@ -2877,11 +2877,11 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                              * character cause this to have no effect */
                             case 'b': {
                                 MULTI_ARG_IS_ERROR
-                                if (likely(self->last_interted)) {
+                                if (likely(self->has_last_inserted_rune)) {
                                     int arg = short_sequence_get_int_argument(seq);
                                     if (arg <= 0)
                                         arg = 1;
-                                    VtRune repeated = *self->last_interted;
+                                    VtRune repeated = self->last_inserted;
                                     for (int i = 0; i < arg; ++i) {
                                         Vt_insert_char_at_cursor(self, repeated);
                                     }
@@ -3285,13 +3285,13 @@ static inline void Vt_alt_buffer_on(Vt* self, bool save_mouse)
     Vt_clear_all_proxies(self);
     Vt_visual_scroll_reset(self);
     Vt_select_end(self);
-    self->last_interted       = NULL;
-    self->alt_lines           = self->lines;
-    self->alt_image_views     = self->image_views;
-    self->alt_scrolled_sixels = self->scrolled_sixels;
-    self->lines               = Vector_new_VtLine(self);
-    self->image_views         = Vector_new_RcPtr_VtImageSurfaceView();
-    self->scrolled_sixels     = Vector_new_RcPtr_VtSixelSurface();
+    self->has_last_inserted_rune = false;
+    self->alt_lines              = self->lines;
+    self->alt_image_views        = self->image_views;
+    self->alt_scrolled_sixels    = self->scrolled_sixels;
+    self->lines                  = Vector_new_VtLine(self);
+    self->image_views            = Vector_new_RcPtr_VtImageSurfaceView();
+    self->scrolled_sixels        = Vector_new_RcPtr_VtSixelSurface();
     for (uint16_t i = 0; i < Vt_row(self); ++i) {
         Vector_push_VtLine(&self->lines, VtLine_new());
     }
@@ -3308,7 +3308,7 @@ static inline void Vt_alt_buffer_on(Vt* self, bool save_mouse)
 static inline void Vt_alt_buffer_off(Vt* self, bool save_mouse)
 {
     if (self->alt_lines.buf) {
-        self->last_interted = NULL;
+        self->has_last_inserted_rune = false;
         Vt_select_end(self);
         Vector_destroy_VtLine(&self->lines);
         Vector_destroy_RcPtr_VtImageSurfaceView(&self->image_views);
@@ -4630,7 +4630,7 @@ static void Vt_reset_text_attribs(Vt* self, VtRune* opt_target)
  * Move cursor to first column */
 static void Vt_carriage_return(Vt* self)
 {
-    self->last_interted = NULL;
+    self->has_last_inserted_rune = false;
     Vt_move_cursor(self, 0, Vt_cursor_row(self));
 }
 
@@ -4642,7 +4642,7 @@ static void Vt_insert_line(Vt* self)
         Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
     }
 
-    self->last_interted = NULL;
+    self->has_last_inserted_rune = false;
     Vector_insert_at_VtLine(&self->lines, self->cursor.row, VtLine_new());
     Vt_shift_global_line_index_refs(self, self->cursor.row, 1, true);
 
@@ -4664,7 +4664,7 @@ static void Vt_reverse_line_feed(Vt* self)
         Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
     }
 
-    self->last_interted = NULL;
+    self->has_last_inserted_rune = false;
     if (self->cursor.row == Vt_get_scroll_region_top(self)) {
         Vt_about_to_delete_line_by_scroll_down(self, Vt_get_scroll_region_bottom(self));
         Vector_remove_at_VtLine(&self->lines, Vt_get_scroll_region_bottom(self), 1);
@@ -4684,7 +4684,7 @@ static void Vt_reverse_line_feed(Vt* self)
  * delete active line, content below scrolls up */
 static void Vt_delete_line(Vt* self)
 {
-    self->last_interted = NULL;
+    self->has_last_inserted_rune = false;
 
     if (unlikely(self->selection.mode)) {
         Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
@@ -4708,8 +4708,8 @@ static void Vt_scroll_up(Vt* self)
         Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
     }
 
-    self->last_interted = NULL;
-    size_t insert_idx   = MIN(Vt_bottom_line(self), Vt_get_scroll_region_bottom(self)) + 1;
+    self->has_last_inserted_rune = false;
+    size_t insert_idx            = MIN(Vt_bottom_line(self), Vt_get_scroll_region_bottom(self)) + 1;
     Vector_insert_at_VtLine(&self->lines, insert_idx, VtLine_new());
     Vt_shift_global_line_index_refs(self, insert_idx, 1, true);
 
@@ -4728,7 +4728,7 @@ static void Vt_scroll_down(Vt* self)
         Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
     }
 
-    self->last_interted = NULL;
+    self->has_last_inserted_rune = false;
     Vector_insert_at_VtLine(&self->lines, Vt_get_scroll_region_top(self), VtLine_new());
     Vt_shift_global_line_index_refs(self, Vt_get_scroll_region_top(self), 1, true);
 
@@ -4933,7 +4933,7 @@ static inline void Vt_clear_right(Vt* self)
     for (uint16_t i = self->cursor.col; i < Vt_col(self); ++i) {
         Vt_cursor_line(self)->data.buf[i] = self->parser.char_state;
     }
-    
+
     Vt_mark_proxy_fully_damaged(self, self->cursor.row);
 }
 
@@ -4959,6 +4959,10 @@ __attribute__((hot)) static void Vt_insert_char_at_cursor(Vt* self, VtRune c)
         Vt_cursor_line(self)->rejoinable = true;
     }
 
+    while (self->lines.size <= self->cursor.row) {
+        Vector_push_VtLine(&self->lines, VtLine_new());
+    }
+
     while (Vt_cursor_line(self)->data.size <= self->cursor.col) {
         Vector_push_VtRune(&Vt_cursor_line(self)->data, self->blank_space);
     }
@@ -4980,7 +4984,7 @@ __attribute__((hot)) static void Vt_insert_char_at_cursor(Vt* self, VtRune c)
         }
     }
 
-    self->last_interted = Vt_cursor_cell(self);
+    self->last_inserted = *Vt_cursor_cell(self);
     ++self->cursor.col;
 
     int width;
@@ -5162,40 +5166,40 @@ static bool VtRune_try_normalize_as_property(VtRune* self, char32_t codepoint)
  * Try to do something about combinable characters */
 static void Vt_handle_combinable(Vt* self, char32_t c)
 {
-    if (self->last_interted) {
-        if (VtRune_try_normalize_as_property(self->last_interted, c)) {
+    if (self->has_last_inserted_rune) {
+        if (VtRune_try_normalize_as_property(&self->last_inserted, c)) {
             return;
         }
 #ifndef NOUTF8PROC
-        if (self->last_interted->rune.combine[0]) {
+        if (self->last_inserted.rune.combine[0]) {
 #endif
             /* Already contains a combining char that failed to normalize */
-            VtRune_push_combining(self->last_interted, c);
+            VtRune_push_combining(&self->last_inserted, c);
 #ifndef NOUTF8PROC
         } else {
             mbstate_t mbs;
             memset(&mbs, 0, sizeof(mbs));
             char   buff[MB_CUR_MAX * 2 + 1];
-            size_t oft = c32rtomb(buff, self->last_interted->rune.code, &mbs);
+            size_t oft = c32rtomb(buff, self->last_inserted.rune.code, &mbs);
             buff[c32rtomb(buff + oft, c, &mbs) + oft] = 0;
             size_t   old_len                          = strlen(buff);
             char*    res     = (char*)utf8proc_NFC((const utf8proc_uint8_t*)buff);
             char32_t conv[2] = { 0, 0 };
 
-            if (old_len == strnlen(res, old_len + 1)) {
-                VtRune_push_combining(self->last_interted, c);
+            if (res && old_len == strnlen(res, old_len + 1)) {
+                VtRune_push_combining(&self->last_inserted, c);
             } else if (mbrtoc32(conv, res, ARRAY_SIZE(buff) - 1, &mbs) < 1) {
                 /* conversion failed */
                 WRN("Unicode normalization failed %s\n", strerror(errno));
                 Vt_grapheme_break(self);
             } else {
                 LOG("Vt::unicode{ u+%x + u+%x -> u+%x }\n",
-                    self->last_interted->rune.code,
+                    self->last_inserted.rune.code,
                     c,
                     conv[0]);
 
-                self->last_interted->rune.code = conv[0];
-                self->last_codepoint           = conv[0];
+                self->last_inserted.rune.code = conv[0];
+                self->last_codepoint          = conv[0];
             }
             free(res);
         }

@@ -89,7 +89,7 @@ PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC eglSwapBuffersWithDamageKHR;
 static struct wl_data_source_listener data_source_listener;
 static void                           cursor_set(struct wl_cursor* what, uint32_t serial);
 static void                           WindowWl_dont_swap_buffers(struct WindowBase* self);
-struct WindowBase*                    WindowWl_new(uint32_t w, uint32_t h);
+struct WindowBase*                    WindowWl_new(uint32_t w, uint32_t h, gfx_api_t gfx_api_t);
 static void       WindowWl_set_maximized(struct WindowBase* self, bool maximized);
 static void       WindowWl_set_fullscreen(struct WindowBase* self, bool fullscreen);
 static void       WindowWl_resize(struct WindowBase* self, uint32_t w, uint32_t h);
@@ -1746,7 +1746,7 @@ static void cursor_set(struct wl_cursor* what, uint32_t serial)
 }
 
 /* Window */
-struct WindowBase* WindowWl_new(uint32_t w, uint32_t h)
+struct WindowBase* WindowWl_new(uint32_t w, uint32_t h, gfx_api_t gfx_api)
 {
     global = calloc(1, sizeof(WindowStatic) + sizeof(GlobalWl) - sizeof(uint8_t));
     global->target_frame_time_ms = 16;
@@ -1824,14 +1824,32 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h)
 
     LOG("EGL Initialized %d.%d\n", major, minor);
 
-    if (eglBindAPI(EGL_OPENGL_API) != EGL_TRUE) {
-        ERR("EGL API binding error %s", egl_get_error_string(eglGetError()));
+    switch (gfx_api.type) {
+        case GFX_API_GL:
+            if (eglBindAPI(EGL_OPENGL_API) != EGL_TRUE) {
+                ERR("EGL API binding error %s", egl_get_error_string(eglGetError()));
+            }
+            break;
+
+        case GFX_API_GLES:
+            if (eglBindAPI(EGL_OPENGL_ES_API) != EGL_TRUE) {
+                ERR("EGL API binding error %s", egl_get_error_string(eglGetError()));
+            }
+            break;
+
+        case GFX_API_VK:
+            ERR("vulkan context not implemented for wayland\n");
+            break;
     }
 
     eglChooseConfig(globalWl->egl_display, cfg_attribs, &config, 1, &num_config);
 
     EGLint context_attribs[] = {
-        EGL_CONTEXT_MAJOR_VERSION, 2, EGL_CONTEXT_MINOR_VERSION, 1, EGL_NONE,
+        EGL_CONTEXT_MAJOR_VERSION,
+        gfx_api.version_major,
+        EGL_CONTEXT_MINOR_VERSION,
+        gfx_api.version_minor,
+        EGL_NONE, /* terminate list */
     };
 
     windowWl(win)->egl_context =
@@ -1935,9 +1953,9 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h)
     return win;
 }
 
-struct WindowBase* Window_new_wayland(Pair_uint32_t res, Pair_uint32_t cell_dims)
+struct WindowBase* Window_new_wayland(Pair_uint32_t res, Pair_uint32_t cell_dims, gfx_api_t gfx_api)
 {
-    struct WindowBase* win = WindowWl_new(res.first, res.second);
+    struct WindowBase* win = WindowWl_new(res.first, res.second, gfx_api);
 
     if (!win) {
         return NULL;

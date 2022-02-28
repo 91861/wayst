@@ -1,7 +1,7 @@
 /* See LICENSE for license information. */
 
 /**
- * GfxOpenGL21 - renderer implementation for OpenGL 2.1
+ * renderer implementations for for OpenGL 2.1 and OpenGL ES 2.0
  */
 
 #pragma once
@@ -9,5 +9,4 @@
 #include "gfx.h"
 #include "freetype.h"
 
-
-Gfx* Gfx_new_OpenGL21(Freetype* freetype);
+Gfx* Gfx_new_OpenGL2(Freetype* freetype);

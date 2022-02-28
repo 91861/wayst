@@ -11,6 +11,20 @@
 #include "util.h"
 #include <stdalign.h>
 
+typedef enum
+{
+    GFX_API_GLES,
+    GFX_API_GL,
+    GFX_API_VK,
+} gfx_api_type_e;
+
+typedef struct
+{
+    gfx_api_type_e type;
+    uint8_t        version_major;
+    uint8_t        version_minor;
+} gfx_api_t;
+
 #define WINDOW_IS_CLOSED         (1 << 0)
 #define WINDOW_IS_FULLSCREEN     (1 << 1)
 #define WINDOW_NEEDS_SWAP        (1 << 2)
@@ -194,7 +208,7 @@ static inline void Window_destroy(struct WindowBase* self)
 {
     free(self->output_name);
     self->output_name = NULL;
-    
+
     self->interface->destroy(self);
 }
 

@@ -31,9 +31,8 @@ Simple terminal emulator for Wayland and X11 with OpenGL rendering and minimal d
 * No font ligatures
 
 ### To-Do
-* OpenGL ES 2.0 compatible renderer
-* Text search
-* Single instance - multi window mode
+* Search
+* Single instance multi window mode
 * All xterm and vte control sequences
 
 # Building
@@ -43,16 +42,22 @@ make install
 ```
 
 ### Dependencies:
-* OpenGL >= 2.1
+* OpenGL >= 2.1/ES 2.0
 * freetype >= 2.10
 * fontconfig
 * xkbcommon [wayland]
+* xrandr [X11]
 * utf8proc [optional]
 * notify-send [optional]
 
+### Build options
 To build without X11 or Wayland support set ```window_protocol=wayland``` or ```window_protocol=x11``` respectively. With both backends enabled wayst will default to wayland. You can force X11 mode with the ```xorg-only``` option.
 
-To build with debuging symbols set ```mode=debugoptimized```.
+To target OpenGL ES 2.0 instead of OpenGL 2.1 set ```renderer=gles20```.
+
+To build without libutf8proc set ```libutf8proc=off```.
+
+To build with debuging symbols set ```mode=debug``` or ```mode=debugoptimized```.
 
 
 ## Installation from AUR
@@ -67,8 +72,8 @@ yay -S wayst-git
 # Usage
 
 #### Configuration file
-All option can be set in a configuration file or passed as command line arguments. To see all supported options run ```wayst --help```.\
-\
+All option can be set in a configuration file or passed as command line arguments. To see all supported options run ```wayst --help```.
+
 Wayst will look for: ```$XDG_CONFIG_HOME/wayst/config``` or ```$HOME/.config/wayst/config```.
 For an example configuration file see ```config.example```.
 

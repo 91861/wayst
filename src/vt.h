@@ -756,7 +756,9 @@ typedef struct
 
     char* active_hyperlink;
 
-    VtRune*  last_interted;
+    VtRune last_inserted;
+    bool   has_last_inserted_rune;
+
     char32_t last_codepoint;
 #ifndef NOUTF8PROC
     int32_t utf8proc_state;
@@ -1075,10 +1077,32 @@ const char* Vt_uri_range_at(Vt*            self,
 
 /**
  * Get line under terminal cursor */
+#ifdef DEBUG
+
+static inline VtLine* _ERRVt_cursor_line(int ln, const Vt* self)
+{
+    ERR("line count overflow on line %d. line cnt %zu cursor pos %zu\n",
+        ln,
+        self->lines.size,
+        self->cursor.row);
+    return NULL;
+}
+
+static inline VtLine* _Vt_cursor_line(const Vt* self)
+{
+    return &self->lines.buf[self->cursor.row];
+}
+
+#define Vt_cursor_line(_s)                                                                         \
+    (((_s)->lines.size < (_s)->cursor.row) ? _ERRVt_cursor_line(__LINE__, (_s))                    \
+                                           : _Vt_cursor_line((_s)))
+
+#else
 static inline VtLine* Vt_cursor_line(const Vt* self)
 {
     return &self->lines.buf[self->cursor.row];
 }
+#endif
 
 /**
  * Get cell under terminal cursor */

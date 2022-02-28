@@ -63,6 +63,13 @@ else
 	LDLIBS += $(XLDLIBS) $(WLLDLIBS)
 endif
 
+ifeq ($(renderer), gles20)
+	CFLAGS += -DGFX_GLES
+	LDLIBS += -lGLESv2
+else
+	LDLIBS += -lGL
+endif
+
 
 $(EXEC): $(OBJ)
 	$(CC) $(OBJ) $(LDLIBS) -o $(TGT_DIR)/$(EXEC) $(LDFLAGS)
@@ -95,3 +102,10 @@ uninstall:
 	$(RM) $(INSTALL_DIR)/$(EXEC)
 
 -include $(OBJ:.o=.d)
+
+
+.PHONY: shaders
+
+shaders:
+	./$(SRC_DIR)/pack_shaders.sh shaders_gl21 > $(SRC_DIR)/shaders_gl21.h
+	./$(SRC_DIR)/pack_shaders.sh shaders_gles20 > $(SRC_DIR)/shaders_gles20.h

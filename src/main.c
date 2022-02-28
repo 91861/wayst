@@ -17,7 +17,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "gfx_gl21.h"
+#include "gfx_gl2.h"
 
 #ifndef NOWL
 #include "wl.h"
@@ -143,16 +143,32 @@ static void* App_load_extension_proc_address(void* self, const char* name)
 
 static void App_create_window(App* self, Pair_uint32_t res, Pair_uint32_t cell_dims)
 {
+#ifndef GFX_GLES
+    gfx_api_t gfx = (gfx_api_t){
+        .type          = GFX_API_GL,
+        .version_major = 2,
+        .version_minor = 1,
+    };
+
+#else
+    gfx_api_t gfx = (gfx_api_t){
+        .type          = GFX_API_GLES,
+        .version_major = 2,
+        .version_minor = 0,
+    };
+
+#endif
+
 #if !defined(NOX) && !defined(NOWL)
     if (!settings.x11_is_default)
-        self->win = Window_new_wayland(res, cell_dims);
+        self->win = Window_new_wayland(res, cell_dims, gfx);
     if (!self->win) {
-        self->win = Window_new_x11(res, cell_dims);
+        self->win = Window_new_x11(res, cell_dims, gfx);
     }
 #elif !defined(NOWL)
     self->win = Window_new_wayland(res, cell_dims);
 #else
-    self->win = Window_new_x11(res, cell_dims);
+    self->win = Window_new_x11(res, cell_dims, gfx);
 #endif
 
     if (!self->win) {
@@ -288,7 +304,7 @@ static void App_init(App* self)
     Vt_init(&self->vt, settings.cols, settings.rows);
     self->vt.master_fd = self->monitor.child_fd;
     self->freetype     = Freetype_new();
-    self->gfx          = Gfx_new_OpenGL21(&self->freetype);
+    self->gfx          = Gfx_new_OpenGL2(&self->freetype);
 
     Pair_uint32_t pixels    = Gfx_pixels(self->gfx, settings.cols, settings.rows);
     Pair_uint32_t cell_dims = { .first  = pixels.first / settings.cols,
@@ -376,8 +392,8 @@ static void App_run(App* self)
                 App_notify_content_change(self);
             } else if (unlikely(TimePoint_is_ms_ahead(TimePoint_now()) >
                                 settings.pty_chunk_timeout_ms)) {
-                // if we take more than a user-defined ammount of time to deal with all the data continue on
-                // and draw the display.
+                // if we take more than a user-defined ammount of time to deal with all the data
+                // continue on and draw the display.
                 break;
             }
 
