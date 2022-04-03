@@ -1497,11 +1497,7 @@ void GfxOpenGL2_init_with_context_activated(Gfx* self)
 
     gl2->solid_fill_shader = Shader_new(solid_fill_vs_src, solid_fill_fs_src, "pos", "clr", NULL);
     gl2->font_shader = Shader_new(font_vs_src, font_fs_src, "coord", "tex", "clr", "bclr", NULL);
-    gl2->font_shader_gray = Shader_new(font_vs_src,
-                                       font_gray_fs_src,
-                                       "coord",
-                                       "tex",
-                                       "clr",
+    gl2->font_shader_gray = Shader_new(font_vs_src, font_gray_fs_src, "coord", "tex", "clr",
 #ifndef GFX_GLES
                                        "bclr",
 #endif
@@ -2229,10 +2225,11 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
 
 #ifdef GFX_GLES
                             glEnable(GL_BLEND);
-                            glBlendFuncSeparate(GL_ONE_MINUS_SRC_ALPHA,
-                                                GL_SRC_ALPHA,
+                            glBlendFuncSeparate(GL_SRC_ALPHA,
+                                                GL_ONE_MINUS_SRC_ALPHA,
                                                 GL_ONE,
                                                 GL_ONE);
+                            glBlendEquation(GL_FUNC_ADD);
 #endif
 
                             switch (page->texture_format) {
@@ -2755,7 +2752,7 @@ static void _GfxOpenGL2_draw_block_cursor(GfxOpenGL2* gfx,
 
 #ifdef GFX_GLES
     glEnable(GL_BLEND);
-    glBlendFuncSeparate(GL_ONE, GL_ONE_MINUS_SRC_COLOR, GL_ONE, GL_ONE);
+    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
 #endif
 
     Shader_use(&gfx->image_shader);

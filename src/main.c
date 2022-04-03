@@ -125,11 +125,11 @@ static void App_set_title(void* self);
 static void App_focus_changed(void* self, bool current_state);
 static void App_action(void* self);
 static void App_framebuffer_damage(void* self);
-static void App_primary_output_changed(void*          self,
-                                       const uint32_t display_index,
-                                       const char*    display_name,
-                                       lcd_filter_e   new_filter,
-                                       uint16_t       physical_dpi);
+static void App_primary_output_changed(void*         self,
+                                       const int32_t display_index,
+                                       const char*   display_name,
+                                       lcd_filter_e  new_filter,
+                                       uint16_t      physical_dpi);
 
 static void* App_load_extension_proc_address(void* self, const char* name)
 {
@@ -166,7 +166,7 @@ static void App_create_window(App* self, Pair_uint32_t res, Pair_uint32_t cell_d
         self->win = Window_new_x11(res, cell_dims, gfx);
     }
 #elif !defined(NOWL)
-    self->win = Window_new_wayland(res, cell_dims);
+    self->win = Window_new_wayland(res, cell_dims, gfx);
 #else
     self->win = Window_new_x11(res, cell_dims, gfx);
 #endif
@@ -1999,11 +1999,11 @@ static void App_framebuffer_damage(void* self)
     Gfx_external_framebuffer_damage(app->gfx);
 }
 
-static void App_primary_output_changed(void*          self,
-                                       const uint32_t display_index,
-                                       const char*    display_name,
-                                       lcd_filter_e   new_filter,
-                                       uint16_t       physical_dpi)
+static void App_primary_output_changed(void*         self,
+                                       const int32_t display_index,
+                                       const char*   display_name,
+                                       lcd_filter_e  new_filter,
+                                       uint16_t      physical_dpi)
 {
     App* app = self;
 
@@ -2019,7 +2019,7 @@ static void App_primary_output_changed(void*          self,
     for (output_prefs_t* i = NULL;
          (i = Vector_iter_output_prefs_t(&settings.output_preferences, i));) {
         if (streq_glob(display_name, i->output_name) ||
-            (display_index && display_index == i->output_index)) {
+            (display_index && (uint32_t)display_index == i->output_index)) {
             no_rule_applies = false;
 
             if (i->lcd_filter != LCD_FILTER_UNDEFINED && get_lcd) {

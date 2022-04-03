@@ -16,7 +16,7 @@
  *      typedef struct {int a, b;} Key;
  *      typedef struct {...} Value;
  *
- *      void Key_hash(Key* k) { return a; }
+ *      size_t Key_hash(Key* k) { return a; }
  *      bool Key_eq(Key* k, Key* o) { return k->a == o->k && k->b == o->b; }
  *      void Value_destroy(Value* v) {...}
  *
@@ -55,8 +55,48 @@
                                                                                                    \
     typedef struct                                                                                 \
     {                                                                                              \
+        MapEntry_##k##_##v*        entry;                                                          \
+        Vector_MapEntry_##k##_##v* _bucket;                                                        \
+    } MapEntryIterator_##k##_##v;                                                                  \
+                                                                                                   \
+    typedef struct                                                                                 \
+    {                                                                                              \
         Vector_Vector_MapEntry_##k##_##v buckets;                                                  \
     } Map_##k##_##v;                                                                               \
+                                                                                                   \
+    static MapEntryIterator_##k##_##v Map_iter_##k##_##v(Map_##k##_##v*             self,          \
+                                                         MapEntryIterator_##k##_##v i)             \
+    {                                                                                              \
+        if (i.entry == NULL) {                                                                     \
+            if (self->buckets.size == 0) {                                                         \
+                return (MapEntryIterator_##k##_##v){ ._bucket = NULL, .entry = NULL };             \
+            }                                                                                      \
+            for (Vector_MapEntry_##k##_##v* bucket = NULL;                                         \
+                 (bucket = Vector_iter_Vector_MapEntry_##k##_##v(&self->buckets, bucket));) {      \
+                MapEntry_##k##_##v* entry = Vector_iter_MapEntry_##k##_##v(bucket, NULL);          \
+                if (entry)                                                                         \
+                    return (MapEntryIterator_##k##_##v){ ._bucket = bucket, .entry = entry };      \
+            }                                                                                      \
+            return (MapEntryIterator_##k##_##v){ ._bucket = NULL, .entry = NULL };                 \
+        } else {                                                                                   \
+            MapEntry_##k##_##v* entry = Vector_iter_MapEntry_##k##_##v(i._bucket, i.entry);        \
+            if (entry) {                                                                           \
+                return (MapEntryIterator_##k##_##v){ ._bucket = i._bucket, .entry = entry };       \
+            }                                                                                      \
+            for (Vector_MapEntry_##k##_##v* bucket = i._bucket;                                    \
+                 (bucket = Vector_iter_Vector_MapEntry_##k##_##v(&self->buckets, bucket));) {      \
+                entry = Vector_iter_MapEntry_##k##_##v(bucket, NULL);                              \
+                if (entry)                                                                         \
+                    return (MapEntryIterator_##k##_##v){ ._bucket = bucket, .entry = entry };      \
+            }                                                                                      \
+            return (MapEntryIterator_##k##_##v){ ._bucket = NULL, .entry = NULL };                 \
+        }                                                                                          \
+    }                                                                                              \
+                                                                                                   \
+    static bool Map_is_empty_##k##_##v(Map_##k##_##v* self)                                        \
+    {                                                                                              \
+        return (Map_iter_##k##_##v(self, (MapEntryIterator_##k##_##v){ 0, 0 })).entry == NULL;     \
+    }                                                                                              \
                                                                                                    \
     static Map_##k##_##v Map_new_##k##_##v(size_t n_buckets)                                       \
     {                                                                                              \
@@ -72,6 +112,16 @@
                                                                   const k*       key)              \
     {                                                                                              \
         return &self->buckets.buf[(self->buckets.size - 1) % hash_func(key)];                      \
+    }                                                                                              \
+                                                                                                   \
+    static size_t Map_count_##k##_##v(Map_##k##_##v* self)                                         \
+    {                                                                                              \
+        size_t ctr = 0;                                                                            \
+        for (MapEntryIterator_##k##_##v i = (MapEntryIterator_##k##_##v){ 0, 0 };                  \
+             (i = Map_iter_##k##_##v(self, i)).entry;) {                                           \
+            ++ctr;                                                                                 \
+        }                                                                                          \
+        return ctr;                                                                                \
     }                                                                                              \
                                                                                                    \
     static v* Map_insert_entry_##k##_##v(Map_##k##_##v* self, MapEntry_##k##_##v entry)            \

@@ -110,7 +110,7 @@ typedef struct WindowBase
 
     lcd_filter_e lcd_filter;
     uint32_t     dpi;
-    uint8_t      output_index;
+    int8_t       output_index;
     char*        output_name;
 
     struct window_callbacks_t
@@ -130,11 +130,11 @@ typedef struct WindowBase
         window_partial_swap_request_t* (*on_redraw_requested)(void* user_data, uint8_t buffer_age);
         void (*on_focus_changed)(void* user_data, bool current_state);
         void (*on_primary_changed)(void* user_data);
-        void (*on_output_changed)(void*          user_data,
-                                  const uint32_t display_index,
-                                  const char*    display_name,
-                                  lcd_filter_e   new_order,
-                                  uint16_t       dpi);
+        void (*on_output_changed)(void*         user_data,
+                                  const int32_t display_index,
+                                  const char*   display_name,
+                                  lcd_filter_e  new_order,
+                                  uint16_t      dpi);
         void (*on_framebuffer_damaged)(void* user_data);
     } callbacks;
 

@@ -1750,7 +1750,7 @@ static void WindowX11_event_selection_notify(WindowBase* self, XSelectionEvent* 
         LOG("X::event::SelectionNotify{ start incremental transfer in }\n");
         XDeleteProperty(globalX11->display, target, clip);
         globalX11->incr_transfer_in.listen_property = clip;
-        globalX11->incr_transfer_in.listen_timeout  = TimePoint_s_from_now(INCR_TIMEOUT_MS);
+        globalX11->incr_transfer_in.listen_timeout  = TimePoint_ms_from_now(INCR_TIMEOUT_MS);
         globalX11->incr_transfer_in.source          = target;
         Vector_clear_char(&globalX11->incr_transfer_in.data);
     } else {
