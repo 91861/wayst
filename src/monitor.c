@@ -120,10 +120,6 @@ void Monitor_fork_new_pty(Monitor* self, uint32_t cols, uint32_t rows)
 
 bool Monitor_wait(Monitor* self, int timeout)
 {
-    if (timeout < 0) {
-        timeout = 0;
-    }
-
     memset(self->pollfds, 0, sizeof(self->pollfds));
     self->pollfds[CHILD_FD_IDX].fd     = self->child_fd;
     self->pollfds[CHILD_FD_IDX].events = POLLIN;

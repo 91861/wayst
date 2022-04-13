@@ -470,10 +470,12 @@ typedef struct
 
 #define TIME_POINT_PTR(tp) (&(time_point_ptr_t){ .payload = tp })
 
-__attribute__((sentinel)) static int32_t
+#define TIMER_MANAGER_NO_ACTION_PENDING INT64_MIN
+
+__attribute__((sentinel)) static int64_t
 TimerManager_get_next_action_ms(TimerManager* self, time_point_ptr_t* external_frame, ...)
 {
-    int32_t   ret              = -1;
+    int64_t   ret              = TIMER_MANAGER_NO_ACTION_PENDING;
     TimePoint next_frame_point = { 0, 0 };
     bool      has_next_frame   = false;
 
@@ -529,9 +531,10 @@ TimerManager_get_next_action_ms(TimerManager* self, time_point_ptr_t* external_f
     va_end(ap);
 
     if (!has_next_frame) {
-        return -1;
+        return TIMER_MANAGER_NO_ACTION_PENDING;
     } else {
-        return TimePoint_is_ms_ahead(next_frame_point);
+        int64_t nfp = TimePoint_is_ms_ahead(next_frame_point);
+        return MAX(0, nfp);
     }
 }
 

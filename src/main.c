@@ -365,12 +365,20 @@ static void App_init(App* self)
 static void App_run(App* self)
 {
     while (!(self->exit || Window_is_closed(self->win))) {
-        int timeout_ms =
-          Vt_get_output_size(&self->vt)
-            ? 0
-            : TimerManager_get_next_action_ms(&self->timer_manager,
+        int timeout_ms = -1;
+        if (Vt_get_output_size(&self->vt)) {
+            timeout_ms = 0;
+        } else {
+            int64_t npa =
+              TimerManager_get_next_action_ms(&self->timer_manager,
                                               TIME_POINT_PTR(self->closest_pending_wakeup),
                                               NULL);
+            if (npa == TIMER_MANAGER_NO_ACTION_PENDING) {
+                timeout_ms = -1;
+            } else {
+                timeout_ms = CLAMP(npa, 0, INT_MAX);
+            }
+        }
 
         Monitor_wait(&self->monitor, timeout_ms);
         self->closest_pending_wakeup = NULL;
