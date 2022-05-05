@@ -1497,7 +1497,11 @@ void GfxOpenGL2_init_with_context_activated(Gfx* self)
 
     gl2->solid_fill_shader = Shader_new(solid_fill_vs_src, solid_fill_fs_src, "pos", "clr", NULL);
     gl2->font_shader = Shader_new(font_vs_src, font_fs_src, "coord", "tex", "clr", "bclr", NULL);
-    gl2->font_shader_gray = Shader_new(font_vs_src, font_gray_fs_src, "coord", "tex", "clr",
+    gl2->font_shader_gray = Shader_new(font_vs_src,
+                                       font_gray_fs_src,
+                                       "coord",
+                                       "tex",
+                                       "clr",
 #ifndef GFX_GLES
                                        "bclr",
 #endif
@@ -2225,11 +2229,7 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
 
 #ifdef GFX_GLES
                             glEnable(GL_BLEND);
-                            glBlendFuncSeparate(GL_SRC_ALPHA,
-                                                GL_ONE_MINUS_SRC_ALPHA,
-                                                GL_ONE,
-                                                GL_ONE);
-                            glBlendEquation(GL_FUNC_ADD);
+                            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 #endif
 
                             switch (page->texture_format) {
@@ -2270,19 +2270,19 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
                                       GL_FALSE,
                                       0,
                                       0);
+
                                     glUniform3f(
                                       pass->args.gl2->font_shader_gray.uniforms[1].location,
                                       ColorRGB_get_float(active_fg_color, 0),
                                       ColorRGB_get_float(active_fg_color, 1),
                                       ColorRGB_get_float(active_fg_color, 2));
-#ifndef GFX_GLES
                                     glUniform4f(
                                       pass->args.gl2->font_shader_gray.uniforms[2].location,
                                       ColorRGBA_get_float(active_bg_color, 0),
                                       ColorRGBA_get_float(active_bg_color, 1),
                                       ColorRGBA_get_float(active_bg_color, 2),
                                       ColorRGBA_get_float(active_bg_color, 3));
-#endif
+
                                     break;
                                 case TEX_FMT_RGBA:
                                     if (pass->args.gl2->bound_resources != BOUND_RESOURCES_IMAGE) {
@@ -2290,12 +2290,14 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
                                         glUseProgram(pass->args.gl2->image_shader.id);
                                     }
 
+#ifndef GFX_GLES
+                                    glDisable(GL_DEPTH_TEST);
+#endif
                                     glEnable(GL_BLEND);
-                                    glBlendFuncSeparate(GL_ONE,
-                                                        GL_ONE_MINUS_SRC_COLOR,
+                                    glBlendFuncSeparate(GL_SRC_ALPHA,
+                                                        GL_ONE_MINUS_SRC_ALPHA,
                                                         GL_ONE,
-                                                        GL_ONE);
-
+                                                        GL_ONE_MINUS_SRC_ALPHA);
                                     glVertexAttribPointer(
                                       pass->args.gl2->image_shader.attribs->location,
                                       4,
@@ -2309,6 +2311,10 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
                             glDrawArrays(QUAD_DRAW_MODE, 0, v->size / 4);
                             ARRAY_BUFFER_ORPHAN(pass->args.gl2->flex_vbo.size);
                             glDisable(GL_BLEND);
+
+#ifndef GFX_GLES
+                            glEnable(GL_DEPTH_TEST);
+#endif
                         }
                         // end drawing
 
@@ -2752,7 +2758,7 @@ static void _GfxOpenGL2_draw_block_cursor(GfxOpenGL2* gfx,
 
 #ifdef GFX_GLES
     glEnable(GL_BLEND);
-    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 #endif
 
     Shader_use(&gfx->image_shader);

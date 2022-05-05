@@ -10,6 +10,7 @@ varying vec2 tex_coord;
 
 void main() {
     vec3 c = texture2D(tex, tex_coord).rgb;
-    gl_FragDepth=1.0- length(c)/length(vec3(1, 1, 1));
-    gl_FragColor=vec4(mix(bclr.rgb, clr, c),bclr.a + (c.r + c.g + c.b)/3.0);
+    float a=length(c)/1.7320508075688772;
+    gl_FragDepth=1.0-a;
+    gl_FragColor=vec4(mix(bclr.rgb, clr, c),bclr.a+a*(1.0-bclr.a));
 }

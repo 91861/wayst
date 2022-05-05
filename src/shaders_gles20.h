@@ -68,8 +68,8 @@ font_fs_src =
 "varying vec2 tex_coord;"
 "void main(){"
 "vec3 c=texture2D(tex,tex_coord).rgb;"
-"float a=length(c)/length(vec3(1,1,1));"
-"gl_FragColor=vec4(mix(bclr.rgb*bclr.a,clr,c),a);"
+"float a=length(c)/1.7320508075688772;"
+"gl_FragColor=vec4(mix(bclr.rgb*bclr.a,clr,c),bclr.a+a*(1.0-bclr.a));"
 "}";
 
 
@@ -78,11 +78,13 @@ font_gray_fs_src =
 "#version 100\n"
 "precision mediump float;"
 "uniform vec3 clr;"
+"uniform vec4 bclr;"
 "uniform sampler2D tex;"
 "varying vec2 tex_coord;"
-"void main(){"
-"float c=texture2D(tex,tex_coord).r;"
-"gl_FragColor=vec4(clr,c);"
+"void main()"
+"{"
+"float s=texture2D(tex,tex_coord).r;"
+"gl_FragColor=vec4(mix(bclr.rgb*bclr.a,clr,s),bclr.a+(1.0/s)*(1.0-bclr.a));"
 "}";
 
 
