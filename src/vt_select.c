@@ -86,7 +86,6 @@ void Vt_select_commit(Vt* self)
         self->selection.begin_char_idx = self->selection.click_begin_char_idx;
         self->selection.end_char_idx   = self->selection.click_begin_char_idx;
         Vt_mark_proxies_damaged_in_selected_region(self);
-        CALL(self->callbacks.on_repaint_required, self->callbacks.user_data);
     }
 }
 
@@ -116,7 +115,6 @@ void Vt_select_set_end_cell(Vt* self, int32_t x, int32_t y)
         size_t lo = MIN(MIN(old_end, self->selection.end_line), self->selection.begin_line);
         size_t hi = MAX(MAX(old_end, self->selection.end_line), self->selection.begin_line);
         Vt_mark_proxies_damaged_in_region(self, hi, lo);
-        CALL(self->callbacks.on_repaint_required, self->callbacks.user_data);
     }
 }
 
@@ -146,7 +144,7 @@ void Vt_select_set_front_cell(Vt* self, int32_t x, int32_t y)
         size_t lo = MIN(MIN(old_front, self->selection.end_line), self->selection.begin_line);
         size_t hi = MAX(MAX(old_front, self->selection.end_line), self->selection.begin_line);
         Vt_mark_proxies_damaged_in_region(self, hi, lo);
-        CALL(self->callbacks.on_repaint_required, self->callbacks.user_data);
+        self->defered_events.repaint = true;
     }
 }
 
@@ -164,7 +162,7 @@ void Vt_select_end(Vt* self)
     Vt_select_clamp_to_buffer(self);
     self->selection.mode = SELECT_MODE_NONE;
     CALL(self->callbacks.on_select_end, self->callbacks.user_data);
-    CALL(self->callbacks.on_repaint_required, self->callbacks.user_data);
+    self->defered_events.repaint = true;
 }
 
 /**

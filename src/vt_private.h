@@ -11,17 +11,18 @@ __attribute__((cold)) char*        pty_string_prettyfy(const char* str, int32_t 
 
 void Vt_output(Vt* self, const char* buf, size_t len);
 
-#define Vt_output_formated(vt, fmt, ...)                                                  \
+#define Vt_output_formated(vt, fmt, ...)                                                           \
     {                                                                                              \
         char _tmp[256];                                                                            \
         int  _len = snprintf(_tmp, sizeof(_tmp), fmt, __VA_ARGS__);                                \
-        Vt_output((vt), _tmp, _len);                                                      \
+        Vt_output((vt), _tmp, _len);                                                               \
     }
 
 static inline void Vt_mark_line_proxy_fully_damaged(Vt* self, VtLine* line)
 {
-    CALL(self->callbacks.on_action_performed, self->callbacks.user_data);
-    line->damage.type = VT_LINE_DAMAGE_FULL;
+    self->defered_events.action_performed = true;
+    self->defered_events.repaint          = true;
+    line->damage.type                     = VT_LINE_DAMAGE_FULL;
 }
 
 static inline void Vt_mark_proxy_fully_damaged(Vt* self, size_t idx)
@@ -31,7 +32,7 @@ static inline void Vt_mark_proxy_fully_damaged(Vt* self, size_t idx)
 
 static inline void Vt_mark_proxy_damaged_cell(Vt* self, size_t line, size_t rune)
 {
-    CALL(self->callbacks.on_action_performed, self->callbacks.user_data);
+    self->defered_events.action_performed = true;
     switch (self->lines.buf[line].damage.type) {
         case VT_LINE_DAMAGE_NONE:
             self->lines.buf[line].damage.type  = VT_LINE_DAMAGE_RANGE;

@@ -697,6 +697,12 @@ typedef struct
     char*         work_dir;
     Vector_DynStr title_stack;
 
+    struct
+    {
+        bool action_performed;
+        bool repaint;
+    } defered_events;
+
     vt_gui_pointer_mode_t gui_pointer_mode;
 
     struct terminal_colors_t

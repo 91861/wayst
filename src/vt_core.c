@@ -859,18 +859,18 @@ static void Vt_soft_reset(Vt* self)
 {
     Vt_alt_buffer_off(self, false);
     Vt_move_cursor(self, 0, 0);
-    self->tabstop              = 8;
-    self->parser.state         = PARSER_STATE_LITERAL;
-    self->charset_g0           = NULL;
-    self->charset_g1           = NULL;
-    self->charset_g2           = NULL;
-    self->charset_g3           = NULL;
-    self->charset_single_shift = NULL;
+    self->tabstop                = 8;
+    self->parser.state           = PARSER_STATE_LITERAL;
+    self->charset_g0             = NULL;
+    self->charset_g1             = NULL;
+    self->charset_g2             = NULL;
+    self->charset_g3             = NULL;
+    self->charset_single_shift   = NULL;
     self->has_last_inserted_rune = false;
-    self->scroll_region_top    = 0;
-    self->scroll_region_bottom = Vt_row(self) - 1;
-    self->scroll_region_left   = 0;
-    self->scroll_region_right  = Vt_col(self) - 1;
+    self->scroll_region_top      = 0;
+    self->scroll_region_bottom   = Vt_row(self) - 1;
+    self->scroll_region_left     = 0;
+    self->scroll_region_right    = Vt_col(self) - 1;
     Vt_uri_break_match(self);
     Vector_clear_DynStr(&self->title_stack);
 }
@@ -1725,7 +1725,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
 
     if (is_csi_sequence_terminated(self->parser.active_sequence.buf,
                                    self->parser.active_sequence.size)) {
-        CALL(self->callbacks.on_repaint_required, self->callbacks.user_data);
+        self->defered_events.repaint = true;
         Vector_push_char(&self->parser.active_sequence, '\0');
         char* seq        = self->parser.active_sequence.buf;
         char  first_char = *seq;
@@ -3025,10 +3025,8 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                         if (!settings.windowops_manip) {
                                             break;
                                         }
-                                        CALL(self->callbacks.on_action_performed,
-                                             self->callbacks.user_data);
-                                        CALL(self->callbacks.on_repaint_required,
-                                             self->callbacks.user_data);
+                                        self->defered_events.action_performed = true;
+                                        self->defered_events.repaint          = true;
                                         break;
 
                                     /* Resize in cells */
@@ -4166,7 +4164,7 @@ static void Vt_handle_OSC(Vt* self, char c)
                     }
                 }
                 Vt_clear_all_proxies(self);
-                CALL(self->callbacks.on_repaint_required, self->callbacks.user_data);
+                self->defered_events.repaint = true;
             } break;
 
             /* 104 ; c Reset Color Number
@@ -4190,7 +4188,7 @@ static void Vt_handle_OSC(Vt* self, char c)
                     }
                 }
                 Vt_clear_all_proxies(self);
-                CALL(self->callbacks.on_repaint_required, self->callbacks.user_data);
+                self->defered_events.repaint = true;
             } break;
 
             /* Modify special color palette */
@@ -4386,7 +4384,7 @@ static void Vt_handle_OSC(Vt* self, char c)
                         ++arg;
                     }
                     Vt_clear_all_proxies(self);
-                    CALL(self->callbacks.on_repaint_required, self->callbacks.user_data);
+                    self->defered_events.repaint = true;
                 }
             } break;
 
@@ -4950,7 +4948,7 @@ static void Vt_overwrite_char_at(Vt* self, size_t column, size_t row, VtRune c)
  * Insert character literal at cursor position, deal with reaching column limit */
 __attribute__((hot)) static void Vt_insert_char_at_cursor(Vt* self, VtRune c)
 {
-    CALL(self->callbacks.on_repaint_required, self->callbacks.user_data);
+    self->defered_events.repaint = true;
 
     if (self->wrap_next && !self->modes.no_wraparound) {
         self->cursor.col                  = 0;
@@ -5119,7 +5117,7 @@ static inline void Vt_move_cursor(Vt* self, uint16_t column, uint16_t rows)
         }
     }
 
-    CALL(self->callbacks.on_repaint_required, self->callbacks.user_data);
+    self->defered_events.repaint = true;
 }
 
 /**
@@ -5944,10 +5942,22 @@ inline void Vt_interpret(Vt* self, char* buf, size_t bytes)
         fprintf(stderr, "pty.read (%3zu) ~> { %s }\n\n", bytes, str);
         free(str);
     }
+
+    memset(&self->defered_events, 0, sizeof(self->defered_events));
+
     for (size_t i = 0; i < bytes; ++i) {
         Vt_handle_char(self, buf[i]);
     }
+
     Vt_shrink_scrollback(self);
+
+    if (self->defered_events.action_performed) {
+        CALL(self->callbacks.on_action_performed, self->callbacks.user_data);
+    }
+
+    if (self->defered_events.repaint) {
+        CALL(self->callbacks.on_repaint_required, self->callbacks.user_data);
+    }
 }
 
 void Vt_get_visible_lines(const Vt* self, VtLine** out_begin, VtLine** out_end)
@@ -5965,8 +5975,8 @@ void Vt_get_visible_lines(const Vt* self, VtLine** out_begin, VtLine** out_end)
  * Start entering unicode codepoint as hex */
 void Vt_start_unicode_input(Vt* self)
 {
-    self->unicode_input.active = true;
-    CALL(self->callbacks.on_repaint_required, self->callbacks.user_data);
+    self->unicode_input.active   = true;
+    self->defered_events.repaint = true;
 }
 
 void Vt_handle_button(void*    _self,

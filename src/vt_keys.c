@@ -104,7 +104,7 @@ static bool Vt_maybe_handle_unicode_input_key(Vt*      self,
             // Escape
             self->unicode_input.buffer.size = 0;
             self->unicode_input.active      = false;
-            CALL(self->callbacks.on_repaint_required, self->callbacks.user_data);
+            self->defered_events.repaint    = true;
         } else if (key == 8) {
             // Backspace
             if (self->unicode_input.buffer.size) {
@@ -113,13 +113,13 @@ static bool Vt_maybe_handle_unicode_input_key(Vt*      self,
                 self->unicode_input.buffer.size = 0;
                 self->unicode_input.active      = false;
             }
-            CALL(self->callbacks.on_repaint_required, self->callbacks.user_data);
+            self->defered_events.repaint = true;
         } else if (isxdigit(key)) {
             if (self->unicode_input.buffer.size > 8) {
                 CALL(self->callbacks.on_visual_bell, self->callbacks.user_data);
             } else {
                 Vector_push_char(&self->unicode_input.buffer, key);
-                CALL(self->callbacks.on_repaint_required, self->callbacks.user_data);
+                self->defered_events.repaint = true;
             }
         } else {
             CALL(self->callbacks.on_visual_bell, self->callbacks.user_data);
