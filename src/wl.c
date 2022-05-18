@@ -1806,6 +1806,11 @@ static void setup_cursor(struct WindowBase* self)
 static void cursor_set(struct wl_cursor* what, uint32_t serial)
 {
     globalWl->serial = serial;
+
+    if (!globalWl->pointer) {
+        return;
+    }
+    
     struct wl_buffer*       b;
     struct wl_cursor_image* img = OR(what, globalWl->cursor_arrow)->images[0];
 
