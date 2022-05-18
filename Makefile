@@ -31,8 +31,8 @@ else ifeq ($(mode),debugoptimized)
 	LDFLAGS = -O2 -g
 	LDLIBS += -lGLU
 else
-	CFLAGS = -std=c18 -MD -O2 -flto -mtune=generic -ffast-math -fshort-enums
-	LDFLAGS = -O2 -flto
+	CFLAGS = -std=c18 -MD -O2 -flto=auto -mtune=generic -ffast-math -fshort-enums
+	LDFLAGS = -O2 -flto=auto
 endif
 
 ifeq ($(libutf8proc),off)
