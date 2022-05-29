@@ -216,6 +216,7 @@ typedef struct
     ColorRGBA bg, bghl, cursor_bg;
     ColorRGB  fg, fghl, cursor_fg;
 
+    bool font_box_drawing_chars;
     bool background_blur;
     bool cursor_color_static_bg, cursor_color_static_fg;
 

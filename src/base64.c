@@ -36,11 +36,6 @@ ptrdiff_t base64_decode(const char* input, char* output)
     return dst - output;
 }
 
-static inline size_t base64_encoded_length(size_t input_size)
-{
-    return ((input_size % 3 ? (input_size += 3 - (input_size % 3)) : input_size) / 3) * 4;
-}
-
 void base64_encode(const char* input, size_t size, char* output)
 {
     static const uint8_t shft_tbl[] = { 3, 2, 1, 0 };
@@ -69,6 +64,18 @@ __attribute__((warn_unused_result)) char* base64_encode_alloc(const char* input,
     size_t output_size = base64_encoded_length(size);
     char*  output      = malloc(output_size + 1);
     base64_encode(input, size, output);
+    if (opt_out_size)
+        *opt_out_size = output_size;
+    return output;
+}
+
+__attribute__((warn_unused_result)) char* base64_decode_alloc(const char* input,
+                                                              size_t      size,
+                                                              size_t*     opt_out_size)
+{
+    size_t output_size = base64_decoded_length(input, size);
+    char*  output      = malloc(output_size + 1);
+    base64_decode(input, output);
     if (opt_out_size)
         *opt_out_size = output_size;
     return output;

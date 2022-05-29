@@ -898,10 +898,700 @@ static GlyphAtlasEntry GlyphAtlasPage_push(GfxOpenGL2*     gfx,
     return retval;
 }
 
+/* Generate a private atlas page with consistant looking block elements from unicode block
+ * "Block Elements" and mirrored equivalents from "Symbols for Legacy Computing". */
+__attribute__((cold)) static void GfxOpenGL2_maybe_generate_boxdraw_atlas_page(GfxOpenGL2* gfx)
+{
+    if (settings.font_box_drawing_chars) {
+        return;
+    }
+
+    uint32_t page_width  = gfx->glyph_width_pixels * 2;
+    uint32_t page_height = gfx->line_height_pixels * 2 + 1;
+
+    GlyphAtlasPage self = (GlyphAtlasPage){
+        .height_px       = page_height,
+        .width_px        = page_width,
+        .texture_id      = 0,
+        .texture_format  = TEX_FMT_MONO,
+        .internal_format = GL_RED,
+        .page_id         = gfx->glyph_atlas.pages.size,
+    };
+
+    self.sx = 2.0 / self.width_px;
+    self.sy = 2.0 / self.height_px;
+
+    float scale_tex_u = 1.0 / self.width_px;
+    float scale_tex_v = 1.0 / self.height_px;
+
+    size_t bs = self.height_px * self.width_px * sizeof(uint8_t) * 4;
+
+    uint8_t* fragments = calloc(1, bs);
+
+#define L_OFFSET(_x, _y) (self.width_px * (_y) + (_x))
+
+    /* |LMD     |
+       |####    |
+       |####    |
+       |####    |
+       |    ####|
+       |    ####|
+       |    ####|
+       |    ####| */
+
+    fragments[L_OFFSET(0, 0)] = 50;  // LIGHT SHADE
+    fragments[L_OFFSET(1, 0)] = 100; // MEDIUM SHADE
+    fragments[L_OFFSET(2, 0)] = 200; // DARK SHADE
+
+    for (int32_t x = 0; x < gfx->glyph_width_pixels; ++x) {
+        for (int32_t y = 1; y < (gfx->line_height_pixels + 1); ++y) {
+            fragments[L_OFFSET(x, y)] = UINT8_MAX;
+        }
+    }
+
+    for (uint32_t x = gfx->glyph_width_pixels; x < (gfx->glyph_width_pixels * 2); ++x) {
+        for (int32_t y = (gfx->line_height_pixels + 1); y < (gfx->line_height_pixels * 2 + 1);
+             ++y) {
+            fragments[L_OFFSET(x, y)] = UINT8_MAX;
+        }
+    }
+
+#undef L_OFFSET
+
+    glActiveTexture(GL_TEXTURE0);
+    glGenTextures(1, &self.texture_id);
+    glBindTexture(GL_TEXTURE_2D, self.texture_id);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D,
+                 0,
+                 GL_RGB,
+                 self.width_px,
+                 self.height_px,
+                 0,
+                 GL_RED,
+                 GL_UNSIGNED_BYTE,
+                 fragments);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+    free(fragments);
+
+    Vector_push_GlyphAtlasPage(&gfx->glyph_atlas.pages, self);
+    GlyphAtlasPage* page = Vector_last_GlyphAtlasPage(&gfx->glyph_atlas.pages);
+    float           t    = gfx->pen_begin_pixels_y;
+
+#define L_TC_U(_u) ((_u)*scale_tex_u)
+#define L_TC_V(_v) ((_v)*scale_tex_v)
+#define L_ENT_PROPS                                                                                \
+    .page_id = page->page_id, .texture_id = self.texture_id, .height = gfx->line_height_pixels,    \
+    .width = gfx->glyph_width_pixels, .top = t, .left = 0
+
+    { /* LIGHT SHADE */
+        Rune rune = (Rune){
+            .code    = 0x2591,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry = (GlyphAtlasEntry){ L_ENT_PROPS,
+                                                   .tex_coords = {
+                                                     L_TC_U(0.5f),
+                                                     L_TC_V(0.5f),
+                                                     L_TC_U(0.5f),
+                                                     L_TC_V(0.5f),
+                                                   } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* MEDIUM SHADE */
+        Rune rune = (Rune){
+            .code    = 0x2592,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry = (GlyphAtlasEntry){ L_ENT_PROPS,
+                                                   .tex_coords = {
+                                                     L_TC_U(1.5f),
+                                                     L_TC_V(0.5f),
+                                                     L_TC_U(1.5f),
+                                                     L_TC_V(0.5f),
+                                                   } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* DARK SHADE */
+        Rune rune = (Rune){
+            .code    = 0x2593,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry = (GlyphAtlasEntry){ L_ENT_PROPS,
+                                                   .tex_coords = {
+                                                     L_TC_U(2.5f),
+                                                     L_TC_V(0.5f),
+                                                     L_TC_U(2.5f),
+                                                     L_TC_V(0.5f),
+                                                   } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* FULL BLOCK */
+        Rune rune = (Rune){
+            .code    = 0x2588,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry = (GlyphAtlasEntry){ L_ENT_PROPS,
+                                                   .tex_coords = {
+                                                     L_TC_U(0.5f),
+                                                     L_TC_V(1.5f),
+                                                     L_TC_U(0.5f),
+                                                     L_TC_V(1.5f),
+                                                   } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* UPPER HALF BLOCK */
+        Rune rune = (Rune){
+            .code    = 0x2580,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry =
+          (GlyphAtlasEntry){ L_ENT_PROPS,
+                             .tex_coords = {
+                               L_TC_U(gfx->glyph_width_pixels),
+                               L_TC_V(1.0f + (gfx->line_height_pixels / 2) * 3),
+                               L_TC_U(gfx->glyph_width_pixels * 2),
+                               L_TC_V(1.0f + (gfx->line_height_pixels / 2)),
+                             } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* LOWER HALF BLOCK */
+        Rune rune = (Rune){
+            .code    = 0x2584,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry =
+          (GlyphAtlasEntry){ L_ENT_PROPS,
+                             .tex_coords = {
+                               L_TC_U(gfx->glyph_width_pixels),
+                               L_TC_V(1.0f + (gfx->line_height_pixels / 2)),
+                               L_TC_U(gfx->glyph_width_pixels * 2),
+                               L_TC_V(1.0f + (gfx->line_height_pixels * 3) / 2),
+                             } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* LOWER ONE QUARTER BLOCK */
+        Rune rune = (Rune){
+            .code    = 0x2582,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry = (GlyphAtlasEntry){ L_ENT_PROPS,
+                                                   .tex_coords = {
+                                                     L_TC_U(gfx->glyph_width_pixels),
+                                                     L_TC_V(1.0f + (gfx->line_height_pixels / 4)),
+                                                     L_TC_U(gfx->glyph_width_pixels * 2),
+                                                     L_TC_V(1.0f + (gfx->line_height_pixels / 4) +
+                                                            gfx->line_height_pixels),
+                                                   } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* UPPER ONE QUARTER BLOCK */
+        Rune rune = (Rune){
+            .code    = 0x1FB82,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry = (GlyphAtlasEntry){ L_ENT_PROPS,
+                                                   .tex_coords = {
+                                                     L_TC_U(gfx->glyph_width_pixels),
+                                                     L_TC_V(1.0f + (gfx->line_height_pixels / 4) +
+                                                            gfx->line_height_pixels),
+                                                     L_TC_U(gfx->glyph_width_pixels * 2),
+                                                     L_TC_V(1.0f + (gfx->line_height_pixels / 4)),
+                                                   } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* LOWER THREE QUARTERS BLOCK */
+        Rune rune = (Rune){
+            .code    = 0x2586,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry =
+          (GlyphAtlasEntry){ L_ENT_PROPS,
+                             .tex_coords = {
+                               L_TC_U(gfx->glyph_width_pixels),
+                               L_TC_V(1.0f + ((int)((float)gfx->line_height_pixels / 4.0f * 3.0f))),
+                               L_TC_U(gfx->glyph_width_pixels * 2),
+                               L_TC_V(1.0f + (int)((float)gfx->line_height_pixels / 4.0f * 3.0f) +
+                                      gfx->line_height_pixels),
+                             } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* UPPER THREE QUARTERS BLOCK */
+        Rune rune = (Rune){
+            .code    = 0x1FB85,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry =
+          (GlyphAtlasEntry){ L_ENT_PROPS,
+                             .tex_coords = {
+                               L_TC_U(gfx->glyph_width_pixels),
+                               L_TC_V(1.0f + (int)((float)gfx->line_height_pixels / 4.0f * 3.0f) +
+                                      gfx->line_height_pixels),
+                               L_TC_U(gfx->glyph_width_pixels * 2),
+                               L_TC_V(1.0f + ((int)((float)gfx->line_height_pixels / 4.0f * 3.0f))),
+                             } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* LOWER ONE EIGTH BLOCK */
+        Rune rune = (Rune){
+            .code    = 0x2581,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry =
+          (GlyphAtlasEntry){ L_ENT_PROPS,
+                             .tex_coords = {
+                               L_TC_U(gfx->glyph_width_pixels),
+                               L_TC_V(1.0f + MAX(1, gfx->line_height_pixels / 8)),
+                               L_TC_U(gfx->glyph_width_pixels * 2),
+                               L_TC_V(1.0f + MAX(1, gfx->line_height_pixels / 8) +
+                                      gfx->line_height_pixels),
+                             } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* UPPER ONE EIGTH BLOCK */
+        Rune rune = (Rune){
+            .code    = 0x2594,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry =
+          (GlyphAtlasEntry){ L_ENT_PROPS,
+                             .tex_coords = {
+                               L_TC_U(gfx->glyph_width_pixels),
+                               L_TC_V(1.0f + MAX(1, gfx->line_height_pixels / 8) +
+                                      gfx->line_height_pixels),
+                               L_TC_U(gfx->glyph_width_pixels * 2),
+                               L_TC_V(1.0f + MAX(1, gfx->line_height_pixels / 8)),
+                             } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* LOWER THREE EIGTHS BLOCK */
+        Rune rune = (Rune){
+            .code    = 0x2583,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry =
+          (GlyphAtlasEntry){ L_ENT_PROPS,
+                             .tex_coords = {
+                               L_TC_U(gfx->glyph_width_pixels),
+                               L_TC_V(1.0f + ((int)((float)gfx->line_height_pixels / 8.0f * 3.0f))),
+                               L_TC_U(gfx->glyph_width_pixels * 2),
+                               L_TC_V(1.0f + ((int)((float)gfx->line_height_pixels / 8.0f * 3.0f)) +
+                                      gfx->line_height_pixels),
+                             } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* UPPER THREE EIGTHS BLOCK */
+        Rune rune = (Rune){
+            .code    = 0x1fb83,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry =
+          (GlyphAtlasEntry){ L_ENT_PROPS,
+                             .tex_coords = {
+                               L_TC_U(gfx->glyph_width_pixels),
+                               L_TC_V(1.0f + ((int)((float)gfx->line_height_pixels / 8.0f * 3.0f)) +
+                                      gfx->line_height_pixels),
+                               L_TC_U(gfx->glyph_width_pixels * 2),
+                               L_TC_V(1.0f + ((int)((float)gfx->line_height_pixels / 8.0f * 3.0f))),
+                             } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* UPPER FIVE EIGTHS BLOCK */
+        Rune rune = (Rune){
+            .code    = 0x2585,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry =
+          (GlyphAtlasEntry){ L_ENT_PROPS,
+                             .tex_coords = {
+                               L_TC_U(gfx->glyph_width_pixels),
+                               L_TC_V(1.0f + ((int)((float)gfx->line_height_pixels / 8.0f * 5.0f))),
+                               L_TC_U(gfx->glyph_width_pixels * 2),
+                               L_TC_V(1.0f + ((int)((float)gfx->line_height_pixels / 8.0f * 5.0f)) +
+                                      gfx->line_height_pixels),
+                             } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* LOWER FIVE EIGTHS BLOCK */
+        Rune rune = (Rune){
+            .code    = 0x1FB84,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry =
+          (GlyphAtlasEntry){ L_ENT_PROPS,
+                             .tex_coords = {
+                               L_TC_U(gfx->glyph_width_pixels),
+                               L_TC_V(1.0f + ((int)((float)gfx->line_height_pixels / 8.0f * 5.0f)) +
+                                      gfx->line_height_pixels),
+                               L_TC_U(gfx->glyph_width_pixels * 2),
+                               L_TC_V(1.0f + ((int)((float)gfx->line_height_pixels / 8.0f * 5.0f))),
+                             } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* UPPER SEVEN EIGHTHS BLOCK */
+        Rune rune = (Rune){
+            .code    = 0x1FB86,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry =
+          (GlyphAtlasEntry){ L_ENT_PROPS,
+                             .tex_coords = {
+                               L_TC_U(gfx->glyph_width_pixels),
+                               L_TC_V(1.0f + ((gfx->line_height_pixels * 7) / 8) +
+                                      gfx->line_height_pixels),
+                               L_TC_U(gfx->glyph_width_pixels * 2),
+                               L_TC_V(1.0f + ((gfx->line_height_pixels * 7) / 8)),
+                             } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* LOWER SEVEN EIGHTHS BLOCK */
+        Rune rune = (Rune){
+            .code    = 0x2587,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry =
+          (GlyphAtlasEntry){ L_ENT_PROPS,
+                             .tex_coords = {
+                               L_TC_U(gfx->glyph_width_pixels),
+                               L_TC_V(1.0f + ((gfx->line_height_pixels * 7) / 8)),
+                               L_TC_U(gfx->glyph_width_pixels * 2),
+                               L_TC_V(1.0f + ((gfx->line_height_pixels * 7) / 8) +
+                                      gfx->line_height_pixels),
+                             } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* LEFT SEVEN EIGHTHS BLOCK */
+        Rune rune = (Rune){
+            .code    = 0x2589,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry =
+          (GlyphAtlasEntry){ L_ENT_PROPS,
+                             .tex_coords = {
+                               L_TC_U((int)((float)gfx->glyph_width_pixels / 8.0f * 1.0f)),
+                               L_TC_V(1.0),
+                               L_TC_U(gfx->glyph_width_pixels +
+                                      (int)((float)gfx->glyph_width_pixels / 8.0f * 1.0f)),
+                               L_TC_V(1.0f + gfx->line_height_pixels),
+                             } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* RIGHT SEVEN EIGHTHS BLOCK */
+        Rune rune = (Rune){
+            .code    = 0x1FB8B,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry =
+          (GlyphAtlasEntry){ L_ENT_PROPS,
+                             .tex_coords = {
+                               L_TC_U(gfx->glyph_width_pixels +
+                                      (int)((float)gfx->glyph_width_pixels / 8.0f * 1.0f)),
+                               L_TC_V(1.0),
+                               L_TC_U((int)((float)gfx->glyph_width_pixels / 8.0f * 1.0f)),
+                               L_TC_V(1.0f + gfx->line_height_pixels),
+                             } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* LEFT THREE QUARTERS BLOCK */
+        Rune rune = (Rune){
+            .code    = 0x258A,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry =
+          (GlyphAtlasEntry){ L_ENT_PROPS,
+                             .tex_coords = {
+                               L_TC_U((int)((float)gfx->glyph_width_pixels / 4.0f)),
+                               L_TC_V(1.0),
+                               L_TC_U(gfx->glyph_width_pixels +
+                                      (int)((float)gfx->glyph_width_pixels / 4.0f)),
+                               L_TC_V(1.0f + gfx->line_height_pixels),
+                             } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* RIGHT THREE QUARTERS BLOCK */
+        Rune rune = (Rune){
+            .code    = 0x1FB8A,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry =
+          (GlyphAtlasEntry){ L_ENT_PROPS,
+                             .tex_coords = {
+                               L_TC_U(gfx->glyph_width_pixels +
+                                      (int)((float)gfx->glyph_width_pixels / 4.0f)),
+                               L_TC_V(1.0),
+                               L_TC_U((int)((float)gfx->glyph_width_pixels / 4.0f)),
+                               L_TC_V(1.0f + gfx->line_height_pixels),
+                             } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* LEFT FIVE EIGHTHS BLOCK */
+        Rune rune = (Rune){
+            .code    = 0x258B,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry =
+          (GlyphAtlasEntry){ L_ENT_PROPS,
+                             .tex_coords = {
+                               L_TC_U((int)((float)gfx->glyph_width_pixels / 8.0f * 3.0f)),
+                               L_TC_V(1.0),
+                               L_TC_U(gfx->glyph_width_pixels +
+                                      (int)((float)gfx->glyph_width_pixels / 8.0f * 3.0f)),
+                               L_TC_V(1.0f + gfx->line_height_pixels),
+                             } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* RIGHT FIVE EIGHTHS BLOCK */
+        Rune rune = (Rune){
+            .code    = 0x1FB89,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry =
+          (GlyphAtlasEntry){ L_ENT_PROPS,
+                             .tex_coords = {
+                               L_TC_U(gfx->glyph_width_pixels +
+                                      (int)((float)gfx->glyph_width_pixels / 8.0f * 3.0f)),
+                               L_TC_V(1.0),
+                               L_TC_U((int)((float)gfx->glyph_width_pixels / 8.0f * 3.0f)),
+                               L_TC_V(1.0f + gfx->line_height_pixels),
+                             } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* LEFT HALF BLOCK */
+        Rune rune = (Rune){
+            .code    = 0x258C,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry =
+          (GlyphAtlasEntry){ L_ENT_PROPS,
+                             .tex_coords = {
+                               L_TC_U(gfx->glyph_width_pixels / 2),
+                               L_TC_V(1.0),
+                               L_TC_U(gfx->glyph_width_pixels + gfx->glyph_width_pixels / 2),
+                               L_TC_V(1.0f + gfx->line_height_pixels),
+                             } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* RIGHT HALF BLOCK */
+        Rune rune = (Rune){
+            .code    = 0x2590,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry =
+          (GlyphAtlasEntry){ L_ENT_PROPS,
+                             .tex_coords = {
+                               L_TC_U(gfx->glyph_width_pixels + gfx->glyph_width_pixels / 2),
+                               L_TC_V(1.0),
+                               L_TC_U(gfx->glyph_width_pixels / 2),
+                               L_TC_V(1.0f + gfx->line_height_pixels),
+                             } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* LEFT THREE EIGHTHS BLOCK */
+        Rune rune = (Rune){
+            .code    = 0x258D,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry =
+          (GlyphAtlasEntry){ L_ENT_PROPS,
+                             .tex_coords = {
+                               L_TC_U((int)((float)gfx->glyph_width_pixels / 8.0f * 5.0f)),
+                               L_TC_V(1.0),
+                               L_TC_U(gfx->glyph_width_pixels +
+                                      (int)((float)gfx->glyph_width_pixels / 8.0f * 5.0f)),
+                               L_TC_V(1.0f + gfx->line_height_pixels),
+                             } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* RIGHT THREE EIGHTHS BLOCK */
+        Rune rune = (Rune){
+            .code    = 0x1FB88,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry =
+          (GlyphAtlasEntry){ L_ENT_PROPS,
+                             .tex_coords = {
+                               L_TC_U(gfx->glyph_width_pixels +
+                                      (int)((float)gfx->glyph_width_pixels / 8.0f * 5.0f)),
+                               L_TC_V(1.0),
+                               L_TC_U((int)((float)gfx->glyph_width_pixels / 8.0f * 5.0f)),
+                               L_TC_V(1.0f + gfx->line_height_pixels),
+                             } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* LEFT ONE QUARTER BLOCK */
+        Rune rune = (Rune){
+            .code    = 0x258E,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry =
+          (GlyphAtlasEntry){ L_ENT_PROPS,
+                             .tex_coords = {
+                               L_TC_U((int)((float)gfx->glyph_width_pixels / 4.0f * 3.0f)),
+                               L_TC_V(1.0),
+                               L_TC_U(gfx->glyph_width_pixels +
+                                      (int)((float)gfx->glyph_width_pixels / 4.0f * 3.0f)),
+                               L_TC_V(1.0f + gfx->line_height_pixels),
+                             } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* RIGHT ONE QUARTER BLOCK */
+        Rune rune = (Rune){
+            .code    = 0x1FB87,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry =
+          (GlyphAtlasEntry){ L_ENT_PROPS,
+                             .tex_coords = {
+                               L_TC_U(gfx->glyph_width_pixels +
+                                      (int)((float)gfx->glyph_width_pixels / 4.0f * 3.0f)),
+                               L_TC_V(1.0),
+                               L_TC_U((int)((float)gfx->glyph_width_pixels / 4.0f * 3.0f)),
+                               L_TC_V(1.0f + gfx->line_height_pixels),
+                             } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* LEFT ONE EIGHTH BLOCK */
+        Rune rune = (Rune){
+            .code    = 0x258E,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry =
+          (GlyphAtlasEntry){ L_ENT_PROPS,
+                             .tex_coords = {
+                               L_TC_U((int)(gfx->glyph_width_pixels / 8.0f * 7.0f)),
+                               L_TC_V(1.0),
+                               L_TC_U(gfx->glyph_width_pixels +
+                                      (int)((float)gfx->glyph_width_pixels / 8.0f * 7.0f)),
+                               L_TC_V(1.0f + gfx->line_height_pixels),
+                             } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* RIGHT ONE EIGHTH BLOCK */
+        Rune rune = (Rune){
+            .code    = 0x2595,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry =
+          (GlyphAtlasEntry){ L_ENT_PROPS,
+                             .tex_coords = {
+                               L_TC_U(gfx->glyph_width_pixels +
+                                      (int)((float)gfx->glyph_width_pixels / 8.0f * 7.0f)),
+                               L_TC_V(1.0),
+                               L_TC_U((int)((float)gfx->glyph_width_pixels / 8.0f * 7.0f)),
+                               L_TC_V(1.0f + gfx->line_height_pixels),
+                             } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+#undef L_TC_U
+#undef L_TC_V
+#undef L_ENT_PROPS
+}
+
 static GlyphAtlas GlyphAtlas_new(uint32_t page_size_px, uint32_t color_page_size_px)
 {
     return (GlyphAtlas){
-        .pages                  = Vector_new_with_capacity_GlyphAtlasPage(3),
+        .pages                  = Vector_new_with_capacity_GlyphAtlasPage(4),
         .entry_map              = Map_new_Rune_GlyphAtlasEntry(1024),
         .current_rgba_page      = NULL,
         .current_rgb_page       = NULL,
@@ -1383,20 +2073,9 @@ __attribute__((cold)) static Texture create_squiggle_texture(uint32_t w,
     return (Texture){ .id = tex, .format = TEX_FMT_RGBA, .w = w / MSAA, .h = h / MSAA };
 }
 
-void GfxOpenGL2_resize(Gfx* self, uint32_t w, uint32_t h)
+static void GfxOpenGL2_update_metrics(Gfx* self)
 {
     GfxOpenGL2* gl2 = gfxOpenGL2(self);
-    GfxOpenGL2_destroy_recycled(gl2);
-
-    gl2->win_w = w;
-    gl2->win_h = h;
-
-    gl2->sx = 2.0f / gl2->win_w;
-    gl2->sy = 2.0f / gl2->win_h;
-
-    gl2->line_height_pixels = gl2->freetype->line_height_pixels + settings.padd_glyph_y;
-    gl2->glyph_width_pixels = gl2->freetype->glyph_width_pixels + settings.padd_glyph_x;
-    gl2->gw                 = gl2->freetype->gw;
 
     FreetypeOutput* output =
       Freetype_load_ascii_glyph(gl2->freetype, settings.center_char, FT_STYLE_REGULAR);
@@ -1416,6 +2095,24 @@ void GfxOpenGL2_resize(Gfx* self, uint32_t w, uint32_t h)
     gl2->line_height       = (float)height * gl2->sy / 64.0;
     gl2->glyph_width       = gl2->glyph_width_pixels * gl2->sx;
     gl2->max_cells_in_line = gl2->win_w / gl2->glyph_width_pixels;
+}
+
+void GfxOpenGL2_resize(Gfx* self, uint32_t w, uint32_t h)
+{
+    GfxOpenGL2* gl2 = gfxOpenGL2(self);
+    GfxOpenGL2_destroy_recycled(gl2);
+
+    gl2->win_w = w;
+    gl2->win_h = h;
+
+    gl2->sx = 2.0f / gl2->win_w;
+    gl2->sy = 2.0f / gl2->win_h;
+
+    gl2->line_height_pixels = gl2->freetype->line_height_pixels + settings.padd_glyph_y;
+    gl2->glyph_width_pixels = gl2->freetype->glyph_width_pixels + settings.padd_glyph_x;
+    gl2->gw                 = gl2->freetype->gw;
+
+    GfxOpenGL2_update_metrics(self);
 
     glViewport(0, 0, gl2->win_w, gl2->win_h);
 
@@ -1563,6 +2260,9 @@ void GfxOpenGL2_init_with_context_activated(Gfx* self)
     uint32_t t_height       = CLAMP(gl2->line_height_pixels / 8.0 + 2, 4, UINT8_MAX);
     gl2->squiggle_texture =
       create_squiggle_texture(t_height * M_PI / 2.0, t_height, CLAMP((t_height / 4), 1, 20));
+
+    GfxOpenGL2_update_metrics(self);
+    GfxOpenGL2_maybe_generate_boxdraw_atlas_page(gl2);
 }
 
 void GfxOpenGL2_reload_font(Gfx* self)
@@ -1575,13 +2275,13 @@ void GfxOpenGL2_reload_font(Gfx* self)
     GlyphAtlas_destroy(&gl2->glyph_atlas);
     gl2->glyph_atlas = GlyphAtlas_new(1024, 512);
 
-    GfxOpenGL2_regenerate_line_quad_vbo(gl2);
-
     // regenerate the squiggle texture
     glDeleteTextures(1, &gl2->squiggle_texture.id);
     uint32_t t_height = CLAMP(gl2->line_height_pixels / 8.0 + 2, 4, UINT8_MAX);
     gl2->squiggle_texture =
       create_squiggle_texture(t_height * M_PI / 2.0, t_height, CLAMP(t_height / 4, 1, 20));
+
+    GfxOpenGL2_maybe_generate_boxdraw_atlas_page(gl2);
 }
 
 static void GfxOpenGL2_regenerate_line_quad_vbo(GfxOpenGL2* gfx)

@@ -817,6 +817,7 @@ static void settings_make_default()
         .font_size_fallback = 0,
         .font_dpi           = 96,
         .general_font_dpi   = 96,
+        .font_box_drawing_chars           = false,
         .font_dpi_calculate_from_phisical = false,
         .lcd_filter         = LCD_FILTER_H_RGB,
         .general_lcd_filter = LCD_FILTER_H_RGB,
@@ -1087,6 +1088,9 @@ static void handle_option(const char opt, const int array_index, const char* val
             case 'H':
                 settings.hold_after_child_process_exit = true;
                 break;
+            case 'b':
+                settings.font_box_drawing_chars = true;
+                break;
         }
         return;
     }
@@ -1202,6 +1206,10 @@ static void handle_option(const char opt, const int array_index, const char* val
 
         case OPT_DEBUG_FONT_IDX:
             settings.debug_font = true;
+            break;
+
+        case OPT_FONT_BOX_CHARS:
+            settings.font_box_drawing_chars = true;
             break;
 
         case OPT_SCROLLBACK_IDX:
@@ -1914,7 +1922,7 @@ static void settings_get_opts(const int argc, char* const* argv, const bool cfg_
         /* print 'invalid option' error message only once */
         opterr   = cfg_file_check;
         int opid = 0;
-        o        = getopt_long(argc, argv, "XctDGFhvloaH", long_options, &opid);
+        o        = getopt_long(argc, argv, "XctDGFhvloaHb", long_options, &opid);
         if (o == -1) {
             break;
         }
