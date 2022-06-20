@@ -21,12 +21,6 @@
 #include <termios.h>
 #include <uchar.h>
 
-#ifndef NOUTF8PROC
-#include <utf8proc.h>
-#else
-#include "wcwidth/wcwidth.h"
-#endif
-
 #include "vt_img_proto.h"
 
 #include "key.h"
@@ -4985,12 +4979,7 @@ __attribute__((hot)) static void Vt_insert_char_at_cursor(Vt* self, VtRune c)
     self->last_inserted = *Vt_cursor_cell(self);
     ++self->cursor.col;
 
-    int width;
-#ifndef NOUTF8PROC
-    width = utf8proc_charwidth(c.rune.code);
-#else
-    width = wcwidth(c.rune.code);
-#endif
+    int width = C_WIDTH(c.rune.code);
 
     if (unlikely(width > 1)) {
         VtRune tmp    = c;

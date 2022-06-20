@@ -12,6 +12,14 @@
 #include <termios.h>
 #endif
 
+#ifndef NOUTF8PROC
+#include <utf8proc.h>
+#define C_WIDTH(c) ((uint8_t)utf8proc_charwidth((char32_t)(c)))
+#else
+#include "wcwidth/wcwidth.h"
+#define C_WIDTH(c) ((uint8_t)wcwidth((c)))
+#endif
+
 #include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -46,6 +54,7 @@ typedef struct
 typedef enum
 {
     VT_IMAGE_PROTO_ACTION_TRANSMIT,
+
     /* The terminal emulator will try to load the image and respond with either
        OK or an error, but it will not replace an existing image with the
        same id, nor will it store the image. */
@@ -143,10 +152,49 @@ typedef struct
     } style : 3;
 } Rune;
 
+/* Get total grapheme cluster width (in cells) */
+static inline uint8_t Rune_width(Rune r)
+{
+    uint8_t base  = C_WIDTH(r.code);
+    uint8_t extra = 0;
+
+    for (int i = 0; i < VT_RUNE_MAX_COMBINE; ++i) {
+        extra = MAX(extra, r.combine[i]);
+    }
+
+    return base + extra;
+}
+
+/* Get total maximum possible visual grapheme cluster width (in cells).
+ (Ambiguous width characters (unicode private use block can be used for custom symbols like
+ icons or logos and differs system to system) may actually use double width glyphs, but should
+ only advance the cursor by a single cell) */
+static inline uint8_t Rune_width_spill(Rune r)
+{
+    uint8_t base  = C_WIDTH(r.code);
+    uint8_t extra = 0;
+
+    for (int i = 0; i < VT_RUNE_MAX_COMBINE; ++i) {
+        extra = MAX(extra, r.combine[i]);
+    }
+
+    return unicode_is_ambiguous_width(r.code) ? (MAX(2, base) + extra) : (base + extra);
+}
+
+static inline bool Rune_is_blank(Rune r)
+{
+    for (int i = 0; i < VT_RUNE_MAX_COMBINE; ++i) {
+        if (r.combine[i])
+            return false;
+    }
+
+    return r.code == ' ';
+}
+
 #define VT_RUNE_PALETTE_INDEX_TERM_DEFAULT (-1)
 
 /**
- * Represents a single character */
+ * Represents a single terminal cell */
 typedef struct
 {
     Rune rune;
@@ -203,9 +251,12 @@ typedef enum
     VT_COMMAND_STATE_COMPLETED,
 } vt_command_state_t;
 
+/* Shell integration command */
 typedef struct
 {
-    char*              command;
+    char* command;
+
+    /* command_end_row = output_rows.first -1 */
     size_t             command_start_row;
     Pair_size_t        output_rows;
     TimeSpan           execution_time;
@@ -310,7 +361,7 @@ DEF_RC_PTR_DA(VtSixelSurface, VtSixelSurface_destroy, void);
 DEF_VECTOR(RcPtr_VtSixelSurface, RcPtr_destroy_VtSixelSurface);
 
 /**
- * represents a clickable range of text linked to a URL */
+ * represents a clickable range of text linked to a URI */
 typedef struct
 {
     char* uri_string;
@@ -412,10 +463,10 @@ typedef struct
     /* This is line was used to invoke a command, contains the prompt/command body or both */
     bool mark_command_invoke : 1;
 
-    /* This is line starts a command output block */
+    /* This line starts a command output block */
     bool mark_command_output_start : 1;
 
-    /* This is line ends a command output block */
+    /* This line ends a command output block */
     bool mark_command_output_end : 1;
 } VtLine;
 
@@ -1081,10 +1132,7 @@ const char* Vt_uri_range_at(Vt*            self,
                             Pair_size_t*   out_rows,
                             Pair_uint16_t* out_columns);
 
-/**
- * Get line under terminal cursor */
 #ifdef DEBUG
-
 static inline VtLine* _ERRVt_cursor_line(int ln, const Vt* self)
 {
     ERR("line count overflow on line %d. line cnt %zu cursor pos %zu\n",
@@ -1104,6 +1152,8 @@ static inline VtLine* _Vt_cursor_line(const Vt* self)
                                            : _Vt_cursor_line((_s)))
 
 #else
+/**
+ * Get line under terminal cursor */
 static inline VtLine* Vt_cursor_line(const Vt* self)
 {
     return &self->lines.buf[self->cursor.row];

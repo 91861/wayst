@@ -2489,24 +2489,28 @@ static void line_render_pass_set_up_subpasses(line_render_pass_t* self)
                 uint16_t range_begin_idx = self->args.damage->front;
                 uint16_t range_end_idx   = self->args.damage->end + 1;
 
-                while (range_begin_idx) {
-                    char32_t this_char = ln->data.buf[range_begin_idx].rune.code;
-                    char32_t prev_char = ln->data.buf[range_begin_idx - 1].rune.code;
+                while (range_begin_idx > 1) {
+                    Rune* this_rune = &ln->data.buf[range_begin_idx - 1].rune;
+                    Rune* prev_rune = &ln->data.buf[range_begin_idx - 2].rune;
 
-                    if (this_char == ' ' && !unicode_is_ambiguous_width(prev_char) &&
-                        wcwidth(prev_char) < 2) {
+                    if (Rune_is_blank(*this_rune) && Rune_width(*prev_rune) < 2) {
                         break;
                     }
                     --range_begin_idx;
                 }
 
-                while (range_end_idx < self->args.vt_line->data.size && range_end_idx) {
-                    char32_t this_char = ln->data.buf[range_end_idx].rune.code;
-                    char32_t prev_char = ln->data.buf[range_end_idx - 1].rune.code;
+                if (range_begin_idx == 1 &&
+                    !Rune_is_blank(ln->data.buf[range_begin_idx - 1].rune) &&
+                    Rune_width(ln->data.buf[0].rune) > 1) {
+                    range_begin_idx = 0;
+                }
 
+                while (range_end_idx < self->args.vt_line->data.size && range_end_idx) {
+                    Rune this_rune = ln->data.buf[range_end_idx].rune;
+                    Rune prev_rune = ln->data.buf[range_end_idx - 1].rune;
                     ++range_end_idx;
-                    if (this_char == ' ' && !unicode_is_ambiguous_width(prev_char) &&
-                        wcwidth(prev_char) < 2) {
+
+                    if (Rune_is_blank(this_rune) && Rune_width_spill(prev_rune) < 2) {
                         break;
                     }
                 }
@@ -2572,7 +2576,6 @@ static void line_render_pass_finalize(line_render_pass_t* self)
         Shader_use(&self->args.gl2->solid_fill_shader);
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
         glUniform4f(self->args.gl2->solid_fill_shader.uniforms[0].location,
                     fabs(sin(debug_tint)),
                     fabs(cos(debug_tint)),
@@ -2586,11 +2589,7 @@ static void line_render_pass_finalize(line_render_pass_t* self)
                               0,
                               0);
 
-#ifdef GFX_GLES
-        glDrawArrays(GL_TRIANGLES, 0, 6);
-#else
-        glDrawArrays(GL_QUADS, 0, 4);
-#endif
+        glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
 
         glDisable(GL_BLEND);
         debug_tint += 0.5f;
@@ -2762,11 +2761,23 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
 
     GLint bg_pixels_begin = subpass->args.render_range_begin * pass->args.gl2->glyph_width_pixels,
           bg_pixels_end;
-    ColorRGBA active_bg_color =
-      pass->args.is_for_cursor ? Vt_rune_cursor_bg(pass->args.vt, NULL) : pass->args.vt->colors.bg;
+
     VtRune* each_rune = pass->args.vt_line->data.buf + subpass->args.render_range_begin;
     VtRune* same_bg_block_begin_rune = each_rune;
     VtRune* cursor_rune              = Vt_cursor_cell(pass->args.vt);
+
+    ColorRGBA active_bg_color;
+    if (pass->args.is_for_cursor) {
+        if (unlikely(Vt_is_cell_selected(pass->args.vt,
+                                         pass->args.vt->cursor.col,
+                                         pass->args.visual_index))) {
+            active_bg_color = pass->args.vt->colors.highlight.bg;
+        } else {
+            active_bg_color = Vt_rune_cursor_bg(pass->args.vt, cursor_rune);
+        }
+    } else {
+        active_bg_color = pass->args.vt->colors.bg;
+    }
 
     for (uint16_t idx_each_rune = subpass->args.render_range_begin;
          idx_each_rune <= subpass->args.render_range_end;) {
@@ -2794,7 +2805,7 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
 
             if (idx_each_rune > 1) {
                 extra_width =
-                  MAX(wcwidth(pass->args.vt_line->data.buf[idx_each_rune - 1].rune.code) - 2, 0);
+                  MAX(Rune_width(pass->args.vt_line->data.buf[idx_each_rune - 1].rune) - 2, 0);
             }
 
             bg_pixels_end = (idx_each_rune + extra_width) * pass->args.gl2->glyph_width_pixels;
@@ -2814,7 +2825,13 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
             );
 
             { // for each block of characters with the same background color
-                ColorRGB      active_fg_color              = settings.fg;
+                ColorRGB active_fg_color = pass->args.is_for_cursor
+                                             ? Vt_rune_final_fg_apply_dim(pass->args.vt,
+                                                                          cursor_rune,
+                                                                          active_bg_color,
+                                                                          pass->args.is_for_cursor)
+                                             : settings.fg;
+
                 const VtRune* same_colors_block_begin_rune = same_bg_block_begin_rune;
 
                 for (const VtRune* each_rune_same_bg = same_bg_block_begin_rune;
@@ -2905,14 +2922,24 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
                                                    ARRAY_SIZE(buf));
                             }
                         }
-                        GLint clip_begin =
-                          (same_colors_block_begin_rune - pass->args.vt_line->data.buf) *
-                          pass->args.gl2->glyph_width_pixels;
-                        GLsizei clip_end = (each_rune_same_bg - pass->args.vt_line->data.buf) *
-                                           pass->args.gl2->glyph_width_pixels;
 
-                        glEnable(GL_SCISSOR_TEST);
-                        glScissor(clip_begin, 0, clip_end - clip_begin, pass->texture_height);
+                        {
+                            GLint clip_begin =
+                              (same_colors_block_begin_rune - pass->args.vt_line->data.buf) *
+                              pass->args.gl2->glyph_width_pixels;
+
+                            ptrdiff_t clip_end_idx =
+                              each_rune_same_bg - pass->args.vt_line->data.buf;
+
+                            uint8_t width =
+                              Rune_width_spill(pass->args.vt_line->data.buf[clip_end_idx].rune);
+
+                            GLsizei clip_end =
+                              (clip_end_idx + width) * pass->args.gl2->glyph_width_pixels;
+
+                            glEnable(GL_SCISSOR_TEST);
+                            glScissor(clip_begin, 0, clip_end - clip_begin, pass->texture_height);
+                        }
 
                         /* Actual drawing */
                         for (size_t i = 0; i < pass->args.gl2->glyph_atlas.pages.size; ++i) {
@@ -3022,19 +3049,22 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
 
                         if (each_rune_same_bg != each_rune) {
                             same_colors_block_begin_rune = each_rune_same_bg;
-                            // update active fg color;
-                            if (settings.highlight_change_fg &&
-                                unlikely(Vt_is_cell_selected(pass->args.vt,
-                                                             each_rune_same_bg -
-                                                               pass->args.vt_line->data.buf,
-                                                             pass->args.visual_index))) {
-                                active_fg_color = pass->args.vt->colors.highlight.fg;
-                            } else {
-                                active_fg_color =
-                                  Vt_rune_final_fg_apply_dim(pass->args.vt,
-                                                             each_rune_same_bg,
-                                                             active_bg_color,
-                                                             pass->args.is_for_cursor);
+
+                            if (!pass->args.is_for_cursor) {
+                                // update active fg color;
+                                if (settings.highlight_change_fg &&
+                                    unlikely(Vt_is_cell_selected(pass->args.vt,
+                                                                 each_rune_same_bg -
+                                                                   pass->args.vt_line->data.buf,
+                                                                 pass->args.visual_index))) {
+                                    active_fg_color = pass->args.vt->colors.highlight.fg;
+                                } else {
+                                    active_fg_color =
+                                      Vt_rune_final_fg_apply_dim(pass->args.vt,
+                                                                 each_rune_same_bg,
+                                                                 active_bg_color,
+                                                                 pass->args.is_for_cursor);
+                                }
                             }
                         }
 
@@ -3050,16 +3080,18 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
 
             if (idx_each_rune != subpass->args.render_range_end) {
                 same_bg_block_begin_rune = each_rune;
-                active_bg_color          = Vt_rune_final_bg(pass->args.vt,
-                                                   each_rune,
-                                                   idx_each_rune,
-                                                   pass->args.visual_index,
-                                                   pass->args.is_for_cursor);
+                if (!pass->args.is_for_cursor) {
+                    active_bg_color = Vt_rune_final_bg(pass->args.vt,
+                                                       each_rune,
+                                                       idx_each_rune,
+                                                       pass->args.visual_index,
+                                                       pass->args.is_for_cursor);
+                }
             }
         } // end if bg color changed
 
         int w = likely(idx_each_rune != subpass->args.render_range_end)
-                  ? wcwidth(pass->args.vt_line->data.buf[idx_each_rune].rune.code)
+                  ? Rune_width(pass->args.vt_line->data.buf[idx_each_rune].rune)
                   : 1;
 
         idx_each_rune = CLAMP(idx_each_rune + (unlikely(w > 1) ? w : 1),
