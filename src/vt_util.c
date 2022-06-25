@@ -271,6 +271,10 @@ ColorRGB Vt_rune_final_fg_apply_dim(const Vt*     self,
                                     ColorRGBA     bg_color,
                                     bool          is_cursor)
 {
+    if (!rune) {
+        return ColorRGB_new_from_blend(settings.fg, ColorRGB_from_RGBA(bg_color), VT_DIM_FACTOR);
+    }
+
     if (unlikely(rune->dim)) {
         return ColorRGB_new_from_blend(is_cursor ? Vt_rune_cursor_fg(self, rune)
                                                  : Vt_rune_fg(self, rune),
@@ -303,8 +307,10 @@ ColorRGBA Vt_rune_final_bg(const Vt* self, const VtRune* rune, int32_t x, int32_
 {
     if (unlikely(Vt_is_cell_selected(self, x, y))) {
         return self->colors.highlight.bg;
-    } else {
+    } else if (rune) {
         return is_cursor ? Vt_rune_cursor_bg(self, rune) : Vt_rune_bg(self, rune);
+    } else {
+        return settings.bg;
     }
 }
 

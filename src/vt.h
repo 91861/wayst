@@ -957,15 +957,15 @@ static ColorRGB Vt_rune_ln_clr(const Vt* self, const VtRune* rune)
 
 static ColorRGB Vt_rune_cursor_fg(const Vt* self, const VtRune* rune)
 {
-    return settings.cursor_color_static_fg
+    return (settings.cursor_color_static_fg || !rune)
              ? settings.cursor_fg
              : ColorRGB_from_RGBA(rune ? Vt_rune_bg(self, rune) : self->colors.bg);
 }
 
 static ColorRGBA Vt_rune_cursor_bg(const Vt* self, const VtRune* rune)
 {
-    return settings.cursor_color_static_bg ? settings.cursor_bg
-                                           : ColorRGBA_from_RGB(Vt_rune_fg(self, rune));
+    return (settings.cursor_color_static_bg || !rune) ? settings.cursor_bg
+                                                      : ColorRGBA_from_RGB(Vt_rune_fg(self, rune));
 }
 
 static ColorRGB Vt_rune_cursor_ln_clr(const Vt* self, const VtRune* rune)

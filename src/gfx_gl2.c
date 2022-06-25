@@ -2794,13 +2794,15 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
             }
         }
 
+#define L_COLOR_BG                                                                                 \
+    Vt_rune_final_bg(pass->args.vt,                                                                \
+                     pass->args.is_for_cursor ? cursor_rune : each_rune,                           \
+                     idx_each_rune,                                                                \
+                     pass->args.visual_index,                                                      \
+                     pass->args.is_for_cursor)
+
         if (idx_each_rune == subpass->args.render_range_end ||
-            !ColorRGBA_eq(Vt_rune_final_bg(pass->args.vt,
-                                           pass->args.is_for_cursor ? cursor_rune : each_rune,
-                                           idx_each_rune,
-                                           pass->args.visual_index,
-                                           pass->args.is_for_cursor),
-                          active_bg_color)) {
+            !ColorRGBA_eq(L_COLOR_BG, active_bg_color)) {
             int32_t extra_width = 0;
 
             if (idx_each_rune > 1) {
@@ -2825,7 +2827,7 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
             );
 
             { // for each block of characters with the same background color
-                ColorRGB active_fg_color = pass->args.is_for_cursor
+                ColorRGB active_fg_color = (pass->args.is_for_cursor && cursor_rune)
                                              ? Vt_rune_final_fg_apply_dim(pass->args.vt,
                                                                           cursor_rune,
                                                                           active_bg_color,
@@ -2932,7 +2934,9 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
                               each_rune_same_bg - pass->args.vt_line->data.buf;
 
                             uint8_t width =
-                              Rune_width_spill(pass->args.vt_line->data.buf[clip_end_idx].rune);
+                              clip_end_idx < (long)pass->args.vt_line->data.size
+                                ? Rune_width_spill(pass->args.vt_line->data.buf[clip_end_idx].rune)
+                                : 0;
 
                             GLsizei clip_end =
                               (clip_end_idx + width) * pass->args.gl2->glyph_width_pixels;
