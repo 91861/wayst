@@ -4,7 +4,7 @@
 
 #include "vt.h"
 
-static void                        Vt_insert_new_line(Vt* self);
+static void                        Vt_line_feed(Vt* self);
 static inline void                 Vt_move_cursor(Vt* self, uint16_t column, uint16_t rows);
 __attribute__((hot, flatten)) void Vt_handle_literal(Vt* self, char c);
 __attribute__((cold)) char*        pty_string_prettyfy(const char* str, int32_t max);
@@ -94,11 +94,13 @@ static inline void Vt_mark_proxies_damaged_in_selected_region(Vt* self)
 static inline void Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(Vt* self)
 {
     if (self->selection.mode) {
-        size_t selection_lo = MIN(self->selection.begin_line, self->selection.end_line);
-        size_t selection_hi = MAX(self->selection.begin_line, self->selection.end_line);
+        size_t selection_lo      = MIN(self->selection.begin_line, self->selection.end_line);
+        size_t selection_hi      = MAX(self->selection.begin_line, self->selection.end_line);
+        size_t scroll_global_top = Vt_get_scroll_region_top(self);
+        size_t scroll_global_bot = Vt_get_scroll_region_bottom(self);
 
-        size_t start = MAX(selection_lo, self->scroll_region_top);
-        size_t end   = MIN(MIN(selection_hi, self->scroll_region_bottom - 1), self->lines.size - 1);
+        size_t start = MAX(selection_lo, scroll_global_top);
+        size_t end   = MIN(MIN(selection_hi, scroll_global_bot - 1), self->lines.size - 1);
         Vt_mark_proxies_damaged_in_region(self, start ? (start - 1) : 0, end + 1);
     }
 }

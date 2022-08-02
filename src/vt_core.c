@@ -1,6 +1,7 @@
 /* See LICENSE for license information. */
 
 #define _GNU_SOURCE
+#include <stdint.h>
 
 #include "settings.h"
 #include "util.h"
@@ -38,7 +39,7 @@ static void          Vt_clear_right(Vt* self);
 static void          Vt_clear_left(Vt* self);
 static inline void   Vt_scroll_out_all_content(Vt* self);
 static void          Vt_empty_line_fill_bg(Vt* self, size_t idx);
-static void          Vt_insert_new_line(Vt* self);
+static void          Vt_line_feed(Vt* self);
 static void          Vt_scroll_up(Vt* self);
 static void          Vt_scroll_down(Vt* self);
 static void          Vt_reverse_line_feed(Vt* self);
@@ -2662,12 +2663,14 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                             } break;
 
                             /* <ESC>[ Ps ; Ps r - Set scroll region (top;bottom) (DECSTBM)
-                             * default: full window */
+                             * default: full window
+                             *
+                             * Also returns cursor to origin (not docummented?).
+                             * If the range is invalid does nothing. */
                             case 'r': {
-                                int32_t top = Vt_top_line(self), bottom = Vt_bottom_line(self);
-
+                                int64_t top = 0, bottom = Vt_row(self) - 1;
                                 if (*seq != 'r') {
-                                    if (sscanf(seq, "%d;%d", &top, &bottom) == EOF) {
+                                    if (sscanf(seq, "%ld;%ld", &top, &bottom) == EOF) {
                                         WRN("invalid CSI(DECSTBM) sequence %s\n", seq);
                                         break;
                                     }
@@ -2678,15 +2681,21 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                     --top;
                                     --bottom;
                                 } else {
-                                    top    = 0;
+                                    top = 0;
+
                                     bottom = CALL(self->callbacks.on_number_of_cells_requested,
                                                   self->callbacks.user_data)
                                                .second -
                                              1;
                                 }
 
-                                self->scroll_region_top    = top;
-                                self->scroll_region_bottom = bottom;
+                                if (bottom > top) {
+                                    Vt_move_cursor(self, 0, 0);
+                                    self->scroll_region_top    = top;
+                                    self->scroll_region_bottom = bottom;
+                                } else {
+                                    WRN("Invalid DECSTBM sequence %s\n", seq);
+                                }
                             } break;
 
                             /* <ESC>[ Ps I - cursor forward ps tabulations (CHT) */
@@ -4017,7 +4026,7 @@ static void Vt_handle_DCS(Vt* self, char c)
                                1);
 
                         for (uint32_t i = 0; i <= (surf.height - 1) / cellsize.second; ++i) {
-                            Vt_insert_new_line(self);
+                            Vt_line_feed(self);
                         }
 
                         if (self->modes.sixel_scrolling) {
@@ -4947,7 +4956,7 @@ __attribute__((hot)) static void Vt_insert_char_at_cursor(Vt* self, VtRune c)
     if (self->wrap_next && !self->modes.no_wraparound) {
         self->cursor.col                  = 0;
         Vt_cursor_line(self)->was_reflown = true;
-        Vt_insert_new_line(self);
+        Vt_line_feed(self);
         Vt_cursor_line(self)->rejoinable = true;
     }
 
@@ -5020,7 +5029,7 @@ static void Vt_insert_char_at_cursor_with_shift(Vt* self, VtRune c)
             --self->cursor.col;
         } else {
             self->cursor.col = 0;
-            Vt_insert_new_line(self);
+            Vt_line_feed(self);
             Vt_cursor_line(self)->rejoinable = true;
         }
     }
@@ -5049,8 +5058,9 @@ static inline void Vt_empty_line_fill_bg(Vt* self, size_t idx)
 
 /**
  * Move one line down or insert a new one, scrolls if region is set */
-static inline void Vt_insert_new_line(Vt* self)
+static inline void Vt_line_feed(Vt* self)
 {
+    int cmove = 1;
     if (unlikely(self->selection.mode)) {
         Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(self);
     }
@@ -5065,12 +5075,13 @@ static inline void Vt_insert_new_line(Vt* self)
         Vt_shift_global_line_index_refs(self, self->cursor.row, 1, true);
 
         Vt_empty_line_fill_bg(self, self->cursor.row);
+        cmove = 0;
     } else if (Vt_bottom_line(self) == self->cursor.row) {
         Vector_push_VtLine(&self->lines, VtLine_new());
         Vt_empty_line_fill_bg(self, self->lines.size - 1);
     }
 
-    Vt_move_cursor(self, self->cursor.col, Vt_cursor_row(self) + 1);
+    Vt_move_cursor(self, self->cursor.col, Vt_cursor_row(self) + cmove);
     Vt_mark_proxy_fully_damaged(self, self->cursor.row);
 }
 
@@ -5270,7 +5281,7 @@ __attribute__((hot, flatten)) void Vt_handle_literal(Vt* self, char c)
                 if (self->modes.new_line_mode) {
                     Vt_carriage_return(self);
                 }
-                Vt_insert_new_line(self);
+                Vt_line_feed(self);
                 break;
 
             case '\e':
@@ -5355,10 +5366,10 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
                 case '\f':
                 case '\v':
                 case '\n':
-                    Vt_insert_new_line(self);
                     if (self->modes.new_line_mode) {
                         Vt_carriage_return(self);
                     }
+                    Vt_line_feed(self);
                     break;
                 default:
                     Vt_handle_CSI(self, c);
@@ -5401,7 +5412,7 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
 
                 /* Line feed (IND) */
                 case 'D':
-                    Vt_insert_new_line(self);
+                    Vt_line_feed(self);
                     self->parser.state = PARSER_STATE_LITERAL;
                     return;
 
@@ -5473,15 +5484,14 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
 
                 /* Save cursor (DECSC) */
                 case '7':
-                    self->saved_active_line = self->cursor.row;
+                    self->saved_active_line = Vt_cursor_row(self);
                     self->saved_cursor_pos  = self->cursor.col;
                     self->parser.state      = PARSER_STATE_LITERAL;
                     return;
 
                 /* Restore cursor (DECRC) */
                 case '8':
-                    self->cursor.row   = self->saved_active_line;
-                    self->cursor.col   = self->saved_cursor_pos;
+                    Vt_move_cursor(self, self->saved_cursor_pos, self->saved_active_line);
                     self->parser.state = PARSER_STATE_LITERAL;
                     return;
 

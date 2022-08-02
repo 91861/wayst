@@ -829,8 +829,13 @@ typedef struct
     size_t   saved_cursor_pos;
     size_t   alt_active_line;
     size_t   saved_active_line;
-    size_t   scroll_region_top;
-    size_t   scroll_region_bottom;
+
+    /* top margin in screen coordinates */
+    uint16_t scroll_region_top;
+
+    /* bottom margin in screen coordinates */
+    uint16_t scroll_region_bottom;
+
     uint16_t scroll_region_left;
     uint16_t scroll_region_right;
 

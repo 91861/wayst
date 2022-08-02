@@ -559,7 +559,7 @@ static const char* Vt_img_proto_display(Vt* self, uint32_t id, vt_image_proto_di
     Vector_push_RcPtr_VtImageSurfaceView(&self->image_views, iv_ptr2);
 
     for (int i = 0; i < image_view.cell_size.second; ++i) {
-        Vt_insert_new_line(self);
+        Vt_line_feed(self);
     }
 
     Vt_move_cursor(self, self->cursor.col + image_view.cell_size.first, Vt_cursor_row(self));
