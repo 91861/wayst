@@ -11,6 +11,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -907,7 +908,7 @@ __attribute__((cold)) static void GfxOpenGL2_maybe_generate_boxdraw_atlas_page(G
     }
 
     uint32_t page_width  = gfx->glyph_width_pixels * 2;
-    uint32_t page_height = gfx->line_height_pixels * 2 + 1;
+    uint32_t page_height = gfx->line_height_pixels * 3 + 1;
 
     GlyphAtlasPage self = (GlyphAtlasPage){
         .height_px       = page_height,
@@ -937,7 +938,11 @@ __attribute__((cold)) static void GfxOpenGL2_maybe_generate_boxdraw_atlas_page(G
        |    ####|
        |    ####|
        |    ####|
-       |    ####| */
+       |    ####|
+       |##  #   |
+       |########|
+       |########|
+       |##  #   | */
 
     fragments[L_OFFSET(0, 0)] = 50;  // LIGHT SHADE
     fragments[L_OFFSET(1, 0)] = 100; // MEDIUM SHADE
@@ -953,6 +958,51 @@ __attribute__((cold)) static void GfxOpenGL2_maybe_generate_boxdraw_atlas_page(G
         for (int32_t y = (gfx->line_height_pixels + 1); y < (gfx->line_height_pixels * 2 + 1);
              ++y) {
             fragments[L_OFFSET(x, y)] = UINT8_MAX;
+        }
+    }
+
+    //  and  from private-use area (filled triangles)
+    const float    sx      = 1.0 / gfx->glyph_width_pixels;
+    const uint32_t yoffset = 1 + gfx->line_height_pixels * 2;
+    const uint32_t xoffset = gfx->glyph_width_pixels;
+    for (uint32_t dx = 0; dx < gfx->glyph_width_pixels; ++dx) {
+        for (int32_t dy = 0; dy <= gfx->line_height_pixels; ++dy) {
+            double x     = ((double)dx + 0.5) / (double)gfx->glyph_width_pixels;
+            double y     = ((double)dy + 0.5) / ((double)gfx->line_height_pixels / 2.0) - 1.0;
+            double sd    = CLAMP((x - fabs(y)), -sx, sx);
+            double value = (sd / (2.0 * sx)) + 0.5;
+            fragments[L_OFFSET(xoffset + dx, yoffset + dy)] = value * UINT8_MAX;
+        }
+    }
+
+    //  and  from private-use area (filled semielipses)
+    for (uint32_t dx = 0; dx < gfx->glyph_width_pixels; ++dx) {
+        for (int32_t dy = 0; dy < gfx->line_height_pixels; ++dy) {
+            int32_t  y_out = 1 + gfx->line_height_pixels * 2 + dy;
+            uint32_t x_out = dx;
+            double   x     = (double)dx / gfx->glyph_width_pixels;
+            double   y     = (double)((double)dy + 0.5 - (double)gfx->line_height_pixels / 2.0) /
+                       gfx->line_height_pixels * 2.0;
+            float   x2 = x * x;
+            float   y2 = y * y;
+            float   w2 = gfx->glyph_width_pixels * gfx->glyph_width_pixels;
+            float   h2 = (gfx->line_height_pixels) * (gfx->line_height_pixels);
+            float   f  = sqrt(x * x + y * y);
+            float   sd = (f - 1.0) * f / (2.0 * sqrt(x2 / w2 + y2 / h2));
+            uint8_t value;
+            if (sd > 0.5) {
+                value = 0;
+            } else if (sd > -0.5) {
+                value = (0.5 - sd) * UINT8_MAX;
+            } else if (sd > +0.5) {
+                value = UINT8_MAX;
+            } else if (sd > -0.5) {
+                value = (sd + 0.5) * UINT8_MAX;
+            } else {
+                value = UINT8_MAX;
+            }
+
+            fragments[L_OFFSET(x_out, y_out)] = value;
         }
     }
 
@@ -983,8 +1033,8 @@ __attribute__((cold)) static void GfxOpenGL2_maybe_generate_boxdraw_atlas_page(G
     GlyphAtlasPage* page = Vector_last_GlyphAtlasPage(&gfx->glyph_atlas.pages);
     float           t    = gfx->pen_begin_pixels_y;
 
-#define L_TC_U(_u) ((_u)*scale_tex_u)
-#define L_TC_V(_v) ((_v)*scale_tex_v)
+#define L_TC_U(_u) (((float)(_u)) * scale_tex_u)
+#define L_TC_V(_v) (((float)(_v)) * scale_tex_v)
 #define L_ENT_PROPS                                                                                \
     .page_id = page->page_id, .texture_id = self.texture_id, .height = gfx->line_height_pixels,    \
     .width = gfx->glyph_width_pixels, .top = t, .left = 0
@@ -1442,9 +1492,9 @@ __attribute__((cold)) static void GfxOpenGL2_maybe_generate_boxdraw_atlas_page(G
         GlyphAtlasEntry entry =
           (GlyphAtlasEntry){ L_ENT_PROPS,
                              .tex_coords = {
-                               L_TC_U(gfx->glyph_width_pixels / 2),
+                               L_TC_U(gfx->glyph_width_pixels / 2.0),
                                L_TC_V(1.0),
-                               L_TC_U(gfx->glyph_width_pixels + gfx->glyph_width_pixels / 2),
+                               L_TC_U(gfx->glyph_width_pixels + gfx->glyph_width_pixels / 2.0),
                                L_TC_V(1.0f + gfx->line_height_pixels),
                              } };
 
@@ -1460,9 +1510,9 @@ __attribute__((cold)) static void GfxOpenGL2_maybe_generate_boxdraw_atlas_page(G
         GlyphAtlasEntry entry =
           (GlyphAtlasEntry){ L_ENT_PROPS,
                              .tex_coords = {
-                               L_TC_U(gfx->glyph_width_pixels + gfx->glyph_width_pixels / 2),
+                               L_TC_U(gfx->glyph_width_pixels + gfx->glyph_width_pixels / 2.0f),
                                L_TC_V(1.0),
-                               L_TC_U(gfx->glyph_width_pixels / 2),
+                               L_TC_U(gfx->glyph_width_pixels / 2.0f),
                                L_TC_V(1.0f + gfx->line_height_pixels),
                              } };
 
@@ -1579,6 +1629,74 @@ __attribute__((cold)) static void GfxOpenGL2_maybe_generate_boxdraw_atlas_page(G
                                L_TC_U((int)((float)gfx->glyph_width_pixels / 8.0f * 7.0f)),
                                L_TC_V(1.0f + gfx->line_height_pixels),
                              } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* left semielipse */
+        Rune rune = (Rune){
+            .code    = 0xE0B6,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry = (GlyphAtlasEntry){ L_ENT_PROPS,
+                                                   .tex_coords = {
+                                                     L_TC_U(gfx->glyph_width_pixels),
+                                                     L_TC_V(1.0 + gfx->line_height_pixels * 2),
+                                                     L_TC_U(0),
+                                                     L_TC_V(1.0 + gfx->line_height_pixels * 3),
+                                                   } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* right semielipse */
+        Rune rune = (Rune){
+            .code    = 0xE0B4,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry = (GlyphAtlasEntry){ L_ENT_PROPS,
+                                                   .tex_coords = {
+                                                     L_TC_U(0),
+                                                     L_TC_V(1.0 + gfx->line_height_pixels * 2),
+                                                     L_TC_U(gfx->glyph_width_pixels),
+                                                     L_TC_V(1.0 + gfx->line_height_pixels * 3),
+                                                   } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* left filled triangle */
+        Rune rune = (Rune){
+            .code    = 0xE0B0,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry = (GlyphAtlasEntry){ L_ENT_PROPS,
+                                                   .tex_coords = {
+                                                     L_TC_U(gfx->glyph_width_pixels * 2.0),
+                                                     L_TC_V(1.0 + gfx->line_height_pixels * 2.0),
+                                                     L_TC_U(gfx->glyph_width_pixels),
+                                                     L_TC_V(1.0 + gfx->line_height_pixels * 3.0),
+                                                   } };
+
+        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
+    }
+
+    { /* right filled triangle */
+        Rune rune = (Rune){
+            .code    = 0xE0B2,
+            .combine = { 0 },
+            .style   = VT_RUNE_UNSTYLED,
+        };
+        GlyphAtlasEntry entry = (GlyphAtlasEntry){ L_ENT_PROPS,
+                                                   .tex_coords = {
+                                                     L_TC_U(gfx->glyph_width_pixels),
+                                                     L_TC_V(1.0 + gfx->line_height_pixels * 2.0),
+                                                     L_TC_U(gfx->glyph_width_pixels * 2.0),
+                                                     L_TC_V(1.0 + gfx->line_height_pixels * 3.0),
+                                                   } };
 
         Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
     }
@@ -2406,11 +2524,11 @@ static line_render_pass_t create_line_render_pass(const line_render_pass_args_t*
                               .texture_height     = args->gl2->line_height_pixels,
                               .n_queued_subpasses = 0,
                               .subpass_args       = {
-                                {
+                                      {
                                         .render_range_begin = 0,
                                         .render_range_end   = 0,
                                 },
-                                {
+                                      {
                                         .render_range_begin = 0,
                                         .render_range_end   = 0,
                                 },
