@@ -4445,8 +4445,9 @@ static void Vt_handle_OSC(Vt* self, char c)
                 WRN("Selection manipulation not implemented\n");
                 break;
 
-            /* Shell integration mark (FinalTerm/iTerm2)
+            /* Shell integration mark (FinalTerm/iTerm2/kitty)
              * https://iterm2.com/documentation-shell-integration.html
+             * https://sw.kovidgoyal.net/kitty/shell-integration
              *
              * [PROMPT]prompt% [COMMAND_START] ls -l
              * [COMMAND_EXECUTED]

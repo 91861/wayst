@@ -32,6 +32,7 @@ Simple terminal emulator for Wayland and X11 with OpenGL rendering and minimal d
 
 ### To-Do
 * Search
+* Ibus support
 * Single instance multi window mode
 * All xterm and vte control sequences
 

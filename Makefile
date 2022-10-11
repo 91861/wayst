@@ -4,6 +4,7 @@ INSTALL_DIR = /usr/local/bin
 ARGS =
 
 SRC_DIR = src
+TST_DIR = tests/unit_tests
 BLD_DIR = build
 TGT_DIR = .
 
@@ -105,7 +106,12 @@ uninstall:
 
 
 .PHONY: shaders
+.PHONY: test
 
 shaders:
 	./$(SRC_DIR)/pack_shaders.sh shaders_gl21 > $(SRC_DIR)/shaders_gl21.h
 	./$(SRC_DIR)/pack_shaders.sh shaders_gles20 > $(SRC_DIR)/shaders_gles20.h
+
+test:
+	@chmod +x $(TST_DIR)/run_tests.sh
+	@./$(TST_DIR)/run_tests.sh
