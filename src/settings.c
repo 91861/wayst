@@ -263,7 +263,7 @@ static void settings_colorscheme_load_preset(uint8_t idx)
     }
     if (colors_default[idx][16]) {
         if (!(settings._explicit_colors_set && settings._explicit_colors_set[0])) {
-            settings.bg = ColorRGBA_from_hex(colors_default[idx][16], NULL);
+            settings.bg = ColorRGBA_from_any(colors_default[idx][16], NULL);
         }
     }
     if (colors_default[idx][17]) {
@@ -1178,7 +1178,7 @@ static void handle_option(const char opt, const int array_index, const char* val
                 settings.no_flash = true;
             } else {
                 bool failed         = false;
-                settings.bell_flash = ColorRGBA_from_hex(value, &failed);
+                settings.bell_flash = ColorRGBA_from_any(value, &failed);
                 if (failed) {
                     L_WARN_BAD_COLOR;
                 }
@@ -1713,7 +1713,7 @@ static void handle_option(const char opt, const int array_index, const char* val
 
         case OPT_BG_COLOR_IDX: {
             bool      failed = false;
-            ColorRGBA parsed = ColorRGBA_from_hex(value, &failed);
+            ColorRGBA parsed = ColorRGBA_from_any(value, &failed);
             if (!failed) {
                 settings.bg                      = parsed;
                 settings._explicit_colors_set[0] = true;
@@ -1724,7 +1724,7 @@ static void handle_option(const char opt, const int array_index, const char* val
 
         case OPT_FG_COLOR_IDX: {
             bool     failed = false;
-            ColorRGB parsed = ColorRGB_from_hex(value, &failed);
+            ColorRGB parsed = ColorRGB_from_any(value, &failed);
             if (!failed) {
                 settings.fg                      = parsed;
                 settings._explicit_colors_set[1] = true;
@@ -1735,7 +1735,7 @@ static void handle_option(const char opt, const int array_index, const char* val
 
         case OPT_H_BG_COLOR_IDX: {
             bool      failed = false;
-            ColorRGBA parsed = ColorRGBA_from_hex(value, &failed);
+            ColorRGBA parsed = ColorRGBA_from_any(value, &failed);
             if (!failed) {
                 settings.bghl = parsed;
             } else {
@@ -1745,7 +1745,7 @@ static void handle_option(const char opt, const int array_index, const char* val
 
         case OPT_H_FG_COLOR_IDX: {
             bool     failed = false;
-            ColorRGB parsed = ColorRGB_from_hex(value, &failed);
+            ColorRGB parsed = ColorRGB_from_any(value, &failed);
             if (!failed) {
                 settings.highlight_change_fg = true;
                 settings.fghl                = parsed;
@@ -1759,7 +1759,7 @@ static void handle_option(const char opt, const int array_index, const char* val
             if (!strcasecmp(value, "none")) {
                 settings.cursor_color_static_fg = false;
             } else {
-                ColorRGB parsed = ColorRGB_from_hex(value, &failed);
+                ColorRGB parsed = ColorRGB_from_any(value, &failed);
                 if (!failed) {
                     settings.cursor_color_static_fg = true;
                     settings.cursor_fg              = parsed;
@@ -1774,7 +1774,7 @@ static void handle_option(const char opt, const int array_index, const char* val
             if (!strcasecmp(value, "none")) {
                 settings.cursor_color_static_bg = false;
             } else {
-                ColorRGBA parsed = ColorRGBA_from_hex(value, &failed);
+                ColorRGBA parsed = ColorRGBA_from_any(value, &failed);
                 if (!failed) {
                     settings.cursor_color_static_bg = true;
                     settings.cursor_bg              = parsed;
@@ -1786,7 +1786,7 @@ static void handle_option(const char opt, const int array_index, const char* val
 
         case OPT_COLOR_0_IDX ... OPT_COLOR_15_IDX: {
             bool     failed = false;
-            ColorRGB parsed = ColorRGB_from_hex(value, &failed);
+            ColorRGB parsed = ColorRGB_from_any(value, &failed);
 
             if (!failed) {
                 settings.colorscheme.color[array_index - OPT_COLOR_0_IDX] = parsed;
@@ -1799,7 +1799,7 @@ static void handle_option(const char opt, const int array_index, const char* val
 
         case OPT_UNFOCUSED_TINT_COLOR: {
             bool      failed = false;
-            ColorRGBA parsed = ColorRGBA_from_hex(value, &failed);
+            ColorRGBA parsed = ColorRGBA_from_any(value, &failed);
             if (!failed) {
                 settings.dim_tint = parsed;
             } else {

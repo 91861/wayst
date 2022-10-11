@@ -130,6 +130,16 @@ ColorRGB ColorRGB_from_xorg_old_rgb_specification(const char* string, bool* fail
 
 ColorRGB ColorRGB_from_xorg_rgb_intensity_specification(const char* string, bool* failed);
 
+ColorRGB ColorRGB_from_rgb_paren(const char* str, bool* failed);
+
+ColorRGBA ColorRGBA_from_rgba_paren(const char* str, bool* failed);
+
+ColorRGB ColorRGB_from_hsl_paren(const char* str, bool* failed);
+
+ColorRGBA ColorRGBA_from_hsla_paren(const char* str, bool* failed);
+
+ColorRGBA ColorRGBA_from_any(const char* string, bool* failed);
+
 /**
  * parse hex string.
  * doesn't need to start with '#' or be NULL-terminated
@@ -193,6 +203,10 @@ static double _hue_to_color_component(double p, double q, double t)
 
 static ColorRGB ColorRGB_new_from_hsl(float h, float s, float l)
 {
+    h = CLAMP(h, 0.0f, 1.0f);
+    s = CLAMP(s, 0.0f, 1.0f);
+    l = CLAMP(l, 0.0f, 1.0f);
+    
     if (s == 0.0) {
         return (ColorRGB){ .r = l, .g = l, .b = l };
     } else {
@@ -204,6 +218,14 @@ static ColorRGB ColorRGB_new_from_hsl(float h, float s, float l)
             .b = _hue_to_color_component(p, q, h - 1.0 / 3.0) * 255,
         };
     }
+}
+
+static ColorRGBA ColorRGBA_new_from_hsla(float h, float s, float l, float a)
+{
+    a = CLAMP(a, 0.0f, 1.0f);
+    ColorRGBA rgba = ColorRGBA_from_RGB(ColorRGB_new_from_hsl(h,s,l));
+    rgba.a = a * UINT8_MAX;
+    return rgba;
 }
 
 static inline float ColorRGB_get_float(const ColorRGB c, const size_t idx)
