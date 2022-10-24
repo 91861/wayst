@@ -140,6 +140,8 @@ ColorRGBA ColorRGBA_from_hsla_paren(const char* str, bool* failed);
 
 ColorRGBA ColorRGBA_from_any(const char* string, bool* failed);
 
+ColorRGB ColorRGB_from_any(const char* string, bool* failed);
+
 /**
  * parse hex string.
  * doesn't need to start with '#' or be NULL-terminated
