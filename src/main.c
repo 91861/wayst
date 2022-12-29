@@ -11,6 +11,7 @@
  *   we can add a SpliterWidget:IWidget nesting other widgets and forwarding mouse/kbd events etc.
  */
 
+#include "window.h"
 #define _GNU_SOURCE
 
 #include <stdio.h>
@@ -104,7 +105,7 @@ typedef struct
     bool        exit;
     bool        cursor_blink_animation_should_play;
     bool        tex_blink_animation_should_play;
-    Cursor      ksm_cursor;
+    VtCursor    ksm_cursor;
     Vector_char ksm_input_buf;
     TimePoint   ksm_last_input;
 } App;
@@ -178,6 +179,8 @@ static void App_create_window(App* self, Pair_uint32_t res, Pair_uint32_t cell_d
 #endif
         );
     }
+
+    Window_set_ui_obj_addr(self->win, &self->ui);
 }
 
 static void App_show_scrollbar(App* self)
@@ -453,6 +456,7 @@ static void App_run(App* self)
     Monitor_kill(&self->monitor);
     Vt_destroy(&self->vt);
     Gfx_destroy(self->gfx);
+    Ui_destroy(&self->ui);
     Freetype_destroy(&self->freetype);
     Window_destroy(self->win);
     TimerManager_destroy(&self->timer_manager);
@@ -489,6 +493,7 @@ static void App_update_padding(App* self)
 {
     Pair_uint32_t chars       = Gfx_get_char_size(self->gfx);
     Pair_uint32_t used_pixels = Gfx_pixels(self->gfx, chars.first, chars.second);
+
     if (settings.padding_center) {
         self->ui.pixel_offset_x = (self->resolution.first - used_pixels.first) / 2;
         self->ui.pixel_offset_y = (self->resolution.second - used_pixels.second) / 2;
@@ -496,8 +501,13 @@ static void App_update_padding(App* self)
         self->ui.pixel_offset_x = 0;
         self->ui.pixel_offset_y = 0;
     }
+
     self->ui.pixel_offset_x += settings.padding;
     self->ui.pixel_offset_y += settings.padding;
+
+    if (Ui_csd_titlebar_visible(&self->ui)) {
+        self->ui.pixel_offset_y += UI_CSD_TITLEBAR_HEIGHT_PX;
+    }
 }
 
 static void App_maybe_resize(App* self, Pair_uint32_t newres)
@@ -519,6 +529,8 @@ static void App_maybe_resize(App* self, Pair_uint32_t newres)
         if (settings.dynamic_title) {
             App_set_title(self);
         }
+
+        Ui_update_CSD_button_layout(&self->ui, self->resolution);
     }
 }
 
@@ -749,344 +761,344 @@ static bool App_handle_keyboard_select_mode_key(App*     self,
         size_t row = self->ksm_cursor.row - Vt_visual_top_line(vt);                                \
         Vt_select_set_end_cell(vt, col, row);                                                      \
         App_notify_content_change(self);                                                           \
-}
+    }
 
-TimePoint now = TimePoint_now();
-TimePoint_subtract(&now, self->ksm_last_input);
-if (TimePoint_get_ms(now) > KSM_CLEAR_INPUT_BUFFER_DELAY_MS) {
-    Vector_clear_char(&self->ksm_input_buf);
-}
-self->ksm_last_input = TimePoint_now();
-
-switch (rawkey) {
-    case KEY(Escape):
-        Vt_select_end(vt);
-        App_notify_content_change(self);
-        App_show_scrollbar(self);
-        self->keyboard_select_mode = false;
-        Vt_visual_scroll_reset(vt);
-        App_update_scrollbar_dims(self);
-        App_action(self);
-        return true;
-
-    case KEY(m):
-        App_notify_content_change(self);
-        App_show_scrollbar(self);
-        self->ksm_cursor.row = Vt_visual_top_line(vt) + Vt_row(vt) / 2;
-        L_UPDATE_SELECT_END
-        App_update_scrollbar_dims(self);
+    TimePoint now = TimePoint_now();
+    TimePoint_subtract(&now, self->ksm_last_input);
+    if (TimePoint_get_ms(now) > KSM_CLEAR_INPUT_BUFFER_DELAY_MS) {
         Vector_clear_char(&self->ksm_input_buf);
-        break;
+    }
+    self->ksm_last_input = TimePoint_now();
 
-    case KEY(Left):
-    case KEY(h):
-        App_notify_content_change(self);
-        App_show_scrollbar(self);
-        if (rawkey == KEY(h) && FLAG_IS_SET(mods, MODIFIER_SHIFT)) {
-            self->ksm_cursor.row = Vt_visual_top_line(vt);
-        } else {
-            int p = App_get_ksm_number(self);
-            for (int i = MAX(1, p); i > 0; --i) {
-                if (self->ksm_cursor.col) {
-                    self->ksm_cursor.col--;
+    switch (rawkey) {
+        case KEY(Escape):
+            Vt_select_end(vt);
+            App_notify_content_change(self);
+            App_show_scrollbar(self);
+            self->keyboard_select_mode = false;
+            Vt_visual_scroll_reset(vt);
+            App_update_scrollbar_dims(self);
+            App_action(self);
+            return true;
+
+        case KEY(m):
+            App_notify_content_change(self);
+            App_show_scrollbar(self);
+            self->ksm_cursor.row = Vt_visual_top_line(vt) + Vt_row(vt) / 2;
+            L_UPDATE_SELECT_END
+            App_update_scrollbar_dims(self);
+            Vector_clear_char(&self->ksm_input_buf);
+            break;
+
+        case KEY(Left):
+        case KEY(h):
+            App_notify_content_change(self);
+            App_show_scrollbar(self);
+            if (rawkey == KEY(h) && FLAG_IS_SET(mods, MODIFIER_SHIFT)) {
+                self->ksm_cursor.row = Vt_visual_top_line(vt);
+            } else {
+                int p = App_get_ksm_number(self);
+                for (int i = MAX(1, p); i > 0; --i) {
+                    if (self->ksm_cursor.col) {
+                        self->ksm_cursor.col--;
+                    }
                 }
             }
-        }
-        L_UPDATE_SELECT_END
-        Vector_clear_char(&self->ksm_input_buf);
-        break;
+            L_UPDATE_SELECT_END
+            Vector_clear_char(&self->ksm_input_buf);
+            break;
 
-    case KEY(Down):
-    case KEY(j):
-        App_notify_content_change(self);
-        App_show_scrollbar(self);
-        int p = App_get_ksm_number(self);
-        for (int i = MAX(1, p); i > 0; --i) {
-            if (self->ksm_cursor.row < Vt_max_line(vt)) {
-                self->ksm_cursor.row++;
+        case KEY(Down):
+        case KEY(j):
+            App_notify_content_change(self);
+            App_show_scrollbar(self);
+            int p = App_get_ksm_number(self);
+            for (int i = MAX(1, p); i > 0; --i) {
+                if (self->ksm_cursor.row < Vt_max_line(vt)) {
+                    self->ksm_cursor.row++;
+                }
+                if (Vt_visual_bottom_line(vt) == Vt_max_line(vt)) {
+                    Vt_visual_scroll_reset(vt);
+                } else {
+                    while (Vt_visual_bottom_line(vt) < self->ksm_cursor.row) {
+                        if (Vt_visual_scroll_down(vt)) {
+                            break;
+                        }
+                    }
+                }
             }
-            if (Vt_visual_bottom_line(vt) == Vt_max_line(vt)) {
-                Vt_visual_scroll_reset(vt);
-            } else {
-                while (Vt_visual_bottom_line(vt) < self->ksm_cursor.row) {
-                    if (Vt_visual_scroll_down(vt)) {
+            App_update_scrollbar_dims(self);
+            L_UPDATE_SELECT_END
+            Vector_clear_char(&self->ksm_input_buf);
+            break;
+
+        case KEY(Up):
+        case KEY(k): {
+            App_notify_content_change(self);
+            App_show_scrollbar(self);
+            int p = App_get_ksm_number(self);
+            for (int i = MAX(1, p); i > 0; --i) {
+                if (self->ksm_cursor.row) {
+                    self->ksm_cursor.row--;
+                }
+                while (Vt_visual_top_line(vt) > self->ksm_cursor.row) {
+                    if (Vt_visual_scroll_up(vt)) {
                         break;
                     }
                 }
             }
-        }
-        App_update_scrollbar_dims(self);
-        L_UPDATE_SELECT_END
-        Vector_clear_char(&self->ksm_input_buf);
-        break;
+            App_update_scrollbar_dims(self);
+            L_UPDATE_SELECT_END
+            Vector_clear_char(&self->ksm_input_buf);
+        } break;
 
-    case KEY(Up):
-    case KEY(k): {
-        App_notify_content_change(self);
-        App_show_scrollbar(self);
-        int p = App_get_ksm_number(self);
-        for (int i = MAX(1, p); i > 0; --i) {
-            if (self->ksm_cursor.row) {
-                self->ksm_cursor.row--;
+        case KEY(Right):
+        case KEY(l):
+            App_notify_content_change(self);
+            App_show_scrollbar(self);
+            if (rawkey == KEY(l) && FLAG_IS_SET(mods, MODIFIER_SHIFT)) {
+                self->ksm_cursor.row = Vt_visual_bottom_line(vt);
+            } else {
+                int p = App_get_ksm_number(self);
+                for (int i = MAX(1, p); i > 0; --i) {
+                    if (self->ksm_cursor.col + 1 < Vt_col(vt)) {
+                        self->ksm_cursor.col++;
+                    }
+                }
             }
-            while (Vt_visual_top_line(vt) > self->ksm_cursor.row) {
-                if (Vt_visual_scroll_up(vt)) {
+            App_update_scrollbar_dims(self);
+            L_UPDATE_SELECT_END
+            Vector_clear_char(&self->ksm_input_buf);
+            break;
+
+        case KEY(y):
+        case KEY(c): {
+            if (self->vt.selection.mode) {
+                Vector_char txt = Vt_select_region_to_string(vt);
+                if (txt.size) {
+                    App_clipboard_send(self, txt.buf);
+                    Vt_select_end(vt);
+                } else {
+                    Vector_destroy_char(&txt);
+                }
+            }
+        }
+            Vector_clear_char(&self->ksm_input_buf);
+            break;
+
+        case KEY(Return): {
+            if (FLAG_IS_SET(mods, MODIFIER_CONTROL)) {
+                const char* uri = Vt_uri_at(vt, self->ksm_cursor.col, self->ksm_cursor.row);
+                if (uri) {
+                    App_handle_uri(self, uri);
                     break;
                 }
             }
         }
-        App_update_scrollbar_dims(self);
-        L_UPDATE_SELECT_END
-        Vector_clear_char(&self->ksm_input_buf);
-    } break;
-
-    case KEY(Right):
-    case KEY(l):
-        App_notify_content_change(self);
-        App_show_scrollbar(self);
-        if (rawkey == KEY(l) && FLAG_IS_SET(mods, MODIFIER_SHIFT)) {
-            self->ksm_cursor.row = Vt_visual_bottom_line(vt);
-        } else {
-            int p = App_get_ksm_number(self);
-            for (int i = MAX(1, p); i > 0; --i) {
-                if (self->ksm_cursor.col + 1 < Vt_col(vt)) {
-                    self->ksm_cursor.col++;
-                }
-            }
-        }
-        App_update_scrollbar_dims(self);
-        L_UPDATE_SELECT_END
-        Vector_clear_char(&self->ksm_input_buf);
-        break;
-
-    case KEY(y):
-    case KEY(c): {
-        if (self->vt.selection.mode) {
-            Vector_char txt = Vt_select_region_to_string(vt);
-            if (txt.size) {
-                App_clipboard_send(self, txt.buf);
+            /* fallthrough */
+        case KEY(v):
+            if (self->vt.selection.mode) {
                 Vt_select_end(vt);
-            } else {
-                Vector_destroy_char(&txt);
-            }
-        }
-    }
-        Vector_clear_char(&self->ksm_input_buf);
-        break;
-
-    case KEY(Return): {
-        if (FLAG_IS_SET(mods, MODIFIER_CONTROL)) {
-            const char* uri = Vt_uri_at(vt, self->ksm_cursor.col, self->ksm_cursor.row);
-            if (uri) {
-                App_handle_uri(self, uri);
                 break;
             }
-        }
-    }
-        /* fallthrough */
-    case KEY(v):
-        if (self->vt.selection.mode) {
-            Vt_select_end(vt);
+            size_t          col = self->ksm_cursor.col;
+            size_t          row = (self->ksm_cursor.row) - Vt_visual_top_line(vt);
+            enum SelectMode mode =
+              FLAG_IS_SET(mods, MODIFIER_CONTROL) ? SELECT_MODE_BOX : SELECT_MODE_NORMAL;
+            Vt_select_init_cell(vt, mode, col, row);
+            Vt_select_commit(vt);
+            Vector_clear_char(&self->ksm_input_buf);
             break;
-        }
-        size_t          col = self->ksm_cursor.col;
-        size_t          row = (self->ksm_cursor.row) - Vt_visual_top_line(vt);
-        enum SelectMode mode =
-          FLAG_IS_SET(mods, MODIFIER_CONTROL) ? SELECT_MODE_BOX : SELECT_MODE_NORMAL;
-        Vt_select_init_cell(vt, mode, col, row);
-        Vt_select_commit(vt);
-        Vector_clear_char(&self->ksm_input_buf);
-        break;
 
-    case KEY(b): {
-        // jump back by word
-        int p = App_get_ksm_number(self);
-        for (int i = MAX(1, p); i > 0; --i) {
-            for (bool initial = true;; initial = false) {
-                if (!self->ksm_cursor.col) {
-                    break;
-                }
-                VtRune* rune      = Vt_at(vt, self->ksm_cursor.col, self->ksm_cursor.row);
-                VtRune* prev_rune = Vt_at(vt, self->ksm_cursor.col - 1, self->ksm_cursor.row);
-                if (!rune || !prev_rune) {
-                    break;
-                }
-                char32_t code = rune->rune.code, prev_code = prev_rune->rune.code;
+        case KEY(b): {
+            // jump back by word
+            int p = App_get_ksm_number(self);
+            for (int i = MAX(1, p); i > 0; --i) {
+                for (bool initial = true;; initial = false) {
+                    if (!self->ksm_cursor.col) {
+                        break;
+                    }
+                    VtRune* rune      = Vt_at(vt, self->ksm_cursor.col, self->ksm_cursor.row);
+                    VtRune* prev_rune = Vt_at(vt, self->ksm_cursor.col - 1, self->ksm_cursor.row);
+                    if (!rune || !prev_rune) {
+                        break;
+                    }
+                    char32_t code = rune->rune.code, prev_code = prev_rune->rune.code;
 
-                if (isblank(prev_code) && !isblank(code) && !initial) {
-                    break;
-                }
-                --self->ksm_cursor.col;
-                App_notify_content_change(self);
-                App_show_scrollbar(self);
-            }
-        }
-        App_update_scrollbar_dims(self);
-        L_UPDATE_SELECT_END
-        Vector_clear_char(&self->ksm_input_buf);
-    } break;
-
-    case KEY(w): {
-        // jump forward to next word
-        int p = App_get_ksm_number(self);
-        for (int i = MAX(1, p); i > 0; --i) {
-            for (bool initial = true;; initial = false) {
-                VtLine* row_line = Vt_line_at(vt, self->ksm_cursor.row);
-                if (self->ksm_cursor.col + 1 >= Vt_col(vt) || !row_line ||
-                    self->ksm_cursor.col + 1 >= (uint16_t)row_line->data.size) {
-                    break;
-                }
-                VtRune* rune      = Vt_at(vt, self->ksm_cursor.col, self->ksm_cursor.row);
-                VtRune* next_rune = Vt_at(vt, self->ksm_cursor.col + 1, self->ksm_cursor.row);
-                if (!rune || !next_rune) {
-                    break;
-                }
-                char32_t code = rune->rune.code, next_code = next_rune->rune.code;
-                ++self->ksm_cursor.col;
-                App_notify_content_change(self);
-                App_show_scrollbar(self);
-                if ((isblank(code) && !isblank(next_code)) && !initial) {
-                    break;
+                    if (isblank(prev_code) && !isblank(code) && !initial) {
+                        break;
+                    }
+                    --self->ksm_cursor.col;
+                    App_notify_content_change(self);
+                    App_show_scrollbar(self);
                 }
             }
-        }
-        App_update_scrollbar_dims(self);
-        L_UPDATE_SELECT_END
-        Vector_clear_char(&self->ksm_input_buf);
-    } break;
+            App_update_scrollbar_dims(self);
+            L_UPDATE_SELECT_END
+            Vector_clear_char(&self->ksm_input_buf);
+        } break;
 
-    case KEY(e): {
-        // jump to end of word
-        int p = App_get_ksm_number(self);
-        for (int i = MAX(1, p); i > 0; --i) {
-            for (bool initial = true;; initial = false) {
-                VtLine* row_line = Vt_line_at(vt, self->ksm_cursor.row);
-                if (self->ksm_cursor.col + 1 >= Vt_col(vt) || !row_line ||
-                    self->ksm_cursor.col + 1 >= (uint16_t)row_line->data.size) {
-                    break;
-                }
-                VtRune*  rune      = Vt_at(vt, self->ksm_cursor.col, self->ksm_cursor.row);
-                VtRune*  next_rune = Vt_at(vt, self->ksm_cursor.col + 1, self->ksm_cursor.row);
-                char32_t code = rune->rune.code, next_code = next_rune->rune.code;
-                if ((isblank(next_code) && !isblank(code)) && !initial) {
-                    break;
-                }
-                ++self->ksm_cursor.col;
-            }
-        }
-        App_notify_content_change(self);
-        App_show_scrollbar(self);
-        App_update_scrollbar_dims(self);
-        L_UPDATE_SELECT_END
-        Vector_clear_char(&self->ksm_input_buf);
-    } break;
-
-    case KEY(g):
-        if (FLAG_IS_SET(mods, MODIFIER_SHIFT)) {
-            Vt_visual_scroll_to(vt, Vt_top_line(vt));
-            self->ksm_cursor.row = Vt_max_line(vt);
-        } else if (self->ksm_input_buf.size) {
-            size_t tgt           = App_get_ksm_number(self);
-            tgt                  = MIN(tgt, Vt_max_line(vt));
-            self->ksm_cursor.row = tgt;
-            if (tgt > Vt_visual_top_line(vt) && tgt < Vt_visual_bottom_line(vt)) {
-            } else {
-                if (tgt < Vt_visual_top_line(vt)) {
-                    Vt_visual_scroll_to(vt, tgt);
-                } else {
-                    Vt_visual_scroll_to(vt, tgt - Vt_row(vt) + 1);
+        case KEY(w): {
+            // jump forward to next word
+            int p = App_get_ksm_number(self);
+            for (int i = MAX(1, p); i > 0; --i) {
+                for (bool initial = true;; initial = false) {
+                    VtLine* row_line = Vt_line_at(vt, self->ksm_cursor.row);
+                    if (self->ksm_cursor.col + 1 >= Vt_col(vt) || !row_line ||
+                        self->ksm_cursor.col + 1 >= (uint16_t)row_line->data.size) {
+                        break;
+                    }
+                    VtRune* rune      = Vt_at(vt, self->ksm_cursor.col, self->ksm_cursor.row);
+                    VtRune* next_rune = Vt_at(vt, self->ksm_cursor.col + 1, self->ksm_cursor.row);
+                    if (!rune || !next_rune) {
+                        break;
+                    }
+                    char32_t code = rune->rune.code, next_code = next_rune->rune.code;
+                    ++self->ksm_cursor.col;
+                    App_notify_content_change(self);
+                    App_show_scrollbar(self);
+                    if ((isblank(code) && !isblank(next_code)) && !initial) {
+                        break;
+                    }
                 }
             }
-        } else {
-            Vt_visual_scroll_to(vt, 0);
-            self->ksm_cursor.row = 0;
-        }
-        App_notify_content_change(self);
-        App_show_scrollbar(self);
-        App_update_scrollbar_dims(self);
-        L_UPDATE_SELECT_END
-        break;
+            App_update_scrollbar_dims(self);
+            L_UPDATE_SELECT_END
+            Vector_clear_char(&self->ksm_input_buf);
+        } break;
 
-    case KEY(0):
-        if (self->ksm_input_buf.size) {
-            if (self->ksm_input_buf.size < 3) {
-                Vector_push_char(&self->ksm_input_buf, '0');
+        case KEY(e): {
+            // jump to end of word
+            int p = App_get_ksm_number(self);
+            for (int i = MAX(1, p); i > 0; --i) {
+                for (bool initial = true;; initial = false) {
+                    VtLine* row_line = Vt_line_at(vt, self->ksm_cursor.row);
+                    if (self->ksm_cursor.col + 1 >= Vt_col(vt) || !row_line ||
+                        self->ksm_cursor.col + 1 >= (uint16_t)row_line->data.size) {
+                        break;
+                    }
+                    VtRune*  rune      = Vt_at(vt, self->ksm_cursor.col, self->ksm_cursor.row);
+                    VtRune*  next_rune = Vt_at(vt, self->ksm_cursor.col + 1, self->ksm_cursor.row);
+                    char32_t code = rune->rune.code, next_code = next_rune->rune.code;
+                    if ((isblank(next_code) && !isblank(code)) && !initial) {
+                        break;
+                    }
+                    ++self->ksm_cursor.col;
+                }
             }
-        } else {
             App_notify_content_change(self);
             App_show_scrollbar(self);
             App_update_scrollbar_dims(self);
-            self->ksm_cursor.col = 0;
             L_UPDATE_SELECT_END
-        }
-        break;
+            Vector_clear_char(&self->ksm_input_buf);
+        } break;
 
-    case KEY(4):
-        // jump to last non-blank in line
-        if (FLAG_IS_SET(mods, MODIFIER_SHIFT)) {
+        case KEY(g):
+            if (FLAG_IS_SET(mods, MODIFIER_SHIFT)) {
+                Vt_visual_scroll_to(vt, Vt_top_line(vt));
+                self->ksm_cursor.row = Vt_max_line(vt);
+            } else if (self->ksm_input_buf.size) {
+                size_t tgt           = App_get_ksm_number(self);
+                tgt                  = MIN(tgt, Vt_max_line(vt));
+                self->ksm_cursor.row = tgt;
+                if (tgt > Vt_visual_top_line(vt) && tgt < Vt_visual_bottom_line(vt)) {
+                } else {
+                    if (tgt < Vt_visual_top_line(vt)) {
+                        Vt_visual_scroll_to(vt, tgt);
+                    } else {
+                        Vt_visual_scroll_to(vt, tgt - Vt_row(vt) + 1);
+                    }
+                }
+            } else {
+                Vt_visual_scroll_to(vt, 0);
+                self->ksm_cursor.row = 0;
+            }
             App_notify_content_change(self);
             App_show_scrollbar(self);
-            size_t last          = Vt_line_at(vt, self->ksm_cursor.row)->data.size - 1;
-            self->ksm_cursor.col = 0;
-            for (size_t i = last; i > 0; --i) {
-                VtRune* rune = Vt_at(vt, i, self->ksm_cursor.row);
-                if (!rune) {
-                    break;
-                }
-                char32_t code = rune->rune.code;
-                if (code != VT_RUNE_CODE_WIDE_TAIL && !isblank(code)) {
-                    self->ksm_cursor.col = i;
-                    break;
-                }
-            }
+            App_update_scrollbar_dims(self);
             L_UPDATE_SELECT_END
-        } else {
-            if (self->ksm_input_buf.size < 3) {
-                Vector_push_char(&self->ksm_input_buf, '4');
-            }
-        }
-        App_update_scrollbar_dims(self);
-        break;
+            break;
 
-        // TODO: case KEY(5):
-
-    case KEY(6):
-        // jump to first non-blank in line
-        if (FLAG_IS_SET(mods, MODIFIER_SHIFT)) {
-            App_notify_content_change(self);
-            App_show_scrollbar(self);
-            self->ksm_cursor.col = 0;
-            for (size_t i = 0; i < Vt_line_at(vt, self->ksm_cursor.row)->data.size; ++i) {
-                VtRune* rune = Vt_at(vt, i, self->ksm_cursor.row);
-                if (!rune) {
-                    break;
+        case KEY(0):
+            if (self->ksm_input_buf.size) {
+                if (self->ksm_input_buf.size < 3) {
+                    Vector_push_char(&self->ksm_input_buf, '0');
                 }
-                char32_t code = rune->rune.code;
-                if (code != VT_RUNE_CODE_WIDE_TAIL && !isblank(code)) {
-                    self->ksm_cursor.col = i;
-                    break;
+            } else {
+                App_notify_content_change(self);
+                App_show_scrollbar(self);
+                App_update_scrollbar_dims(self);
+                self->ksm_cursor.col = 0;
+                L_UPDATE_SELECT_END
+            }
+            break;
+
+        case KEY(4):
+            // jump to last non-blank in line
+            if (FLAG_IS_SET(mods, MODIFIER_SHIFT)) {
+                App_notify_content_change(self);
+                App_show_scrollbar(self);
+                size_t last          = Vt_line_at(vt, self->ksm_cursor.row)->data.size - 1;
+                self->ksm_cursor.col = 0;
+                for (size_t i = last; i > 0; --i) {
+                    VtRune* rune = Vt_at(vt, i, self->ksm_cursor.row);
+                    if (!rune) {
+                        break;
+                    }
+                    char32_t code = rune->rune.code;
+                    if (code != VT_RUNE_CODE_WIDE_TAIL && !isblank(code)) {
+                        self->ksm_cursor.col = i;
+                        break;
+                    }
+                }
+                L_UPDATE_SELECT_END
+            } else {
+                if (self->ksm_input_buf.size < 3) {
+                    Vector_push_char(&self->ksm_input_buf, '4');
                 }
             }
-            L_UPDATE_SELECT_END
-        } else {
-            if (self->ksm_input_buf.size < 3) {
-                Vector_push_char(&self->ksm_input_buf, '6');
+            App_update_scrollbar_dims(self);
+            break;
+
+            // TODO: case KEY(5):
+
+        case KEY(6):
+            // jump to first non-blank in line
+            if (FLAG_IS_SET(mods, MODIFIER_SHIFT)) {
+                App_notify_content_change(self);
+                App_show_scrollbar(self);
+                self->ksm_cursor.col = 0;
+                for (size_t i = 0; i < Vt_line_at(vt, self->ksm_cursor.row)->data.size; ++i) {
+                    VtRune* rune = Vt_at(vt, i, self->ksm_cursor.row);
+                    if (!rune) {
+                        break;
+                    }
+                    char32_t code = rune->rune.code;
+                    if (code != VT_RUNE_CODE_WIDE_TAIL && !isblank(code)) {
+                        self->ksm_cursor.col = i;
+                        break;
+                    }
+                }
+                L_UPDATE_SELECT_END
+            } else {
+                if (self->ksm_input_buf.size < 3) {
+                    Vector_push_char(&self->ksm_input_buf, '6');
+                }
             }
-        }
-        App_update_scrollbar_dims(self);
-        break;
+            App_update_scrollbar_dims(self);
+            break;
 
-    case KEY(1)... KEY(3):
-    case KEY(5):
-    case KEY(7)... KEY(9):
-        if (self->ksm_input_buf.size < 3) {
-            Vector_push_char(&self->ksm_input_buf, rawkey - KEY(1) + '1');
-        }
-        break;
+        case KEY(1)... KEY(3):
+        case KEY(5):
+        case KEY(7)... KEY(9):
+            if (self->ksm_input_buf.size < 3) {
+                Vector_push_char(&self->ksm_input_buf, rawkey - KEY(1) + '1');
+            }
+            break;
 
-    default:;
-}
-return false;
+        default:;
+    }
+    return false;
 }
 
 static void App_do_extern_pipe(App* self)
@@ -1570,8 +1582,8 @@ static bool App_consume_drag(App* self, uint32_t button, int32_t x, int32_t y)
 
     self->click_count = 0;
     if (button == MOUSE_BTN_LEFT && self->selection_dragging_left) {
-        int32_t high_bound = self->ui.pixel_offset_y + AUTOSCROLL_TRIGGER_MARGIN_PX;
-        int32_t low_bound  = self->win->h - self->ui.pixel_offset_y - AUTOSCROLL_TRIGGER_MARGIN_PX;
+        int32_t high_bound = AUTOSCROLL_TRIGGER_MARGIN_PX;
+        int32_t low_bound  = self->win->h - AUTOSCROLL_TRIGGER_MARGIN_PX;
 
         LOG("App::select_drag{ %d x %d ", x, y);
 
@@ -1766,10 +1778,42 @@ static void App_button_handler(void*    self,
                                int32_t  ammount,
                                uint32_t mods)
 {
-    App* app             = self;
-    Vt*  vt              = &app->vt;
-    x                    = CLAMP(x - app->ui.pixel_offset_x, 0, (int32_t)app->resolution.first);
-    y                    = CLAMP(y - app->ui.pixel_offset_y, 0, (int32_t)app->resolution.second);
+    App* app = self;
+    Vt*  vt  = &app->vt;
+
+    if (Ui_csd_titlebar_visible(&app->ui)) {
+        if (y < UI_CSD_TITLEBAR_HEIGHT_PX && !state && button == MOUSE_BTN_MIDDLE) {
+            Window_set_minimized(app->win);
+            return;
+        }
+
+        if (y < UI_CSD_TITLEBAR_HEIGHT_PX && !state && button == MOUSE_BTN_LEFT) {
+            ui_csd_titlebar_button_info_t* btn = Ui_csd_get_hovered_button(&app->ui, x, y);
+            if (btn) {
+                switch (btn->type) {
+                    case UI_CSD_TITLEBAR_BUTTON_CLOSE:
+                        app->exit = true;
+                        break;
+                    case UI_CSD_TITLEBAR_BUTTON_MINIMIZE:
+                        Window_set_minimized(app->win);
+                        break;
+                    case UI_CSD_TITLEBAR_BUTTON_MAXIMIZE:
+                        Window_set_maximized(app->win, !Window_is_maximized(app->win));
+                        break;
+                    default:;
+                }
+                return;
+            }
+        }
+
+        if (y <= UI_CSD_TITLEBAR_HEIGHT_PX) {
+            return;
+        }
+    }
+
+    x = CLAMP(x - app->ui.pixel_offset_x, 0, (int32_t)app->resolution.first);
+    y = CLAMP(y - app->ui.pixel_offset_y, 0, (int32_t)app->resolution.second);
+
     bool vt_wants_scroll = Vt_reports_mouse(&app->vt);
     app->autoselect      = false;
 
@@ -1852,19 +1896,43 @@ static void App_update_hover(App* self, int32_t x, int32_t y)
 static void App_motion_handler(void* self, uint32_t button, int32_t x, int32_t y)
 {
     App* app = self;
-    x        = CLAMP(x - app->ui.pixel_offset_x, 0, (int32_t)app->resolution.first);
-    y        = CLAMP(y - app->ui.pixel_offset_y, 0, (int32_t)app->resolution.second);
+
+    if (Ui_csd_titlebar_visible(&app->ui)) {
+        bool csd_changed = false;
+        for (ui_csd_titlebar_button_info_t* i = NULL;
+             (i = Vector_iter_ui_csd_titlebar_button_info_t(&app->ui.csd.buttons, i));) {
+            if (i->highlight_fraction != 0.0f) {
+                csd_changed = true;
+            }
+            i->highlight_fraction = 0.0f;
+        }
+
+        if (y < UI_CSD_TITLEBAR_HEIGHT_PX) {
+            ui_csd_titlebar_button_info_t* btn = Ui_csd_get_hovered_button(&app->ui, x, y);
+            if (btn) {
+                if (btn->highlight_fraction != 1.0f) {
+                    csd_changed = true;
+                }
+                btn->highlight_fraction = 1.0f;
+            }
+        }
+        if (csd_changed) {
+            app->ui.csd.damage = true;
+            App_notify_content_change(self);
+        }
+    }
+
+    x = CLAMP(x - app->ui.pixel_offset_x, 0, (int32_t)app->resolution.first);
+    y = CLAMP(y - app->ui.pixel_offset_y, 0, (int32_t)app->resolution.second);
 
     if (button) {
         if (!App_scrollbar_consume_drag(self, button, x, y) &&
             !App_consume_drag(self, button, x, y)) {
             Vt_handle_motion(&app->vt, button, x, y);
         }
-
         if (app->selection_dragging_left) {
             Window_set_pointer_style(app->win, MOUSE_POINTER_I_BEAM);
         }
-
     } else {
         App_update_hover(app, x, y);
     }
@@ -1930,6 +1998,47 @@ static void App_focus_changed(void* self, bool current_state)
     }
 }
 
+static void App_csd_changed(void* self, ui_csd_mode_e csd_mode)
+{
+    App* app = self;
+
+    if (!app->ui.csd.buttons.buf) {
+        app->ui.csd.buttons = Vector_new_with_capacity_ui_csd_titlebar_button_info_t(1);
+        Vector_pushv_ui_csd_titlebar_button_info_t(
+          &app->ui.csd.buttons,
+          (ui_csd_titlebar_button_info_t[]){
+            { UI_CSD_TITLEBAR_BUTTON_CLOSE, 0.0f, { 0, 0 } },
+            { UI_CSD_TITLEBAR_BUTTON_MAXIMIZE, 0.0f, { 0, 0 } },
+            { UI_CSD_TITLEBAR_BUTTON_MINIMIZE, 0.0f, { 0, 0 } },
+          },
+          3);
+
+        Ui_update_CSD_button_layout(&app->ui, app->resolution);
+    }
+
+    if (app->ui.csd.mode == csd_mode) {
+        return;
+    }
+
+    switch (csd_mode) {
+        case UI_CSD_MODE_FLOATING:
+            app->ui.csd.mode = UI_CSD_MODE_FLOATING;
+            // TODO: update titlebar text
+            break;
+
+        case UI_CSD_MODE_TILED:
+        case UI_CSD_MODE_NONE:
+            app->ui.csd.mode = csd_mode;
+            break;
+    }
+
+    App_update_padding(app);
+
+    app->ui.csd.mode   = csd_mode;
+    app->ui.csd.damage = true;
+    App_framebuffer_damage(self);
+}
+
 static bool App_minimized(void* self)
 {
     App* app = self;
@@ -1958,6 +2067,7 @@ static void App_set_window_size(void* self, int32_t width, int32_t height)
 {
     App* app = self;
     Window_resize(app->win, width, height);
+    Ui_update_CSD_button_layout(&app->ui, app->resolution);
     App_framebuffer_damage(self);
 }
 
@@ -2119,6 +2229,7 @@ static void App_set_callbacks(App* self)
     self->win->callbacks.on_primary_changed      = App_primary_claimed_by_other_client;
     self->win->callbacks.on_output_changed       = App_primary_output_changed;
     self->win->callbacks.on_framebuffer_damaged  = App_framebuffer_damage;
+    self->win->callbacks.on_csd_style_changed    = App_csd_changed;
 
     self->gfx->callbacks.user_data                   = self;
     self->gfx->callbacks.load_extension_proc_address = App_load_extension_proc_address;

@@ -6,6 +6,7 @@
 
 #include "x.h"
 #include "rcptr.h"
+#include "util.h"
 #include "vector.h"
 
 #include <X11/Xlib.h>
@@ -105,8 +106,6 @@ static int32_t convert_modifier_mask(unsigned int x_mask)
     return mods;
 }
 
-DEF_VECTOR(char, NULL);
-
 static WindowStatic* global;
 
 #define globalX11       ((GlobalX11*)&global->extend_data)
@@ -120,6 +119,11 @@ static WindowBase* WindowX11_new(uint32_t  w,
                                  gfx_api_t gfx_api);
 static void        WindowX11_set_fullscreen(WindowBase* self, bool fullscreen);
 static void        WindowX11_set_maximized(WindowBase* self, bool maximized);
+static void        WindowX11_set_minimized(WindowBase* self)
+{
+    /* only required for CSDs */
+    ASSERT_UNREACHABLE;
+}
 static void        WindowX11_resize(WindowBase* self, uint32_t w, uint32_t h);
 static void        WindowX11_events(WindowBase* self);
 static void        WindowX11_set_wm_name(WindowBase* self, const char* title, const char* name);
@@ -150,6 +154,7 @@ static void WindowX11_update_monitor_placement(WindowBase* self);
 static struct IWindow window_interface_x11 = {
     .set_fullscreen         = WindowX11_set_fullscreen,
     .set_maximized          = WindowX11_set_maximized,
+    .set_minimized          = WindowX11_set_minimized,
     .resize                 = WindowX11_resize,
     .events                 = WindowX11_events,
     .process_timers         = WindowX11_process_timers,
@@ -1037,10 +1042,10 @@ static inline void WindowX11_fullscreen_change_state(WindowBase* self, const lon
                               .message_type = globalX11->atom.wm_state,
                               .format       = 32,
                               .data.l       = {
-                                [0] = (long)arg,
-                                [1] = globalX11->atom.wm_fullscreen,
-                                [2] = 0,
-                                [3] = 0,
+                                      [0] = (long)arg,
+                                      [1] = globalX11->atom.wm_fullscreen,
+                                      [2] = 0,
+                                      [3] = 0,
                               } };
 
     XSendEvent(globalX11->display,
@@ -1086,10 +1091,10 @@ static void WindowX11_set_maximized(WindowBase* self, bool maximized)
                               .message_type = globalX11->atom.wm_state,
                               .format       = 32,
                               .data.l       = {
-                                [0] = maximized ? _NET_WM_STATE_ADD : _NET_WM_STATE_REMOVE,
-                                [1] = globalX11->atom.wm_max_vert,
-                                [2] = 0,
-                                [3] = 0,
+                                      [0] = maximized ? _NET_WM_STATE_ADD : _NET_WM_STATE_REMOVE,
+                                      [1] = globalX11->atom.wm_max_vert,
+                                      [2] = 0,
+                                      [3] = 0,
                               } };
 
     XSendEvent(globalX11->display,
@@ -2054,6 +2059,8 @@ static void WindowX11_set_pointer_style(WindowBase* self, enum MousePointerStyle
             XDefineCursor(globalX11->display, windowX11(self)->window, globalX11->cursor_hand);
             FLAG_UNSET(self->state_flags, WINDOW_IS_POINTER_HIDDEN);
             break;
+        default:
+            ASSERT_UNREACHABLE;
     }
 }
 

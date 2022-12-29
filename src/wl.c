@@ -5,12 +5,15 @@
 #define _GNU_SOURCE
 
 #include "wl.h"
+#include "colors.h"
 #include "map.h"
 #include "timing.h"
+#include "ui.h"
 #include "util.h"
 #include "vector.h"
 
 #include <assert.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,6 +22,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <time.h>
 #include <unistd.h>
 
 #include <wayland-client-protocol.h>
@@ -45,8 +49,6 @@
 #define WL_FALLBACK_TGT_FRAME_TIME_MS 16
 
 static WindowStatic* global;
-
-DEF_VECTOR(char, NULL);
 
 #define globalWl       ((GlobalWl*)&global->extend_data)
 #define windowWl(base) ((WindowWl*)&base->extend_data)
@@ -93,6 +95,7 @@ static void                           cursor_set(struct wl_cursor* what, uint32_
 static void                           WindowWl_dont_swap_buffers(struct WindowBase* self);
 struct WindowBase*                    WindowWl_new(uint32_t w, uint32_t h, gfx_api_t gfx_api_t);
 static void       WindowWl_set_maximized(struct WindowBase* self, bool maximized);
+static void       WindowWl_set_minimized(struct WindowBase* self);
 static void       WindowWl_set_fullscreen(struct WindowBase* self, bool fullscreen);
 static void       WindowWl_resize(struct WindowBase* self, uint32_t w, uint32_t h);
 static void       WindowWl_events(struct WindowBase* self);
@@ -122,6 +125,7 @@ static int64_t    WindowWl_get_window_id(struct WindowBase* self)
 static struct IWindow window_interface_wayland = {
     .set_fullscreen         = WindowWl_set_fullscreen,
     .set_maximized          = WindowWl_set_maximized,
+    .set_minimized          = WindowWl_set_minimized,
     .resize                 = WindowWl_resize,
     .events                 = WindowWl_events,
     .process_timers         = WindowWl_process_timers,
@@ -166,9 +170,10 @@ typedef struct
     struct wl_display*  display;
     struct wl_registry* registry;
 
-    struct wl_compositor* compositor;
-    struct wl_output*     output;
-    struct wl_shm*        shm;
+    struct wl_compositor*    compositor;
+    struct wl_subcompositor* subcompositor;
+    struct wl_output*        output;
+    struct wl_shm*           shm;
 
     struct wl_data_device_manager* data_device_manager;
     struct wl_data_device*         data_device;
@@ -183,8 +188,11 @@ typedef struct
     struct wl_seat*     seat;
     struct wl_pointer*  pointer;
     struct wl_keyboard* keyboard;
+    struct wl_surface*  moused_over_surface;
 
-    struct wl_cursor *      cursor_arrow, *cursor_beam, *cursor_hand;
+    struct wl_cursor *cursor_arrow, *cursor_beam, *cursor_hand, *cursor_bottom_left_corner,
+      *cursor_bottom_right_corner, *cursor_top_left_corner, *cursor_top_right_corner,
+      *cursor_top_side, *cursor_bottom_side, *cursor_left_side, *cursor_right_side, *cursor_move;
     struct wl_cursor_theme* cursor_theme;
     struct wl_surface*      cursor_surface;
 
@@ -251,6 +259,22 @@ static bool wl_output_ptr_eq(const wl_output_ptr* k, const wl_output_ptr* o)
 
 DEF_MAP(wl_output_ptr, WlOutputInfo, wl_output_ptr_hash, wl_output_ptr_eq, WlOutputInfo_destroy);
 
+typedef enum
+{
+    /* Not using CSDs at all */
+    CSD_MODE_DISABLED = 0,
+
+    /* Full decorations for a normal floating window */
+    CSD_MODE_FLOATING,
+
+    /* The window is in a tiled/maximized state. Shadow is not shown and the titlebar has sharp
+       corners */
+    CSD_MODE_TILED,
+
+    /* Enabled but completely hidden (eg. window fullscreen) */
+    CSD_MODE_HIDDEN,
+} csd_mode_e;
+
 typedef struct
 {
     struct wl_surface*       surface;
@@ -279,13 +303,20 @@ typedef struct
 
     bool got_discrete_axis_event;
 
-    // Vector_WlOutputInfo outputs;
-
     Map_wl_output_ptr_WlOutputInfo outputs;
 
     WlOutputInfo* active_output;
     bool          draw_next_frame;
 
+    struct window_wl_csd_t
+    {
+        csd_mode_e            mode;
+        struct wl_surface*    shadow_surf;
+        struct wl_subsurface* shadow_subsurf;
+        bool                  dragging_button;
+        uint32_t              dragging_button_serial;
+        bool                  window_move_inhibits_focus_loss;
+    } csd;
 } WindowWl;
 
 /* in order of preference */
@@ -448,6 +479,371 @@ void primary_selection_offer_handle_offer(void*                                 
     } else {
         LOG(" - REJECTED(\'%s\' is preffered) }\n", ACCEPTED_MIMES[w->new_primary_offer_mime_idx]);
     }
+}
+
+static void wl_buffer_release(void* data, struct wl_buffer* buffer)
+{
+    wl_buffer_destroy(buffer);
+}
+
+static const struct wl_buffer_listener buffer_listener = {
+    .release = wl_buffer_release,
+};
+
+void randname(char* buf)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    long r = ts.tv_nsec;
+
+    for (int i = 0; i < 6; ++i) {
+        buf[i] = 'A' + (r & 15) + (r & 16) * 2;
+        r >>= 5;
+    }
+}
+
+int create_shm_file()
+{
+    int retries = 32;
+
+    do {
+        char name[] = "/wl_shm-XXXXXX";
+        randname(name + sizeof(name) - 7);
+        --retries;
+        int fd = shm_open(name, O_RDWR | O_CREAT | O_EXCL, 0600);
+
+        if (fd >= 0) {
+            shm_unlink(name);
+            return fd;
+        }
+    } while (retries > 0 && errno == EEXIST);
+
+    return -1;
+}
+
+int allocate_shm_file(size_t size)
+{
+    int fd = create_shm_file();
+    if (fd < 0) {
+        return -1;
+    }
+
+    int ret = 0;
+
+    do {
+        ret = ftruncate(fd, size);
+    } while (ret < 0 && errno == EINTR);
+
+    if (ret < 0) {
+        close(fd);
+        return -1;
+    }
+
+    return fd;
+}
+
+typedef ColorRGBA (*SoftwareShaderFn)(size_t x, size_t y, void* opts);
+
+ColorRGBA SoftwareShaderFn_fill(size_t x, size_t y, void* ColorRGBA_ptr_fill_color)
+{
+    return *((ColorRGBA*)ColorRGBA_ptr_fill_color);
+}
+
+typedef struct
+{
+    Pair_uint32_t window_surface_size;
+    uint16_t      window_surface_radius;
+    uint16_t      shadow_margin;
+    uint16_t      shadow_offset;
+} SoftwareShaderFn_window_shadow_args_t;
+
+ColorRGBA SoftwareShaderFn_window_shadow(size_t x, size_t y, void* args)
+{
+    SoftwareShaderFn_window_shadow_args_t* a = (SoftwareShaderFn_window_shadow_args_t*)args;
+
+    uint16_t shadow_radius = a->shadow_margin + a->window_surface_radius;
+
+    Pair_uint32_t shadow_srf_dims =
+      (Pair_uint32_t){ .first  = a->shadow_margin * 2 + a->window_surface_size.first,
+                       .second = a->shadow_margin * 2 + a->window_surface_size.second };
+
+    double       alpha         = 0.0;
+    Pair_int32_t this_fragment = { x, y };
+
+#define L_DISTANCE(p1, p2) sqrt(pow(p1.first - p2.first, 2.0) + pow(p1.second - p2.second, 2.0))
+
+    bool h_front = x < shadow_radius;
+    bool v_front = y < (size_t)(shadow_radius - a->shadow_offset);
+    bool h_end =
+      x >= a->shadow_margin + a->window_surface_size.first - (shadow_radius - a->shadow_margin);
+    bool v_end = y >= a->shadow_margin - a->shadow_offset + a->window_surface_size.second -
+                        (shadow_radius - a->shadow_margin);
+    bool h_middle = !h_front && !h_end;
+    bool v_middle = !v_front && !v_end;
+
+    bool left   = x < a->shadow_margin;
+    bool right  = x >= (shadow_srf_dims.first - a->shadow_margin);
+    bool top    = y < (size_t)(a->shadow_margin - a->shadow_offset);
+    bool bottom = y >= (a->shadow_margin - a->shadow_offset) + a->window_surface_size.second;
+
+    bool left_titlebar_corner = !top && !left && x < shadow_radius && y < shadow_radius;
+    bool right_titlebar_corner =
+      !top && !right && x >= (shadow_srf_dims.first - shadow_radius) && y < shadow_radius;
+
+    if (!left && !right && !top && !bottom) {
+        if (left_titlebar_corner) {
+            Pair_int32_t center = { shadow_radius, shadow_radius };
+            double       dist   = L_DISTANCE(center, this_fragment);
+            alpha               = (shadow_radius - MIN(dist, shadow_radius)) / a->shadow_margin;
+        } else if (right_titlebar_corner) {
+            Pair_int32_t center = { shadow_srf_dims.first - shadow_radius, shadow_radius };
+            double       dist   = L_DISTANCE(center, this_fragment);
+            alpha               = (shadow_radius - MIN(dist, shadow_radius)) / a->shadow_margin;
+        } else {
+            alpha = 0.0;
+        }
+    } else {
+        if (h_front && v_middle) /* left edge */ {
+            alpha = (double)x / a->shadow_margin;
+        } else if (h_end && v_middle) /* right edge */ {
+            alpha = ((double)shadow_srf_dims.first - x) / a->shadow_margin;
+        } else if (v_front && h_middle) /* top edge */ {
+            alpha = (double)y / a->shadow_margin;
+        } else if (v_end && h_middle) /* bottom edge */ {
+            alpha = ((double)shadow_srf_dims.second - y) / a->shadow_margin;
+        } else if (h_front && v_front) /* top left corner */ {
+            Pair_int32_t center = { shadow_radius, shadow_radius };
+            double       dist   = L_DISTANCE(center, this_fragment);
+            alpha               = (shadow_radius - MIN(dist, shadow_radius)) / a->shadow_margin;
+        } else if (h_end && v_front) /* top right corner */ {
+            Pair_int32_t center = { shadow_srf_dims.first - shadow_radius, shadow_radius };
+            double       dist   = L_DISTANCE(center, this_fragment);
+            alpha               = (shadow_radius - MIN(dist, shadow_radius)) / a->shadow_margin;
+        } else if (h_front && v_end) /* bottom left */ {
+            Pair_int32_t center = { shadow_radius, shadow_srf_dims.second - shadow_radius };
+            double       dist   = L_DISTANCE(center, this_fragment);
+            alpha               = (shadow_radius - MIN(dist, shadow_radius)) / a->shadow_margin;
+        } else if (h_end && v_end) /* bottom right */ {
+            Pair_int32_t center = { shadow_srf_dims.first - shadow_radius,
+                                    shadow_srf_dims.second - shadow_radius };
+            double       dist   = L_DISTANCE(center, this_fragment);
+            alpha               = (shadow_radius - MIN(dist, shadow_radius)) / a->shadow_margin;
+        }
+    }
+
+    return (ColorRGBA){ 0, 0, 0, UINT8_MAX * POW2(alpha) * (0.2) };
+}
+
+struct wl_buffer* make_wl_buffer(GlobalWl*        wl,
+                                 size_t           w,
+                                 size_t           h,
+                                 SoftwareShaderFn shader,
+                                 void*            shader_opts)
+{
+    size_t stride = w * 4;
+    size_t size   = stride * h;
+
+    int fd = allocate_shm_file(size);
+
+    if (fd == -1) {
+        return NULL;
+    }
+
+    uint32_t* data = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+
+    if (data == MAP_FAILED) {
+        close(fd);
+        return NULL;
+    }
+
+    struct wl_shm_pool* pool = wl_shm_create_pool(wl->shm, fd, size);
+    struct wl_buffer*   buffer =
+      wl_shm_pool_create_buffer(pool, 0, w, h, stride, WL_SHM_FORMAT_ARGB8888);
+    /* the actual format is BGRA */
+
+    wl_shm_pool_destroy(pool);
+    close(fd);
+
+    for (uint32_t y = 0; y < h; ++y) {
+        for (uint32_t x = 0; x < w; ++x) {
+            *(ColorRGBA*)(&data[y * w + x]) = shader(x, y, shader_opts);
+        }
+    }
+
+    if (!buffer) {
+        return NULL;
+    }
+
+    munmap(data, size);
+    wl_buffer_add_listener(buffer, &buffer_listener, NULL);
+
+    return buffer;
+}
+
+static void WindowWl_enable_csd(WindowBase* self, csd_mode_e initial_mode)
+{
+    ASSERT(initial_mode != CSD_MODE_DISABLED, "Initial mode is an enabled state");
+    windowWl(self)->csd.mode = initial_mode;
+}
+
+static bool WindowWl_csd_created(WindowBase* self)
+{
+    return windowWl(self)->csd.shadow_surf;
+}
+
+static bool WindowWl_csd_enabled(WindowBase* self)
+{
+    return windowWl(self)->csd.mode != CSD_MODE_DISABLED;
+}
+
+const uint8_t CSD_SHADOW_MARGIN   = 40;
+const uint8_t CSD_SHADOW_V_OFFSET = 6;
+const uint8_t CSD_FRAME_THICKNESS = 1;
+
+static void WindowWl_build_csd(WindowBase* self)
+{
+    WindowWl* win = windowWl(self);
+
+    if (win->csd.mode == CSD_MODE_DISABLED || WindowWl_csd_created(self)) {
+        return;
+    }
+
+    win->csd.shadow_surf = wl_compositor_create_surface(globalWl->compositor);
+    win->csd.shadow_subsurf =
+      wl_subcompositor_get_subsurface(globalWl->subcompositor, win->csd.shadow_surf, win->surface);
+
+    SoftwareShaderFn_window_shadow_args_t shader_args = {
+        .window_surface_size   = { .first = self->w, .second = self->h },
+        .window_surface_radius = 10,
+        .shadow_margin         = CSD_SHADOW_MARGIN,
+        .shadow_offset         = CSD_SHADOW_V_OFFSET,
+    };
+
+    struct wl_buffer* buf = make_wl_buffer(globalWl,
+                                           self->w + CSD_SHADOW_MARGIN * 2,
+                                           self->h + CSD_SHADOW_MARGIN * 2,
+                                           SoftwareShaderFn_window_shadow,
+                                           &shader_args);
+
+    /* Always attach at origin. */
+    wl_surface_attach(win->csd.shadow_surf, buf, 0, 0);
+    wl_subsurface_set_position(win->csd.shadow_subsurf,
+                               -CSD_SHADOW_MARGIN,
+                               -CSD_SHADOW_MARGIN + CSD_SHADOW_V_OFFSET);
+    wl_subsurface_place_below(win->csd.shadow_subsurf, win->surface);
+
+    struct wl_region* region      = wl_compositor_create_region(globalWl->compositor);
+    int32_t           side_offset = CSD_SHADOW_MARGIN - UI_CSD_MOUSE_RESIZE_GRIP_THICKNESS_PX;
+    int32_t           top_offset =
+      CSD_SHADOW_MARGIN - UI_CSD_MOUSE_RESIZE_GRIP_THICKNESS_PX - CSD_SHADOW_V_OFFSET;
+    wl_region_add(region,
+                  side_offset,
+                  top_offset,
+                  UI_CSD_MOUSE_RESIZE_GRIP_THICKNESS_PX * 2 + self->w,
+                  UI_CSD_MOUSE_RESIZE_GRIP_THICKNESS_PX * 2 + self->h);
+    wl_surface_set_input_region(win->csd.shadow_surf, region);
+    wl_region_destroy(region);
+    wl_subsurface_set_desync(win->csd.shadow_subsurf);
+    xdg_surface_set_window_geometry(win->xdg_surface, 0, 0, self->w, self->h);
+    wl_surface_commit(win->csd.shadow_surf);
+}
+
+static void WindowWl_resize_csd(WindowBase* self)
+{
+    WindowWl* win = windowWl(self);
+
+    if (win->csd.mode == CSD_MODE_DISABLED || win->csd.mode == CSD_MODE_HIDDEN) {
+        return;
+    }
+
+    if (win->csd.mode == CSD_MODE_FLOATING) /* Has window shadow */ {
+        SoftwareShaderFn_window_shadow_args_t shader_args = {
+            .window_surface_size   = { .first = self->w, .second = self->h },
+            .window_surface_radius = 10,
+            .shadow_margin         = CSD_SHADOW_MARGIN,
+            .shadow_offset         = CSD_SHADOW_V_OFFSET,
+        };
+
+        struct wl_buffer* buf = make_wl_buffer(globalWl,
+                                               self->w + CSD_SHADOW_MARGIN * 2,
+                                               self->h + CSD_SHADOW_MARGIN * 2,
+                                               SoftwareShaderFn_window_shadow,
+                                               &shader_args);
+        wl_surface_attach(win->csd.shadow_surf, buf, 0, 0);
+        struct wl_region* region      = wl_compositor_create_region(globalWl->compositor);
+        int32_t           side_offset = CSD_SHADOW_MARGIN - UI_CSD_MOUSE_RESIZE_GRIP_THICKNESS_PX;
+        int32_t           top_offset =
+          CSD_SHADOW_MARGIN - UI_CSD_MOUSE_RESIZE_GRIP_THICKNESS_PX - CSD_SHADOW_V_OFFSET;
+        wl_region_add(region,
+                      side_offset,
+                      top_offset,
+                      UI_CSD_MOUSE_RESIZE_GRIP_THICKNESS_PX * 2 + self->w,
+                      UI_CSD_MOUSE_RESIZE_GRIP_THICKNESS_PX * 2 + self->h);
+        wl_surface_set_input_region(win->csd.shadow_surf, region);
+        wl_region_destroy(region);
+    }
+
+    xdg_surface_set_window_geometry(win->xdg_surface, 0, 0, self->w, self->h);
+    wl_surface_commit(win->csd.shadow_surf);
+}
+
+static void WindowWl_destroy_csd(WindowBase* self)
+{
+    WindowWl* win = windowWl(self);
+
+    if (win->csd.mode == CSD_MODE_DISABLED) {
+        return;
+    }
+
+    if (win->csd.shadow_subsurf) {
+        wl_subsurface_destroy(win->csd.shadow_subsurf);
+        win->csd.shadow_subsurf = NULL;
+    }
+
+    if (win->csd.shadow_surf) {
+        wl_surface_destroy(win->csd.shadow_surf);
+        win->csd.shadow_surf = NULL;
+    }
+}
+
+static void WindowWl_hide_csd(WindowBase* self)
+{
+    WindowWl* win = windowWl(self);
+
+    if (win->csd.mode == CSD_MODE_HIDDEN || win->csd.mode == CSD_MODE_DISABLED) {
+        return;
+    }
+
+    win->csd.mode = CSD_MODE_HIDDEN;
+    wl_surface_attach(win->csd.shadow_surf, NULL, 0, 0);
+    wl_surface_commit(win->csd.shadow_surf); // We don't resize when hidden commit surface here
+}
+
+static void WindowWl_show_tiled_csd(WindowBase* self)
+{
+    WindowWl* win = windowWl(self);
+
+    if (win->csd.mode == CSD_MODE_TILED || win->csd.mode == CSD_MODE_DISABLED) {
+        return;
+    }
+
+    win->csd.mode = CSD_MODE_TILED;
+    wl_surface_attach(win->csd.shadow_surf, NULL, 0, 0);
+}
+static void WindowWl_show_floating_csd(WindowBase* self)
+{
+    WindowWl* win = windowWl(self);
+
+    if (win->csd.mode == CSD_MODE_FLOATING || win->csd.mode == CSD_MODE_DISABLED) {
+        return;
+    }
+
+    if (!WindowWl_csd_created(self)) {
+        WindowWl_build_csd(self);
+    }
+
+    win->csd.mode = CSD_MODE_FLOATING;
+    WindowWl_resize_csd(self);
 }
 
 struct zwp_primary_selection_offer_v1_listener primary_selection_offer_listener = {
@@ -638,6 +1034,10 @@ static void wl_surface_handle_enter(void*              data,
     WindowBase* win_base = data;
     WindowWl*   win      = windowWl(win_base);
 
+    if (wl_surface != win->surface) {
+        return;
+    }
+
     WlOutputInfo* info =
       Map_get_wl_output_ptr_WlOutputInfo(&win->outputs, (wl_output_ptr*)(&output));
 
@@ -671,11 +1071,18 @@ static void wl_surface_handle_enter(void*              data,
     }
 }
 
-static void wl_surface_handle_leave(void* data, struct wl_surface* _, struct wl_output* output)
+static void wl_surface_handle_leave(void*              data,
+                                    struct wl_surface* wl_surface,
+                                    struct wl_output*  output)
 {
     struct WindowBase* win_base = data;
     WindowWl*          win      = windowWl(win_base);
-    win->active_output          = NULL;
+
+    if (wl_surface != win->surface) {
+        return;
+    }
+
+    win->active_output = NULL;
 
     for (MapEntryIterator_wl_output_ptr_WlOutputInfo i = { 0, 0 };
          (i = Map_iter_wl_output_ptr_WlOutputInfo(&win->outputs, i)).entry;) {
@@ -726,11 +1133,13 @@ static void pointer_handle_enter(void*              data,
                                  wl_fixed_t         x,
                                  wl_fixed_t         y)
 {
-    struct WindowBase* win = data;
+    struct WindowBase* win        = data;
+    globalWl->moused_over_surface = surface;
+    win->pointer_x                = wl_fixed_to_int(x);
+    win->pointer_y                = wl_fixed_to_int(y);
+
     FLAG_UNSET(win->state_flags, WINDOW_IS_POINTER_HIDDEN);
     cursor_set(globalWl->cursor_arrow, serial);
-    win->pointer_x = wl_fixed_to_int(x);
-    win->pointer_y = wl_fixed_to_int(y);
     TRY_CALL(win->callbacks.activity_notify_handler, win->callbacks.user_data);
     globalWl->serial = serial;
     Window_notify_content_change(data);
@@ -741,7 +1150,40 @@ static void pointer_handle_leave(void*              data,
                                  uint32_t           serial,
                                  struct wl_surface* surface)
 {
-    globalWl->serial = serial;
+    globalWl->moused_over_surface = NULL;
+    globalWl->serial              = serial;
+}
+
+static enum xdg_toplevel_resize_edge WindowWl_get_resize_edge(WindowBase* self)
+{
+    bool left   = self->pointer_x < CSD_SHADOW_MARGIN;
+    bool top    = self->pointer_y < CSD_SHADOW_MARGIN - CSD_SHADOW_V_OFFSET;
+    bool right  = self->pointer_x >= (self->w - CSD_SHADOW_MARGIN);
+    bool bottom = self->pointer_y >= (self->h - CSD_SHADOW_MARGIN + CSD_SHADOW_V_OFFSET);
+
+    bool none = !left && !right && !top && !bottom;
+
+    if (none) {
+        return XDG_TOPLEVEL_RESIZE_EDGE_NONE;
+    } else if (top && left) {
+        return XDG_TOPLEVEL_RESIZE_EDGE_TOP_LEFT;
+    } else if (top && right) {
+        return XDG_TOPLEVEL_RESIZE_EDGE_TOP_RIGHT;
+    } else if (bottom && left) {
+        return XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_LEFT;
+    } else if (bottom && right) {
+        return XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_RIGHT;
+    } else if (top) {
+        return XDG_TOPLEVEL_RESIZE_EDGE_TOP;
+    } else if (bottom) {
+        return XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM;
+    } else if (left) {
+        return XDG_TOPLEVEL_RESIZE_EDGE_LEFT;
+    } else if (right) {
+        return XDG_TOPLEVEL_RESIZE_EDGE_RIGHT;
+    }
+
+    return XDG_TOPLEVEL_RESIZE_EDGE_NONE;
 }
 
 static void pointer_handle_motion(void*              data,
@@ -754,16 +1196,62 @@ static void pointer_handle_motion(void*              data,
     struct WindowBase* win = data;
     win->pointer_x         = wl_fixed_to_int(x);
     win->pointer_y         = wl_fixed_to_int(y);
-    if (FLAG_IS_SET(win->state_flags, WINDOW_IS_POINTER_HIDDEN)) {
-        cursor_set(globalWl->cursor_arrow, 0);
-        FLAG_UNSET(win->state_flags, WINDOW_IS_POINTER_HIDDEN);
-    }
 
-    TRY_CALL(win->callbacks.motion_handler,
-             win->callbacks.user_data,
-             globalWl->last_button_pressed,
-             win->pointer_x,
-             win->pointer_y);
+    if (WindowWl_csd_enabled(win) &&
+        globalWl->moused_over_surface == windowWl(win)->csd.shadow_surf) {
+        windowWl(win)->csd.dragging_button = false;
+        enum xdg_toplevel_resize_edge edge = WindowWl_get_resize_edge(win);
+
+        switch (edge) {
+            case XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM:
+                WindowWl_set_pointer_style(win, MOUSE_POINTER_BOTTOM_SIDE);
+                break;
+            case XDG_TOPLEVEL_RESIZE_EDGE_TOP:
+                WindowWl_set_pointer_style(win, MOUSE_POINTER_TOP_SIDE);
+                break;
+            case XDG_TOPLEVEL_RESIZE_EDGE_LEFT:
+                WindowWl_set_pointer_style(win, MOUSE_POINTER_LEFT_SIDE);
+                break;
+            case XDG_TOPLEVEL_RESIZE_EDGE_RIGHT:
+                WindowWl_set_pointer_style(win, MOUSE_POINTER_RIGHT_SIDE);
+                break;
+            case XDG_TOPLEVEL_RESIZE_EDGE_TOP_LEFT:
+                WindowWl_set_pointer_style(win, MOUSE_POINTER_TOP_LEFT_CORNER);
+                break;
+            case XDG_TOPLEVEL_RESIZE_EDGE_TOP_RIGHT:
+                WindowWl_set_pointer_style(win, MOUSE_POINTER_TOP_RIGHT_CORNER);
+                break;
+            case XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_LEFT:
+                WindowWl_set_pointer_style(win, MOUSE_POINTER_BOTTOM_LEFT_CORNER);
+                break;
+            case XDG_TOPLEVEL_RESIZE_EDGE_BOTTOM_RIGHT:
+                WindowWl_set_pointer_style(win, MOUSE_POINTER_BOTTOM_RIGHT_CORNER);
+                break;
+            default:;
+        }
+    } else /* motion over main surface */ {
+        if (windowWl(win)->csd.dragging_button) {
+            windowWl(win)->csd.dragging_button = false;
+            Ui_CSD_unhover_all_buttons(win->ui);
+            win->ui->csd.damage = true;
+            TRY_CALL(win->callbacks.on_framebuffer_damaged, win->callbacks.user_data);
+            xdg_toplevel_move(windowWl(win)->xdg_toplevel,
+                              globalWl->seat,
+                              windowWl(win)->csd.dragging_button_serial);
+            return;
+        }
+
+        if (FLAG_IS_SET(win->state_flags, WINDOW_IS_POINTER_HIDDEN)) {
+            cursor_set(globalWl->cursor_arrow, 0);
+            FLAG_UNSET(win->state_flags, WINDOW_IS_POINTER_HIDDEN);
+        }
+
+        TRY_CALL(win->callbacks.motion_handler,
+                 win->callbacks.user_data,
+                 globalWl->last_button_pressed,
+                 win->pointer_x,
+                 win->pointer_y);
+    }
 }
 
 static void pointer_handle_button(void*              data,
@@ -774,11 +1262,51 @@ static void pointer_handle_button(void*              data,
                                   uint32_t           state)
 {
     struct WindowBase* win = data;
+    globalWl->serial       = serial;
 
-    globalWl->serial = serial;
+    windowWl(win)->csd.window_move_inhibits_focus_loss = false;
+    windowWl(win)->csd.dragging_button                 = false;
+
+    if (state && WindowWl_csd_enabled(win) &&
+        globalWl->moused_over_surface == windowWl(win)->csd.shadow_surf) {
+        enum xdg_toplevel_resize_edge resize_edge = WindowWl_get_resize_edge(win);
+        if (resize_edge != XDG_TOPLEVEL_RESIZE_EDGE_NONE) /* on resize grip */ {
+            windowWl(win)->csd.window_move_inhibits_focus_loss = true;
+            xdg_toplevel_resize(windowWl(win)->xdg_toplevel, globalWl->seat, serial, resize_edge);
+            return; /* block events */
+        }
+    }
+
+    if (state && WindowWl_csd_enabled(win) &&
+        globalWl->moused_over_surface == windowWl(win)->surface &&
+        win->pointer_y <= UI_CSD_TITLEBAR_HEIGHT_PX) {
+
+        if (button == 272) {
+            ui_csd_titlebar_button_info_t* btn =
+              Ui_csd_get_hovered_button(win->ui, win->pointer_x, win->pointer_y);
+
+            windowWl(win)->csd.window_move_inhibits_focus_loss = true;
+            if (!btn) {
+                xdg_toplevel_move(windowWl(win)->xdg_toplevel, globalWl->seat, serial);
+            } else {
+                windowWl(win)->csd.dragging_button        = true;
+                windowWl(win)->csd.dragging_button_serial = serial;
+            }
+            return;
+        } else if (button == 273) {
+            windowWl(win)->csd.window_move_inhibits_focus_loss = true;
+            xdg_toplevel_show_window_menu(windowWl(win)->xdg_toplevel,
+                                          globalWl->seat,
+                                          serial,
+                                          win->pointer_x,
+                                          win->pointer_y);
+            return;
+        }
+    }
 
     uint32_t final_mods = 0;
-    uint32_t mods       = xkb_state_serialize_mods(globalWl->xkb.state, XKB_STATE_MODS_EFFECTIVE);
+
+    uint32_t mods = xkb_state_serialize_mods(globalWl->xkb.state, XKB_STATE_MODS_EFFECTIVE);
 
     if (FLAG_IS_SET(mods, globalWl->xkb.ctrl_mask)) {
         FLAG_SET(final_mods, MODIFIER_CONTROL);
@@ -831,13 +1359,15 @@ static void pointer_handle_frame(void* data, struct wl_pointer* pointer) {}
 static void pointer_handle_axis_source(void*              data,
                                        struct wl_pointer* wl_pointer,
                                        uint32_t           axis_source)
-{}
+{
+}
 
 static void pointer_handle_axis_stop(void*              data,
                                      struct wl_pointer* wl_pointer,
                                      uint32_t           time,
                                      uint32_t           axis)
-{}
+{
+}
 
 static void pointer_handle_axis_discrete(void*              data,
                                          struct wl_pointer* wl_pointer,
@@ -968,8 +1498,9 @@ static void keyboard_handle_enter(void*               data,
                                   struct wl_surface*  surface,
                                   struct wl_array*    keys)
 {
-    globalWl->serial       = serial;
-    struct WindowBase* win = data;
+    globalWl->serial                                   = serial;
+    struct WindowBase* win                             = data;
+    windowWl(win)->csd.window_move_inhibits_focus_loss = false;
     FLAG_SET(((struct WindowBase*)data)->state_flags, WINDOW_IS_IN_FOCUS);
     TRY_CALL(win->callbacks.on_focus_changed, win->callbacks.user_data, true);
 }
@@ -979,11 +1510,16 @@ static void keyboard_handle_leave(void*               data,
                                   uint32_t            serial,
                                   struct wl_surface*  surface)
 {
-    globalWl->serial       = serial;
-    struct WindowBase* win = data;
+    globalWl->serial            = serial;
+    struct WindowBase* win      = data;
+    globalWl->keycode_to_repeat = 0;
+
+    if (windowWl(win)->csd.window_move_inhibits_focus_loss) {
+        return;
+    }
+
     FLAG_UNSET(((struct WindowBase*)data)->state_flags, WINDOW_IS_IN_FOCUS);
     TRY_CALL(win->callbacks.on_focus_changed, win->callbacks.user_data, false);
-    globalWl->keycode_to_repeat = 0;
 }
 
 static void keyboard_handle_key(void*               data,
@@ -1163,6 +1699,17 @@ static void xdg_surface_handle_configure(void*               data,
                                          uint32_t            serial)
 {
     globalWl->serial = serial;
+    WindowBase* win  = data;
+
+    if (WindowWl_csd_enabled(win)) {
+        if (WindowWl_csd_created(win)) {
+            WindowWl_resize_csd(win);
+        } else {
+            WindowWl_build_csd(win);
+        }
+    }
+
+    Window_notify_content_change(win);
     xdg_surface_ack_configure(xdg_surface, serial);
 }
 
@@ -1181,17 +1728,51 @@ static void xdg_toplevel_handle_configure(void*                data,
                                           int32_t              height,
                                           struct wl_array*     states)
 {
-    struct WindowBase* win = data;
+    static bool        init = false;
+    struct WindowBase* win  = data;
 
     enum xdg_toplevel_state* s;
-    bool                     is_wm_size = false;
+
+    bool is_wm_size    = false;
+    bool is_fullscreen = false;
+    bool is_maximized  = false;
+    bool is_tiled      = false;
+
+    if (!init && width == 1 && height == 1) {
+        return;
+    }
 
     wl_array_for_each(s, states)
     {
-        if (*s == XDG_TOPLEVEL_STATE_MAXIMIZED || *s == XDG_TOPLEVEL_STATE_FULLSCREEN ||
-            *s == XDG_TOPLEVEL_STATE_TILED_LEFT || *s == XDG_TOPLEVEL_STATE_TILED_RIGHT ||
-            *s == XDG_TOPLEVEL_STATE_TILED_TOP || *s == XDG_TOPLEVEL_STATE_TILED_BOTTOM) {
-            is_wm_size = true;
+        if (*s == XDG_TOPLEVEL_STATE_FULLSCREEN) {
+            is_fullscreen = true;
+        } else if (*s == XDG_TOPLEVEL_STATE_MAXIMIZED) {
+            is_maximized = true;
+        } else if (*s == XDG_TOPLEVEL_STATE_FULLSCREEN || *s == XDG_TOPLEVEL_STATE_TILED_LEFT ||
+                   *s == XDG_TOPLEVEL_STATE_TILED_RIGHT || *s == XDG_TOPLEVEL_STATE_TILED_TOP ||
+                   *s == XDG_TOPLEVEL_STATE_TILED_BOTTOM) {
+            is_tiled = true;
+        }
+    }
+
+    is_wm_size = is_fullscreen || is_maximized || is_tiled;
+
+    if (WindowWl_csd_enabled(win)) {
+        if (is_fullscreen) {
+            WindowWl_hide_csd(win);
+            TRY_CALL(win->callbacks.on_csd_style_changed,
+                     win->callbacks.user_data,
+                     UI_CSD_MODE_NONE);
+        } else if (is_maximized || is_tiled) {
+            WindowWl_show_tiled_csd(win);
+            TRY_CALL(win->callbacks.on_csd_style_changed,
+                     win->callbacks.user_data,
+                     UI_CSD_MODE_TILED);
+        } else {
+            WindowWl_show_floating_csd(win);
+            TRY_CALL(win->callbacks.on_csd_style_changed,
+                     win->callbacks.user_data,
+                     UI_CSD_MODE_FLOATING);
         }
     }
 
@@ -1202,6 +1783,7 @@ static void xdg_toplevel_handle_configure(void*                data,
         }
         wl_egl_window_resize(windowWl(win)->egl_window, win->w, win->h, 0, 0);
     } else {
+        init   = true;
         win->w = width;
         win->h = height;
         if (!is_wm_size) {
@@ -1210,8 +1792,6 @@ static void xdg_toplevel_handle_configure(void*                data,
         }
         wl_egl_window_resize(windowWl(win)->egl_window, win->w, win->h, 0, 0);
     }
-
-    Window_notify_content_change(win);
 }
 
 static const struct xdg_toplevel_listener xdg_toplevel_listener = {
@@ -1724,7 +2304,8 @@ static void registry_add(void*               data,
     } else if (!strcmp(interface, wl_shell_interface.name)) {
         globalWl->wl_shell = wl_registry_bind(registry, name, &wl_shell_interface, 1);
     } else if (!strcmp(interface, xdg_wm_base_interface.name)) {
-        globalWl->xdg_shell = wl_registry_bind(registry, name, &xdg_wm_base_interface, 1);
+        L_REQUIRE_VER(2); // v2 adds support for tiled toplevels states
+        globalWl->xdg_shell = wl_registry_bind(registry, name, &xdg_wm_base_interface, 2);
         xdg_wm_base_add_listener(globalWl->xdg_shell, &wm_base_listener, data);
     } else if (!strcmp(interface, wl_seat_interface.name)) {
         L_REQUIRE_VER(5);
@@ -1749,6 +2330,8 @@ static void registry_add(void*               data,
     } else if (!strcmp(interface, org_kde_kwin_blur_manager_interface.name)) {
         globalWl->kde_kwin_blur_manager =
           wl_registry_bind(registry, name, &org_kde_kwin_blur_manager_interface, 1);
+    } else if (!strcmp(interface, wl_subcompositor_interface.name)) {
+        globalWl->subcompositor = wl_registry_bind(registry, name, &wl_subcompositor_interface, 1);
     } else {
         unused = true;
     }
@@ -1787,9 +2370,23 @@ static void setup_cursor(struct WindowBase* self)
         return;
     }
 
-    globalWl->cursor_arrow = wl_cursor_theme_get_cursor(globalWl->cursor_theme, "left_ptr");
-    globalWl->cursor_beam  = wl_cursor_theme_get_cursor(globalWl->cursor_theme, "xterm");
-    globalWl->cursor_hand  = wl_cursor_theme_get_cursor(globalWl->cursor_theme, "hand1");
+    globalWl->cursor_arrow    = wl_cursor_theme_get_cursor(globalWl->cursor_theme, "left_ptr");
+    globalWl->cursor_beam     = wl_cursor_theme_get_cursor(globalWl->cursor_theme, "xterm");
+    globalWl->cursor_hand     = wl_cursor_theme_get_cursor(globalWl->cursor_theme, "hand1");
+    globalWl->cursor_top_side = wl_cursor_theme_get_cursor(globalWl->cursor_theme, "top_side");
+    globalWl->cursor_bottom_side =
+      wl_cursor_theme_get_cursor(globalWl->cursor_theme, "bottom_side");
+    globalWl->cursor_left_side  = wl_cursor_theme_get_cursor(globalWl->cursor_theme, "left_side");
+    globalWl->cursor_right_side = wl_cursor_theme_get_cursor(globalWl->cursor_theme, "right_side");
+    globalWl->cursor_top_left_corner =
+      wl_cursor_theme_get_cursor(globalWl->cursor_theme, "top_left_corner");
+    globalWl->cursor_top_right_corner =
+      wl_cursor_theme_get_cursor(globalWl->cursor_theme, "top_right_corner");
+    globalWl->cursor_bottom_left_corner =
+      wl_cursor_theme_get_cursor(globalWl->cursor_theme, "bottom_left_corner");
+    globalWl->cursor_bottom_right_corner =
+      wl_cursor_theme_get_cursor(globalWl->cursor_theme, "bottom_right_corner");
+    globalWl->cursor_move = wl_cursor_theme_get_cursor(globalWl->cursor_theme, "fleur");
 
     if (!globalWl->cursor_arrow || !globalWl->cursor_beam) {
         WRN("Failed to load cursor image");
@@ -1810,7 +2407,7 @@ static void cursor_set(struct wl_cursor* what, uint32_t serial)
     if (!globalWl->pointer) {
         return;
     }
-    
+
     struct wl_buffer*       b;
     struct wl_cursor_image* img = OR(what, globalWl->cursor_arrow)->images[0];
 
@@ -1968,6 +2565,9 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h, gfx_api_t gfx_api)
 
         if (settings.decoration_style != DECORATION_STYLE_NONE) {
             if (globalWl->decoration_manager) {
+                /* KDE has it's own SSD protocol extension, but it is only supported by kwin and
+                 * wlr, both of them also support zxdg_toplevel_decoration_v1. There is no point in
+                 * implementing it. */
                 windowWl(win)->toplevel_decoration =
                   zxdg_decoration_manager_v1_get_toplevel_decoration(globalWl->decoration_manager,
                                                                      windowWl(win)->xdg_toplevel);
@@ -1978,8 +2578,10 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h, gfx_api_t gfx_api)
 
                 zxdg_toplevel_decoration_v1_set_mode(windowWl(win)->toplevel_decoration,
                                                      ZXDG_TOPLEVEL_DECORATION_V1_MODE_SERVER_SIDE);
-            } else {
-                WRN("Wayland compositor does not provide window decorations\n");
+            } else /* no ssd support on server */ {
+                WindowWl_enable_csd(win, CSD_MODE_FLOATING);
+                /* csd subsurfs will be created after toplevel was configured. At this point we
+                 * don't know what window size we will get. */
             }
         }
 
@@ -2114,6 +2716,7 @@ void WindowWl_resize(struct WindowBase* self, uint32_t w, uint32_t h)
     self->previous_h = 0;
     self->w          = w;
     self->h          = h;
+
     Window_notify_content_change(self);
 }
 
@@ -2244,6 +2847,14 @@ static void WindowWl_set_wm_name(struct WindowBase* self, const char* title)
         wl_shell_surface_set_class(windowWl(self)->shell_surface, title);
 }
 
+static void WindowWl_set_minimized(struct WindowBase* self)
+{
+    if (globalWl->xdg_shell) {
+        xdg_toplevel_set_minimized(windowWl(self)->xdg_toplevel);
+        FLAG_SET(self->state_flags, WINDOW_IS_MINIMIZED);
+    } /* not supported in wl_shell */
+}
+
 static void WindowWl_set_maximized(struct WindowBase* self, bool maximized)
 {
     if (maximized) {
@@ -2334,6 +2945,10 @@ static void WindowWl_destroy(struct WindowBase* self)
         zwp_primary_selection_source_v1_destroy(windowWl(self)->primary_source);
     }
 
+    if (globalWl->subcompositor) {
+        wl_subcompositor_destroy(globalWl->subcompositor);
+    }
+
     eglTerminate(globalWl->egl_display);
     eglReleaseThread();
 
@@ -2376,25 +2991,63 @@ static uint32_t WindowWl_get_keycode_from_name(struct WindowBase* self, char* na
 
 static void WindowWl_set_pointer_style(struct WindowBase* self, enum MousePointerStyle style)
 {
+    if (style == MOUSE_POINTER_HIDDEN) {
+        FLAG_SET(self->state_flags, WINDOW_IS_POINTER_HIDDEN);
+    } else {
+        FLAG_UNSET(self->state_flags, WINDOW_IS_POINTER_HIDDEN);
+    }
+
     switch (style) {
         case MOUSE_POINTER_HIDDEN:
-            FLAG_SET(self->state_flags, WINDOW_IS_POINTER_HIDDEN);
             cursor_set(0, 0);
             break;
 
         case MOUSE_POINTER_ARROW:
-            FLAG_UNSET(self->state_flags, WINDOW_IS_POINTER_HIDDEN);
             cursor_set(globalWl->cursor_arrow, 0);
             break;
 
         case MOUSE_POINTER_I_BEAM:
-            FLAG_UNSET(self->state_flags, WINDOW_IS_POINTER_HIDDEN);
             cursor_set(globalWl->cursor_beam, 0);
             break;
 
         case MOUSE_POINTER_HAND:
-            FLAG_UNSET(self->state_flags, WINDOW_IS_POINTER_HIDDEN);
             cursor_set(globalWl->cursor_hand, 0);
+            break;
+
+        case MOUSE_POINTER_TOP_SIDE:
+            cursor_set(globalWl->cursor_top_side, 0);
+            break;
+
+        case MOUSE_POINTER_BOTTOM_SIDE:
+            cursor_set(globalWl->cursor_bottom_side, 0);
+            break;
+
+        case MOUSE_POINTER_LEFT_SIDE:
+            cursor_set(globalWl->cursor_left_side, 0);
+            break;
+
+        case MOUSE_POINTER_RIGHT_SIDE:
+            cursor_set(globalWl->cursor_right_side, 0);
+            break;
+
+        case MOUSE_POINTER_TOP_LEFT_CORNER:
+            cursor_set(globalWl->cursor_top_left_corner, 0);
+            break;
+
+        case MOUSE_POINTER_TOP_RIGHT_CORNER:
+            cursor_set(globalWl->cursor_top_right_corner, 0);
+            break;
+
+        case MOUSE_POINTER_BOTTOM_LEFT_CORNER:
+            cursor_set(globalWl->cursor_bottom_left_corner, 0);
+            break;
+
+        case MOUSE_POINTER_BOTTOM_RIGHT_CORNER:
+            cursor_set(globalWl->cursor_bottom_right_corner, 0);
+            break;
+
+        case MOUSE_POINTER_MOVE:
+            cursor_set(globalWl->cursor_move, 0);
             break;
     }
 }

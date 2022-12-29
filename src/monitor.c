@@ -40,7 +40,10 @@ void sighandler(int sig)
             }
             if (info->child_pid == p) {
                 if (status) {
-                    WRN("Child process %d exited with status %d\n", p, status);
+                    WRN("Child process \'%s\' (pid: %d) exited with status code %d\n",
+                        settings.shell.str,
+                        p,
+                        status);
                 }
 
                 if (info->instance->callbacks.on_exit && info->instance->callbacks.user_data) {

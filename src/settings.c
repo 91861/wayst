@@ -992,13 +992,13 @@ static void print_version_and_exit()
            "-debug"
 #endif
 
-           "\n wayland: "
+           "\n wayland:  "
 #ifdef NOWL
            "disabled"
 #else
            "enabled"
 #endif
-           "\n X11: "
+           "\n X11:      "
 #ifdef NOX
            "disabled"
 #else
@@ -1009,6 +1009,12 @@ static void print_version_and_exit()
            "disabled"
 #else
            "enabled"
+#endif
+           "\n renderer: "
+#ifndef GFX_GLES
+           "OpenGL 2.1"
+#else
+           "OpenGL ES 2.0"
 #endif
            "\n");
 
@@ -1118,7 +1124,10 @@ static void handle_option(const char opt, const int array_index, const char* val
         Vector_clear_char(&buf);                                                                   \
         ++argument_index;                                                                          \
         }                                                                                          \
-        else { Vector_push_char(&buf, *i); }                                                       \
+        else                                                                                       \
+        {                                                                                          \
+            Vector_push_char(&buf, *i);                                                            \
+        }                                                                                          \
         if (!*i)                                                                                   \
             break;                                                                                 \
         }                                                                                          \

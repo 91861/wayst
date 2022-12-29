@@ -2,6 +2,9 @@
 
 #define _GNU_SOURCE
 
+#include "colors.h"
+#include "ui.h"
+
 #include "gfx_gl2.h"
 #include "vt.h"
 
@@ -419,6 +422,9 @@ typedef struct _GfxOpenGL2
     Shader line_shader;
     Shader image_shader;
     Shader image_tint_shader;
+    Shader circle_shader;
+
+    GLuint csd_close_button_vbo;
 
     ColorRGB  color;
     ColorRGBA bg_color;
@@ -430,6 +436,7 @@ typedef struct _GfxOpenGL2
     LineTexture recycled_textures[5];
 
     Texture squiggle_texture;
+    Texture csd_close_button_texture;
 
     TimePoint blink_switch;
     TimePoint blink_switch_text;
@@ -4050,7 +4057,6 @@ static void GfxOpenGL2_draw_flash(GfxOpenGL2* self, double fraction)
                 (double)ColorRGBA_get_float(settings.bell_flash, 3) * fraction);
     glBindBuffer(GL_ARRAY_BUFFER, self->full_framebuffer_quad_vbo);
     glVertexAttribPointer(self->solid_fill_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
-
     glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
 }
 
@@ -4457,6 +4463,353 @@ static window_partial_swap_request_t* GfxOpenGL2_process_line_position_change_da
     return swap_request;
 }
 
+/* GIMP RGBA C-Source image dump (close_titlebar_button_icon.c) */
+static const struct
+{
+    unsigned int  width;
+    unsigned int  height;
+    unsigned int  bytes_per_pixel; /* 2:RGB16, 3:RGB, 4:RGBA */
+    unsigned char pixel_data[8 * 8 * 4 + 1];
+} close_titlebar_button_image = {
+    8,
+    8,
+    4,
+    "\377\377\377\377\377\377\377\303\377\377\377\025\000\000\000\000\000\000\000\000\377\377\377"
+    "\023\377\377\377\277\377\377\377\377\377\377\377\325\377\377\377\377\377\377"
+    "\377\322\377\377\377\025\377\377\377\025\377\377\377\317\377\377\377\377\377"
+    "\377\377\327\377\377\377\033\377\377\377\333\377\377\377\377\377\377\377\322"
+    "\377\377\377\320\377\377\377\377\377\377\377\337\377\377\377\040\000\000\000\000\377"
+    "\377\377\033\377\377\377\333\377\377\377\377\377\377\377\377\377\377\377\341"
+    "\377\377\377\"\000\000\000\000\000\000\000\000\377\377\377\026\377\377\377\322\377\377\377"
+    "\377\377\377\377\377\377\377\377\331\377\377\377\032\000\000\000\000\377\377\377\031"
+    "\377\377\377\325\377\377\377\377\377\377\377\327\377\377\377\327\377\377"
+    "\377\377\377\377\377\327\377\377\377\031\377\377\377\316\377\377\377\377\377"
+    "\377\377\327\377\377\377\031\377\377\377\031\377\377\377\327\377\377\377\377"
+    "\377\377\377\317\377\377\377\377\377\377\377\317\377\377\377\031\000\000\000\000\000"
+    "\000\000\000\377\377\377\031\377\377\377\317\377\377\377\377",
+};
+
+static void GfxOpenGL2_create_close_button_img(Gfx* self)
+{
+    GfxOpenGL2* gfx = gfxOpenGL2(self);
+
+    Texture_destroy(&gfx->csd_close_button_texture);
+
+    GLuint tex;
+    glGenTextures(1, &tex);
+    glBindTexture(GL_TEXTURE_2D, tex);
+
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, close_titlebar_button_image.bytes_per_pixel);
+    glTexImage2D(GL_TEXTURE_2D,
+                 0,
+                 GL_RGBA,
+                 close_titlebar_button_image.width,
+                 close_titlebar_button_image.height,
+                 0,
+                 GL_RGBA,
+                 GL_UNSIGNED_BYTE,
+                 close_titlebar_button_image.pixel_data);
+
+    gfx->csd_close_button_texture = (Texture){ .id     = tex,
+                                               .format = TEX_FMT_RGBA,
+                                               .w      = close_titlebar_button_image.width,
+                                               .h      = close_titlebar_button_image.height };
+}
+
+static window_partial_swap_request_t*
+GfxOpenGL2_maybe_draw_titlebar(Gfx* self, Ui* ui, window_partial_swap_request_t* swap_request)
+{
+    GfxOpenGL2* gfx = gfxOpenGL2(self);
+
+    if (!Ui_csd_titlebar_visible(ui)) {
+        return swap_request;
+    }
+
+    glDisable(GL_BLEND);
+    glDisable(GL_SCISSOR_TEST);
+    static const float tb_clr_if[4]      = { 0.188f, 0.188f, 0.188f, 1.0f };
+    static const float tb_clr_of[4]      = { 0.141f, 0.141f, 0.141f, 1.0f };
+    static const float btn_clr_if[4]     = { 0.267f, 0.267f, 0.267f, 1.0f };
+    static const float btn_clr_of[4]     = { 0.184f, 0.184f, 0.184f, 1.0f };
+    static const float btn_clr_hi[4]     = { 0.310f, 0.310f, 0.310f, 1.0f };
+    static const float btn_clr_sym_if[4] = { 0.996f, 0.996f, 0.996f, 1.0f };
+    static const float btn_clr_sym_of[4] = { 0.569f, 0.569f, 0.569f, 1.0f };
+    static const float tb_clr_bdr[4]     = { 0.243f, 0.243f, 0.243f, 1.0f };
+
+    const float* tb_clr      = ui->window_in_focus ? tb_clr_if : tb_clr_of;
+    const float* btn_clr     = ui->window_in_focus ? btn_clr_if : btn_clr_of;
+    const float* btn_clr_sym = ui->window_in_focus ? btn_clr_sym_if : btn_clr_sym_of;
+
+    Shader_use(&gfx->solid_fill_shader);
+
+    glUniform4f(gfx->solid_fill_shader.uniforms[0].location,
+                tb_clr_bdr[0],
+                tb_clr_bdr[1],
+                tb_clr_bdr[2],
+                tb_clr_bdr[3]);
+    glViewport(0, gfx->win_h - UI_CSD_TITLEBAR_HEIGHT_PX, gfx->win_w, UI_CSD_TITLEBAR_HEIGHT_PX);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glBindBuffer(GL_ARRAY_BUFFER, gfx->full_framebuffer_quad_vbo);
+    glVertexAttribPointer(gfx->solid_fill_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
+    glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
+
+    glUniform4f(gfx->solid_fill_shader.uniforms[0].location,
+                tb_clr[1],
+                tb_clr[1],
+                tb_clr[2],
+                tb_clr[3]);
+    glViewport(1,
+               gfx->win_h - UI_CSD_TITLEBAR_HEIGHT_PX + 1,
+               gfx->win_w - 2,
+               UI_CSD_TITLEBAR_HEIGHT_PX - 2);
+    glVertexAttribPointer(gfx->solid_fill_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
+    glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
+
+    if (ui->csd.mode == UI_CSD_MODE_FLOATING) {
+        if (unlikely(!gfx->circle_shader.id)) {
+            gfx->circle_shader =
+              Shader_new(circle_vs_src, circle_fs_src, "pos", "clr", "bclr", "cir", NULL);
+        }
+        Shader_use(&gfx->circle_shader);
+        glViewport(0,
+                   gfx->win_h - UI_CSD_TITLEBAR_RADIUS_PX,
+                   UI_CSD_TITLEBAR_RADIUS_PX,
+                   UI_CSD_TITLEBAR_RADIUS_PX);
+        glUniform4f(gfx->circle_shader.uniforms[0].location,
+                    tb_clr_bdr[0],
+                    tb_clr_bdr[1],
+                    tb_clr_bdr[2],
+                    tb_clr_bdr[3]);
+        glUniform4f(gfx->circle_shader.uniforms[1].location, 0.0f, 0.0f, 0.0f, 0.0f);
+        glUniform4f(gfx->circle_shader.uniforms[2].location,
+                    1.0f,
+                    -1.0f,
+                    2.0f,
+                    1.2f / UI_CSD_TITLEBAR_RADIUS_PX);
+        glVertexAttribPointer(gfx->circle_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
+        glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
+        glViewport(gfx->win_w - UI_CSD_TITLEBAR_RADIUS_PX,
+                   gfx->win_h - UI_CSD_TITLEBAR_RADIUS_PX,
+                   UI_CSD_TITLEBAR_RADIUS_PX,
+                   UI_CSD_TITLEBAR_RADIUS_PX);
+        glUniform4f(gfx->circle_shader.uniforms[2].location,
+                    -1.0f,
+                    -1.0f,
+                    2.0f,
+                    1.2f / UI_CSD_TITLEBAR_RADIUS_PX);
+        glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
+    }
+
+    if (ui->csd.mode == UI_CSD_MODE_FLOATING) {
+        if (unlikely(!gfx->circle_shader.id)) {
+            gfx->circle_shader =
+              Shader_new(circle_vs_src, circle_fs_src, "pos", "clr", "bclr", "cir", NULL);
+        }
+        Shader_use(&gfx->circle_shader);
+        glViewport(1,
+                   gfx->win_h - UI_CSD_TITLEBAR_RADIUS_PX,
+                   UI_CSD_TITLEBAR_RADIUS_PX - 1,
+                   UI_CSD_TITLEBAR_RADIUS_PX - 1);
+        glUniform4f(gfx->circle_shader.uniforms[0].location,
+                    tb_clr[0],
+                    tb_clr[1],
+                    tb_clr[2],
+                    tb_clr[3]);
+        glUniform4f(gfx->circle_shader.uniforms[1].location,
+                    tb_clr_bdr[0],
+                    tb_clr_bdr[1],
+                    tb_clr_bdr[2],
+                    0.0f);
+        glUniform4f(gfx->circle_shader.uniforms[2].location,
+                    1.0f,
+                    -1.0f,
+                    2.0f,
+                    1.25f / (UI_CSD_TITLEBAR_RADIUS_PX - 1));
+        glVertexAttribPointer(gfx->circle_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
+        glEnable(GL_BLEND);
+        glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA, GL_DST_ALPHA);
+        glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
+        glViewport(gfx->win_w - UI_CSD_TITLEBAR_RADIUS_PX,
+                   gfx->win_h - UI_CSD_TITLEBAR_RADIUS_PX,
+                   UI_CSD_TITLEBAR_RADIUS_PX - 1,
+                   UI_CSD_TITLEBAR_RADIUS_PX - 1);
+        glUniform4f(gfx->circle_shader.uniforms[2].location,
+                    -1.0f,
+                    -1.0f,
+                    2.0f,
+                    1.25f / (UI_CSD_TITLEBAR_RADIUS_PX - 1));
+        glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
+        glDisable(GL_BLEND);
+    } else /* no rounded corners */ {
+        if (unlikely(!gfx->circle_shader.id)) {
+            gfx->circle_shader =
+              Shader_new(circle_vs_src, circle_fs_src, "pos", "clr", "bclr", "cir", NULL);
+        }
+        Shader_use(&gfx->circle_shader);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glBindBuffer(GL_ARRAY_BUFFER, gfx->full_framebuffer_quad_vbo);
+        glVertexAttribPointer(gfx->circle_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
+    }
+
+    if (ui->csd.buttons.size) {
+        uint32_t vp_w = UI_CSD_TITLEBAR_RADIUS_PX * 2 + 2;
+        uint32_t vp_h = UI_CSD_TITLEBAR_RADIUS_PX * 2 + 2;
+
+        uint32_t xoffset_px = gfx->win_w - UI_CSD_TITLEBAR_HEIGHT_PX / 2 - vp_w / 2;
+        uint32_t yoffset_px = gfx->win_h - UI_CSD_TITLEBAR_HEIGHT_PX / 2 - vp_h / 2;
+
+        glUniform4f(gfx->circle_shader.uniforms[0].location,
+                    btn_clr[0],
+                    btn_clr[1],
+                    btn_clr[2],
+                    btn_clr[3]);
+        glUniform4f(gfx->circle_shader.uniforms[1].location,
+                    tb_clr[0],
+                    tb_clr[1],
+                    tb_clr[2],
+                    tb_clr[3]);
+        glUniform4f(gfx->circle_shader.uniforms[2].location, 0.0f, 0.0f, 1.0f, 1.5f / vp_w);
+
+        for (ui_csd_titlebar_button_info_t* i = NULL;
+             (i = Vector_iter_ui_csd_titlebar_button_info_t(&ui->csd.buttons, i));) {
+            float this_btn_clr[4];
+            for (int j = 0; j < 4; j++) {
+                this_btn_clr[j] = btn_clr[j] * (1.0 - i->highlight_fraction) +
+                                  btn_clr_hi[j] * i->highlight_fraction;
+            }
+
+            glDisable(GL_BLEND);
+            Shader_use(&gfx->circle_shader);
+            glUniform4f(gfx->circle_shader.uniforms[0].location,
+                        this_btn_clr[0],
+                        this_btn_clr[1],
+                        this_btn_clr[2],
+                        this_btn_clr[3]);
+            glViewport(xoffset_px, yoffset_px, vp_w, vp_h);
+            glBindBuffer(GL_ARRAY_BUFFER, gfx->full_framebuffer_quad_vbo);
+            glVertexAttribPointer(gfx->circle_shader.attribs->location,
+                                  2,
+                                  GL_FLOAT,
+                                  GL_FALSE,
+                                  0,
+                                  0);
+            glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
+
+            Shader_use(&gfx->solid_fill_shader);
+            glVertexAttribPointer(gfx->solid_fill_shader.attribs->location,
+                                  2,
+                                  GL_FLOAT,
+                                  GL_FALSE,
+                                  0,
+                                  0);
+            glUniform4f(gfx->solid_fill_shader.uniforms[0].location,
+                        btn_clr_sym[0],
+                        btn_clr_sym[1],
+                        btn_clr_sym[2],
+                        btn_clr_sym[3]);
+            switch (i->type) {
+                case UI_CSD_TITLEBAR_BUTTON_CLOSE: {
+                    glEnable(GL_BLEND);
+
+                    glViewport(xoffset_px + (vp_w - gfx->csd_close_button_texture.w) / 2,
+                               yoffset_px + (vp_h - gfx->csd_close_button_texture.h) / 2,
+                               gfx->csd_close_button_texture.w,
+                               gfx->csd_close_button_texture.h);
+
+                    if (unlikely(!gfx->csd_close_button_texture.id)) {
+                        GfxOpenGL2_create_close_button_img(self);
+                    }
+
+                    Shader_use(&gfx->image_tint_shader);
+                    glBindTexture(GL_TEXTURE_2D, gfx->csd_close_button_texture.id);
+                    glUniform3f(gfx->image_tint_shader.uniforms[1].location,
+                                btn_clr_sym[0],
+                                btn_clr_sym[1],
+                                btn_clr_sym[2]);
+
+                    if (!gfx->csd_close_button_vbo) {
+                        glGenBuffers(1, &gfx->csd_close_button_vbo);
+
+                        Vector_clear_vertex_t(&gfx->vec_vertex_buffer);
+                        Vector_push_vertex_t(&gfx->vec_vertex_buffer, (vertex_t){ -1, -1 });
+                        Vector_push_vertex_t(&gfx->vec_vertex_buffer, (vertex_t){ 0, 0 });
+
+                        Vector_push_vertex_t(&gfx->vec_vertex_buffer, (vertex_t){ -1, 1 });
+                        Vector_push_vertex_t(&gfx->vec_vertex_buffer, (vertex_t){ 0, 1 });
+
+                        Vector_push_vertex_t(&gfx->vec_vertex_buffer, (vertex_t){ 1, 1 });
+                        Vector_push_vertex_t(&gfx->vec_vertex_buffer, (vertex_t){ 1, 1 });
+
+#ifdef GFX_GLES
+                        Vector_push_vertex_t(&gfx->vec_vertex_buffer, (vertex_t){ 1, 1 });
+                        Vector_push_vertex_t(&gfx->vec_vertex_buffer, (vertex_t){ 1, 1 });
+
+                        Vector_push_vertex_t(&gfx->vec_vertex_buffer, (vertex_t){ -1, -1 });
+                        Vector_push_vertex_t(&gfx->vec_vertex_buffer, (vertex_t){ 0, 0 });
+#endif
+
+                        Vector_push_vertex_t(&gfx->vec_vertex_buffer, (vertex_t){ 1, -1 });
+                        Vector_push_vertex_t(&gfx->vec_vertex_buffer, (vertex_t){ 1, 0 });
+
+                        size_t new_size = sizeof(vertex_t) * gfx->vec_vertex_buffer.size;
+                        glBindBuffer(GL_ARRAY_BUFFER, gfx->csd_close_button_vbo);
+                        glBufferData(GL_ARRAY_BUFFER,
+                                     new_size,
+                                     gfx->vec_vertex_buffer.buf,
+                                     GL_STATIC_DRAW);
+                    } else {
+                        glBindBuffer(GL_ARRAY_BUFFER, gfx->csd_close_button_vbo);
+                    }
+
+                    glVertexAttribPointer(gfx->font_shader.attribs->location,
+                                          4,
+                                          GL_FLOAT,
+                                          GL_FALSE,
+                                          0,
+                                          0);
+                    glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
+                } break;
+                case UI_CSD_TITLEBAR_BUTTON_MAXIMIZE:
+                    glUniform4f(gfx->solid_fill_shader.uniforms[0].location,
+                                btn_clr_sym[0],
+                                btn_clr_sym[1],
+                                btn_clr_sym[2],
+                                btn_clr_sym[3]);
+                    glViewport(xoffset_px + 7, yoffset_px + 7, 8, 8);
+                    glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
+                    glUniform4f(gfx->solid_fill_shader.uniforms[0].location,
+                                this_btn_clr[0],
+                                this_btn_clr[1],
+                                this_btn_clr[2],
+                                this_btn_clr[3]);
+                    glViewport(xoffset_px + 9, yoffset_px + 9, 4, 4);
+                    glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
+                    break;
+                case UI_CSD_TITLEBAR_BUTTON_MINIMIZE:
+                    glUniform4f(gfx->solid_fill_shader.uniforms[0].location,
+                                btn_clr_sym[0],
+                                btn_clr_sym[1],
+                                btn_clr_sym[2],
+                                btn_clr_sym[3]);
+                    glViewport(xoffset_px + 7, yoffset_px + 7, 8, 2);
+                    glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
+                    break;
+                default:
+                    ASSERT_UNREACHABLE;
+            }
+            xoffset_px -= 37;
+        }
+    } /* buttons */
+
+    glViewport(0, 0, gfx->win_w, gfx->win_h);
+    rect_t dam_rect = GfxOpenGL2_translate_coords(gfx, 0, 0, gfx->win_w, UI_CSD_TITLEBAR_HEIGHT_PX);
+    return GfxOpenGL2_merge_or_push_modified_rect(gfx, dam_rect);
+}
+
 window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, const Vt* vt, Ui* ui, uint8_t buffer_age)
 {
     GfxOpenGL2* gfx = gfxOpenGL2(self);
@@ -4609,14 +4962,25 @@ window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, const Vt* vt, Ui* ui, 
 
     if (ui->flash_fraction != 0.0) {
         retval = NULL;
-        glViewport(0, 0, gfx->win_w, gfx->win_h);
+        if (Ui_csd_titlebar_visible(ui)) {
+            glViewport(0, 0, gfx->win_w, gfx->win_h - UI_CSD_TITLEBAR_HEIGHT_PX);
+        } else {
+            glViewport(0, 0, gfx->win_w, gfx->win_h);
+        }
         GfxOpenGL2_draw_flash(gfx, ui->flash_fraction);
     }
 
     if (unlikely(ui->draw_out_of_focus_tint && settings.dim_tint.a)) {
         retval = NULL;
+        if (Ui_csd_titlebar_visible(ui)) {
+            glViewport(0, 0, gfx->win_w, gfx->win_h - UI_CSD_TITLEBAR_HEIGHT_PX);
+        } else {
+            glViewport(0, 0, gfx->win_w, gfx->win_h);
+        }
         GfxOpenGL2_draw_tint(gfx);
     }
+
+    retval = GfxOpenGL2_maybe_draw_titlebar(self, ui, retval);
 
     if (retval) {
         retval = GfxOpenGL2_try_push_accumulated_cursor_damage(gfx, buffer_age);
@@ -4815,6 +5179,14 @@ void GfxOpenGL2_destroy(Gfx* self)
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     GfxOpenGL2_destroy_recycled(gfxOpenGL2(self));
     glDeleteTextures(1, &gfxOpenGL2(self)->squiggle_texture.id);
+    if (gfxOpenGL2(self)->csd_close_button_texture.id) {
+        glDeleteTextures(1, &gfxOpenGL2(self)->csd_close_button_texture.id);
+        gfxOpenGL2(self)->csd_close_button_texture.id = 0;
+    }
+    if (gfxOpenGL2(self)->csd_close_button_vbo) {
+        glDeleteBuffers(1, &gfxOpenGL2(self)->csd_close_button_vbo);
+        gfxOpenGL2(self)->csd_close_button_vbo = 0;
+    }
     glDeleteFramebuffers(1, &gfxOpenGL2(self)->line_framebuffer);
     VBO_destroy(&gfxOpenGL2(self)->flex_vbo);
     glDeleteBuffers(1, &gfxOpenGL2(self)->line_quads_vbo);

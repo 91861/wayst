@@ -2,6 +2,8 @@
 
 #pragma once
 
+#define _GNU_SOURCE
+
 #ifdef __linux
 #include <pty.h>
 #elif defined(__OpenBSD__) || defined(__NetBSD__)
@@ -121,7 +123,7 @@ enum MouseButton
     MOUSE_BTN_WHEEL_DOWN = 66,
 };
 
-typedef struct Cursor
+typedef struct VtCursor
 {
     enum CursorType
     {
@@ -134,7 +136,7 @@ typedef struct Cursor
     uint8_t  hidden : 1;
     size_t   row;
     uint16_t col;
-} Cursor;
+} VtCursor;
 
 #define VT_RUNE_CODE_WIDE_TAIL 27
 
@@ -823,7 +825,7 @@ typedef struct
 
     VtRune blank_space;
 
-    Cursor cursor;
+    VtCursor cursor;
 
     size_t   alt_cursor_pos;
     size_t   saved_cursor_pos;

@@ -8,6 +8,7 @@
 
 #include "settings.h"
 #include "timing.h"
+#include "ui.h"
 #include "util.h"
 #include <stdalign.h>
 
@@ -59,6 +60,15 @@ enum MousePointerStyle
     MOUSE_POINTER_ARROW,
     MOUSE_POINTER_I_BEAM,
     MOUSE_POINTER_HAND,
+    MOUSE_POINTER_TOP_SIDE,
+    MOUSE_POINTER_BOTTOM_SIDE,
+    MOUSE_POINTER_LEFT_SIDE,
+    MOUSE_POINTER_RIGHT_SIDE,
+    MOUSE_POINTER_TOP_LEFT_CORNER,
+    MOUSE_POINTER_TOP_RIGHT_CORNER,
+    MOUSE_POINTER_BOTTOM_LEFT_CORNER,
+    MOUSE_POINTER_BOTTOM_RIGHT_CORNER,
+    MOUSE_POINTER_MOVE,
 };
 
 struct WindowBase;
@@ -67,6 +77,7 @@ struct IWindow
 {
     void (*set_fullscreen)(struct WindowBase* self, bool fullscreen);
     void (*set_maximized)(struct WindowBase* self, bool maximized);
+    void (*set_minimized)(struct WindowBase* self);
     void (*resize)(struct WindowBase* self, uint32_t w, uint32_t h);
     void (*events)(struct WindowBase* self);
     TimePoint* (*process_timers)(struct WindowBase* self);
@@ -113,6 +124,8 @@ typedef struct WindowBase
     int8_t       output_index;
     char*        output_name;
 
+    Ui* ui; /* for client side decorations */
+
     struct window_callbacks_t
     {
         void* user_data;
@@ -136,6 +149,7 @@ typedef struct WindowBase
                                   lcd_filter_e  new_order,
                                   uint16_t      dpi);
         void (*on_framebuffer_damaged)(void* user_data);
+        void (*on_csd_style_changed)(void* user_data, ui_csd_mode_e csd_style);
     } callbacks;
 
     char* title;
@@ -146,11 +160,21 @@ typedef struct WindowBase
 
 } WindowBase;
 
+static bool Window_is_maximized(const struct WindowBase* self)
+{
+    return FLAG_IS_SET(self->state_flags, WINDOW_IS_MAXIMIZED);
+}
+
 static void Window_update_title(struct WindowBase* self, const char* title)
 {
     if (settings.dynamic_title) {
         self->interface->set_title(self, title);
     }
+}
+
+static void Window_set_ui_obj_addr(struct WindowBase* self, Ui* ui)
+{
+    self->ui = ui;
 }
 
 /* Froward interface functions */
@@ -167,6 +191,11 @@ static inline void Window_set_current_context(struct WindowBase* self, bool this
 static inline void Window_set_maximized(struct WindowBase* self, bool maximized)
 {
     self->interface->set_maximized(self, maximized);
+}
+
+static inline void Window_set_minimized(struct WindowBase* self)
+{
+    self->interface->set_minimized(self);
 }
 
 static inline void Window_set_fullscreen(struct WindowBase* self, bool fullscreen)

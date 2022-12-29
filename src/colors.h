@@ -28,6 +28,11 @@ typedef struct
     uint8_t r, g, b, a;
 } ColorRGBA;
 
+typedef struct
+{
+    uint8_t a, r, g, b;
+} ColorARGB;
+
 #define RELATIVE_LUMINANCE_BRIGHT_COLOR_TRESHOLD 0.04
 
 #define COLOR_RGB_FMT   "rgb(%d, %d, %d)"
@@ -172,6 +177,26 @@ static inline ColorRGBA ColorRGBA_from_RGB(const ColorRGB c)
         .g = c.g,
         .b = c.b,
         .a = 255,
+    };
+}
+
+static inline ColorARGB ColorARGB_from_RGB(const ColorRGB c)
+{
+    return (ColorARGB){
+        .r = c.r,
+        .g = c.g,
+        .b = c.b,
+        .a = 255,
+    };
+}
+
+static inline ColorARGB ColorARGB_from_RGBA(const ColorRGBA c)
+{
+    return (ColorARGB){
+        .a = c.a,
+        .r = c.r,
+        .g = c.g,
+        .b = c.b,
     };
 }
 
