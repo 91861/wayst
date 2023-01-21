@@ -3474,6 +3474,8 @@ __attribute__((hot)) static void Vt_handle_single_argument_SGR(Vt*     self,
         /*  Not underlined, ECMA-48 3rd */
         case 24:
             r->underlined = false;
+            r->curlyunderline = false;
+            r->doubleunderline = false;
             break;
 
         /* Steady (not blinking), ECMA-48 3rd */
