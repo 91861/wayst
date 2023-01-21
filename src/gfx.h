@@ -69,7 +69,7 @@ struct IGfx
 {
     window_partial_swap_request_t* (*draw)(Gfx* self, const Vt*, Ui* ui, uint8_t buffer_age);
     void (*resize)(Gfx* self, uint32_t w, uint32_t h);
-    Pair_uint32_t (*get_char_size)(Gfx* self);
+    Pair_uint32_t (*get_char_size)(Gfx* self, Pair_uint32_t pixles);
     void (*init_with_context_activated)(Gfx* self);
     void (*reload_font)(Gfx* self);
     Pair_uint32_t (*pixels)(Gfx* self, uint32_t rows, uint32_t columns);
@@ -85,7 +85,8 @@ struct IGfx
 
 /**
  * Set window dimensions */
-static bool Window_is_framebuffer_dirty(Gfx* self) {
+static bool Window_is_framebuffer_dirty(Gfx* self)
+{
     return self->interface->is_framebuffer_dirty(self);
 }
 
@@ -103,9 +104,9 @@ static void Gfx_resize(Gfx* self, uint32_t w, uint32_t h)
 
 /**
  * Get the number of cells that can be drawn on the window with current dimensions */
-static Pair_uint32_t Gfx_get_char_size(Gfx* self)
+static Pair_uint32_t Gfx_get_char_size(Gfx* self, Pair_uint32_t pixels)
 {
-    return self->interface->get_char_size(self);
+    return self->interface->get_char_size(self, pixels);
 }
 
 /**

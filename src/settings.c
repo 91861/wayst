@@ -1720,6 +1720,10 @@ static void handle_option(const char opt, const int array_index, const char* val
             L_ASSIGN_BOOL(settings.background_blur, true)
         } break;
 
+        case OPT_INC_WIN_RESIZE: {
+            L_ASSIGN_BOOL(settings.incremental_windw_resize, true);
+        } break;
+
         case OPT_BG_COLOR_IDX: {
             bool      failed = false;
             ColorRGBA parsed = ColorRGBA_from_any(value, &failed);

@@ -11,8 +11,11 @@
  *   we can add a SpliterWidget:IWidget nesting other widgets and forwarding mouse/kbd events etc.
  */
 
-#include "window.h"
 #define _GNU_SOURCE
+#include "gfx.h"
+#include "util.h"
+#include "window.h"
+#include <stdint.h>
 
 #include <stdio.h>
 #include <time.h>
@@ -105,32 +108,35 @@ typedef struct
     bool        exit;
     bool        cursor_blink_animation_should_play;
     bool        tex_blink_animation_should_play;
+    bool        csd_mode_changed_before_resize;
     VtCursor    ksm_cursor;
     Vector_char ksm_input_buf;
     TimePoint   ksm_last_input;
 } App;
 
-static void App_update_scrollbar_dims(App* self);
-static void App_update_cursor(App* self);
-static void App_do_autoscroll(App* self);
-static void App_notify_content_change(void* self);
-static void App_clamp_cursor(App* self, Pair_uint32_t chars);
-static void App_set_monitor_callbacks(App* self);
-static void App_set_callbacks(App* self);
-static void App_set_up_timers(App* self);
-static void App_maybe_resize(App* self, Pair_uint32_t newres);
-static void App_handle_uri(App* self, const char* uri);
-static void App_update_hover(App* self, int32_t x, int32_t y);
-static void App_update_padding(App* self);
-static void App_set_title(void* self);
-static void App_focus_changed(void* self, bool current_state);
-static void App_action(void* self);
-static void App_framebuffer_damage(void* self);
-static void App_primary_output_changed(void*         self,
-                                       const int32_t display_index,
-                                       const char*   display_name,
-                                       lcd_filter_e  new_filter,
-                                       uint16_t      physical_dpi);
+static void          App_update_scrollbar_dims(App* self);
+static void          App_update_cursor(App* self);
+static void          App_do_autoscroll(App* self);
+static void          App_notify_content_change(void* self);
+static void          App_clamp_cursor(App* self, Pair_uint32_t chars);
+static void          App_set_monitor_callbacks(App* self);
+static void          App_set_callbacks(App* self);
+static void          App_set_up_timers(App* self);
+static void          App_maybe_resize(App* self, Pair_uint32_t newres);
+static void          App_handle_uri(App* self, const char* uri);
+static void          App_update_hover(App* self, int32_t x, int32_t y);
+static void          App_update_padding(App* self);
+static void          App_set_title(void* self);
+static void          App_focus_changed(void* self, bool current_state);
+static void          App_action(void* self);
+static void          App_framebuffer_damage(void* self);
+static Pair_uint32_t App_get_char_size(void* self);
+static bool          App_fullscreen(void* self);
+static void          App_primary_output_changed(void*         self,
+                                                const int32_t display_index,
+                                                const char*   display_name,
+                                                lcd_filter_e  new_filter,
+                                                uint16_t      physical_dpi);
 
 static void* App_load_extension_proc_address(void* self, const char* name)
 {
@@ -333,7 +339,7 @@ static void App_init(App* self)
     Pair_uint32_t size = Window_size(self->win);
     Gfx_resize(self->gfx, size.first, size.second);
 
-    Pair_uint32_t chars = Gfx_get_char_size(self->gfx);
+    Pair_uint32_t chars = App_get_char_size(self);
     Vt_resize(&self->vt, chars.first, chars.second);
 
     Monitor_watch_window_system_fd(&self->monitor, Window_get_connection_fd(self->win));
@@ -491,7 +497,7 @@ static window_partial_swap_request_t* App_redraw(void* self, uint8_t buffer_age)
 
 static void App_update_padding(App* self)
 {
-    Pair_uint32_t chars       = Gfx_get_char_size(self->gfx);
+    Pair_uint32_t chars       = Gfx_get_char_size(self->gfx, self->resolution);
     Pair_uint32_t used_pixels = Gfx_pixels(self->gfx, chars.first, chars.second);
 
     if (settings.padding_center) {
@@ -505,32 +511,40 @@ static void App_update_padding(App* self)
     self->ui.pixel_offset_x += settings.padding;
     self->ui.pixel_offset_y += settings.padding;
 
-    if (Ui_csd_titlebar_visible(&self->ui)) {
+    if (Ui_csd_titlebar_visible(&self->ui) && !Window_is_fullscreen(self->win)) {
         self->ui.pixel_offset_y += UI_CSD_TITLEBAR_HEIGHT_PX;
     }
 }
 
+static void App_resize(App* self, Pair_uint32_t newres)
+{
+    self->csd_mode_changed_before_resize = false;
+    self->resolution                     = newres;
+    Pair_uint32_t chars                  = Gfx_get_char_size(self->gfx, newres);
+    Vt_clear_all_proxies(&self->vt);
+    Gfx_destroy_proxy(self->gfx, self->ui.cursor_proxy.data);
+    Gfx_resize(self->gfx, self->resolution.first, self->resolution.second);
+    App_update_padding(self);
+    App_clamp_cursor(self, chars);
+    chars = App_get_char_size(self);
+    Vt_resize(&self->vt, chars.first, chars.second);
+    Window_notify_content_change(self->win);
+    App_framebuffer_damage(self);
+    App_update_cursor(self);
+
+    if (settings.dynamic_title) {
+        App_set_title(self);
+    }
+
+    Ui_update_CSD_button_layout(&self->ui, self->resolution);
+}
+
 static void App_maybe_resize(App* self, Pair_uint32_t newres)
 {
-    if (newres.first != self->resolution.first || newres.second != self->resolution.second) {
-        self->resolution    = newres;
-        Pair_uint32_t chars = Gfx_get_char_size(self->gfx);
-        Vt_clear_all_proxies(&self->vt);
-        Gfx_destroy_proxy(self->gfx, self->ui.cursor_proxy.data);
-        Gfx_resize(self->gfx, self->resolution.first, self->resolution.second);
-        App_update_padding(self);
-        App_clamp_cursor(self, chars);
-        chars = Gfx_get_char_size(self->gfx);
-        Vt_resize(&self->vt, chars.first, chars.second);
-        Window_notify_content_change(self->win);
-        App_framebuffer_damage(self);
-        App_update_cursor(self);
-
-        if (settings.dynamic_title) {
-            App_set_title(self);
-        }
-
-        Ui_update_CSD_button_layout(&self->ui, self->resolution);
+    if (unlikely(newres.first != self->resolution.first ||
+                 newres.second != self->resolution.second) ||
+        self->csd_mode_changed_before_resize) {
+        App_resize(self, newres);
     }
 }
 
@@ -554,7 +568,7 @@ static void App_reload_font(void* self)
 
 static Pair_uint32_t App_get_cell_dims(App* self)
 {
-    Pair_uint32_t cells  = Gfx_get_char_size(self->gfx);
+    Pair_uint32_t cells  = Gfx_get_char_size(self->gfx, self->resolution);
     Pair_uint32_t pixels = Gfx_pixels(self->gfx, cells.first, cells.second);
     return (Pair_uint32_t){ .first  = pixels.first / cells.first,
                             .second = pixels.second / cells.second };
@@ -602,7 +616,14 @@ static Pair_uint32_t App_pixels(void* self, uint32_t rows, uint32_t columns)
 
 static Pair_uint32_t App_get_char_size(void* self)
 {
-    return Gfx_get_char_size(((App*)self)->gfx);
+    App*          app = self;
+    Pair_uint32_t res = app->resolution;
+
+    if (Ui_csd_titlebar_visible(&app->ui) && !App_fullscreen(app)) {
+        res.second -= UI_CSD_TITLEBAR_HEIGHT_PX;
+    }
+
+    return Gfx_get_char_size(app->gfx, res);
 }
 
 static void App_set_title(void* self)
@@ -2032,10 +2053,9 @@ static void App_csd_changed(void* self, ui_csd_mode_e csd_mode)
             break;
     }
 
-    App_update_padding(app);
-
     app->ui.csd.mode   = csd_mode;
     app->ui.csd.damage = true;
+    app->csd_mode_changed_before_resize = true;
     App_framebuffer_damage(self);
 }
 
@@ -2061,12 +2081,14 @@ static void App_set_fullscreen_state(void* self, bool fullscreen)
 {
     App* app = self;
     Window_set_fullscreen(app->win, fullscreen);
+    App_resize(app, (Pair_uint32_t){ app->win->w, app->win->h });
 }
 
 static void App_set_window_size(void* self, int32_t width, int32_t height)
 {
     App* app = self;
     Window_resize(app->win, width, height);
+    App_resize(self, (Pair_uint32_t){ app->win->w, app->win->h });
     Ui_update_CSD_button_layout(&app->ui, app->resolution);
     App_framebuffer_damage(self);
 }

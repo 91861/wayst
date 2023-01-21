@@ -456,13 +456,14 @@ typedef struct _GfxOpenGL2
 } GfxOpenGL2;
 
 #define gfxBase(gfxGl2) ((Gfx*)(((uint8_t*)(gfxGl2)) - offsetof(Gfx, extend_data)))
-Pair_uint32_t GfxOpenGL2_get_char_size(Gfx* self);
+Pair_uint32_t GfxOpenGL2_get_char_size(Gfx* self, Pair_uint32_t pixels);
 #define gfxOpenGL2(gfx) ((GfxOpenGL2*)&gfx->extend_data)
 
 void GfxOpenGL2_external_framebuffer_damage(Gfx* self)
 {
-    GfxOpenGL2* gl2     = gfxOpenGL2(self);
-    uint16_t    n_lines = GfxOpenGL2_get_char_size(self).second;
+    GfxOpenGL2* gl2 = gfxOpenGL2(self);
+    uint16_t    n_lines =
+      GfxOpenGL2_get_char_size(self, (Pair_uint32_t){ gl2->win_w, gl2->win_h }).second;
 
     for (int i = 0; i < MAX_TRACKED_FRAME_DAMAGE; ++i) {
         gl2->frame_overlay_damage[i].overlay_state = 1;
@@ -476,7 +477,8 @@ void GfxOpenGL2_external_framebuffer_damage(Gfx* self)
 
 static void GfxOpenGL2_realloc_damage_record(GfxOpenGL2* self)
 {
-    uint16_t n_lines = GfxOpenGL2_get_char_size(gfxBase(self)).second;
+    uint16_t n_lines =
+      GfxOpenGL2_get_char_size(gfxBase(self), (Pair_uint32_t){ self->win_w, self->win_h }).second;
 
     free(self->line_damage.damage_history);
     free(self->line_damage.proxy_color_component);
@@ -527,7 +529,7 @@ void                             GfxOpenGL2_destroy_recycled(GfxOpenGL2* self);
 
 void                           GfxOpenGL2_destroy(Gfx* self);
 window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, const Vt* vt, Ui* ui, uint8_t age);
-Pair_uint32_t                  GfxOpenGL2_get_char_size(Gfx* self);
+Pair_uint32_t                  GfxOpenGL2_get_char_size(Gfx* self, Pair_uint32_t pixels);
 void                           GfxOpenGL2_resize(Gfx* self, uint32_t w, uint32_t h);
 void                           GfxOpenGL2_init_with_context_activated(Gfx* self);
 bool                           GfxOpenGL2_set_focus(Gfx* self, bool focus);
@@ -2245,22 +2247,20 @@ void GfxOpenGL2_resize(Gfx* self, uint32_t w, uint32_t h)
     GfxOpenGL2_regenerate_line_quad_vbo(gl2);
 }
 
-Pair_uint32_t GfxOpenGL2_get_char_size(Gfx* self)
+Pair_uint32_t GfxOpenGL2_get_char_size(Gfx* self, Pair_uint32_t pixels)
 {
     ASSERT(gfxOpenGL2(self)->freetype, "font renderer active");
-
-    GfxOpenGL2* gl2 = gfxOpenGL2(self);
 
     uint32_t minsize = settings.padding * 2;
     int32_t  cellx   = gfxOpenGL2(self)->freetype->glyph_width_pixels + settings.padd_glyph_x;
     int32_t  celly   = gfxOpenGL2(self)->freetype->line_height_pixels + settings.padd_glyph_y;
 
-    if (gl2->win_w <= minsize || gl2->win_h <= minsize) {
+    if (pixels.first <= minsize || pixels.second <= minsize) {
         return (Pair_uint32_t){ .first = 0, .second = 0 };
     }
 
-    int32_t cols = MAX((gl2->win_w - 2 * settings.padding) / cellx, 0);
-    int32_t rows = MAX((gl2->win_h - 2 * settings.padding) / celly, 0);
+    int32_t cols = MAX((pixels.first - 2 * settings.padding) / cellx, 0);
+    int32_t rows = MAX((pixels.second - 2 * settings.padding) / celly, 0);
 
     return (Pair_uint32_t){ .first = cols, .second = rows };
 }
@@ -2411,7 +2411,8 @@ void GfxOpenGL2_reload_font(Gfx* self)
 
 static void GfxOpenGL2_regenerate_line_quad_vbo(GfxOpenGL2* gfx)
 {
-    uint32_t n_lines = GfxOpenGL2_get_char_size(gfxBase(gfx)).second;
+    uint32_t n_lines =
+      GfxOpenGL2_get_char_size(gfxBase(gfx), (Pair_uint32_t){ gfx->win_w, gfx->win_h }).second;
 
     Vector_float transfer = Vector_new_with_capacity_float(n_lines * 4 * QUAD_V_SZ);
 
@@ -2531,11 +2532,11 @@ static line_render_pass_t create_line_render_pass(const line_render_pass_args_t*
                               .texture_height     = args->gl2->line_height_pixels,
                               .n_queued_subpasses = 0,
                               .subpass_args       = {
-                                      {
+                                {
                                         .render_range_begin = 0,
                                         .render_range_end   = 0,
                                 },
-                                      {
+                                {
                                         .render_range_begin = 0,
                                         .render_range_end   = 0,
                                 },
@@ -4928,7 +4929,7 @@ window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, const Vt* vt, Ui* ui, 
 
     glDisable(GL_BLEND);
     glEnable(GL_SCISSOR_TEST);
-    Pair_uint32_t chars = Gfx_get_char_size(self);
+    Pair_uint32_t chars = Gfx_get_char_size(self, (Pair_uint32_t){ gfx->win_w, gfx->win_h });
 
     if (vt->scrolling_visual) {
         glScissor(gfx->pixel_offset_x,

@@ -1791,6 +1791,9 @@ static void xdg_toplevel_handle_configure(void*                data,
             win->previous_h = win->h;
         }
         wl_egl_window_resize(windowWl(win)->egl_window, win->w, win->h, 0, 0);
+        if (is_fullscreen) {
+            xdg_surface_set_window_geometry(windowWl(win)->xdg_surface, 0, 0, win->w, win->h);
+        }
     }
 }
 
