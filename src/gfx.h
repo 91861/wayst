@@ -68,7 +68,7 @@ typedef struct
 struct IGfx
 {
     window_partial_swap_request_t* (*draw)(Gfx* self, const Vt*, Ui* ui, uint8_t buffer_age);
-    void (*resize)(Gfx* self, uint32_t w, uint32_t h);
+    void (*resize)(Gfx* self, uint32_t w, uint32_t h, Pair_uint32_t cells);
     Pair_uint32_t (*get_char_size)(Gfx* self, Pair_uint32_t pixles);
     void (*init_with_context_activated)(Gfx* self);
     void (*reload_font)(Gfx* self);
@@ -97,9 +97,9 @@ static window_partial_swap_request_t* Gfx_draw(Gfx* self, const Vt* vt, Ui* ui, 
 
 /**
  * Set window dimensions */
-static void Gfx_resize(Gfx* self, uint32_t w, uint32_t h)
+static void Gfx_resize(Gfx* self, uint32_t w, uint32_t h, Pair_uint32_t cells)
 {
-    self->interface->resize(self, w, h);
+    self->interface->resize(self, w, h, cells);
 }
 
 /**

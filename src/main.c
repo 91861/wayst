@@ -336,11 +336,10 @@ static void App_init(App* self)
     Window_set_swap_interval(self->win, 0);
     Gfx_init_with_context_activated(self->gfx);
 
-    Pair_uint32_t size = Window_size(self->win);
-    Gfx_resize(self->gfx, size.first, size.second);
-
+    self->resolution    = Window_size(self->win);
     Pair_uint32_t chars = App_get_char_size(self);
     Vt_resize(&self->vt, chars.first, chars.second);
+    Gfx_resize(self->gfx, self->resolution.first, self->resolution.second, chars);
 
     Monitor_watch_window_system_fd(&self->monitor, Window_get_connection_fd(self->win));
 
@@ -349,7 +348,6 @@ static void App_init(App* self)
     self->ui.draw_cursor_blinking            = true;
     self->cursor_blink_animation_should_play = false;
     self->tex_blink_animation_should_play    = true;
-    self->resolution                         = size;
 
     Window_events(self->win);
 
@@ -359,7 +357,7 @@ static void App_init(App* self)
          *xdg_session_type    = getenv("XDG_SESSION_TYPE");
     if (xdg_current_desktop && xdg_session_type && !strcmp(xdg_current_desktop, "KDE") &&
         !strcmp(xdg_session_type, "wayland")) {
-        Window_resize(self->win, size.first, size.second);
+        Window_resize(self->win, self->resolution.first, self->resolution.second);
     }
 
     if (!settings.dynamic_title) {
@@ -520,10 +518,10 @@ static void App_resize(App* self, Pair_uint32_t newres)
 {
     self->csd_mode_changed_before_resize = false;
     self->resolution                     = newres;
-    Pair_uint32_t chars                  = Gfx_get_char_size(self->gfx, newres);
+    Pair_uint32_t chars                  = App_get_char_size(self);
     Vt_clear_all_proxies(&self->vt);
     Gfx_destroy_proxy(self->gfx, self->ui.cursor_proxy.data);
-    Gfx_resize(self->gfx, self->resolution.first, self->resolution.second);
+    Gfx_resize(self->gfx, self->resolution.first, self->resolution.second, chars);
     App_update_padding(self);
     App_clamp_cursor(self, chars);
     chars = App_get_char_size(self);
@@ -568,7 +566,7 @@ static void App_reload_font(void* self)
 
 static Pair_uint32_t App_get_cell_dims(App* self)
 {
-    Pair_uint32_t cells  = Gfx_get_char_size(self->gfx, self->resolution);
+    Pair_uint32_t cells  = App_get_char_size(self);
     Pair_uint32_t pixels = Gfx_pixels(self->gfx, cells.first, cells.second);
     return (Pair_uint32_t){ .first  = pixels.first / cells.first,
                             .second = pixels.second / cells.second };
@@ -620,7 +618,7 @@ static Pair_uint32_t App_get_char_size(void* self)
     Pair_uint32_t res = app->resolution;
 
     if (Ui_csd_titlebar_visible(&app->ui) && !App_fullscreen(app)) {
-        res.second -= UI_CSD_TITLEBAR_HEIGHT_PX;
+        res.second -= (UI_CSD_TITLEBAR_HEIGHT_PX + 1);
     }
 
     return Gfx_get_char_size(app->gfx, res);
@@ -1463,15 +1461,26 @@ static void App_update_cursor(App* self)
  * Update gui scrollbar dimensions */
 static void App_update_scrollbar_dims(App* self)
 {
-    Vt*     vt                = &self->vt;
-    double  minimum_length    = (2.0 / self->resolution.second) * settings.scrollbar_length_px;
-    double  length            = 2.0 / vt->lines.size * vt->ws.ws_row;
+    Vt* vt = &self->vt;
+
+    uint32_t y_pixels = self->resolution.second;
+    uint32_t y_offset = 0;
+    double   area_y   = 2.0;
+
+    if (Ui_csd_titlebar_visible(&self->ui) && !Window_is_fullscreen(self->win)) {
+        y_offset = UI_CSD_TITLEBAR_HEIGHT_PX;
+        area_y *= ((double)(self->resolution.second - y_offset) / self->resolution.second);
+    }
+
+    y_pixels -= y_offset;
+    double  minimum_length    = (area_y / y_pixels) * settings.scrollbar_length_px;
+    double  length            = area_y / vt->lines.size * vt->ws.ws_row;
     double  extra_length      = length > minimum_length ? 0.0 : (minimum_length - length);
     int32_t scrollable_lines  = Vt_top_line(&self->vt);
     int32_t lines_scrolled    = Vt_visual_top_line(&self->vt);
     double  fraction_scrolled = (double)lines_scrolled / scrollable_lines;
     self->ui.scrollbar.length = length + extra_length;
-    self->ui.scrollbar.top    = (2.0 - length - extra_length) * fraction_scrolled;
+    self->ui.scrollbar.top = (area_y - length - extra_length) * fraction_scrolled + (2.0 - area_y);
 }
 
 /**
@@ -2053,8 +2062,8 @@ static void App_csd_changed(void* self, ui_csd_mode_e csd_mode)
             break;
     }
 
-    app->ui.csd.mode   = csd_mode;
-    app->ui.csd.damage = true;
+    app->ui.csd.mode                    = csd_mode;
+    app->ui.csd.damage                  = true;
     app->csd_mode_changed_before_resize = true;
     App_framebuffer_damage(self);
 }

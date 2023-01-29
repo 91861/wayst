@@ -317,6 +317,11 @@ static void restore_gl_state(stored_common_gl_state_t* state)
     }
 }
 
+static uint32_t titlebar_height_px(Ui* ui)
+{
+    return Ui_csd_titlebar_visible(ui) ? UI_CSD_TITLEBAR_HEIGHT_PX : 0;
+}
+
 struct _GfxOpenGL2;
 
 typedef struct
@@ -449,6 +454,8 @@ typedef struct _GfxOpenGL2
 
     int_fast8_t bound_resources;
 
+    Pair_uint32_t cells;
+
     window_partial_swap_request_t modified_region;
 
     lines_damage_record_t   line_damage;
@@ -461,9 +468,8 @@ Pair_uint32_t GfxOpenGL2_get_char_size(Gfx* self, Pair_uint32_t pixels);
 
 void GfxOpenGL2_external_framebuffer_damage(Gfx* self)
 {
-    GfxOpenGL2* gl2 = gfxOpenGL2(self);
-    uint16_t    n_lines =
-      GfxOpenGL2_get_char_size(self, (Pair_uint32_t){ gl2->win_w, gl2->win_h }).second;
+    GfxOpenGL2* gl2     = gfxOpenGL2(self);
+    uint32_t    n_lines = gl2->cells.second;
 
     for (int i = 0; i < MAX_TRACKED_FRAME_DAMAGE; ++i) {
         gl2->frame_overlay_damage[i].overlay_state = 1;
@@ -475,11 +481,8 @@ void GfxOpenGL2_external_framebuffer_damage(Gfx* self)
            MAX_TRACKED_FRAME_DAMAGE * n_lines * sizeof(uint32_t));
 }
 
-static void GfxOpenGL2_realloc_damage_record(GfxOpenGL2* self)
+static void GfxOpenGL2_realloc_damage_record(GfxOpenGL2* self, uint32_t n_lines)
 {
-    uint16_t n_lines =
-      GfxOpenGL2_get_char_size(gfxBase(self), (Pair_uint32_t){ self->win_w, self->win_h }).second;
-
     free(self->line_damage.damage_history);
     free(self->line_damage.proxy_color_component);
     free(self->line_damage.line_length);
@@ -530,17 +533,17 @@ void                             GfxOpenGL2_destroy_recycled(GfxOpenGL2* self);
 void                           GfxOpenGL2_destroy(Gfx* self);
 window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, const Vt* vt, Ui* ui, uint8_t age);
 Pair_uint32_t                  GfxOpenGL2_get_char_size(Gfx* self, Pair_uint32_t pixels);
-void                           GfxOpenGL2_resize(Gfx* self, uint32_t w, uint32_t h);
-void                           GfxOpenGL2_init_with_context_activated(Gfx* self);
-bool                           GfxOpenGL2_set_focus(Gfx* self, bool focus);
-Pair_uint32_t                  GfxOpenGL2_pixels(Gfx* self, uint32_t c, uint32_t r);
-void                           GfxOpenGL2_reload_font(Gfx* self);
-void                           GfxOpenGL2_external_framebuffer_damage(Gfx* self);
-void                           GfxOpenGL2_destroy_proxy(Gfx* self, uint32_t* proxy);
-void                           GfxOpenGL2_destroy_image_proxy(Gfx* self, uint32_t* proxy);
-void                           GfxOpenGL2_destroy_image_view_proxy(Gfx* self, uint32_t* proxy);
-void                           GfxOpenGL2_destroy_sixel_proxy(Gfx* self, uint32_t* proxy);
-static void                    GfxOpenGL2_regenerate_line_quad_vbo(GfxOpenGL2* gfx);
+void          GfxOpenGL2_resize(Gfx* self, uint32_t w, uint32_t h, Pair_uint32_t cells);
+void          GfxOpenGL2_init_with_context_activated(Gfx* self);
+bool          GfxOpenGL2_set_focus(Gfx* self, bool focus);
+Pair_uint32_t GfxOpenGL2_pixels(Gfx* self, uint32_t c, uint32_t r);
+void          GfxOpenGL2_reload_font(Gfx* self);
+void          GfxOpenGL2_external_framebuffer_damage(Gfx* self);
+void          GfxOpenGL2_destroy_proxy(Gfx* self, uint32_t* proxy);
+void          GfxOpenGL2_destroy_image_proxy(Gfx* self, uint32_t* proxy);
+void          GfxOpenGL2_destroy_image_view_proxy(Gfx* self, uint32_t* proxy);
+void          GfxOpenGL2_destroy_sixel_proxy(Gfx* self, uint32_t* proxy);
+static void   GfxOpenGL2_regenerate_line_quad_vbo(GfxOpenGL2* gfx, uint32_t n_lines);
 
 static struct IGfx gfx_interface_opengl2 = {
     .draw                        = GfxOpenGL2_draw,
@@ -2224,9 +2227,10 @@ static void GfxOpenGL2_update_metrics(Gfx* self)
     gl2->max_cells_in_line = gl2->win_w / gl2->glyph_width_pixels;
 }
 
-void GfxOpenGL2_resize(Gfx* self, uint32_t w, uint32_t h)
+void GfxOpenGL2_resize(Gfx* self, uint32_t w, uint32_t h, Pair_uint32_t cells)
 {
     GfxOpenGL2* gl2 = gfxOpenGL2(self);
+    gl2->cells      = cells;
     GfxOpenGL2_destroy_recycled(gl2);
 
     gl2->win_w = w;
@@ -2243,8 +2247,8 @@ void GfxOpenGL2_resize(Gfx* self, uint32_t w, uint32_t h)
 
     glViewport(0, 0, gl2->win_w, gl2->win_h);
 
-    GfxOpenGL2_realloc_damage_record(gl2);
-    GfxOpenGL2_regenerate_line_quad_vbo(gl2);
+    GfxOpenGL2_realloc_damage_record(gl2, cells.second);
+    GfxOpenGL2_regenerate_line_quad_vbo(gl2, cells.second);
 }
 
 Pair_uint32_t GfxOpenGL2_get_char_size(Gfx* self, Pair_uint32_t pixels)
@@ -2356,7 +2360,7 @@ void GfxOpenGL2_init_with_context_activated(Gfx* self)
 #endif
 
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_data), vertex_data, GL_STATIC_DRAW);
-    GfxOpenGL2_regenerate_line_quad_vbo(gl2);
+    GfxOpenGL2_regenerate_line_quad_vbo(gl2, gl2->cells.second);
 
     glGetIntegerv(GL_MAX_TEXTURE_SIZE, &gl2->max_tex_res);
 
@@ -2395,7 +2399,7 @@ void GfxOpenGL2_reload_font(Gfx* self)
     GfxOpenGL2* gl2 = gfxOpenGL2(self);
 
     GfxOpenGL2_load_font(self);
-    GfxOpenGL2_resize(self, gl2->win_w, gl2->win_h);
+    GfxOpenGL2_resize(self, gl2->win_w, gl2->win_h, gl2->cells);
 
     GlyphAtlas_destroy(&gl2->glyph_atlas);
     gl2->glyph_atlas = GlyphAtlas_new(1024, 512);
@@ -2409,11 +2413,8 @@ void GfxOpenGL2_reload_font(Gfx* self)
     GfxOpenGL2_maybe_generate_boxdraw_atlas_page(gl2);
 }
 
-static void GfxOpenGL2_regenerate_line_quad_vbo(GfxOpenGL2* gfx)
+static void GfxOpenGL2_regenerate_line_quad_vbo(GfxOpenGL2* gfx, uint32_t n_lines)
 {
-    uint32_t n_lines =
-      GfxOpenGL2_get_char_size(gfxBase(gfx), (Pair_uint32_t){ gfx->win_w, gfx->win_h }).second;
-
     Vector_float transfer = Vector_new_with_capacity_float(n_lines * 4 * QUAD_V_SZ);
 
     for (uint32_t i = 0; i < n_lines; ++i) {
@@ -4424,13 +4425,14 @@ static window_partial_swap_request_t* GfxOpenGL2_process_line_position_change_da
   window_partial_swap_request_t* swap_request,
   VtLine*                        line,
   size_t                         visual_index,
-  uint8_t                        buffer_age)
+  uint8_t                        buffer_age,
+  Ui*                            ui)
 {
     bool repainted = self->line_damage.damage_history[visual_index];
 
     if (swap_request) {
         if (!repainted) /* just scrolling */ {
-            uint16_t n_lines = self->line_damage.n_lines;
+            uint32_t n_lines = self->line_damage.n_lines;
             uint32_t ix      = visual_index + 1 * n_lines + (buffer_age * n_lines);
             uint16_t len     = MAX(line->data.size, self->line_damage.line_length[ix]);
 
@@ -4444,7 +4446,7 @@ static window_partial_swap_request_t* GfxOpenGL2_process_line_position_change_da
                 swap_request    = GfxOpenGL2_merge_or_push_modified_rect(self, dam_rect);
             }
         } else /* scrolling, but replaced with shorter content */ {
-            uint16_t n_lines = self->line_damage.n_lines;
+            uint32_t n_lines = self->line_damage.n_lines;
             uint32_t ix      = visual_index + 1 * n_lines + (buffer_age * n_lines);
             uint16_t new_len = line->data.size;
             uint16_t old_len = self->line_damage.line_length[ix];
@@ -4807,8 +4809,9 @@ GfxOpenGL2_maybe_draw_titlebar(Gfx* self, Ui* ui, window_partial_swap_request_t*
     } /* buttons */
 
     glViewport(0, 0, gfx->win_w, gfx->win_h);
+
     rect_t dam_rect = GfxOpenGL2_translate_coords(gfx, 0, 0, gfx->win_w, UI_CSD_TITLEBAR_HEIGHT_PX);
-    return GfxOpenGL2_merge_or_push_modified_rect(gfx, dam_rect);
+    return swap_request ? GfxOpenGL2_merge_or_push_modified_rect(gfx, dam_rect) : NULL;
 }
 
 window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, const Vt* vt, Ui* ui, uint8_t buffer_age)
@@ -4831,7 +4834,7 @@ window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, const Vt* vt, Ui* ui, 
     GfxOpenGL2_rotate_damage_record(gfx);
 
     gfx->frame_overlay_damage->overlay_state =
-      Ui_any_overlay_element_visible(ui) | Vt_is_scrolling_visual(vt);
+      Ui_any_overlay_element_visible(ui) || Vt_is_scrolling_visual(vt);
 
     if (GfxOpenGL2_get_accumulated_overlay_damaged(gfx, buffer_age) ||
         gfx->frame_overlay_damage->overlay_state) {
@@ -4892,7 +4895,10 @@ window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, const Vt* vt, Ui* ui, 
                 int32_t h = gfx->line_height_pixels;
 
                 rect_t dam_rect = GfxOpenGL2_translate_coords(gfx, x, y, w, h);
-                retval          = GfxOpenGL2_merge_or_push_modified_rect(gfx, dam_rect);
+
+                if (retval) {
+                    retval = GfxOpenGL2_merge_or_push_modified_rect(gfx, dam_rect);
+                }
             } else {
                 retval = NULL;
             }
@@ -4919,7 +4925,8 @@ window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, const Vt* vt, Ui* ui, 
                                                                     retval,
                                                                     i,
                                                                     visual_index,
-                                                                    buffer_age);
+                                                                    buffer_age,
+                                                                    ui);
         }
 
         /* update damage history data */
@@ -4929,11 +4936,13 @@ window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, const Vt* vt, Ui* ui, 
 
     glDisable(GL_BLEND);
     glEnable(GL_SCISSOR_TEST);
-    Pair_uint32_t chars = Gfx_get_char_size(self, (Pair_uint32_t){ gfx->win_w, gfx->win_h });
+    Pair_uint32_t chars = Gfx_get_char_size(
+      self,
+      (Pair_uint32_t){ gfx->win_w - settings.padding * 2, gfx->win_h - settings.padding * 2 });
 
     if (vt->scrolling_visual) {
         glScissor(gfx->pixel_offset_x,
-                  gfx->pixel_offset_y,
+                  gfx->pixel_offset_y - titlebar_height_px(ui),
                   chars.first * gfx->glyph_width_pixels,
                   gfx->win_h);
     } else {
@@ -4988,6 +4997,39 @@ window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, const Vt* vt, Ui* ui, 
     }
 
     if (unlikely(settings.debug_gfx)) {
+        if (retval) {
+            for (int8_t i = 0; i < retval->count; ++i) {
+                rect_t* r = &retval->regions[i];
+                Shader_use(&gfx->solid_fill_shader);
+                glBindTexture(GL_TEXTURE_2D, 0);
+                float vertex_data[] = {
+                    -1.0f + r->x * gfx->sx + gfx->sx,    -1.0 + r->y * gfx->sy + gfx->sy,
+
+                    -1.0f + r->x * gfx->sx + gfx->sx,    -1.0f + (r->y + r->h - 1) * gfx->sy,
+
+                    -1.0f + (r->x + r->w - 1) * gfx->sx, -1.0f + (r->y + r->h - 1) * gfx->sy,
+
+                    -1.0f + (r->x + r->w - 1) * gfx->sx, -1.0 + r->y * gfx->sy + gfx->sy,
+
+                    -1.0f + r->x * gfx->sx + gfx->sx,    -1.0 + r->y * gfx->sy + gfx->sy,
+
+                    -1.0f + (r->x + r->w - 1) * gfx->sx, -1.0f + (r->y + r->h - 1) * gfx->sy,
+
+                };
+                glBindBuffer(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
+                ARRAY_BUFFER_SUB_OR_SWAP(vertex_data, gfx->flex_vbo.size, (sizeof vertex_data));
+                glVertexAttribPointer(gfx->solid_fill_shader.attribs->location,
+                                      2,
+                                      GL_FLOAT,
+                                      GL_FALSE,
+                                      0,
+                                      0);
+                glUniform4f(gfx->solid_fill_shader.uniforms[0].location, 1.0f, 0.0f, 0.0f, 1.0f);
+                glDrawArrays(GL_LINE_STRIP, 0, 6);
+            }
+            retval = NULL;
+        }
+
         static bool repaint_indicator_visible = true;
         if (repaint_indicator_visible) {
             retval                                   = NULL;
@@ -4995,8 +5037,8 @@ window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, const Vt* vt, Ui* ui, 
             Shader_use(&gfx->solid_fill_shader);
             glBindTexture(GL_TEXTURE_2D, 0);
 
-            float vertex_data[] = { -1.0f, 1.0f,  -1.0f + gfx->sx * 50.0f,
-                                    1.0f,  -1.0f, 1.0f - gfx->sy * 50.0f };
+            float vertex_data[] = { -1.0f, 1.0f,  -1.0f + gfx->sx * 5.0f,
+                                    1.0f,  -1.0f, 1.0f - gfx->sy * 5.0f };
 
             glBindBuffer(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
             ARRAY_BUFFER_SUB_OR_SWAP(vertex_data, gfx->flex_vbo.size, (sizeof vertex_data));

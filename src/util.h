@@ -270,6 +270,9 @@ static void print_rect(rect_t* rect)
     printf("rect{ x: %d, y: %d, w: %d, h :%d }\n", rect->x, rect->y, rect->w, rect->h);
 }
 
+#define RECT_FMT "x: %d, y: %d, w: %d, h :%d"
+#define RECT_AP(rect) (rect)->x, (rect)->y, (rect)->w, (rect)->h
+
 static bool regions_intersect(int32_t a, int32_t as, int32_t b, int32_t bs)
 {
     return (a <= b && a + as >= b) || (a >= b && a <= b + bs);

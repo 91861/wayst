@@ -11,6 +11,7 @@
 #include "ui.h"
 #include "util.h"
 #include <stdalign.h>
+#include <stdio.h>
 
 typedef enum
 {
@@ -53,6 +54,15 @@ typedef struct
     int8_t count;
     rect_t regions[WINDOW_MAX_SWAP_REGION_COUNT];
 } window_partial_swap_request_t;
+
+static void window_partial_swap_request_print(window_partial_swap_request_t* sr) {
+    if (!sr)
+        return;
+    
+    for (int8_t i = 0; i < sr->count; ++i) {
+        printf("rect %d # " RECT_FMT "\n", i, RECT_AP(&sr->regions[i]));
+    }
+}
 
 enum MousePointerStyle
 {
