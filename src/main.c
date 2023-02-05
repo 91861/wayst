@@ -1244,14 +1244,9 @@ static bool App_maybe_handle_application_key(App*     self,
             Vt_clear_all_proxies(vt);
             Gfx_destroy_proxy(self->gfx, self->ui.cursor_proxy.data);
             App_reload_font(self);
-            Pair_uint32_t cells = App_get_char_size(self);
-            Vt_resize(vt, cells.first, cells.second);
-            App_update_padding(self);
-            App_update_scrollbar_dims(self);
-            App_notify_content_change(self);
+            App_resize(self, self->resolution);
             Pair_uint32_t cell = App_get_cell_dims(self);
             Window_set_incremental_resize(self->win, cell.first, cell.second);
-            App_framebuffer_damage(self);
         } else {
             App_flash(self);
         }
@@ -1261,14 +1256,9 @@ static bool App_maybe_handle_application_key(App*     self,
         Vt_clear_all_proxies(vt);
         Gfx_destroy_proxy(self->gfx, self->ui.cursor_proxy.data);
         App_reload_font(self);
-        Pair_uint32_t cells = App_get_char_size(self);
-        Vt_resize(vt, cells.first, cells.second);
-        App_notify_content_change(self);
-        App_update_scrollbar_dims(self);
-        App_notify_content_change(self);
+        App_resize(self, self->resolution);
         Pair_uint32_t cell = App_get_cell_dims(self);
         Window_set_incremental_resize(self->win, cell.first, cell.second);
-        App_framebuffer_damage(self);
         return true;
     } else if (KeyCommand_is_active(&cmd[KCMD_HTML_DUMP], key, rawkey, mods)) {
         time_t     current_time;
