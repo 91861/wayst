@@ -763,13 +763,11 @@ typedef struct
         ColorRGBA bg;
         ColorRGB  fg;
 
-        // TODO:
-        /* struct terminal_cursor_colors_t */
-        /* { */
-        /*     bool enabled; */
-        /*     ColorRGBA bg; */
-        /*     ColorRGB  fg; */
-        /* } cursor; */
+        struct terminal_cursor_colors_t
+        {
+            bool     enabled;
+            ColorRGBA bg;
+        } cursor;
 
         struct terminal_highlight_colors_t
         {
@@ -827,10 +825,10 @@ typedef struct
 
     VtCursor cursor;
 
-    size_t   alt_cursor_pos;
-    size_t   saved_cursor_pos;
-    size_t   alt_active_line;
-    size_t   saved_active_line;
+    size_t alt_cursor_pos;
+    size_t saved_cursor_pos;
+    size_t alt_active_line;
+    size_t saved_active_line;
 
     /* top margin in screen coordinates */
     uint16_t scroll_region_top;
@@ -971,8 +969,10 @@ static ColorRGB Vt_rune_cursor_fg(const Vt* self, const VtRune* rune)
 
 static ColorRGBA Vt_rune_cursor_bg(const Vt* self, const VtRune* rune)
 {
-    return (settings.cursor_color_static_bg || !rune) ? settings.cursor_bg
-                                                      : ColorRGBA_from_RGB(Vt_rune_fg(self, rune));
+    return self->colors.cursor.enabled ? self->colors.cursor.bg
+           : (settings.cursor_color_static_bg || !rune)
+             ? settings.cursor_bg
+             : ColorRGBA_from_RGB(Vt_rune_fg(self, rune));
 }
 
 static ColorRGB Vt_rune_cursor_ln_clr(const Vt* self, const VtRune* rune)

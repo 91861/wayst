@@ -560,7 +560,7 @@ static const char* const color_palette_names[] = {
 int palette_color_index_from_xterm_name(const char* name)
 {
     for (uint16_t i = 0; i < ARRAY_SIZE(color_palette_names); ++i) {
-        if (strcasecmp(color_palette_names[i], name)) {
+        if (!strcasecmp(color_palette_names[i], name)) {
             return i + 16;
         }
     }
@@ -570,7 +570,7 @@ int palette_color_index_from_xterm_name(const char* name)
 ColorRGB color_from_xterm_name(const char* name, bool* fail)
 {
     for (uint16_t i = 0; i < ARRAY_SIZE(color_palette_names); ++i) {
-        if (strcasecmp(color_palette_names[i], name)) {
+        if (!strcasecmp(color_palette_names[i], name)) {
             ColorRGB color;
             generate_color_palette_entry(&color, i + 16);
             return color;

@@ -1,5 +1,6 @@
 /* See LICENSE for license information. */
 
+#include "colors.h"
 #define _GNU_SOURCE
 #include <stdint.h>
 
@@ -359,6 +360,17 @@ static void Vt_grapheme_break(Vt* self)
     self->utf8proc_state = 0;
 #endif
     self->last_codepoint = 0;
+}
+
+static void Vt_set_cursor_color(Vt* self, ColorRGBA color)
+{
+    self->colors.cursor.enabled = true;
+    self->colors.cursor.bg      = color;
+}
+
+static void Vt_set_cursor_color_default(Vt* self)
+{
+    self->colors.cursor.enabled = false;
 }
 
 static void Vt_set_fg_color_custom(Vt* self, ColorRGB color, VtRune* opt_target)
@@ -3473,8 +3485,8 @@ __attribute__((hot)) static void Vt_handle_single_argument_SGR(Vt*     self,
 
         /*  Not underlined, ECMA-48 3rd */
         case 24:
-            r->underlined = false;
-            r->curlyunderline = false;
+            r->underlined      = false;
+            r->curlyunderline  = false;
             r->doubleunderline = false;
             break;
 
@@ -4296,6 +4308,16 @@ static void Vt_handle_OSC(Vt* self, char c)
                                                self->colors.bg.b);
                         } break;
 
+                        /* text cursor color */
+                        case 12: {
+                            Vt_output_formated(self,
+                                               "\e]%u;rgb:%x/%x/%x\e\\",
+                                               arg,
+                                               self->colors.cursor.bg.r,
+                                               self->colors.cursor.bg.g,
+                                               self->colors.cursor.bg.b);
+                        } break;
+
                         /* highlight background color */
                         case 17: {
                             Vt_output_formated(self,
@@ -4322,8 +4344,6 @@ static void Vt_handle_OSC(Vt* self, char c)
                         case 13:
                         /* pointer background color */
                         case 14:
-                        /* text cursor color */
-                        case 12:
                         /* Tektronix foreground color */
                         case 15:
                         /* Tektronix cursor color */
@@ -4354,7 +4374,25 @@ static void Vt_handle_OSC(Vt* self, char c)
                                 set_rgba_color_from_xterm_string(&self->colors.bg, sequence_arg);
                             } break;
 
-                            /* highlight background color */
+                            /* text cursor color (argument is formatted for XParseColor) */
+                            case 12: {
+                                bool      fail = false;
+                                ColorRGBA c    = ColorRGBA_from_any(sequence_arg, &fail);
+
+                                if (fail) {
+                                    fail = false;
+                                    c    = ColorRGBA_from_RGB(
+                                      color_from_xterm_name(sequence_arg, &fail));
+                                }
+
+                                if (!fail) {
+                                    Vt_set_cursor_color(self, c);
+                                } else {
+                                    WRN("OSC12 could not parse %s as color", sequence_arg);
+                                }
+
+                            } break;
+
                             case 17: {
                                 set_rgba_color_from_xterm_string(&self->colors.highlight.bg,
                                                                  sequence_arg);
@@ -4366,18 +4404,16 @@ static void Vt_handle_OSC(Vt* self, char c)
                                                                 sequence_arg);
                             } break;
 
-                            /* Tektronix background color */
-                            case 16:
-                            /* text cursor color */
-                            case 12:
-                            /* Tektronix foreground color */
-                            case 15:
-                            /* Tektronix cursor color */
-                            case 18:
                             /* pointer foreground color */
                             case 13:
                             /* pointer background color */
                             case 14:
+                            /* Tektronix foreground color */
+                            case 15:
+                            /* Tektronix background color */
+                            case 16:
+                            /* Tektronix cursor color */
+                            case 18:
                             default:
                                 break;
                         }
@@ -4400,6 +4436,8 @@ static void Vt_handle_OSC(Vt* self, char c)
                     case 10:
                     /* text cursor color */
                     case 12:
+                        Vt_set_cursor_color_default(self);
+                        break;
                     /* Tektronix foreground color */
                     case 15:
                     /* Tektronix cursor color */
