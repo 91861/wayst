@@ -2463,6 +2463,10 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h, gfx_api_t gfx_api)
     wl_registry_add_listener(globalWl->registry, &registry_listener, win);
     wl_display_roundtrip(globalWl->display);
 
+    if (!globalWl->decoration_manager) {
+        win->h += UI_CSD_TITLEBAR_HEIGHT_PX;
+    }
+
     if (globalWl->data_device_manager) {
         globalWl->data_device =
           wl_data_device_manager_get_data_device(globalWl->data_device_manager, globalWl->seat);

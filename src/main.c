@@ -495,8 +495,12 @@ static window_partial_swap_request_t* App_redraw(void* self, uint8_t buffer_age)
 
 static void App_update_padding(App* self)
 {
-    Pair_uint32_t chars       = Gfx_get_char_size(self->gfx, self->resolution);
+    Pair_uint32_t chars       = App_get_char_size(self);
     Pair_uint32_t used_pixels = Gfx_pixels(self->gfx, chars.first, chars.second);
+
+    if (Ui_csd_titlebar_visible(&self->ui) && !App_fullscreen(self)) {
+        used_pixels.second += (UI_CSD_TITLEBAR_HEIGHT_PX);
+    }
 
     if (settings.padding_center) {
         self->ui.pixel_offset_x = (self->resolution.first - used_pixels.first) / 2;
@@ -519,6 +523,7 @@ static void App_resize(App* self, Pair_uint32_t newres)
     self->csd_mode_changed_before_resize = false;
     self->resolution                     = newres;
     Pair_uint32_t chars                  = App_get_char_size(self);
+
     Vt_clear_all_proxies(&self->vt);
     Gfx_destroy_proxy(self->gfx, self->ui.cursor_proxy.data);
     Gfx_resize(self->gfx, self->resolution.first, self->resolution.second, chars);
@@ -618,7 +623,7 @@ static Pair_uint32_t App_get_char_size(void* self)
     Pair_uint32_t res = app->resolution;
 
     if (Ui_csd_titlebar_visible(&app->ui) && !App_fullscreen(app)) {
-        res.second -= (UI_CSD_TITLEBAR_HEIGHT_PX + 1);
+        res.second -= (UI_CSD_TITLEBAR_HEIGHT_PX);
     }
 
     return Gfx_get_char_size(app->gfx, res);
