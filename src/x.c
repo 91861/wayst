@@ -454,7 +454,7 @@ static WindowBase* WindowX11_new(uint32_t  w,
 
     if (!global) {
         init_globals = true;
-        global       = calloc(1, sizeof(WindowStatic) + sizeof(GlobalX11) - sizeof(uint8_t));
+        global       = _calloc(1, sizeof(WindowStatic) + sizeof(GlobalX11) - sizeof(uint8_t));
 
         XSetErrorHandler(x11_error_handler);
         XSetIOErrorHandler(x11_io_error_handler);
@@ -493,7 +493,7 @@ static WindowBase* WindowX11_new(uint32_t  w,
         }
     }
 
-    WindowBase* win = calloc(1, sizeof(WindowBase) + sizeof(WindowX11) - sizeof(uint8_t));
+    WindowBase* win = _calloc(1, sizeof(WindowBase) + sizeof(WindowX11) - sizeof(uint8_t));
 
     XSetLocaleModifiers("@im=none");
     globalX11->im = XOpenIM(globalX11->display, NULL, NULL, NULL);

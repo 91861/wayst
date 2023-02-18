@@ -5,7 +5,7 @@
 
 static inline bool isbase64(char c)
 {
-    return isalnum(c) || c == '+' || c == '/' || c == '=';
+    return (c > 0 && isalnum(c)) || c == '+' || c == '/' || c == '=';
 }
 
 ptrdiff_t base64_decode(const char* input, char* output)
@@ -62,7 +62,7 @@ __attribute__((warn_unused_result)) char* base64_encode_alloc(const char* input,
                                                               size_t*     opt_out_size)
 {
     size_t output_size = base64_encoded_length(size);
-    char*  output      = malloc(output_size + 1);
+    char*  output      = _malloc(output_size + 1);
     base64_encode(input, size, output);
     if (opt_out_size)
         *opt_out_size = output_size;
@@ -74,7 +74,7 @@ __attribute__((warn_unused_result)) char* base64_decode_alloc(const char* input,
                                                               size_t*     opt_out_size)
 {
     size_t output_size = base64_decoded_length(input, size);
-    char*  output      = malloc(output_size + 1);
+    char*  output      = _malloc(output_size + 1);
     base64_decode(input, output);
     if (opt_out_size)
         *opt_out_size = output_size;

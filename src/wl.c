@@ -2431,7 +2431,7 @@ static void cursor_set(struct wl_cursor* what, uint32_t serial)
 /* Window */
 struct WindowBase* WindowWl_new(uint32_t w, uint32_t h, gfx_api_t gfx_api)
 {
-    global = calloc(1, sizeof(WindowStatic) + sizeof(GlobalWl) - sizeof(uint8_t));
+    global = _calloc(1, sizeof(WindowStatic) + sizeof(GlobalWl) - sizeof(uint8_t));
     global->target_frame_time_ms = 16;
 
     /* passing NULL grabs WAYLAND_DISPLAY from env */
@@ -2446,7 +2446,7 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h, gfx_api_t gfx_api)
     globalWl->xkb.ctx = xkb_context_new(0);
 
     struct WindowBase* win =
-      calloc(1, sizeof(struct WindowBase) + sizeof(WindowWl) + sizeof(uint8_t));
+      _calloc(1, sizeof(struct WindowBase) + sizeof(WindowWl) + sizeof(uint8_t));
 
     win->w                 = w;
     win->h                 = h;

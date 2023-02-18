@@ -596,7 +596,7 @@ typedef struct
         void (*on_desktop_notification_sent)(void*, const char* opt_title, const char* text);
         void (*on_window_maximize_state_set)(void*, bool);
         void (*on_window_fullscreen_state_set)(void*, bool);
-        void (*on_window_dimensions_set)(void*, int32_t, int32_t);
+        void (*on_window_dimensions_set)(void*, uint32_t, uint32_t);
         void (*on_text_area_dimensions_set)(void*, int32_t, int32_t);
         void (*on_title_changed)(void*, const char*);
         void (*on_clipboard_requested)(void*);
@@ -765,7 +765,7 @@ typedef struct
 
         struct terminal_cursor_colors_t
         {
-            bool     enabled;
+            bool      enabled;
             ColorRGBA bg;
         } cursor;
 
@@ -1044,7 +1044,7 @@ static void VtSixelSurface_destroy(void* _vt, VtSixelSurface* self)
 static uint16_t VtLine_add_link(VtLine* self, const char* link)
 {
     if (!self->links) {
-        self->links  = malloc(sizeof(*self->links));
+        self->links  = _malloc(sizeof(*self->links));
         *self->links = Vector_new_with_capacity_VtUri(1);
         Vector_push_VtUri(self->links, (VtUri){ .uri_string = strdup(link) });
         return 0;
@@ -1538,6 +1538,8 @@ static bool Vt_client_host_is_local(const Vt* self)
 
     return (!application_host || !client_host) ? true : !strcmp(application_host, client_host);
 }
+
+void Vt_shrink_scrollback(Vt* self);
 
 void Vt_clear_scrollback(Vt* self);
 

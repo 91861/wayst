@@ -122,7 +122,7 @@ const char* Vt_uri_range_at(Vt*            self,
             break;
         }
 
-        while (line_end_column < Vt_col(self)) {
+        while (line_end_column < Vt_col(self) && ln->data.size > (size_t)(line_end_column + 1)) {
             if (ln->data.buf[line_end_column + 1].hyperlink_idx != ln_base_idx)
                 break;
             ++line_end_column;
@@ -163,7 +163,7 @@ Vector_char rune_vec_to_string(Vector_VtRune* line, size_t begin, size_t end, co
         return res;
     }
     res = Vector_new_with_capacity_char(end - begin);
-    char             utfbuf[4];
+    char             utfbuf[16];
     static mbstate_t mbstate;
 
     for (uint32_t i = begin; i < end; ++i) {
@@ -175,7 +175,7 @@ Vector_char rune_vec_to_string(Vector_VtRune* line, size_t begin, size_t end, co
 
         if (rune->code > CHAR_MAX) {
             size_t bytes = c32rtomb(utfbuf, rune->code, &mbstate);
-            if (bytes > 0) {
+            if (bytes > 0 && bytes <= ARRAY_SIZE(utfbuf)) {
                 Vector_pushv_char(&res, utfbuf, bytes);
             }
         } else if (!rune->code) {

@@ -11,6 +11,7 @@
  *   we can add a SpliterWidget:IWidget nesting other widgets and forwarding mouse/kbd events etc.
  */
 
+#include "timing.h"
 #define _GNU_SOURCE
 #include "gfx.h"
 #include "util.h"
@@ -405,7 +406,7 @@ static void App_run(App* self)
             if (unlikely(settings.debug_vt)) {
                 usleep(settings.vt_debug_delay_usec);
                 App_notify_content_change(self);
-            } else if (unlikely(TimePoint_is_ms_ahead(TimePoint_now()) >
+            } else if (unlikely(TimePoint_ms_in_the_past(self->interpreter_start_time) >
                                 settings.pty_chunk_timeout_ms)) {
                 // if we take more than a user-defined ammount of time to deal with all the data
                 // continue on and draw the display.
@@ -522,8 +523,12 @@ static void App_resize(App* self, Pair_uint32_t newres)
 {
     self->csd_mode_changed_before_resize = false;
     self->resolution                     = newres;
-    Pair_uint32_t chars                  = App_get_char_size(self);
 
+    if (Ui_csd_titlebar_visible(&self->ui) && !App_fullscreen(self)) {
+        self->resolution.second = MAX(self->resolution.second, UI_CSD_TITLEBAR_HEIGHT_PX);
+    }
+
+    Pair_uint32_t chars = App_get_char_size(self);
     Vt_clear_all_proxies(&self->vt);
     Gfx_destroy_proxy(self->gfx, self->ui.cursor_proxy.data);
     Gfx_resize(self->gfx, self->resolution.first, self->resolution.second, chars);
@@ -2088,8 +2093,13 @@ static void App_set_fullscreen_state(void* self, bool fullscreen)
     App_resize(app, (Pair_uint32_t){ app->win->w, app->win->h });
 }
 
-static void App_set_window_size(void* self, int32_t width, int32_t height)
+static void App_set_window_size(void* self, uint32_t width, uint32_t height)
 {
+    if (width > UINT16_MAX || height > UINT16_MAX) {
+        WRN("requested window size too large");
+        return;
+    }
+
     App* app = self;
     Window_resize(app->win, width, height);
     App_resize(self, (Pair_uint32_t){ app->win->w, app->win->h });

@@ -218,6 +218,10 @@ static void Vt_uri_break_match(Vt* self)
 
 static void Vt_uri_next_char(Vt* self, char32_t c)
 {
+    if (self->uri_matcher.match.size > UINT16_MAX) {
+        Vt_uri_break_match(self);
+    }
+
     switch (self->uri_matcher.state) {
         case VT_URI_MATCHER_EMPTY: {
             if (c <= CHAR_MAX && isalpha(c)) {
@@ -230,7 +234,7 @@ static void Vt_uri_next_char(Vt* self, char32_t c)
 
         case VT_URI_MATCHER_SCHEME: {
             /* We care if we should use it, not if it's valid. Drop '+' '-' '.' */
-            if (isalnum(c) && self->uri_matcher.match.size < 10) {
+            if (c >= 'a' && c <= 'z' && self->uri_matcher.match.size < 10) {
                 Vector_push_char(&self->uri_matcher.match, c);
             } else if (c == ':') {
                 static const char* const SUPPORTED_SCHEMES[] = {
@@ -325,12 +329,12 @@ static inline void Vt_about_to_delete_line_by_scroll_up(Vt* self, size_t idx)
                 RcPtr_VtImageSurfaceView new_ptr2 = RcPtr_new_shared_VtImageSurfaceView(&new_ptr);
 
                 if (!tgt->graphic_attachments) {
-                    tgt->graphic_attachments = calloc(1, sizeof(VtGraphicLineAttachments));
+                    tgt->graphic_attachments = _calloc(1, sizeof(VtGraphicLineAttachments));
                 }
 
                 if (!tgt->graphic_attachments->images) {
                     tgt->graphic_attachments->images =
-                      malloc(sizeof(Vector_RcPtr_VtImageSurfaceView));
+                      _malloc(sizeof(Vector_RcPtr_VtImageSurfaceView));
                     *tgt->graphic_attachments->images = Vector_new_RcPtr_VtImageSurfaceView();
                 }
 
@@ -759,6 +763,10 @@ static Vector_Vector_char string_split_on(const char* str,
 
 static inline bool is_csi_sequence_terminated(const char* seq, const size_t size)
 {
+    if (unlikely(size > UINT16_MAX)) {
+        return true;
+    }
+
     if (!size) {
         return false;
     }
@@ -769,6 +777,10 @@ static inline bool is_csi_sequence_terminated(const char* seq, const size_t size
 
 static inline bool is_string_sequence_terminated(const char* seq, const size_t size)
 {
+    if (unlikely(size > UINT16_MAX)) {
+        return true;
+    }
+
     if (!size) {
         return false;
     }
@@ -977,7 +989,7 @@ void Vt_init(Vt* self, uint32_t cols, uint32_t rows)
 static void Vt_init_tab_ruler(Vt* self)
 {
     free(self->tab_ruler);
-    self->tab_ruler = calloc(1, Vt_col(self) + 1);
+    self->tab_ruler = _calloc(1, Vt_col(self) + 1);
     Vt_reset_tab_ruler(self);
 }
 
@@ -1373,7 +1385,7 @@ void Vt_resize(Vt* self, uint32_t x, uint32_t y)
 
 static inline int32_t short_sequence_get_int_argument(const char* seq)
 {
-    return *seq == 0 || seq[1] == 0 ? 1 : atoi(seq);
+    return !seq ? 1 : *seq == 0 || seq[1] == 0 ? 1 : atoi(seq);
 }
 
 /*
@@ -3076,6 +3088,12 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                                 break;
                                             }
 
+                                            if (target_cols > UINT16_MAX ||
+                                                target_rows > UINT16_MAX) {
+                                                LOG("WinOps requested window size too large\n");
+                                                break;
+                                            }
+
                                             CALL(self->callbacks.on_text_area_dimensions_set,
                                                  self->callbacks.user_data,
                                                  target_text_area_dims.first,
@@ -3267,10 +3285,14 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                                Vt_col(self),
                                                short_sequence_get_int_argument(seq));
 
-                                        CALL(self->callbacks.on_window_dimensions_set,
-                                             self->callbacks.user_data,
-                                             target_dims.first,
-                                             target_dims.second);
+                                        if (target_dims.second > UINT16_MAX) {
+                                            LOG("WinOps requested window size too large\n");
+                                        } else {
+                                            CALL(self->callbacks.on_window_dimensions_set,
+                                                 self->callbacks.user_data,
+                                                 target_dims.first,
+                                                 target_dims.second);
+                                        }
                                     }
                                 }
 
@@ -3655,8 +3677,13 @@ static void Vt_handle_APC(Vt* self, char c)
                     break;
 
                 char *s      = (char*)seq + 1, *control_data, *payload, *arg;
-                control_data = strsep(&s, ";");
-                payload      = strsep(&s, ";");
+                control_data = strsep(&s, ";\0");
+                payload      = strsep(&s, ";\0");
+
+                if (Vector_last_char(&self->parser.active_sequence) < payload ||
+                    Vector_last_char(&self->parser.active_sequence) < control_data) {
+                    break;
+                }
 
                 vt_image_proto_action_t       action       = VT_IMAGE_PROTO_ACTION_TRANSMIT;
                 vt_image_proto_compression_t  compression  = VT_IMAGE_PROTO_COMPRESSION_NONE;
@@ -4047,11 +4074,11 @@ static void Vt_handle_DCS(Vt* self, char c)
                             VtLine* ln = Vt_cursor_line(self);
                             if (!ln->graphic_attachments) {
                                 ln->graphic_attachments =
-                                  calloc(1, sizeof(VtGraphicLineAttachments));
+                                  _calloc(1, sizeof(VtGraphicLineAttachments));
                             }
                             if (!ln->graphic_attachments->sixels) {
                                 ln->graphic_attachments->sixels =
-                                  malloc(sizeof(Vector_RcPtr_VtSixelSurface));
+                                  _malloc(sizeof(Vector_RcPtr_VtSixelSurface));
                                 *ln->graphic_attachments->sixels =
                                   Vector_new_RcPtr_VtSixelSurface();
                             }
@@ -4125,7 +4152,7 @@ static void Vt_handle_OSC(Vt* self, char c)
         uint32_t arg  = 0;
         char*    text = seq;
 
-        if (isdigit(*seq)) {
+        if (*seq > 0 && isdigit(*seq)) {
             arg = strtoul(seq, &text, 10);
             if (text && !(*text == ';' || *text == ':')) {
                 text = seq;
@@ -4241,7 +4268,7 @@ static void Vt_handle_OSC(Vt* self, char c)
                     while (*uri && *uri != '/')
                         ++uri;
                     ptrdiff_t s                            = uri - host;
-                    self->client_host                      = malloc(s + 1);
+                    self->client_host                      = _malloc(s + 1);
                     strncpy(self->client_host, host, s)[s] = '\0';
                     self->work_dir                         = strdup(uri + 1 /* skip second '/' */);
                     LOG("Vt::osc7{ host: %s, pwd: %s }\n", self->client_host, self->work_dir);
@@ -4253,11 +4280,11 @@ static void Vt_handle_OSC(Vt* self, char c)
 
             /* mark text as hyperlink with URL */
             case 8: {
-                strsep(&seq, ";");
-                strsep(&seq, ";");
-                char* link = strsep(&seq, ";");
+                strsep(&seq, ";\0");
+                strsep(&seq, ";\0");
+                char* link = strsep(&seq, ";\0");
 
-                if (strnlen(link, 1)) {
+                if (link && strnlen(link, 1)) {
                     free(self->active_hyperlink);
                     self->active_hyperlink = strdup(link);
                 } else {
@@ -4830,7 +4857,12 @@ static void Vt_delete_chars(Vt* self, size_t n)
     size_t rm_size = Vt_cursor_line(self)->data.size == self->cursor.col
                        ? Vt_cursor_line(self)->data.size - self->cursor.col
                        : Vt_cursor_line(self)->data.size;
-    Vector_remove_at_VtRune(&Vt_cursor_line(self)->data, self->cursor.col, MIN(rm_size, n));
+
+    size_t left = Vt_cursor_line(self)->data.size - self->cursor.col;
+
+    Vector_remove_at_VtRune(&Vt_cursor_line(self)->data,
+                            self->cursor.col,
+                            MIN(MIN(rm_size, n), left));
 
     /* Fill line to the cursor position with spaces with original propreties
      * before scolling so we get the expected result, when we... */
@@ -5949,7 +5981,7 @@ void Vt_clear_scrollback(Vt* self)
     Vt_remove_scrollback(self, self->lines.size);
 }
 
-static void Vt_shrink_scrollback(Vt* self)
+void Vt_shrink_scrollback(Vt* self)
 {
     if (Vt_alt_buffer_enabled(self)) {
         return;
@@ -5997,6 +6029,10 @@ inline void Vt_interpret(Vt* self, char* buf, size_t bytes)
 
     if (self->defered_events.repaint) {
         CALL(self->callbacks.on_repaint_required, self->callbacks.user_data);
+    }
+
+    if (self->lines.size > settings.scrollback * 2) {
+        Vt_shrink_scrollback(self);
     }
 }
 

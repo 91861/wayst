@@ -475,7 +475,7 @@ void GfxOpenGL2_external_framebuffer_damage(Gfx* self)
         gl2->frame_overlay_damage[i].overlay_state = 1;
     }
 
-    memset(gl2->line_damage.damage_history, 1, MAX_TRACKED_FRAME_DAMAGE * n_lines);
+    memset(gl2->line_damage.damage_history, 1, MAX_TRACKED_FRAME_DAMAGE * MAX(1, n_lines));
     memset(gl2->line_damage.proxy_color_component,
            0,
            MAX_TRACKED_FRAME_DAMAGE * n_lines * sizeof(uint32_t));
@@ -487,13 +487,14 @@ static void GfxOpenGL2_realloc_damage_record(GfxOpenGL2* self, uint32_t n_lines)
     free(self->line_damage.proxy_color_component);
     free(self->line_damage.line_length);
 
-    self->line_damage.damage_history = calloc(MAX_TRACKED_FRAME_DAMAGE, n_lines);
-    self->line_damage.line_length    = calloc(MAX_TRACKED_FRAME_DAMAGE * sizeof(uint16_t), n_lines);
+    self->line_damage.damage_history = _calloc(MAX_TRACKED_FRAME_DAMAGE, MAX(1, n_lines));
+    self->line_damage.line_length =
+      _calloc(MAX_TRACKED_FRAME_DAMAGE * sizeof(uint16_t), MAX(1, n_lines));
 
     self->line_damage.proxy_color_component =
-      calloc(MAX_TRACKED_FRAME_DAMAGE * sizeof(uint32_t), n_lines);
+      _calloc(MAX_TRACKED_FRAME_DAMAGE * sizeof(uint32_t), MAX(1, n_lines));
 
-    memset(self->line_damage.damage_history, 1, MAX_TRACKED_FRAME_DAMAGE * n_lines);
+    memset(self->line_damage.damage_history, 1, MAX_TRACKED_FRAME_DAMAGE * MAX(1, n_lines));
 
     for (int i = 0; i < MAX_TRACKED_FRAME_DAMAGE; ++i) {
         self->frame_overlay_damage[i].overlay_state = 1;
@@ -562,7 +563,7 @@ static struct IGfx gfx_interface_opengl2 = {
 
 Gfx* Gfx_new_OpenGL2(Freetype* freetype)
 {
-    Gfx* self                  = calloc(1, sizeof(Gfx) + sizeof(GfxOpenGL2) - sizeof(uint8_t));
+    Gfx* self                  = _calloc(1, sizeof(Gfx) + sizeof(GfxOpenGL2) - sizeof(uint8_t));
     self->interface            = &gfx_interface_opengl2;
     gfxOpenGL2(self)->freetype = freetype;
     gfxOpenGL2(self)->is_main_font_rgb = !(freetype->primary_output_type == FT_OUTPUT_GRAYSCALE);
@@ -939,7 +940,7 @@ __attribute__((cold)) static void GfxOpenGL2_maybe_generate_boxdraw_atlas_page(G
 
     size_t bs = self.height_px * self.width_px * sizeof(uint8_t) * 4;
 
-    uint8_t* fragments = calloc(1, bs);
+    uint8_t* fragments = _calloc(1, bs);
 
 #define L_OFFSET(_x, _y) (self.width_px * (_y) + (_x))
 
@@ -2153,7 +2154,7 @@ __attribute__((cold)) static Texture create_squiggle_texture(uint32_t w,
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
-    uint8_t* fragments                 = calloc(w * h * 4, 1);
+    uint8_t* fragments                 = _calloc(w * h * 4, 1);
     double   pixel_size                = 2.0 / h;
     double   stroke_width              = thickness * pixel_size * (MSAA / 1.3);
     double   stroke_fade               = pixel_size * MSAA * 2;
@@ -2259,12 +2260,20 @@ Pair_uint32_t GfxOpenGL2_get_char_size(Gfx* self, Pair_uint32_t pixels)
     int32_t  cellx   = gfxOpenGL2(self)->freetype->glyph_width_pixels + settings.padd_glyph_x;
     int32_t  celly   = gfxOpenGL2(self)->freetype->line_height_pixels + settings.padd_glyph_y;
 
-    if (pixels.first <= minsize || pixels.second <= minsize) {
+    if (pixels.first < minsize + cellx || pixels.second < minsize + celly) {
         return (Pair_uint32_t){ .first = 0, .second = 0 };
     }
 
     int32_t cols = MAX((pixels.first - 2 * settings.padding) / cellx, 0);
     int32_t rows = MAX((pixels.second - 2 * settings.padding) / celly, 0);
+
+    if (pixels.first < minsize + cellx * 2) {
+        cols = 1;
+    }
+
+    if (pixels.second < minsize + celly * 2) {
+        rows = 1;
+    }
 
     return (Pair_uint32_t){ .first = cols, .second = rows };
 }
@@ -4371,7 +4380,9 @@ static bool GfxOpenGL2_get_accumulated_line_damaged(GfxOpenGL2* self,
     bool     cursor_drawn_now = self->frame_overlay_damage->cursor_drawn;
     uint32_t cursor_now_x     = self->frame_overlay_damage->curosr_position_x;
 
-    for (int i = 0; i < age && !rv; ++i) {
+    for (int i = 0;
+         i < age && !rv && self->line_damage.n_lines > line_index + self->line_damage.n_lines * i;
+         ++i) {
         rv |= (self->line_damage.damage_history[line_index + self->line_damage.n_lines * i] ||
                (self->frame_overlay_damage[i].line_index == line_index &&
                 self->frame_overlay_damage[i].cursor_drawn != cursor_drawn_now &&
@@ -4870,7 +4881,9 @@ window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, const Vt* vt, Ui* ui, 
         };
 
         bool should_repaint = should_create_line_render_pass(&rp_args);
-        gfx->line_damage.damage_history[rp_args.visual_index] = should_repaint;
+        if (rp_args.visual_index < gfx->line_damage.n_lines) {
+            gfx->line_damage.damage_history[rp_args.visual_index] = should_repaint;
+        }
 
         if (should_repaint) {
             gfx->bound_resources  = BOUND_RESOURCES_NONE;
@@ -4930,8 +4943,10 @@ window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, const Vt* vt, Ui* ui, 
         }
 
         /* update damage history data */
-        gfx->line_damage.proxy_color_component[i - begin] = i->proxy.data[PROXY_INDEX_TEXTURE];
-        gfx->line_damage.line_length[i - begin]           = i->data.size;
+        if (gfx->line_damage.n_lines > i - begin) {
+            gfx->line_damage.proxy_color_component[i - begin] = i->proxy.data[PROXY_INDEX_TEXTURE];
+            gfx->line_damage.line_length[i - begin]           = i->data.size;
+        }
     }
 
     glDisable(GL_BLEND);

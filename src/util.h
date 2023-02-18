@@ -181,6 +181,71 @@ static inline void* _call_fp_helper(const char* const msg,
         fputs("\n", stderr);                                                                       \
     }
 
+static char* _strdup(const char* str)
+{
+    char* ret = strdup(str);
+
+    if (unlikely(!ret)) {
+        for (int i = 0; !ret && i < 20; ++i) {
+            ret = strdup(str);
+            if (ret) {
+                LOG("failed alloc");
+                return ret;
+            }
+        }
+        ERR("out of memory: strdup");
+    }
+
+    return ret;
+}
+
+static void* _calloc(size_t n, size_t size)
+{
+    void* ret = calloc(n, size);
+    if (unlikely(!ret)) {
+        for (int i = 0; !ret && i < 20; ++i) {
+            ret = calloc(n, size);
+            if (ret) {
+                LOG("failed alloc");
+                return ret;
+            }
+        }
+        ERR("out of memory: realloc(%zu, %zu)", n, size);
+    }
+    return ret;
+}
+
+static void* _malloc(size_t size)
+{
+    void* ret = malloc(size);
+    if (unlikely(!ret)) {
+        for (int i = 0; !ret && i < 20; ++i) {
+            ret = malloc(size);
+            if (ret) {
+                LOG("failed alloc");
+                return ret;
+            }
+        }
+        ERR("out of memory: malloc(%zu)", size);
+    }
+    return ret;
+}
+
+_Pragma("GCC diagnostic push");
+_Pragma("GCC diagnostic ignored \"-Wuse-after-free\"");
+static void* _realloc(void* ptr, size_t new_size)
+{
+    void* ret = realloc(ptr, new_size);
+    if (unlikely(!ret)) {
+        ret = realloc(ptr, new_size);
+        if (!ret) {
+            ERR("out of memory");
+        }
+    }
+    return ret;
+}
+_Pragma("GCC diagnostic pop");
+
 #ifndef asprintf
 #define asprintf(...) _asprintf(__VA_ARGS__)
 #endif
@@ -189,7 +254,7 @@ static inline char* _asprintf(const char* fmt, ...)
 {
     va_list ap;
     va_start(ap, fmt);
-    char* buf = malloc(1 + vsnprintf(NULL, 0, fmt, ap));
+    char* buf = _malloc(1 + vsnprintf(NULL, 0, fmt, ap));
     va_end(ap);
     va_start(ap, fmt);
     vsprintf(buf, fmt, ap);
@@ -270,7 +335,7 @@ static void print_rect(rect_t* rect)
     printf("rect{ x: %d, y: %d, w: %d, h :%d }\n", rect->x, rect->y, rect->w, rect->h);
 }
 
-#define RECT_FMT "x: %d, y: %d, w: %d, h :%d"
+#define RECT_FMT      "x: %d, y: %d, w: %d, h :%d"
 #define RECT_AP(rect) (rect)->x, (rect)->y, (rect)->w, (rect)->h
 
 static bool regions_intersect(int32_t a, int32_t as, int32_t b, int32_t bs)
@@ -518,7 +583,7 @@ static size_t AString_len(AString* self)
 
 static char* AString_dup(AString* self)
 {
-    return strdup(self->str);
+    return _strdup(self->str);
 }
 
 static AString AString_new_copy(AString* other)
@@ -526,7 +591,7 @@ static AString AString_new_copy(AString* other)
     if (other->state == ASTRING_UNINITIALIZED || other->state == ASTRING_STATIC) {
         return *other;
     } else {
-        return (AString){ .str = strdup(other->str), .state = ASTRING_DYNAMIC };
+        return (AString){ .str = _strdup(other->str), .state = ASTRING_DYNAMIC };
     }
 }
 

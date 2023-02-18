@@ -110,7 +110,7 @@ static void Freetype_convert_vertical_pixel_data_layout(Freetype* self, FT_Bitma
     uint_fast16_t       mod                  = target_row_length % TARGET_ROW_ALIGNMENT;
     uint_fast16_t       add                  = mod ? (TARGET_ROW_ALIGNMENT - mod) : 0;
     target_row_length += add;
-    uint8_t* target = calloc(1, target_row_length * target_height);
+    uint8_t* target = _calloc(1, target_row_length * target_height);
 
     for (uint_fast16_t x = 0; x < pixel_width; ++x) {
         for (uint_fast16_t y = 0; y < pixel_height; ++y) {

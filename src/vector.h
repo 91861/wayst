@@ -4,8 +4,8 @@
 
 #define _GNU_SOURCE
 
+#include "util.h"
 #include <stdbool.h>
-#include <stdint.h>
 
 /**
  * Templated dynamic array with iterators
@@ -47,19 +47,19 @@
                                                                                                    \
     static inline Vector_##t Vector_new_##t()                                                      \
     {                                                                                              \
-        return (Vector_##t){ .cap = 4, .size = 0, .buf = malloc(sizeof(t) << 2) };                 \
+        return (Vector_##t){ .cap = 4, .size = 0, .buf = _malloc(sizeof(t) << 2) };                \
     }                                                                                              \
                                                                                                    \
     static inline Vector_##t Vector_new_with_capacity_##t(size_t init_cap)                         \
     {                                                                                              \
-        return (Vector_##t){ .cap = init_cap, .size = 0, .buf = malloc(sizeof(t) * init_cap) };    \
+        return (Vector_##t){ .cap = init_cap, .size = 0, .buf = _malloc(sizeof(t) * init_cap) };   \
     }                                                                                              \
                                                                                                    \
     static void Vector_push_##t(Vector_##t* self, t arg)                                           \
     {                                                                                              \
         ASSERT(self->buf, "Vector not initialized");                                               \
         if (unlikely(self->cap == self->size)) {                                                   \
-            self->buf = realloc(self->buf, (self->cap <<= 1) * sizeof(t));                         \
+            self->buf = _realloc(self->buf, (self->cap <<= 1) * sizeof(t));                        \
         }                                                                                          \
         self->buf[self->size++] = arg;                                                             \
     }                                                                                              \
@@ -68,14 +68,14 @@
     {                                                                                              \
         ASSERT(self->buf, "Vector not initialized");                                               \
         if (likely(cnt > self->cap))                                                               \
-            self->buf = realloc(self->buf, (self->cap = cnt) * sizeof(t));                         \
+            self->buf = _realloc(self->buf, (self->cap = cnt) * sizeof(t));                        \
     }                                                                                              \
                                                                                                    \
     static void Vector_reserve_extra_##t(Vector_##t* self, size_t cnt)                             \
     {                                                                                              \
         ASSERT(self->buf, "Vector not initialized");                                               \
         if (cnt + self->size > self->cap)                                                          \
-            self->buf = realloc(self->buf, (self->cap = cnt + self->size) * sizeof(t));            \
+            self->buf = _realloc(self->buf, (self->cap = cnt + self->size) * sizeof(t));           \
     }                                                                                              \
                                                                                                    \
     static inline void Vector_remove_at_##t(Vector_##t* self, size_t idx, size_t n)                \
@@ -91,7 +91,7 @@
         if (unlikely(!n))                                                                          \
             return;                                                                                \
         if (unlikely(self->cap < self->size + n))                                                  \
-            self->buf = realloc(self->buf, (self->cap = self->size + n) * sizeof(t));              \
+            self->buf = _realloc(self->buf, (self->cap = self->size + n) * sizeof(t));             \
         memcpy(self->buf + self->size, argv, n * sizeof(t));                                       \
         self->size += n;                                                                           \
     }                                                                                              \
@@ -180,7 +180,7 @@
             return i + 1;                                                                          \
         } else if (unlikely(self->cap == self->size)) {                                            \
             size_t idx = i - self->buf;                                                            \
-            self->buf  = realloc(self->buf, (self->cap <<= 1) * sizeof(t));                        \
+            self->buf  = _realloc(self->buf, (self->cap <<= 1) * sizeof(t));                       \
             memmove(self->buf + idx + 1, self->buf + idx, (self->size++ - idx) * sizeof(t));       \
             self->buf[idx] = arg;                                                                  \
             return self->buf + idx;                                                                \
@@ -199,7 +199,7 @@
             return i + n;                                                                          \
         } else if (unlikely(self->cap + n > self->size)) {                                         \
             size_t idx = i - self->buf;                                                            \
-            self->buf  = realloc(self->buf, (self->cap += n) * sizeof(t));                         \
+            self->buf  = _realloc(self->buf, (self->cap += n) * sizeof(t));                        \
             memmove(self->buf + idx + n, self->buf + idx, ((self->size += n) - idx) * sizeof(t));  \
             memcpy(self->buf + idx, argv, sizeof(t) * n);                                          \
             return self->buf + idx;                                                                \
@@ -216,7 +216,7 @@
         if (unlikely(!self->size)) {                                                               \
             Vector_push_##t(self, arg);                                                            \
         } else if (unlikely(self->cap == self->size)) {                                            \
-            self->buf = realloc(self->buf, (self->cap <<= 1) * sizeof(t));                         \
+            self->buf = _realloc(self->buf, (self->cap <<= 1) * sizeof(t));                        \
             memmove(self->buf + i + 1, self->buf + i, (self->size++ - i) * sizeof(t));             \
             self->buf[i] = arg;                                                                    \
         } else {                                                                                   \
@@ -245,9 +245,15 @@
         return !self->size ? NULL : self->buf + (self->size - 1);                                  \
     }                                                                                              \
                                                                                                    \
-    static inline t* Vector_first_##t(Vector_##t* self) { return self->buf; }                      \
+    static inline t* Vector_first_##t(Vector_##t* self)                                            \
+    {                                                                                              \
+        return self->buf;                                                                          \
+    }                                                                                              \
                                                                                                    \
-    static inline const t* Vector_first_const_##t(const Vector_##t* self) { return self->buf; }    \
+    static inline const t* Vector_first_const_##t(const Vector_##t* self)                          \
+    {                                                                                              \
+        return self->buf;                                                                          \
+    }                                                                                              \
                                                                                                    \
     static inline void Vector_clear_##t(Vector_##t* self)                                          \
     {                                                                                              \
@@ -266,7 +272,7 @@
                                                                                                    \
     static inline void Vector_shrink_##t(Vector_##t* self)                                         \
     {                                                                                              \
-        self->buf = realloc(self->buf, (self->cap = self->size) * sizeof(t));                      \
+        self->buf = _realloc(self->buf, (self->cap = self->size) * sizeof(t));                     \
     }                                                                                              \
     _Pragma("GCC diagnostic pop");                                                                 \
     _Pragma("GCC diagnostic pop");                                                                 \
@@ -291,7 +297,7 @@
     {                                                                                              \
         return (Vector_##t){ .cap      = 4,                                                        \
                              .size     = 0,                                                        \
-                             .buf      = malloc(sizeof(t) << 2),                                   \
+                             .buf      = _malloc(sizeof(t) << 2),                                  \
                              .dtor_arg = destroy_arg };                                            \
     }                                                                                              \
                                                                                                    \
@@ -299,7 +305,7 @@
     {                                                                                              \
         return (Vector_##t){ .cap      = init_cap,                                                 \
                              .size     = 0,                                                        \
-                             .buf      = malloc(sizeof(t) * init_cap),                             \
+                             .buf      = _malloc(sizeof(t) * init_cap),                            \
                              .dtor_arg = destroy_arg };                                            \
     }                                                                                              \
                                                                                                    \
@@ -307,7 +313,7 @@
     {                                                                                              \
         ASSERT(self->buf, "Vector not initialized");                                               \
         if (unlikely(self->cap == self->size)) {                                                   \
-            self->buf = realloc(self->buf, (self->cap <<= 1) * sizeof(t));                         \
+            self->buf = _realloc(self->buf, (self->cap <<= 1) * sizeof(t));                        \
         }                                                                                          \
         self->buf[self->size++] = arg;                                                             \
     }                                                                                              \
@@ -316,14 +322,14 @@
     {                                                                                              \
         ASSERT(self->buf, "Vector not initialized");                                               \
         if (likely(cnt > self->cap))                                                               \
-            self->buf = realloc(self->buf, (self->cap = cnt) * sizeof(t));                         \
+            self->buf = _realloc(self->buf, (self->cap = cnt) * sizeof(t));                        \
     }                                                                                              \
                                                                                                    \
     static void Vector_reserve_extra_##t(Vector_##t* self, size_t cnt)                             \
     {                                                                                              \
         ASSERT(self->buf, "Vector not initialized");                                               \
         if (cnt + self->size > self->cap)                                                          \
-            self->buf = realloc(self->buf, (self->cap = cnt + self->size) * sizeof(t));            \
+            self->buf = _realloc(self->buf, (self->cap = cnt + self->size) * sizeof(t));           \
     }                                                                                              \
                                                                                                    \
     static inline void Vector_remove_at_##t(Vector_##t* self, size_t idx, size_t n)                \
@@ -339,7 +345,7 @@
         if (unlikely(!n))                                                                          \
             return;                                                                                \
         if (unlikely(self->cap < self->size + n))                                                  \
-            self->buf = realloc(self->buf, (self->cap = self->size + n) * sizeof(t));              \
+            self->buf = _realloc(self->buf, (self->cap = self->size + n) * sizeof(t));             \
         memcpy(self->buf + self->size, argv, n * sizeof(t));                                       \
         self->size += n;                                                                           \
     }                                                                                              \
@@ -428,7 +434,7 @@
             return i + 1;                                                                          \
         } else if (unlikely(self->cap == self->size)) {                                            \
             size_t idx = i - self->buf;                                                            \
-            self->buf  = realloc(self->buf, (self->cap <<= 1) * sizeof(t));                        \
+            self->buf  = _realloc(self->buf, (self->cap <<= 1) * sizeof(t));                       \
             memmove(self->buf + idx + 1, self->buf + idx, (self->size++ - idx) * sizeof(t));       \
             self->buf[idx] = arg;                                                                  \
             return self->buf + idx;                                                                \
@@ -447,7 +453,7 @@
             return i + n;                                                                          \
         } else if (unlikely(self->cap + n > self->size)) {                                         \
             size_t idx = i - self->buf;                                                            \
-            self->buf  = realloc(self->buf, (self->cap += n) * sizeof(t));                         \
+            self->buf  = _realloc(self->buf, (self->cap += n) * sizeof(t));                        \
             memmove(self->buf + idx + n, self->buf + idx, ((self->size += n) - idx) * sizeof(t));  \
             memcpy(self->buf + idx, argv, sizeof(t) * n);                                          \
             return self->buf + idx;                                                                \
@@ -464,7 +470,7 @@
         if (unlikely(!self->size)) {                                                               \
             Vector_push_##t(self, arg);                                                            \
         } else if (unlikely(self->cap == self->size)) {                                            \
-            self->buf = realloc(self->buf, (self->cap <<= 1) * sizeof(t));                         \
+            self->buf = _realloc(self->buf, (self->cap <<= 1) * sizeof(t));                        \
             memmove(self->buf + i + 1, self->buf + i, (self->size++ - i) * sizeof(t));             \
             self->buf[i] = arg;                                                                    \
         } else {                                                                                   \
@@ -493,9 +499,15 @@
         return !self->size ? NULL : self->buf + (self->size - 1);                                  \
     }                                                                                              \
                                                                                                    \
-    static inline t* Vector_first_##t(Vector_##t* self) { return self->buf; }                      \
+    static inline t* Vector_first_##t(Vector_##t* self)                                            \
+    {                                                                                              \
+        return self->buf;                                                                          \
+    }                                                                                              \
                                                                                                    \
-    static inline const t* Vector_first_const_##t(const Vector_##t* self) { return self->buf; }    \
+    static inline const t* Vector_first_const_##t(const Vector_##t* self)                          \
+    {                                                                                              \
+        return self->buf;                                                                          \
+    }                                                                                              \
                                                                                                    \
     static inline void Vector_clear_##t(Vector_##t* self)                                          \
     {                                                                                              \
@@ -508,7 +520,7 @@
                                                                                                    \
     static inline void Vector_shrink_##t(Vector_##t* self)                                         \
     {                                                                                              \
-        self->buf = realloc(self->buf, (self->cap = self->size) * sizeof(t));                      \
+        self->buf = _realloc(self->buf, (self->cap = self->size) * sizeof(t));                     \
     }                                                                                              \
     _Pragma("GCC diagnostic pop");                                                                 \
     _Pragma("GCC diagnostic pop");                                                                 \

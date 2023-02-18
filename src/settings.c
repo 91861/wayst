@@ -860,7 +860,7 @@ static void settings_make_default()
         .bold_is_bright = true,
 
         .colorscheme_preset   = 0,
-        ._explicit_colors_set = calloc(1, 21),
+        ._explicit_colors_set = _calloc(1, 21),
 
         .bell_flash = { .r = 200, .g = 200, .b = 200, .a = 30 },
 
@@ -1957,7 +1957,7 @@ static void settings_get_opts(const int argc, char* const* argv, const bool cfg_
                 if (argc > (i++ + 1)) {
                     AString_replace_with_dynamic(&settings.shell, strdup(argv[i]));
                     settings.shell_argc = argc - i;
-                    settings.shell_argv = calloc((settings.shell_argc + 1), sizeof(char*));
+                    settings.shell_argv = _calloc((settings.shell_argc + 1), sizeof(char*));
                     for (int j = 0; j < settings.shell_argc; ++j) {
                         settings.shell_argv[j] = strdup(argv[i + j]);
                     }
@@ -1972,7 +1972,7 @@ static void settings_get_opts(const int argc, char* const* argv, const bool cfg_
             if (!settings.shell.str) {
                 AString_replace_with_static(&settings.shell, "/bin/sh");
             }
-            settings.shell_argv    = calloc(2, sizeof(char*));
+            settings.shell_argv    = _calloc(2, sizeof(char*));
             settings.shell_argv[0] = strdup(settings.shell.str);
             settings.shell_argc    = 1;
         }

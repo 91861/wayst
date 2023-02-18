@@ -31,7 +31,7 @@
                                                                                                    \
     static RcPtr_##t RcPtr_new_##t()                                                               \
     {                                                                                              \
-        RcPtrBlock_##t* block = malloc(sizeof(RcPtrBlock_##t));                                    \
+        RcPtrBlock_##t* block = _malloc(sizeof(RcPtrBlock_##t));                                   \
         block->refcount       = 1;                                                                 \
         return (RcPtr_##t){ .block = block };                                                      \
     }                                                                                              \
@@ -60,7 +60,7 @@
     static void RcPtr_new_in_place_of_##t(RcPtr_##t* self)                                         \
     {                                                                                              \
         RcPtr_destroy_##t(self);                                                                   \
-        RcPtrBlock_##t* block = malloc(sizeof(RcPtrBlock_##t));                                    \
+        RcPtrBlock_##t* block = _malloc(sizeof(RcPtrBlock_##t));                                   \
         block->refcount       = 1;                                                                 \
         self->block           = block;                                                             \
     }                                                                                              \
@@ -125,7 +125,7 @@
                                                                                                    \
     static RcPtr_##t RcPtr_new_##t(dtorctx_t* destroy_arg)                                         \
     {                                                                                              \
-        RcPtrBlock_##t* block = malloc(sizeof(RcPtrBlock_##t));                                    \
+        RcPtrBlock_##t* block = _malloc(sizeof(RcPtrBlock_##t));                                   \
         block->refcount       = 1;                                                                 \
         block->dtor_arg       = destroy_arg;                                                       \
         return (RcPtr_##t){ .block = block };                                                      \
@@ -155,7 +155,7 @@
     static void RcPtr_new_in_place_of_##t(RcPtr_##t* self)                                         \
     {                                                                                              \
         RcPtr_destroy_##t(self);                                                                   \
-        RcPtrBlock_##t* block = malloc(sizeof(RcPtrBlock_##t));                                    \
+        RcPtrBlock_##t* block = _malloc(sizeof(RcPtrBlock_##t));                                   \
         block->refcount       = 1;                                                                 \
         self->block           = block;                                                             \
     }                                                                                              \

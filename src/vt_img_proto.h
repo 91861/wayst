@@ -167,7 +167,7 @@ static uint8_t* data_from_base64_file_name(char*                        file_nam
     fseek(file, 0, SEEK_END);
     size_t size_file = ftell(file);
     opt_size         = OR(opt_size, (size_file - opt_offset));
-    uint8_t* pixels  = malloc(opt_size);
+    uint8_t* pixels  = _malloc(opt_size);
     fseek(file, opt_offset, SEEK_SET);
     size_t rd = fread(pixels, 1, opt_size, file);
     fclose(file);
@@ -199,12 +199,19 @@ static uint8_t* data_from_base64_file_name(char*                        file_nam
     return pixels;
 }
 
-static uint8_t* data_from_base64(uint8_t* input, vt_image_proto_compression_t compression_type)
+static uint8_t* data_from_base64(uint8_t*                     input,
+                                 vt_image_proto_compression_t compression_type,
+                                 size_t*                      opt_out_size)
 {
     size_t   len     = strlen((char*)input);
     size_t   out_len = len * 3 / 4;
-    uint8_t* pixels  = calloc(1, out_len + 4);
+    uint8_t* pixels  = _calloc(1, out_len + 4);
     base64_decode((char*)input, (char*)pixels);
+
+    if (opt_out_size) {
+        *opt_out_size = out_len;
+    }
+
     return pixels;
 }
 
@@ -294,142 +301,152 @@ const char* Vt_img_proto_transmit(Vt*                           self,
         }
     }
 
-    switch (transmission_type) {
-        case VT_IMAGE_PROTO_TRANSMISSION_DIRECT: {
-            if (queue_display) {
-                surface->display_on_transmission_completed = true;
-                surface->display_args                      = display_args;
-            }
+    if (!payload) {
+        fail_msg = "image format error";
+    }
 
-            if (format == 100) {
-                surface->png_data_transmission = true;
-            }
+    if (!fail_msg) {
+        switch (transmission_type) {
+            case VT_IMAGE_PROTO_TRANSMISSION_DIRECT: {
+                if (queue_display) {
+                    surface->display_on_transmission_completed = true;
+                    surface->display_args                      = display_args;
+                }
 
-            Vector_pushv_uint8_t(&surface->fragments, (uint8_t*)payload, strlen(payload));
+                if (format == 100) {
+                    surface->png_data_transmission = true;
+                }
 
-            if (is_complete) {
-                Vector_push_uint8_t(&surface->fragments, 0);
+                Vector_pushv_uint8_t(&surface->fragments, (uint8_t*)payload, strlen(payload));
 
-                if (!surface->png_data_transmission) {
-                    uint8_t* data = data_from_base64(surface->fragments.buf, compression_type);
+                if (is_complete) {
+                    Vector_push_uint8_t(&surface->fragments, 0);
 
-                    if (data) {
-                        surface->state = VT_IMAGE_SURFACE_READY;
-                        Vector_clear_uint8_t(&surface->fragments);
-                        Vector_pushv_uint8_t(&surface->fragments,
-                                             data,
-                                             surface->width * surface->height *
-                                               surface->bytes_per_pixel);
-                        free(data);
-                        if (surface->display_on_transmission_completed) {
-                            Vt_img_proto_display(self, id, surface->display_args);
-                            if (!id) {
-                                RcPtr_destroy_VtImageSurface(&self->manipulated_image);
+                    if (!surface->png_data_transmission) {
+                        size_t   b64size;
+                        uint8_t* data =
+                          data_from_base64(surface->fragments.buf, compression_type, &b64size);
+
+                        if (data) {
+                            surface->state = VT_IMAGE_SURFACE_READY;
+                            Vector_clear_uint8_t(&surface->fragments);
+                            Vector_pushv_uint8_t(
+                              &surface->fragments,
+                              data,
+                              MIN(surface->width * surface->height * surface->bytes_per_pixel,
+                                  b64size));
+                            free(data);
+                            if (surface->display_on_transmission_completed) {
+                                Vt_img_proto_display(self, id, surface->display_args);
+                                if (!id) {
+                                    RcPtr_destroy_VtImageSurface(&self->manipulated_image);
+                                }
                             }
+                        } else {
+                            fail_msg = "image format error";
                         }
                     } else {
-                        fail_msg = "image format error";
+                        stbi_uc* image = image_from_base64((char*)surface->fragments.buf,
+                                                           &surface->width,
+                                                           &surface->height,
+                                                           &surface->bytes_per_pixel);
+                        if (image) {
+                            surface->state = VT_IMAGE_SURFACE_READY;
+                            Vector_clear_uint8_t(&surface->fragments);
+                            Vector_pushv_uint8_t(&surface->fragments,
+                                                 (uint8_t*)image,
+                                                 surface->width * surface->height *
+                                                   surface->bytes_per_pixel);
+                            stbi_image_free(image);
+
+                            if (surface->display_on_transmission_completed) {
+                                Vt_img_proto_display(self, id, surface->display_args);
+
+                                if (!id) {
+                                    RcPtr_destroy_VtImageSurface(&self->manipulated_image);
+                                }
+                            }
+
+                        } else {
+                            fail_msg = "image format error";
+                        }
+                    }
+
+                } else {
+                    if (width) {
+                        surface->width = width;
+                    }
+
+                    if (height) {
+                        surface->height = height;
+                    }
+                }
+            } break;
+
+            case VT_IMAGE_PROTO_TRANSMISSION_TEMP_FILE:
+            case VT_IMAGE_PROTO_TRANSMISSION_FILE: {
+                if (queue_display) {
+                    surface->display_on_transmission_completed = true;
+                    surface->display_args                      = display_args;
+                }
+
+                bool     is_raw_pixel_data = format != 100;
+                stbi_uc* image             = NULL;
+                uint8_t* raw_image         = NULL;
+
+                if (is_raw_pixel_data) {
+                    surface->bytes_per_pixel = 4;
+
+                    raw_image = data_from_base64_file_name(payload,
+                                                           compression_type,
+                                                           size,
+                                                           offset,
+                                                           transmission_type ==
+                                                             VT_IMAGE_PROTO_TRANSMISSION_TEMP_FILE);
+                    if (width) {
+                        surface->width = width;
+                    }
+
+                    if (height) {
+                        surface->height = height;
                     }
                 } else {
-                    stbi_uc* image = image_from_base64((char*)surface->fragments.buf,
-                                                       &surface->width,
-                                                       &surface->height,
-                                                       &surface->bytes_per_pixel);
-                    if (image) {
-                        surface->state = VT_IMAGE_SURFACE_READY;
-                        Vector_clear_uint8_t(&surface->fragments);
-                        Vector_pushv_uint8_t(&surface->fragments,
-                                             (uint8_t*)image,
-                                             surface->width * surface->height *
-                                               surface->bytes_per_pixel);
-                        stbi_image_free(image);
+                    surface->bytes_per_pixel = 4;
 
-                        if (surface->display_on_transmission_completed) {
-                            Vt_img_proto_display(self, id, surface->display_args);
+                    image = image_from_base64_file_name(payload,
+                                                        size,
+                                                        offset,
+                                                        &surface->width,
+                                                        &surface->height,
+                                                        &surface->bytes_per_pixel,
+                                                        transmission_type ==
+                                                          VT_IMAGE_PROTO_TRANSMISSION_TEMP_FILE);
+                }
 
-                            if (!id) {
-                                RcPtr_destroy_VtImageSurface(&self->manipulated_image);
-                            }
+                if (image || raw_image) {
+                    surface->state = VT_IMAGE_SURFACE_READY;
+                    Vector_pushv_uint8_t(&surface->fragments,
+                                         is_raw_pixel_data ? raw_image : image,
+                                         surface->width * surface->height *
+                                           surface->bytes_per_pixel);
+                    stbi_image_free(image);
+                    free(raw_image);
+
+                    if (surface->display_on_transmission_completed) {
+                        Vt_img_proto_display(self, id, surface->display_args);
+                        if (!id) {
+                            RcPtr_destroy_VtImageSurface(&self->manipulated_image);
                         }
-
-                    } else {
-                        fail_msg = "image format error";
                     }
+                } else {
+                    fail_msg = "image format error";
                 }
 
-            } else {
-                if (width) {
-                    surface->width = width;
-                }
+            } break;
 
-                if (height) {
-                    surface->height = height;
-                }
-            }
-        } break;
-
-        case VT_IMAGE_PROTO_TRANSMISSION_TEMP_FILE:
-        case VT_IMAGE_PROTO_TRANSMISSION_FILE: {
-            if (queue_display) {
-                surface->display_on_transmission_completed = true;
-                surface->display_args                      = display_args;
-            }
-
-            bool     is_raw_pixel_data = format != 100;
-            stbi_uc* image             = NULL;
-            uint8_t* raw_image         = NULL;
-
-            if (is_raw_pixel_data) {
-                surface->bytes_per_pixel = 4;
-
-                raw_image = data_from_base64_file_name(payload,
-                                                       compression_type,
-                                                       size,
-                                                       offset,
-                                                       transmission_type ==
-                                                         VT_IMAGE_PROTO_TRANSMISSION_TEMP_FILE);
-                if (width) {
-                    surface->width = width;
-                }
-
-                if (height) {
-                    surface->height = height;
-                }
-            } else {
-                surface->bytes_per_pixel = 4;
-
-                image = image_from_base64_file_name(payload,
-                                                    size,
-                                                    offset,
-                                                    &surface->width,
-                                                    &surface->height,
-                                                    &surface->bytes_per_pixel,
-                                                    transmission_type ==
-                                                      VT_IMAGE_PROTO_TRANSMISSION_TEMP_FILE);
-            }
-
-            if (image || raw_image) {
-                surface->state = VT_IMAGE_SURFACE_READY;
-                Vector_pushv_uint8_t(&surface->fragments,
-                                     is_raw_pixel_data ? raw_image : image,
-                                     surface->width * surface->height * surface->bytes_per_pixel);
-                stbi_image_free(image);
-                free(raw_image);
-
-                if (surface->display_on_transmission_completed) {
-                    Vt_img_proto_display(self, id, surface->display_args);
-                    if (!id) {
-                        RcPtr_destroy_VtImageSurface(&self->manipulated_image);
-                    }
-                }
-            } else {
-                fail_msg = "image format error";
-            }
-
-        } break;
-
-        default:
-            fail_msg = "transmission medium not supported";
+            default:
+                fail_msg = "transmission medium not supported";
+        }
     }
 
     if (fail_msg) {
@@ -526,11 +543,11 @@ static const char* Vt_img_proto_display(Vt* self, uint32_t id, vt_image_proto_di
     VtLine*  ln          = Vt_cursor_line(self);
 
     if (!ln->graphic_attachments) {
-        ln->graphic_attachments = calloc(1, sizeof(VtGraphicLineAttachments));
+        ln->graphic_attachments = _calloc(1, sizeof(VtGraphicLineAttachments));
     }
 
     if (!ln->graphic_attachments->images) {
-        ln->graphic_attachments->images  = malloc(sizeof(Vector_RcPtr_VtImageSurfaceView));
+        ln->graphic_attachments->images  = _malloc(sizeof(Vector_RcPtr_VtImageSurfaceView));
         *ln->graphic_attachments->images = Vector_new_RcPtr_VtImageSurfaceView();
     }
 

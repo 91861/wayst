@@ -101,10 +101,17 @@ static inline int64_t TimePoint_is_nsecs_ahead(TimePoint t)
     return TimePoint_get_nsecs(t);
 }
 
-static inline int64_t TimePoint_is_ms_ahead(TimePoint t)
+static inline int64_t TimePoint_ms_in_the_future(TimePoint t)
 {
     TimePoint_subtract(&t, TimePoint_now());
     return TimePoint_get_ms(t);
+}
+
+static inline int64_t TimePoint_ms_in_the_past(TimePoint t)
+{
+    TimePoint n = TimePoint_now();
+    TimePoint_subtract(&n, t);
+    return TimePoint_get_ms(n);
 }
 
 static inline bool TimePoint_is_earlier(TimePoint t, TimePoint other)
@@ -533,7 +540,7 @@ TimerManager_get_next_action_ms(TimerManager* self, time_point_ptr_t* external_f
     if (!has_next_frame) {
         return TIMER_MANAGER_NO_ACTION_PENDING;
     } else {
-        int64_t nfp = TimePoint_is_ms_ahead(next_frame_point);
+        int64_t nfp = TimePoint_ms_in_the_future(next_frame_point);
         return MAX(0, nfp);
     }
 }
