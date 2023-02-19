@@ -1729,6 +1729,10 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
             self->modes.sixel_private_color_registers = on;
             break;
 
+        case 2026: /* application-synchronized updates equivalent to BSU/ESU */
+            STUB("DEC private mode 2026 synchronized updates");
+            break;
+
         case 8452: /* Sixel scrolling leaves cursor to right of graphic */
             self->modes.sixel_scrolling_move_cursor_right = on;
             break;
@@ -2923,7 +2927,9 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                             /* <ESC>[Ps SP u - Set margin-bell volume (DECSMBV), VT520 */
                             case 'u': {
                                 if (*seq == 'u') {
-                                    // TODO: cursor restore
+                                    Vt_move_cursor(self,
+                                                   self->saved_cursor_pos,
+                                                   self->saved_active_line);
                                 } else {
                                     WRN("DECSMBV not implemented\n");
                                 }
@@ -2952,7 +2958,8 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                 } else {
                                     /* <ESC>[s - Save cursor (SCOSC, also ANSI.SYS) available only
                                      * when DECLRMM is disabled */
-                                    STUB("SCOSC");
+                                    self->saved_active_line = Vt_cursor_row(self);
+                                    self->saved_cursor_pos  = self->cursor.col;
                                 }
                             } break;
 
