@@ -13,3 +13,6 @@ wayst.desktop
 .cache/*
 src/.cache
 src/.cache/*
+gmon.out
+prof_output
+perf_graph*.png

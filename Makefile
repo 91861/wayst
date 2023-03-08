@@ -27,6 +27,9 @@ else ifeq ($(mode),debug)
 	CFLAGS = -std=c18 -MD -g -O0 -fno-omit-frame-pointer -fshort-enums -DDEBUG
 	LDFLAGS = -O0 -g
 	LDLIBS += -lGLU
+else ifeq ($(mode),profile)
+	CFLAGS = -std=c18 -O2 -mtune=generic -ffast-math -fshort-enums -pg -fno-omit-frame-pointer
+	LDFLAGS = -O2 -pg
 else ifeq ($(mode),debugoptimized)
 	CFLAGS = -std=c18 -MD -g -O2 -fno-omit-frame-pointer -mtune=generic -ffast-math -fshort-enums -DDEBUG
 	LDFLAGS = -O2 -g
@@ -107,6 +110,7 @@ uninstall:
 
 .PHONY: shaders
 .PHONY: test
+.PHONY: graph
 
 shaders:
 	./$(SRC_DIR)/pack_shaders.sh shaders_gl21 > $(SRC_DIR)/shaders_gl21.h
@@ -115,3 +119,6 @@ shaders:
 test:
 	@chmod +x $(TST_DIR)/run_tests.sh
 	@./$(TST_DIR)/run_tests.sh
+
+graph:
+	@gprof ./wayst | gprof2dot | dot -Tpng -o perf_graph.png
