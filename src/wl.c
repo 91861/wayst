@@ -103,7 +103,7 @@ static TimePoint* WindowWl_process_timers(struct WindowBase* self);
 static void       WindowWl_set_swap_interval(struct WindowBase* self, int32_t ival);
 static void       WindowWl_set_wm_name(struct WindowBase* self, const char* title);
 static void       WindowWl_set_title(struct WindowBase* self, const char* title);
-static bool       WindowWl_maybe_swap(WindowBase* self);
+static bool       WindowWl_maybe_swap(WindowBase* self, bool do_swap);
 static void       WindowWl_destroy(struct WindowBase* self);
 static int        WindowWl_get_connection_fd(struct WindowBase* self);
 static void       WindowWl_clipboard_send(struct WindowBase* self, const char* text);
@@ -1916,24 +1916,27 @@ static void output_handle_done(void* data, struct wl_output* wl_output)
                      !last_recorded_output_params.geometry_event_received;
 
     if (is_delete) {
-        if (win->active_output->output == wl_output) {
+        if (win->active_output && win->active_output->output == wl_output) {
             win->active_output = NULL;
         }
-        uint8_t deleted_idx =
-          Map_get_wl_output_ptr_WlOutputInfo(&win->outputs, (wl_output_ptr*)&wl_output)
-            ->global_index;
 
-        Map_remove_wl_output_ptr_WlOutputInfo(&win->outputs, (wl_output_ptr*)&wl_output);
+        WlOutputInfo* oi =
+          Map_get_wl_output_ptr_WlOutputInfo(&win->outputs, (wl_output_ptr*)&wl_output);
 
-        for (MapEntryIterator_wl_output_ptr_WlOutputInfo i = { 0, 0 };
-             (i = Map_iter_wl_output_ptr_WlOutputInfo(&win->outputs, i)).entry;) {
-            WlOutputInfo* info = &i.entry->value;
+        if (oi) {
+            uint8_t deleted_idx = oi->global_index;
+            Map_remove_wl_output_ptr_WlOutputInfo(&win->outputs, (wl_output_ptr*)&wl_output);
 
-            if (info->global_index > deleted_idx) {
-                --info->global_index;
+            for (MapEntryIterator_wl_output_ptr_WlOutputInfo i = { 0, 0 };
+                 (i = Map_iter_wl_output_ptr_WlOutputInfo(&win->outputs, i)).entry;) {
+                WlOutputInfo* info = &i.entry->value;
+
+                if (info->global_index > deleted_idx) {
+                    --info->global_index;
+                }
             }
+            --last_recorded_output_params.global_output_index;
         }
-        --last_recorded_output_params.global_output_index;
     } else {
         for (MapEntryIterator_wl_output_ptr_WlOutputInfo i = { 0, 0 };
              (i = Map_iter_wl_output_ptr_WlOutputInfo(&win->outputs, i)).entry;) {
@@ -2823,9 +2826,9 @@ static void WindowWl_swap_buffers(WindowBase* self)
     wl_callback_add_listener(frame_callback, &frame_listener, self);
 }
 
-static bool WindowWl_maybe_swap(WindowBase* self)
+static bool WindowWl_maybe_swap(WindowBase* self, bool do_swap)
 {
-    if (windowWl(self)->draw_next_frame && self->paint) {
+    if (windowWl(self)->draw_next_frame && self->paint && do_swap) {
         WindowWl_swap_buffers(self);
         return true;
     } else {
