@@ -110,6 +110,7 @@ typedef struct
     bool        cursor_blink_animation_should_play;
     bool        tex_blink_animation_should_play;
     bool        csd_mode_changed_before_resize;
+    bool        did_paint_in_sync_update_mode;
     VtCursor    ksm_cursor;
     Vector_char ksm_input_buf;
     TimePoint   ksm_last_input;
@@ -133,6 +134,7 @@ static void          App_action(void* self);
 static void          App_framebuffer_damage(void* self);
 static Pair_uint32_t App_get_char_size(void* self);
 static bool          App_fullscreen(void* self);
+static void          App_maybe_swap_window(App* self);
 static void          App_primary_output_changed(void*         self,
                                                 const int32_t display_index,
                                                 const char*   display_name,
@@ -455,7 +457,7 @@ static void App_run(App* self)
             TimerManager_cancel(&self->timer_manager, self->text_blink_switch_timer);
         }
 
-        Window_maybe_swap(self->win);
+        App_maybe_swap_window(self);
     }
 
     Monitor_kill(&self->monitor);
@@ -468,6 +470,18 @@ static void App_run(App* self)
     Vector_destroy_char(&self->ksm_input_buf);
     free(self->hostname);
     free(self->vt_title);
+}
+
+static void App_maybe_swap_window(App* self)
+{
+    if (unlikely(Vt_synchronized_update_is_active(&self->vt))) {
+        bool do_swap = self->win->paint && !self->did_paint_in_sync_update_mode;
+        Window_maybe_swap(self->win, do_swap);
+        self->did_paint_in_sync_update_mode = true;
+    } else {
+        self->did_paint_in_sync_update_mode = false;
+        Window_maybe_swap(self->win, true);
+    }
 }
 
 /* Whenever some other application sets primary selection while we are out of focus, upon focus gain
@@ -571,7 +585,7 @@ static void App_reload_font(void* self)
     App_update_padding(self);
     Window_notify_content_change(app->win);
     App_framebuffer_damage(self);
-    Window_maybe_swap(app->win);
+    Window_maybe_swap(app->win, true);
 }
 
 static Pair_uint32_t App_get_cell_dims(App* self)
@@ -1377,8 +1391,11 @@ static bool App_maybe_handle_application_key(App*     self,
 
 void App_gui_pointer_mode_change_handler(void* self)
 {
+
+
 #define L_SET_POINTER_STYLE                                                                        \
-    if (app->selection_dragging_left || app->selection_dragging_right) {                           \
+    if (app->selection_dragging_left || app->selection_dragging_right ||                           \
+            app->vt.selection.mode != SELECT_MODE_NONE) {                                          \
         Window_set_pointer_style(app->win, MOUSE_POINTER_I_BEAM);                                  \
     } else {                                                                                       \
         Window_set_pointer_style(app->win, MOUSE_POINTER_ARROW);                                   \
@@ -1692,7 +1709,12 @@ static bool App_maybe_consume_click(App*     self,
     if (!state) {
         self->selection_dragging_left  = false;
         self->selection_dragging_right = SELECT_DRAG_RIGHT_NONE;
-        Window_set_pointer_style(self->win, MOUSE_POINTER_ARROW);
+
+        if (self->vt.selection.mode == SELECT_MODE_NONE) {
+            Window_set_pointer_style(self->win, MOUSE_POINTER_ARROW);
+        } else {
+            Window_set_pointer_style(self->win, MOUSE_POINTER_I_BEAM);
+        }
     }
 
     if (vt->modes.x10_mouse_compat) {
@@ -1793,7 +1815,7 @@ static bool App_maybe_consume_click(App*     self,
             Window_primary_get(self->win);
         }
     } else if (vt->selection.mode != SELECT_MODE_NONE && state) {
-        Window_set_pointer_style(self->win, MOUSE_POINTER_ARROW);
+        Window_set_pointer_style(self->win, MOUSE_POINTER_I_BEAM);
         Vt_select_end(vt);
         return true;
     }
@@ -1917,8 +1939,14 @@ static void App_update_hover(App* self, int32_t x, int32_t y)
             App_notify_content_change(self);
         }
 
-        if (self->win->current_pointer_style != MOUSE_POINTER_ARROW) {
-            Window_set_pointer_style(self->win, MOUSE_POINTER_ARROW);
+        if (self->vt.selection.mode == SELECT_MODE_NONE) {
+            if (self->win->current_pointer_style != MOUSE_POINTER_ARROW) {
+                Window_set_pointer_style(self->win, MOUSE_POINTER_ARROW);
+            }
+        } else {
+            if (self->win->current_pointer_style != MOUSE_POINTER_I_BEAM) {
+                Window_set_pointer_style(self->win, MOUSE_POINTER_I_BEAM);
+            }
         }
     }
 }
