@@ -40,6 +40,9 @@
 #include "util.h"
 #include "vector.h"
 
+#define VT_DIM_FACTOR                     0.4f
+#define VT_SYNCHRONIZED_UPDATE_TIMEOUT_MS 100
+
 typedef struct
 {
     int32_t  z_layer;
@@ -379,7 +382,7 @@ DEF_VECTOR(VtUri, VtUri_destroy);
 
 typedef struct
 {
-    uint32_t data[6];
+    uint32_t data[4];
 } VtLineProxy;
 
 typedef struct
@@ -387,6 +390,32 @@ typedef struct
     Vector_RcPtr_VtImageSurfaceView* images;
     Vector_RcPtr_VtSixelSurface*     sixels;
 } VtGraphicLineAttachments;
+
+static VtGraphicLineAttachments VtGraphicLineAttachments_clone(VtGraphicLineAttachments* source)
+{
+    VtGraphicLineAttachments dest = { NULL, NULL };
+
+    if (source->images) {
+        dest.images  = _malloc(sizeof(Vector_RcPtr_VtImageSurfaceView));
+        *dest.images = Vector_new_with_capacity_RcPtr_VtImageSurfaceView(source->images->size);
+        for (RcPtr_VtImageSurfaceView* i = NULL;
+             (i = Vector_iter_RcPtr_VtImageSurfaceView(source->images, i));) {
+            Vector_push_RcPtr_VtImageSurfaceView(dest.images,
+                                                 RcPtr_new_shared_VtImageSurfaceView(i));
+        }
+    }
+
+    if (source->sixels) {
+        dest.sixels  = _malloc(sizeof(Vector_RcPtr_VtSixelSurface));
+        *dest.sixels = Vector_new_with_capacity_RcPtr_VtSixelSurface(source->sixels->size);
+        for (RcPtr_VtSixelSurface* i = NULL;
+             (i = Vector_iter_RcPtr_VtSixelSurface(dest.sixels, i));) {
+            Vector_push_RcPtr_VtSixelSurface(dest.sixels, RcPtr_new_shared_VtSixelSurface(i));
+        }
+    }
+
+    return dest;
+}
 
 static void VtGraphicLineAttachments_destroy(VtGraphicLineAttachments* self)
 {
@@ -417,6 +446,14 @@ typedef enum
 
     /* The characters between 'front' and 'end' need to be refreshed */
     VT_LINE_DAMAGE_RANGE,
+
+    /* The proxy object (and damage model) for this line was moved to its clone in the synchronized
+     * update state. vt_line_damage_t.front contains the index into synchronized_update_state.lines
+     * where the original proxy is now stored.
+     *
+     * A line with this danage model should never be presented for rendering by
+     * Vt_get_visible_lines() */
+    VT_LINE_DAMAGE_PROXIES_MOVED_TO_CLONE,
 } vt_line_damage_type_e;
 
 typedef struct
@@ -482,6 +519,36 @@ static void VtLine_copy(VtLine* dest, VtLine* source)
     memset(&dest->proxy, 0, sizeof(VtLineProxy));
     dest->data = Vector_new_with_capacity_VtRune(source->data.size);
     Vector_pushv_VtRune(&dest->data, source->data.buf, source->data.size);
+}
+
+static VtLine VtLine_clone(VtLine* source)
+{
+    VtLine dest;
+    memcpy(&dest, source, sizeof(VtLine));
+
+    dest.data = Vector_new_with_capacity_VtRune(source->data.size);
+    Vector_pushv_VtRune(&dest.data, source->data.buf, source->data.size);
+
+    if (RcPtr_get_VtCommand(&source->linked_command)) {
+        dest.linked_command = RcPtr_new_shared_VtCommand(&source->linked_command);
+    }
+
+    if (source->links) {
+        dest.links  = _malloc(sizeof(Vector_VtUri));
+        *dest.links = Vector_new_with_capacity_VtUri(source->links->size);
+        Vector_pushv_VtUri(dest.links, source->links->buf, source->links->size);
+
+        for (VtUri* i = NULL; (i = Vector_iter_VtUri(dest.links, i));) {
+            i->uri_string = strdup(i->uri_string);
+        }
+    }
+
+    if (source->graphic_attachments) {
+        dest.graphic_attachments  = _malloc(sizeof(VtGraphicLineAttachments));
+        *dest.graphic_attachments = VtGraphicLineAttachments_clone(source->graphic_attachments);
+    }
+
+    return dest;
 }
 
 static inline void VtLine_destroy(void* vt_, VtLine* self);
@@ -574,6 +641,22 @@ typedef struct
      */
     uint8_t vertical_split_screen_mode : 1;
 } vt_modes_t;
+
+typedef struct
+{
+    bool   alive;
+    size_t global_index;
+} vt_synchronized_update_origin_t;
+
+DEF_VECTOR(vt_synchronized_update_origin_t, NULL);
+
+typedef struct
+{
+    Pair_uint16_t                          snapshot_display_size;
+    TimePoint                              snapshot_create_time;
+    Vector_VtLine                          lines;
+    Vector_vt_synchronized_update_origin_t origins;
+} vt_synchronized_update_state_t;
 
 typedef struct
 {
@@ -733,6 +816,8 @@ typedef struct
         VT_SHELL_INTEG_STATE_OUTPUT,
     } shell_integration_state;
 
+    vt_synchronized_update_state_t synchronized_update_state;
+
     RcPtr_VtImageSurface            manipulated_image;
     Vector_RcPtr_VtImageSurface     images;
     Vector_RcPtr_VtImageSurfaceView image_views, alt_image_views;
@@ -867,24 +952,24 @@ static const VtCommand* Vt_get_last_completed_command(Vt* self)
     return NULL;
 }
 
-static const VtCommand* Vt_get_last_command(const Vt* self)
+static inline const VtCommand* Vt_get_last_command(const Vt* self)
 {
     return RcPtr_get_const_VtCommand(Vector_last_const_RcPtr_VtCommand(&self->shell_commands));
 }
 
-static bool VtRune_fg_is_default(const VtRune* rune)
+static inline bool VtRune_fg_is_default(const VtRune* rune)
 {
     return rune->fg_is_palette_entry && rune->fg_data.index == VT_RUNE_PALETTE_INDEX_TERM_DEFAULT;
 }
 
-static bool VtRune_bg_is_default(const VtRune* rune)
+static inline bool VtRune_bg_is_default(const VtRune* rune)
 {
     return rune->bg_is_palette_entry && rune->bg_data.index == VT_RUNE_PALETTE_INDEX_TERM_DEFAULT;
 }
 
 static ColorRGB Vt_rune_fg_no_invert(const Vt* self, const VtRune* rune);
 
-static ColorRGBA Vt_rune_bg_no_invert(const Vt* self, const VtRune* rune)
+static inline ColorRGBA Vt_rune_bg_no_invert(const Vt* self, const VtRune* rune)
 {
     if (!rune) {
         return self->colors.bg;
@@ -899,7 +984,7 @@ static ColorRGBA Vt_rune_bg_no_invert(const Vt* self, const VtRune* rune)
     }
 }
 
-static ColorRGBA Vt_rune_bg(const Vt* self, const VtRune* rune)
+static inline ColorRGBA Vt_rune_bg(const Vt* self, const VtRune* rune)
 {
     if (!rune) {
         return self->colors.bg;
@@ -912,7 +997,7 @@ static ColorRGBA Vt_rune_bg(const Vt* self, const VtRune* rune)
     }
 }
 
-static ColorRGB Vt_rune_fg_no_invert(const Vt* self, const VtRune* rune)
+static inline ColorRGB Vt_rune_fg_no_invert(const Vt* self, const VtRune* rune)
 {
     if (!rune) {
         return self->colors.fg;
@@ -930,7 +1015,7 @@ static ColorRGB Vt_rune_fg_no_invert(const Vt* self, const VtRune* rune)
     }
 }
 
-static ColorRGB Vt_rune_fg(const Vt* self, const VtRune* rune)
+static inline ColorRGB Vt_rune_fg(const Vt* self, const VtRune* rune)
 {
     if (!rune) {
         return self->colors.fg;
@@ -943,7 +1028,7 @@ static ColorRGB Vt_rune_fg(const Vt* self, const VtRune* rune)
     }
 }
 
-static ColorRGB Vt_rune_ln_clr(const Vt* self, const VtRune* rune)
+static inline ColorRGB Vt_rune_ln_clr(const Vt* self, const VtRune* rune)
 {
     if (!rune) {
         return self->colors.fg;
@@ -960,14 +1045,14 @@ static ColorRGB Vt_rune_ln_clr(const Vt* self, const VtRune* rune)
     }
 }
 
-static ColorRGB Vt_rune_cursor_fg(const Vt* self, const VtRune* rune)
+static inline ColorRGB Vt_rune_cursor_fg(const Vt* self, const VtRune* rune)
 {
     return (settings.cursor_color_static_fg || !rune)
              ? settings.cursor_fg
              : ColorRGB_from_RGBA(rune ? Vt_rune_bg(self, rune) : self->colors.bg);
 }
 
-static ColorRGBA Vt_rune_cursor_bg(const Vt* self, const VtRune* rune)
+static inline ColorRGBA Vt_rune_cursor_bg(const Vt* self, const VtRune* rune)
 {
     return self->colors.cursor.enabled ? self->colors.cursor.bg
            : (settings.cursor_color_static_bg || !rune)
@@ -1081,6 +1166,12 @@ static inline uint16_t Vt_row(const Vt* const self)
     return self->ws.ws_row;
 }
 
+static inline bool Vt_synchronized_update_is_active(const Vt* self)
+{
+    return self->synchronized_update_state.snapshot_display_size.first ||
+           self->synchronized_update_state.snapshot_display_size.second;
+}
+
 /**
  * Get line at global index if it exists */
 static inline VtLine* Vt_line_at(Vt* self, size_t row)
@@ -1110,25 +1201,6 @@ static inline Pair_uint16_t Vt_pixels_to_cells(Vt* self, int32_t x, int32_t y)
         .first  = (double)x / self->pixels_per_cell_x,
         .second = (double)y / self->pixels_per_cell_y,
     };
-}
-
-/**
- * Get URI at cell in global coordinates */
-static inline const char* Vt_uri_at(Vt* self, uint16_t column, size_t row)
-{
-    VtLine* line = Vt_line_at(self, row);
-
-    if (!line || !line->links || column >= line->data.size) {
-        return NULL;
-    }
-
-    VtRune* rune = &line->data.buf[column];
-
-    if (!rune->hyperlink_idx || rune->hyperlink_idx > (int16_t)line->links->size) {
-        return NULL;
-    }
-
-    return Vector_at_VtUri(line->links, rune->hyperlink_idx - 1)->uri_string;
 }
 
 /**
@@ -1203,7 +1275,9 @@ void Vt_consumed_output(Vt* self, size_t len);
 
 /**
  * Get lines that should be visible */
-void vt_get_visible_lines(const Vt* self, VtLine** out_begin, VtLine** out_end);
+void Vt_get_visible_lines(const Vt* self, VtLine** out_begin, VtLine** out_end);
+
+VtLine* Vt_get_visible_line(const Vt* self, size_t idx);
 
 /**
  * Change terminal size */
@@ -1250,20 +1324,20 @@ void Vt_handle_motion(void* self, uint32_t button, int32_t x, int32_t y);
 
 /**
  * Is the alternate screen buffer beeing displayed */
-static bool Vt_alt_buffer_enabled(Vt* self)
+static inline bool Vt_alt_buffer_enabled(Vt* self)
 {
     return self->alt_lines.buf;
 }
 
 /**
- * Get line index at the top of the real viewport */
+ * Get line index at the top of the client viewport */
 static inline size_t Vt_top_line(const Vt* const self)
 {
     return self->lines.size <= self->ws.ws_row ? 0 : self->lines.size - self->ws.ws_row;
 }
 
 /**
- * Get line index at the bottom of the real viewport */
+ * Get line index at the bottom of the client viewport */
 static inline size_t Vt_bottom_line(const Vt* self)
 {
     return Vt_top_line(self) + Vt_row(self) - 1;
@@ -1277,14 +1351,14 @@ static inline bool Vt_is_scrolling_visual(const Vt* self)
 }
 
 /**
- * Get line index at the top of the viewport (takes visual scroling into account) */
+ * Get line index at the top of the visual viewport (takes visual scroling into account) */
 static inline size_t Vt_visual_top_line(const Vt* const self)
 {
     return self->scrolling_visual ? self->visual_scroll_top : Vt_top_line(self);
 }
 
 /**
- * Get line index at the bottom of the viewport (takes visual scroling into account) */
+ * Get line index at the bottom of the visual viewport (takes visual scroling into account) */
 static inline size_t Vt_visual_bottom_line(const Vt* const self)
 {
     return self->ws.ws_row + Vt_visual_top_line(self) - 1;
@@ -1445,9 +1519,18 @@ int palette_color_index_from_xterm_name(const char* name);
  * Get xterm 256 palette color by X11 color name */
 ColorRGB color_from_xterm_name(const char* name, bool* fail);
 
+bool _vt_is_cell_selected(const Vt* const self, int32_t x, int32_t y);
+
 /**
  * Should a cell (in screen coordinates) be visually highlighted as selected */
-bool Vt_is_cell_selected(const Vt* const self, int32_t x, int32_t y);
+static inline bool Vt_is_cell_selected(const Vt* const self, int32_t x, int32_t y)
+{
+    if (likely(self->selection.mode == SELECT_MODE_NONE)) {
+        return false;
+    } else {
+        return _vt_is_cell_selected(self, x, y);
+    }
+}
 
 /**
  * Get cursor row in screen coordinates */
@@ -1491,7 +1574,7 @@ Vector_char rune_vec_to_string(Vector_VtRune* line, size_t begin, size_t end, co
 /**
  * Get UTF-8 encoded string from VtLine in a given range
  * @param tail - append string to the end */
-static Vector_char VtLine_to_string(VtLine* line, size_t begin, size_t end, const char* tail)
+static inline Vector_char VtLine_to_string(VtLine* line, size_t begin, size_t end, const char* tail)
 {
     return rune_vec_to_string(&line->data, begin, end, tail);
 }
@@ -1561,26 +1644,86 @@ static VtCommand* Vt_shell_integration_get_active_command(Vt* self)
     return cmd->state == VT_COMMAND_STATE_RUNNING ? cmd : NULL;
 }
 
-ColorRGBA Vt_rune_final_bg(const Vt*     self,
-                           const VtRune* rune,
-                           int32_t       x,
-                           int32_t       y,
-                           bool          is_cursor);
+static inline ColorRGB Vt_rune_final_fg_apply_dim(const Vt*     self,
+                                                  const VtRune* rune,
+                                                  ColorRGBA     bg_color,
+                                                  bool          is_cursor)
+{
+    if (!rune) {
+        return ColorRGB_new_from_blend(settings.fg, ColorRGB_from_RGBA(bg_color), VT_DIM_FACTOR);
+    }
 
-ColorRGB Vt_rune_final_fg(const Vt*     self,
-                          const VtRune* rune,
-                          int32_t       x,
-                          int32_t       y,
-                          ColorRGBA     bg_color,
-                          bool          is_cursor);
+    if (unlikely(rune->dim)) {
+        return ColorRGB_new_from_blend(is_cursor ? Vt_rune_cursor_fg(self, rune)
+                                                 : Vt_rune_fg(self, rune),
+                                       ColorRGB_from_RGBA(bg_color),
+                                       VT_DIM_FACTOR);
+    } else {
+        return is_cursor ? Vt_rune_cursor_fg(self, rune) : Vt_rune_fg(self, rune);
+    }
+}
 
-ColorRGB Vt_rune_final_fg_apply_dim(const Vt*     self,
-                                    const VtRune* rune,
-                                    ColorRGBA     bg_color,
-                                    bool          is_cursor);
+static inline ColorRGBA Vt_rune_final_bg(const Vt*     self,
+                                         const VtRune* rune,
+                                         int32_t       x,
+                                         int32_t       y,
+                                         bool          is_cursor)
+{
+    if (unlikely(Vt_is_cell_selected(self, x, y))) {
+        return self->colors.highlight.bg;
+    } else if (rune) {
+        return is_cursor ? Vt_rune_cursor_bg(self, rune) : Vt_rune_bg(self, rune);
+    } else {
+        return settings.bg;
+    }
+}
 
-static bool Vt_is_reporting_mouse(const Vt* self)
+static inline ColorRGB Vt_rune_final_fg(const Vt*     self,
+                                        const VtRune* rune,
+                                        int32_t       x,
+                                        int32_t       y,
+                                        ColorRGBA     bg_color,
+                                        bool          is_cursor)
+{
+    if (!settings.highlight_change_fg) {
+        return Vt_rune_final_fg_apply_dim(self, rune, bg_color, is_cursor);
+    } else {
+        if (unlikely(Vt_is_cell_selected(self, x, y))) {
+            return self->colors.highlight.fg;
+        } else {
+            return Vt_rune_final_fg_apply_dim(self, rune, bg_color, is_cursor);
+        }
+    }
+}
+
+static inline bool Vt_is_reporting_mouse(const Vt* self)
 {
     return self->modes.mouse_btn_report || self->modes.mouse_motion_report ||
            self->modes.mouse_motion_on_btn_report || self->modes.extended_report;
+}
+
+/**
+ * Get URI at cell in global coordinates */
+static inline const char* Vt_uri_at(Vt* self, uint16_t column, size_t row)
+{
+    VtLine* line;
+    if (unlikely(Vt_synchronized_update_is_active(self) && row >= Vt_top_line(self))) {
+        line =
+          &self->synchronized_update_state.lines
+             .buf[MIN(row - Vt_top_line(self), self->synchronized_update_state.lines.size - 1)];
+    } else {
+        line = Vt_line_at(self, row);
+    }
+
+    if (!line || !line->links || column >= line->data.size) {
+        return NULL;
+    }
+
+    VtRune* rune = &line->data.buf[column];
+
+    if (!rune->hyperlink_idx || rune->hyperlink_idx > (int16_t)line->links->size) {
+        return NULL;
+    }
+
+    return Vector_at_VtUri(line->links, rune->hyperlink_idx - 1)->uri_string;
 }

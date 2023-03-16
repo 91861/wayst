@@ -132,6 +132,7 @@ static PFNGLDEBUGMESSAGECALLBACKPROC   glDebugMessageCallback;
 static PFNGLCHECKFRAMEBUFFERSTATUSPROC glCheckFramebufferStatus;
 #endif
 
+
 static void maybe_load_gl_exts(void* loader,
                                void* (*loader_func)(void* loader, const char* proc_name))
 {
@@ -193,6 +194,28 @@ static void maybe_load_gl_exts(void* loader,
 
 #include "gl.h"
 
+#ifdef DEBUG
+static size_t dbg_line_proxy_textures_created = 0;
+static size_t dbg_line_proxy_textures_destroyed = 0;
+#define DBG_DELTEX                                                                                 \
+    ++dbg_line_proxy_textures_destroyed;                                                           \
+    INFO("proxy-- created: %zu, destroyed: %zu (total: %zu)\n",                                    \
+         dbg_line_proxy_textures_created,                                                          \
+         dbg_line_proxy_textures_destroyed,                                                        \
+         (dbg_line_proxy_textures_created - dbg_line_proxy_textures_destroyed))
+
+#define DBG_MAKETEX                                                                                \
+    ++dbg_line_proxy_textures_created;                                                             \
+    INFO("proxy++ created: %zu, destroyed: %zu (total: %zu)\n",                                    \
+         dbg_line_proxy_textures_created,                                                          \
+         dbg_line_proxy_textures_destroyed,                                                        \
+         (dbg_line_proxy_textures_created - dbg_line_proxy_textures_destroyed))
+#else
+#define DBG_DELTEX ;
+#define DBG_MAKETEX ;
+#endif
+
+
 enum GlyphColor
 {
     GLYPH_COLOR_MONO,
@@ -245,6 +268,7 @@ typedef struct
 static void LineTexture_destroy(LineTexture* self)
 {
     if (self->color_tex) {
+        DBG_DELTEX
         glDeleteTextures(1, &self->color_tex);
         self->color_tex = 0;
 
@@ -2753,6 +2777,7 @@ static void line_render_pass_finalize(line_render_pass_t* self)
     // There are no blinking characters, but their resources still exist
     if (!self->has_blinking_chars && self->args.proxy->data[PROXY_INDEX_TEXTURE_BLINK]) {
         // TODO: recycle?
+        DBG_DELTEX
         glDeleteTextures(1, (GLuint*)&self->args.proxy->data[PROXY_INDEX_TEXTURE_BLINK]);
         self->args.proxy->data[PROXY_INDEX_TEXTURE_BLINK] = 0;
 
@@ -2824,6 +2849,7 @@ static void line_render_pass_set_up_framebuffer(line_render_pass_t* self)
 
         } else {
             /* Generate new framebuffer attachments */
+            DBG_MAKETEX
             glGenTextures(1, &self->final_texture);
             glBindTexture(GL_TEXTURE_2D, self->final_texture);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -3734,8 +3760,9 @@ static void GfxOpenGL2_draw_cursor(GfxOpenGL2* gfx, const Vt* vt, const Ui* ui)
 
     VtRune* cursor_rune = NULL;
 
-    if (vt->lines.size > ui->cursor->row && vt->lines.buf[ui->cursor->row].data.size > st_col) {
-        cursor_rune = &vt->lines.buf[ui->cursor->row].data.buf[st_col];
+    if (vt->lines.size > ui->cursor->row &&
+        Vt_get_visible_line(vt, ui->cursor->row)->data.size > st_col) {
+        cursor_rune = &Vt_get_visible_line(vt, ui->cursor->row)->data.buf[st_col];
     }
 
     ColorRGBA clr = Vt_rune_cursor_bg(vt, cursor_rune);
@@ -4326,8 +4353,8 @@ static window_partial_swap_request_t* GfxOpenGL2_merge_into_modified_rect(GfxOpe
     return &self->modified_region;
 }
 
-static window_partial_swap_request_t* GfxOpenGL2_try_push_modified_rect(GfxOpenGL2* self,
-                                                                        rect_t      rect)
+static inline window_partial_swap_request_t* GfxOpenGL2_try_push_modified_rect(GfxOpenGL2* self,
+                                                                               rect_t      rect)
 {
     if (self->modified_region.count >= WINDOW_MAX_SWAP_REGION_COUNT)
         return NULL;
@@ -4336,8 +4363,9 @@ static window_partial_swap_request_t* GfxOpenGL2_try_push_modified_rect(GfxOpenG
     return &self->modified_region;
 }
 
-static window_partial_swap_request_t* GfxOpenGL2_merge_or_push_modified_rect(GfxOpenGL2* self,
-                                                                             rect_t      rect)
+static inline window_partial_swap_request_t* GfxOpenGL2_merge_or_push_modified_rect(
+  GfxOpenGL2* self,
+  rect_t      rect)
 {
     for (int i = 0; i < self->modified_region.count; ++i) {
         if (rect_intersects(&self->modified_region.regions[i], &rect)) {
@@ -5076,6 +5104,7 @@ void GfxOpenGL2_destroy_recycled(GfxOpenGL2* self)
 {
     for (uint_fast8_t i = 0; i < ARRAY_SIZE(self->recycled_textures); ++i) {
         if (self->recycled_textures[i].color_tex) {
+            DBG_DELTEX
             glDeleteTextures(1, &self->recycled_textures[i].color_tex);
 
 #ifndef GFX_GLES
@@ -5102,6 +5131,7 @@ void GfxOpenGL2_push_recycled(GfxOpenGL2* self,
     for (uint_fast8_t insert_point = 0; insert_point < N_RECYCLED_TEXTURES; ++insert_point) {
         if (!self->recycled_textures[insert_point].color_tex) {
             if (likely(ARRAY_LAST(self->recycled_textures).color_tex)) {
+                DBG_DELTEX
                 glDeleteTextures(1, &ARRAY_LAST(self->recycled_textures).color_tex);
 
 #ifndef GFX_GLES
@@ -5125,6 +5155,7 @@ void GfxOpenGL2_push_recycled(GfxOpenGL2* self,
         }
     }
 
+    DBG_DELTEX
     glDeleteTextures(1, &tex_id);
 
 #ifndef GFX_GLES
@@ -5197,6 +5228,12 @@ __attribute__((hot)) void GfxOpenGL2_destroy_proxy(Gfx* self, uint32_t* proxy)
 
         int del_num = unlikely(proxy[PROXY_INDEX_TEXTURE_BLINK]) ? 2 : 1;
 
+#ifdef DEBUG
+        for (int i = 0; i < del_num; ++i) {
+            DBG_DELTEX
+        }
+#endif
+
         glDeleteTextures(del_num, (GLuint*)&proxy[PROXY_INDEX_TEXTURE]);
 
 #ifndef GFX_GLES
@@ -5210,6 +5247,7 @@ __attribute__((hot)) void GfxOpenGL2_destroy_proxy(Gfx* self, uint32_t* proxy)
 
     } else if (unlikely(proxy[PROXY_INDEX_TEXTURE_BLINK])) {
         ASSERT_UNREACHABLE;
+        DBG_DELTEX
         glDeleteTextures(1, (GLuint*)&proxy[PROXY_INDEX_TEXTURE_BLINK]);
 
 #ifndef GFX_GLES
@@ -5260,4 +5298,11 @@ void GfxOpenGL2_destroy(Gfx* self)
     Vector_destroy_vertex_t(&(gfxOpenGL2(self)->vec_vertex_buffer));
     Vector_destroy_vertex_t(&(gfxOpenGL2(self)->vec_vertex_buffer2));
     Vector_destroy_Vector_float(&(gfxOpenGL2(self))->float_vec);
+
+#ifdef DEBUG
+    INFO("proxy textures created: %zu, destroyed: %zu (total: %zu)\n",
+         dbg_line_proxy_textures_created,
+         dbg_line_proxy_textures_destroyed,
+         (dbg_line_proxy_textures_created - dbg_line_proxy_textures_destroyed))
+#endif
 }

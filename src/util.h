@@ -338,42 +338,42 @@ static void print_rect(rect_t* rect)
 #define RECT_FMT      "x: %d, y: %d, w: %d, h :%d"
 #define RECT_AP(rect) (rect)->x, (rect)->y, (rect)->w, (rect)->h
 
-static bool regions_intersect(int32_t a, int32_t as, int32_t b, int32_t bs)
+static inline bool regions_intersect(int32_t a, int32_t as, int32_t b, int32_t bs)
 {
     return (a <= b && a + as >= b) || (a >= b && a <= b + bs);
 }
 
-static bool regions_overlap(int32_t a, int32_t as, int32_t b, int32_t bs)
+static inline bool regions_overlap(int32_t a, int32_t as, int32_t b, int32_t bs)
 {
     return (a < b && a + as > b) || (a > b && a < b + bs);
 }
 
-static bool rect_intersects_horizontal(rect_t* a, rect_t* b)
+static inline bool rect_intersects_horizontal(rect_t* a, rect_t* b)
 {
     return regions_intersect(a->x, a->w, b->x, b->w);
 }
 
-static bool rect_overlaps_horizontal(rect_t* a, rect_t* b)
+static inline bool rect_overlaps_horizontal(rect_t* a, rect_t* b)
 {
     return regions_overlap(a->x, a->w, b->x, b->w);
 }
 
-static bool rect_intersects_vertical(rect_t* a, rect_t* b)
+static inline bool rect_intersects_vertical(rect_t* a, rect_t* b)
 {
     return regions_intersect(a->y, a->h, b->y, b->h);
 }
 
-static bool rect_overlaps_vertical(rect_t* a, rect_t* b)
+static inline bool rect_overlaps_vertical(rect_t* a, rect_t* b)
 {
     return regions_overlap(a->y, a->h, b->y, b->h);
 }
 
-static bool rect_intersects(rect_t* a, rect_t* b)
+static inline bool rect_intersects(rect_t* a, rect_t* b)
 {
     return rect_intersects_horizontal(a, b) && rect_intersects_vertical(a, b);
 }
 
-static bool rect_overlaps(rect_t* a, rect_t* b)
+static inline bool rect_overlaps(rect_t* a, rect_t* b)
 {
     return rect_overlaps_horizontal(a, b) && rect_overlaps_vertical(a, b);
 }
@@ -508,7 +508,7 @@ static inline bool unicode_is_ambiguous_width(char32_t codepoint)
            unicode_is_special(codepoint);
 }
 
-static bool is_in_tmp_dir(const char* path)
+static inline bool is_in_tmp_dir(const char* path)
 {
     return (path == strstr(path, "/tmp/") || path == strstr(path, "/dev/shm/") ||
             (path = strstr(path, getenv("PATH"))));
@@ -516,7 +516,7 @@ static bool is_in_tmp_dir(const char* path)
 
 /**
  * Get full path to this binary file. Caller should free() */
-static char* get_running_binary_path()
+static inline char* get_running_binary_path()
 {
     return realpath("/proc/self/exe", 0);
 }
@@ -541,17 +541,17 @@ static AString AString_new_uninitialized()
     return (AString){ .str = NULL, .state = ASTRING_UNINITIALIZED };
 }
 
-static AString AString_new_static(char* str)
+static inline AString AString_new_static(char* str)
 {
     return (AString){ .str = str, .state = ASTRING_STATIC };
 }
 
-static AString AString_new_dynamic(char* str)
+static inline AString AString_new_dynamic(char* str)
 {
     return (AString){ .str = str, .state = ASTRING_DYNAMIC };
 }
 
-static void AString_destroy(AString* self)
+static inline void AString_destroy(AString* self)
 {
     if (self->state == ASTRING_DYNAMIC) {
         free(self->str);
@@ -560,14 +560,14 @@ static void AString_destroy(AString* self)
     self->str   = NULL;
 }
 
-static void AString_replace_with_static(AString* self, char* str)
+static inline void AString_replace_with_static(AString* self, char* str)
 {
     AString_destroy(self);
     self->str   = str;
     self->state = ASTRING_STATIC;
 }
 
-static void AString_replace_with_dynamic(AString* self, char* str)
+static inline void AString_replace_with_dynamic(AString* self, char* str)
 {
     if (!str)
         return;
@@ -576,17 +576,17 @@ static void AString_replace_with_dynamic(AString* self, char* str)
     self->state = ASTRING_DYNAMIC;
 }
 
-static size_t AString_len(AString* self)
+static inline size_t AString_len(AString* self)
 {
     return strlen(self->str);
 }
 
-static char* AString_dup(AString* self)
+static inline char* AString_dup(AString* self)
 {
     return _strdup(self->str);
 }
 
-static AString AString_new_copy(AString* other)
+static inline AString AString_new_copy(AString* other)
 {
     if (other->state == ASTRING_UNINITIALIZED || other->state == ASTRING_STATIC) {
         return *other;

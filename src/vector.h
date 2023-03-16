@@ -55,7 +55,12 @@
         return (Vector_##t){ .cap = init_cap, .size = 0, .buf = _malloc(sizeof(t) * init_cap) };   \
     }                                                                                              \
                                                                                                    \
-    static void Vector_push_##t(Vector_##t* self, t arg)                                           \
+    static inline bool Vector_is_initialized_##t(const Vector_##t* self)                           \
+    {                                                                                              \
+        return self->buf;                                                                          \
+    }                                                                                              \
+                                                                                                   \
+    static inline void Vector_push_##t(Vector_##t* self, t arg)                                    \
     {                                                                                              \
         ASSERT(self->buf, "Vector not initialized");                                               \
         if (unlikely(self->cap == self->size)) {                                                   \
@@ -64,14 +69,14 @@
         self->buf[self->size++] = arg;                                                             \
     }                                                                                              \
                                                                                                    \
-    static void Vector_reserve_##t(Vector_##t* self, size_t cnt)                                   \
+    static inline void Vector_reserve_##t(Vector_##t* self, size_t cnt)                            \
     {                                                                                              \
         ASSERT(self->buf, "Vector not initialized");                                               \
         if (likely(cnt > self->cap))                                                               \
             self->buf = _realloc(self->buf, (self->cap = cnt) * sizeof(t));                        \
     }                                                                                              \
                                                                                                    \
-    static void Vector_reserve_extra_##t(Vector_##t* self, size_t cnt)                             \
+    static inline void Vector_reserve_extra_##t(Vector_##t* self, size_t cnt)                      \
     {                                                                                              \
         ASSERT(self->buf, "Vector not initialized");                                               \
         if (cnt + self->size > self->cap)                                                          \
@@ -161,7 +166,7 @@
         return unlikely(!self->size) ? NULL                                                        \
                : !i                  ? &self->buf[self->size - 1]                                  \
                : (i == self->buf)    ? NULL                                                        \
-                                     : i - 1;                                                         \
+                                     : i - 1;                                                      \
     }                                                                                              \
                                                                                                    \
     static inline const t* Vector_iter_back_const_##t(const Vector_##t* self, const t* i)          \
@@ -169,7 +174,7 @@
         return unlikely(!self->size) ? NULL                                                        \
                : !i                  ? &self->buf[self->size - 1]                                  \
                : (i == self->buf)    ? NULL                                                        \
-                                     : i - 1;                                                         \
+                                     : i - 1;                                                      \
     }                                                                                              \
                                                                                                    \
     static inline t* Vector_insert_##t(Vector_##t* self, t* i, t arg)                              \
@@ -309,7 +314,12 @@
                              .dtor_arg = destroy_arg };                                            \
     }                                                                                              \
                                                                                                    \
-    static void Vector_push_##t(Vector_##t* self, t arg)                                           \
+    static inline bool Vector_is_initialized_##t(const Vector_##t* self)                           \
+    {                                                                                              \
+        return self->buf;                                                                          \
+    }                                                                                              \
+                                                                                                   \
+    static inline void Vector_push_##t(Vector_##t* self, t arg)                                    \
     {                                                                                              \
         ASSERT(self->buf, "Vector not initialized");                                               \
         if (unlikely(self->cap == self->size)) {                                                   \
@@ -318,14 +328,14 @@
         self->buf[self->size++] = arg;                                                             \
     }                                                                                              \
                                                                                                    \
-    static void Vector_reserve_##t(Vector_##t* self, size_t cnt)                                   \
+    static inline void Vector_reserve_##t(Vector_##t* self, size_t cnt)                            \
     {                                                                                              \
         ASSERT(self->buf, "Vector not initialized");                                               \
         if (likely(cnt > self->cap))                                                               \
             self->buf = _realloc(self->buf, (self->cap = cnt) * sizeof(t));                        \
     }                                                                                              \
                                                                                                    \
-    static void Vector_reserve_extra_##t(Vector_##t* self, size_t cnt)                             \
+    static inline void Vector_reserve_extra_##t(Vector_##t* self, size_t cnt)                      \
     {                                                                                              \
         ASSERT(self->buf, "Vector not initialized");                                               \
         if (cnt + self->size > self->cap)                                                          \
@@ -415,7 +425,7 @@
         return unlikely(!self->size) ? NULL                                                        \
                : !i                  ? &self->buf[self->size - 1]                                  \
                : (i == self->buf)    ? NULL                                                        \
-                                     : i - 1;                                                         \
+                                     : i - 1;                                                      \
     }                                                                                              \
                                                                                                    \
     static inline const t* Vector_iter_back_const_##t(const Vector_##t* self, const t* i)          \
@@ -423,7 +433,7 @@
         return unlikely(!self->size) ? NULL                                                        \
                : !i                  ? &self->buf[self->size - 1]                                  \
                : (i == self->buf)    ? NULL                                                        \
-                                     : i - 1;                                                         \
+                                     : i - 1;                                                      \
     }                                                                                              \
                                                                                                    \
     static inline t* Vector_insert_##t(Vector_##t* self, t* i, t arg)                              \

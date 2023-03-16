@@ -461,6 +461,7 @@ static void App_run(App* self)
     }
 
     Monitor_kill(&self->monitor);
+    self->vt.callbacks.destroy_proxy(self->vt.callbacks.user_data, &self->ui.cursor_proxy);
     Vt_destroy(&self->vt);
     Gfx_destroy(self->gfx);
     Ui_destroy(&self->ui);
@@ -1392,10 +1393,9 @@ static bool App_maybe_handle_application_key(App*     self,
 void App_gui_pointer_mode_change_handler(void* self)
 {
 
-
 #define L_SET_POINTER_STYLE                                                                        \
     if (app->selection_dragging_left || app->selection_dragging_right ||                           \
-            app->vt.selection.mode != SELECT_MODE_NONE) {                                          \
+        app->vt.selection.mode != SELECT_MODE_NONE) {                                              \
         Window_set_pointer_style(app->win, MOUSE_POINTER_I_BEAM);                                  \
     } else {                                                                                       \
         Window_set_pointer_style(app->win, MOUSE_POINTER_ARROW);                                   \

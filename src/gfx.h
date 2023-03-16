@@ -77,10 +77,10 @@ struct IGfx
     void (*external_framebuffer_damage)(Gfx* self);
     bool (*is_framebuffer_dirty)(Gfx* self);
 
-    void (*destroy_proxy)(Gfx* self, uint32_t proxy[static 6]);
-    void (*destroy_image_proxy)(Gfx* self, uint32_t proxy[static 6]);
-    void (*destroy_image_view_proxy)(Gfx* self, uint32_t proxy[static 6]);
-    void (*destroy_sixel_proxy)(Gfx* self, uint32_t proxy[static 6]);
+    void (*destroy_proxy)(Gfx* self, uint32_t proxy[static 4]);
+    void (*destroy_image_proxy)(Gfx* self, uint32_t proxy[static 4]);
+    void (*destroy_image_view_proxy)(Gfx* self, uint32_t proxy[static 4]);
+    void (*destroy_sixel_proxy)(Gfx* self, uint32_t proxy[static 4]);
 };
 
 /**
@@ -136,7 +136,7 @@ static void Gfx_destroy(Gfx* self)
 
 /**
  * Destroy the generated line 'proxy' object */
-static void Gfx_destroy_proxy(Gfx* self, uint32_t proxy[static 6])
+static void Gfx_destroy_proxy(Gfx* self, uint32_t proxy[static 4])
 {
     self->interface->destroy_proxy(self, proxy);
 }

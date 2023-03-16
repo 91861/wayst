@@ -101,7 +101,7 @@ static int32_t convert_modifier_mask(unsigned int x_mask)
         FLAG_SET(mods, MODIFIER_CONTROL);
     }
     if (x_mask & Mod1Mask) {
-        FLAG_SET(mods, MODIFIER_CONTROL);
+        FLAG_SET(mods, MODIFIER_ALT);
     }
     return mods;
 }
@@ -129,7 +129,7 @@ static void        WindowX11_events(WindowBase* self);
 static void        WindowX11_set_wm_name(WindowBase* self, const char* title, const char* name);
 static void        WindowX11_set_title(WindowBase* self, const char* title);
 static void        WindowX11_set_swap_interval(WindowBase* self, int32_t ival);
-static bool        WindowX11_maybe_swap(WindowBase* self);
+static bool        WindowX11_maybe_swap(WindowBase* self, bool do_swap);
 static void        WindowX11_destroy(WindowBase* self);
 static int         WindowX11_get_connection_fd(WindowBase* self);
 static void        WindowX11_primary_get(WindowBase* self);
@@ -1042,10 +1042,10 @@ static inline void WindowX11_fullscreen_change_state(WindowBase* self, const lon
                               .message_type = globalX11->atom.wm_state,
                               .format       = 32,
                               .data.l       = {
-                                      [0] = (long)arg,
-                                      [1] = globalX11->atom.wm_fullscreen,
-                                      [2] = 0,
-                                      [3] = 0,
+                                [0] = (long)arg,
+                                [1] = globalX11->atom.wm_fullscreen,
+                                [2] = 0,
+                                [3] = 0,
                               } };
 
     XSendEvent(globalX11->display,
@@ -1091,10 +1091,10 @@ static void WindowX11_set_maximized(WindowBase* self, bool maximized)
                               .message_type = globalX11->atom.wm_state,
                               .format       = 32,
                               .data.l       = {
-                                      [0] = maximized ? _NET_WM_STATE_ADD : _NET_WM_STATE_REMOVE,
-                                      [1] = globalX11->atom.wm_max_vert,
-                                      [2] = 0,
-                                      [3] = 0,
+                                [0] = maximized ? _NET_WM_STATE_ADD : _NET_WM_STATE_REMOVE,
+                                [1] = globalX11->atom.wm_max_vert,
+                                [2] = 0,
+                                [3] = 0,
                               } };
 
     XSendEvent(globalX11->display,
@@ -1919,11 +1919,11 @@ static void WindowX11_set_wm_name(WindowBase* self, const char* class_name, cons
     XSetClassHint(globalX11->display, windowX11(self)->window, &class_hint);
 }
 
-static bool WindowX11_maybe_swap(WindowBase* self)
+static bool WindowX11_maybe_swap(WindowBase* self, bool do_swap)
 {
     WindowX11* winx = windowX11(self);
 
-    if (self->paint && !FLAG_IS_SET(self->state_flags, WINDOW_IS_MINIMIZED)) {
+    if (self->paint && !FLAG_IS_SET(self->state_flags, WINDOW_IS_MINIMIZED) && do_swap) {
         self->paint = false;
         unsigned int age, preserved;
         glXQueryDrawable(globalX11->display, winx->window, GLX_BACK_BUFFER_AGE_EXT, &age);

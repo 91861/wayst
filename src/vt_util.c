@@ -14,8 +14,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define VT_DIM_FACTOR 0.4f
-
 Vector_char Vt_command_to_string(const Vt* self, const VtCommand* command, size_t opt_limit_lines)
 {
     ASSERT(command->state == VT_COMMAND_STATE_COMPLETED, "is completed");
@@ -224,7 +222,7 @@ void generate_color_palette_entry(ColorRGB* color, int16_t idx)
     }
 }
 
-bool Vt_is_cell_selected(const Vt* const self, int32_t x, int32_t y)
+bool _vt_is_cell_selected(const Vt* const self, int32_t x, int32_t y)
 {
     switch (expect(self->selection.mode, SELECT_MODE_NONE)) {
         case SELECT_MODE_NONE:
@@ -264,54 +262,6 @@ bool Vt_is_cell_selected(const Vt* const self, int32_t x, int32_t y)
             return false;
     }
     return false;
-}
-
-ColorRGB Vt_rune_final_fg_apply_dim(const Vt*     self,
-                                    const VtRune* rune,
-                                    ColorRGBA     bg_color,
-                                    bool          is_cursor)
-{
-    if (!rune) {
-        return ColorRGB_new_from_blend(settings.fg, ColorRGB_from_RGBA(bg_color), VT_DIM_FACTOR);
-    }
-
-    if (unlikely(rune->dim)) {
-        return ColorRGB_new_from_blend(is_cursor ? Vt_rune_cursor_fg(self, rune)
-                                                 : Vt_rune_fg(self, rune),
-                                       ColorRGB_from_RGBA(bg_color),
-                                       VT_DIM_FACTOR);
-    } else {
-        return is_cursor ? Vt_rune_cursor_fg(self, rune) : Vt_rune_fg(self, rune);
-    }
-}
-
-ColorRGB Vt_rune_final_fg(const Vt*     self,
-                          const VtRune* rune,
-                          int32_t       x,
-                          int32_t       y,
-                          ColorRGBA     bg_color,
-                          bool          is_cursor)
-{
-    if (!settings.highlight_change_fg) {
-        return Vt_rune_final_fg_apply_dim(self, rune, bg_color, is_cursor);
-    } else {
-        if (unlikely(Vt_is_cell_selected(self, x, y))) {
-            return self->colors.highlight.fg;
-        } else {
-            return Vt_rune_final_fg_apply_dim(self, rune, bg_color, is_cursor);
-        }
-    }
-}
-
-ColorRGBA Vt_rune_final_bg(const Vt* self, const VtRune* rune, int32_t x, int32_t y, bool is_cursor)
-{
-    if (unlikely(Vt_is_cell_selected(self, x, y))) {
-        return self->colors.highlight.bg;
-    } else if (rune) {
-        return is_cursor ? Vt_rune_cursor_bg(self, rune) : Vt_rune_bg(self, rune);
-    } else {
-        return settings.bg;
-    }
 }
 
 static const char* const color_palette_names[] = {
@@ -765,32 +715,32 @@ __attribute__((cold)) void Vt_dump_info(Vt* self)
 
     for (size_t i = 0; i < self->lines.size; ++i) {
         Vector_char str = rune_vec_to_string(&self->lines.buf[i].data, 0, 0, "");
-        printf("%s%c %c %c %4zu%c s:%3zu dmg:%d proxy{%3d,%3d,%3d,%3d} reflow{%d,%d,%d} "
-               "marks{%d,%d,%d,%d} data{%.90s%s}" TERMCOLOR_RESET "\n",
-               i == self->cursor.row ? TERMCOLOR_BOLD : "",
-               i == Vt_top_line(self)      ? 'v'
-               : i == Vt_bottom_line(self) ? '^'
-                                           : ' ',
-               i == Vt_get_scroll_region_top(self) || i == Vt_get_scroll_region_bottom(self) ? '-'
-                                                                                             : ' ',
-               i == Vt_visual_top_line(self) || i == Vt_visual_bottom_line(self) ? '*' : ' ',
-               i,
-               i == self->cursor.row ? '<' : ' ',
-               self->lines.buf[i].data.size,
-               self->lines.buf[i].damage.type != VT_LINE_DAMAGE_NONE,
-               self->lines.buf[i].proxy.data[0],
-               self->lines.buf[i].proxy.data[1],
-               self->lines.buf[i].proxy.data[2],
-               self->lines.buf[i].proxy.data[3],
-               self->lines.buf[i].reflowable,
-               self->lines.buf[i].rejoinable,
-               self->lines.buf[i].was_reflown,
-               self->lines.buf[i].mark_command_invoke,
-               self->lines.buf[i].mark_command_output_start,
-               self->lines.buf[i].mark_command_output_end,
-               self->lines.buf[i].mark_explicit,
-               str.buf,
-               (str.size > 90 ? "…" : ""));
+        printf(
+          "%s%c %c %c %4zu%c s:%3zu dmg:%d proxy{%3d,%3d,%3d,%3d} reflow{%d,%d,%d} "
+          "marks{%d,%d,%d,%d} data{%.90s%s}" TERMCOLOR_RESET "\n",
+          i == self->cursor.row ? TERMCOLOR_BOLD : "",
+          i == Vt_top_line(self)      ? 'v'
+          : i == Vt_bottom_line(self) ? '^'
+                                      : ' ',
+          i == Vt_get_scroll_region_top(self) || i == Vt_get_scroll_region_bottom(self) ? '-' : ' ',
+          i == Vt_visual_top_line(self) || i == Vt_visual_bottom_line(self) ? '*' : ' ',
+          i,
+          i == self->cursor.row ? '<' : ' ',
+          self->lines.buf[i].data.size,
+          self->lines.buf[i].damage.type != VT_LINE_DAMAGE_NONE,
+          self->lines.buf[i].proxy.data[0],
+          self->lines.buf[i].proxy.data[1],
+          self->lines.buf[i].proxy.data[2],
+          self->lines.buf[i].proxy.data[3],
+          self->lines.buf[i].reflowable,
+          self->lines.buf[i].rejoinable,
+          self->lines.buf[i].was_reflown,
+          self->lines.buf[i].mark_command_invoke,
+          self->lines.buf[i].mark_command_output_start,
+          self->lines.buf[i].mark_command_output_end,
+          self->lines.buf[i].mark_explicit,
+          str.buf,
+          (str.size > 90 ? "…" : ""));
 
         if (self->lines.buf[i].links) {
             for (uint16_t j = 0; j < self->lines.buf[i].links->size; ++j) {

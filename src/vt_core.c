@@ -1,6 +1,8 @@
 /* See LICENSE for license information. */
 
 #include "colors.h"
+#include "timing.h"
+#include <string.h>
 #define _GNU_SOURCE
 #include <stdint.h>
 
@@ -64,6 +66,131 @@ static void          Vt_mark_proxy_damaged_cell(Vt* self, size_t line, size_t ru
 static void          Vt_init_tab_ruler(Vt* self);
 static void          Vt_reset_tab_ruler(Vt* self);
 
+static vt_line_damage_t VtLine_diff_to_damage(VtLine*           line_a,
+                                              VtLine*           line_b,
+                                              vt_line_damage_t* damage)
+{
+    if (damage->type == VT_LINE_DAMAGE_FULL) {
+        return (vt_line_damage_t){
+            .type = VT_LINE_DAMAGE_FULL,
+        };
+    }
+
+    size_t max_size        = MAX(line_a->data.size, line_b->data.size);
+    size_t min_size        = MIN(line_a->data.size, line_b->data.size);
+    size_t dmg_range_begin = 0;
+    size_t dmg_range_end   = min_size != max_size ? max_size : 0;
+
+    for (size_t i = 0; i < min_size; ++i) {
+        VtRune* rune_a = &line_a->data.buf[i];
+        VtRune* rune_b = &line_b->data.buf[i];
+
+        if (memcmp(rune_a, rune_b, sizeof(VtRune))) {
+            dmg_range_begin = MIN(dmg_range_begin, i);
+            dmg_range_end   = MAX(dmg_range_end, i);
+        }
+    }
+
+    switch (damage->type) {
+        case VT_LINE_DAMAGE_RANGE:
+            dmg_range_begin = MIN(dmg_range_begin, damage->front);
+            dmg_range_end   = MAX(dmg_range_end, damage->end);
+            break;
+
+            // TODO: other damage models
+        default:;
+    }
+
+    if (dmg_range_begin != dmg_range_end) {
+        return (vt_line_damage_t){
+            .type  = VT_LINE_DAMAGE_RANGE,
+            .front = dmg_range_begin,
+            .end   = dmg_range_end,
+        };
+    } else {
+        return (vt_line_damage_t){
+            .type = VT_LINE_DAMAGE_NONE,
+        };
+    }
+}
+
+/* End synchronized update by merging previously cloned lines into their origins if alive and
+ * calculate damage */
+void Vt_end_synchronized_update(Vt* self)
+{
+    if (!Vt_synchronized_update_is_active(self)) {
+        return;
+    }
+
+    for (size_t i = 0; i < self->synchronized_update_state.lines.size; ++i) {
+        VtLine*                          sync_line = &self->synchronized_update_state.lines.buf[i];
+        vt_synchronized_update_origin_t* origin = &self->synchronized_update_state.origins.buf[i];
+
+        if (origin->alive) {
+            VtLine* origin_line = &self->lines.buf[origin->global_index];
+            origin_line->damage = VtLine_diff_to_damage(sync_line, origin_line, &sync_line->damage);
+            origin_line->proxy  = sync_line->proxy;
+            memset(&sync_line->proxy, 0, sizeof(VtLineProxy));
+        }
+    }
+
+    Vector_clear_VtLine(&self->synchronized_update_state.lines); // destroys proxy if not cleared
+    Vector_clear_vt_synchronized_update_origin_t(&self->synchronized_update_state.origins);
+    self->synchronized_update_state.snapshot_display_size = (Pair_uint16_t){ 0, 0 };
+}
+
+/* Begin synchronized update by cloning logical viewport lines */
+void Vt_start_synchronized_update(Vt* self)
+{
+    if (unlikely(Vt_synchronized_update_is_active(self))) {
+        return;
+    }
+
+    if (unlikely(!Vector_is_initialized_VtLine(&self->synchronized_update_state.lines))) {
+        self->synchronized_update_state.lines = Vector_new_with_capacity_VtLine(Vt_row(self), self);
+        self->synchronized_update_state.origins =
+          Vector_new_with_capacity_vt_synchronized_update_origin_t(Vt_row(self));
+    }
+
+    self->synchronized_update_state.snapshot_display_size = (Pair_uint16_t){
+        .first  = Vt_col(self),
+        .second = Vt_row(self),
+    };
+
+    VtLine* begin = self->lines.buf + Vt_top_line(self);
+    VtLine* end   = self->lines.buf + Vt_bottom_line(self);
+
+    for (VtLine* i = begin; i <= end; ++i) {
+        Vector_push_VtLine(&self->synchronized_update_state.lines, VtLine_clone(i));
+        i->damage.type  = VT_LINE_DAMAGE_PROXIES_MOVED_TO_CLONE;
+        i->damage.front = self->synchronized_update_state.lines.size - 1;
+        memset(&i->proxy, 0, sizeof(VtLineProxy));
+        vt_synchronized_update_origin_t origin;
+        origin.alive        = true;
+        origin.global_index = i - self->lines.buf;
+        Vector_push_vt_synchronized_update_origin_t(&self->synchronized_update_state.origins,
+                                                    origin);
+    }
+
+    self->synchronized_update_state.snapshot_create_time = TimePoint_now();
+}
+
+static inline void Vt_synchronized_update_process_line_deletion(Vt* self, VtLine* line)
+{
+    if (likely(!Vt_synchronized_update_is_active(self))) {
+        return;
+    }
+
+    if (line->damage.type == VT_LINE_DAMAGE_PROXIES_MOVED_TO_CLONE) {
+        size_t sync_buffer_index = line->damage.front;
+
+        vt_synchronized_update_origin_t* origin =
+          &self->synchronized_update_state.origins.buf[sync_buffer_index];
+
+        origin->alive = false;
+    }
+}
+
 static inline VtLine VtLine_new()
 {
     VtLine line;
@@ -91,11 +218,6 @@ static inline void VtLine_strip_blanks(VtLine* self)
     }
 }
 
-void Vt_output(Vt* self, const char* buf, size_t len)
-{
-    Vector_pushv_char(&self->output, buf, len);
-}
-
 static void Vt_bell(Vt* self)
 {
     if (!settings.no_flash)
@@ -116,7 +238,7 @@ static inline size_t Vt_bottom_line_alt(Vt* self)
     return Vt_top_line_alt(self) + Vt_row(self) - 1;
 }
 
-static void Vt_command_output_interrupted(Vt* self)
+static inline void Vt_command_output_interrupted(Vt* self)
 {
     self->shell_integration_state = VT_SHELL_INTEG_STATE_NONE;
 }
@@ -161,7 +283,7 @@ static void Vt_uri_complete(Vt* self)
     LOG("Vt::uri_match: %s\n", self->uri_matcher.match.buf);
 }
 
-static bool isurl(char32_t c)
+static inline bool isurl(char32_t c)
 {
     if (c > 255)
         return false;
@@ -312,10 +434,19 @@ static void Vt_uri_next_char(Vt* self, char32_t c)
     }
 }
 
+static inline void Vt_about_to_delete_line(Vt* self, VtLine* line)
+{
+    if (unlikely(line->damage.type == VT_LINE_DAMAGE_PROXIES_MOVED_TO_CLONE)) {
+        self->synchronized_update_state.origins.buf[line->damage.front].alive = false;
+    }
+}
+
 static inline void Vt_about_to_delete_line_by_scroll_up(Vt* self, size_t idx)
 {
     VtLine* src = &self->lines.buf[idx];
     VtLine* tgt = &self->lines.buf[idx + 1];
+
+    Vt_about_to_delete_line(self, src);
 
     if (unlikely(src->graphic_attachments && src->graphic_attachments->images)) {
         for (RcPtr_VtImageSurfaceView* i = NULL;
@@ -345,8 +476,11 @@ static inline void Vt_about_to_delete_line_by_scroll_up(Vt* self, size_t idx)
     }
 }
 
-static void Vt_about_to_delete_line_by_scroll_down(Vt* self, size_t idx)
+static inline void Vt_about_to_delete_line_by_scroll_down(Vt* self, size_t idx)
 {
+    VtLine* line = &self->lines.buf[idx];
+    Vt_about_to_delete_line(self, line);
+
     for (RcPtr_VtImageSurfaceView* i = NULL;
          (i = Vector_iter_RcPtr_VtImageSurfaceView(&self->image_views, i));) {
         VtImageSurfaceView* view = RcPtr_get_VtImageSurfaceView(i);
@@ -358,7 +492,7 @@ static void Vt_about_to_delete_line_by_scroll_down(Vt* self, size_t idx)
     }
 }
 
-static void Vt_grapheme_break(Vt* self)
+static inline void Vt_grapheme_break(Vt* self)
 {
 #ifndef NOUTF8PROC
     self->utf8proc_state = 0;
@@ -366,25 +500,25 @@ static void Vt_grapheme_break(Vt* self)
     self->last_codepoint = 0;
 }
 
-static void Vt_set_cursor_color(Vt* self, ColorRGBA color)
+static inline void Vt_set_cursor_color(Vt* self, ColorRGBA color)
 {
     self->colors.cursor.enabled = true;
     self->colors.cursor.bg      = color;
 }
 
-static void Vt_set_cursor_color_default(Vt* self)
+static inline void Vt_set_cursor_color_default(Vt* self)
 {
     self->colors.cursor.enabled = false;
 }
 
-static void Vt_set_fg_color_custom(Vt* self, ColorRGB color, VtRune* opt_target)
+static inline void Vt_set_fg_color_custom(Vt* self, ColorRGB color, VtRune* opt_target)
 {
     VtRune* r              = OR(opt_target, &self->parser.char_state);
     r->fg_is_palette_entry = false;
     r->fg_data.rgb         = color;
 }
 
-static void Vt_set_fg_color_palette(Vt* self, int16_t index, VtRune* opt_target)
+static inline void Vt_set_fg_color_palette(Vt* self, int16_t index, VtRune* opt_target)
 {
     ASSERT(index >= 0 && index <= 256, "in palette range");
     VtRune* r              = OR(opt_target, &self->parser.char_state);
@@ -392,21 +526,21 @@ static void Vt_set_fg_color_palette(Vt* self, int16_t index, VtRune* opt_target)
     r->fg_data.index       = index;
 }
 
-static void Vt_set_fg_color_default(Vt* self, VtRune* opt_target)
+static inline void Vt_set_fg_color_default(Vt* self, VtRune* opt_target)
 {
     VtRune* r              = OR(opt_target, &self->parser.char_state);
     r->fg_is_palette_entry = true;
     r->fg_data.index       = VT_RUNE_PALETTE_INDEX_TERM_DEFAULT;
 }
 
-static void Vt_set_bg_color_custom(Vt* self, ColorRGBA color, VtRune* opt_target)
+static inline void Vt_set_bg_color_custom(Vt* self, ColorRGBA color, VtRune* opt_target)
 {
     VtRune* r              = OR(opt_target, &self->parser.char_state);
     r->bg_is_palette_entry = false;
     r->bg_data.rgba        = color;
 }
 
-static void Vt_set_bg_color_palette(Vt* self, int16_t index, VtRune* opt_target)
+static inline void Vt_set_bg_color_palette(Vt* self, int16_t index, VtRune* opt_target)
 {
     ASSERT(index >= 0 && index <= 256, "in palette range");
     VtRune* r              = OR(opt_target, &self->parser.char_state);
@@ -414,14 +548,14 @@ static void Vt_set_bg_color_palette(Vt* self, int16_t index, VtRune* opt_target)
     r->bg_data.index       = index;
 }
 
-static void Vt_set_bg_color_default(Vt* self, VtRune* opt_target)
+static inline void Vt_set_bg_color_default(Vt* self, VtRune* opt_target)
 {
     VtRune* r              = OR(opt_target, &self->parser.char_state);
     r->bg_is_palette_entry = true;
     r->bg_data.index       = VT_RUNE_PALETTE_INDEX_TERM_DEFAULT;
 }
 
-static void Vt_set_line_color_custom(Vt* self, ColorRGB color, VtRune* opt_target)
+static inline void Vt_set_line_color_custom(Vt* self, ColorRGB color, VtRune* opt_target)
 {
     VtRune* r                  = OR(opt_target, &self->parser.char_state);
     r->line_color_not_default  = true;
@@ -429,7 +563,7 @@ static void Vt_set_line_color_custom(Vt* self, ColorRGB color, VtRune* opt_targe
     r->ln_clr_data.rgb         = color;
 }
 
-static void Vt_set_line_color_palette(Vt* self, int16_t index, VtRune* opt_target)
+static inline void Vt_set_line_color_palette(Vt* self, int16_t index, VtRune* opt_target)
 {
     ASSERT(index >= 0 && index <= 256, "in palette range");
     VtRune* r                  = OR(opt_target, &self->parser.char_state);
@@ -437,23 +571,23 @@ static void Vt_set_line_color_palette(Vt* self, int16_t index, VtRune* opt_targe
     r->ln_clr_data.index       = index;
 }
 
-static void Vt_set_line_color_default(Vt* self, VtRune* opt_target)
+static inline void Vt_set_line_color_default(Vt* self, VtRune* opt_target)
 {
     VtRune* r                 = OR(opt_target, &self->parser.char_state);
     r->line_color_not_default = false;
 }
 
-static ColorRGB Vt_active_fg_color(const Vt* self)
+static inline ColorRGB Vt_active_fg_color(const Vt* self)
 {
     return Vt_rune_fg(self, &self->parser.char_state);
 }
 
-static ColorRGBA Vt_active_bg_color(const Vt* self)
+static inline ColorRGBA Vt_active_bg_color(const Vt* self)
 {
     return Vt_rune_bg(self, &self->parser.char_state);
 }
 
-static ColorRGB Vt_active_line_color(const Vt* self)
+static inline ColorRGB Vt_active_line_color(const Vt* self)
 {
     return Vt_rune_ln_clr(self, &self->parser.char_state);
 }
@@ -823,7 +957,7 @@ static void set_rgb_color_from_xterm_string(ColorRGB* color, const char* string)
     }
 }
 
-static void set_rgba_color_from_xterm_string(ColorRGBA* color, const char* string)
+static inline void set_rgba_color_from_xterm_string(ColorRGBA* color, const char* string)
 {
     ColorRGB c;
     set_rgb_color_from_xterm_string(&c, string);
@@ -993,14 +1127,14 @@ static void Vt_init_tab_ruler(Vt* self)
     Vt_reset_tab_ruler(self);
 }
 
-static void Vt_reset_tab_ruler(Vt* self)
+static inline void Vt_reset_tab_ruler(Vt* self)
 {
     for (uint16_t i = 0; i < Vt_col(self); ++i) {
         self->tab_ruler[i] = i % self->tabstop == 0;
     }
 }
 
-static void Vt_clear_all_tabstops(Vt* self)
+static inline void Vt_clear_all_tabstops(Vt* self)
 {
     memset(self->tab_ruler, false, Vt_col(self));
 }
@@ -1014,6 +1148,7 @@ bool Vt_visual_scroll_up(Vt* self)
             return true;
         }
     } else if (Vt_top_line(self)) {
+        Vt_end_synchronized_update(self);
         self->scrolling_visual  = true;
         self->visual_scroll_top = Vt_top_line(self) - 1;
     }
@@ -1027,6 +1162,8 @@ bool Vt_visual_scroll_down(Vt* self)
         if (self->visual_scroll_top == Vt_top_line(self)) {
             self->scrolling_visual = false;
             return true;
+        } else {
+            Vt_end_synchronized_update(self);
         }
     }
     return false;
@@ -1037,11 +1174,14 @@ void Vt_visual_scroll_to(Vt* self, size_t line)
     line                    = MIN(line, Vt_top_line(self));
     self->visual_scroll_top = line;
     self->scrolling_visual  = line != Vt_top_line(self);
+
+    Vt_end_synchronized_update(self);
 }
 
 void Vt_visual_scroll_reset(Vt* self)
 {
     self->scrolling_visual = false;
+    Vt_end_synchronized_update(self);
 }
 
 static void Vt_reflow_expand(Vt* self, uint32_t x)
@@ -1297,6 +1437,8 @@ void Vt_resize(Vt* self, uint32_t x, uint32_t y)
     if (x < 2 || y < 2) {
         return;
     }
+
+    Vt_end_synchronized_update(self);
 
     if (!self->alt_lines.buf) {
         Vt_trim_columns(self);
@@ -1730,7 +1872,11 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
             break;
 
         case 2026: /* application-synchronized updates equivalent to BSU/ESU */
-            STUB("DEC private mode 2026 synchronized updates");
+            if (on) {
+                Vt_start_synchronized_update(self);
+            } else {
+                Vt_end_synchronized_update(self);
+            }
             break;
 
         case 8452: /* Sixel scrolling leaves cursor to right of graphic */
@@ -3995,9 +4141,10 @@ static void Vt_handle_DCS(Vt* self, char c)
                          * is killed/crashes).
                          */
 
-                        // TODO: some way to deal with proxy object updates
+                        Vt_start_synchronized_update(self);
                     } else {
                         /* End synchronized update (ESU) (iTerm2) */
+                        Vt_end_synchronized_update(self);
                     }
                 }
                 return;
@@ -4971,6 +5118,7 @@ static inline void Vt_clear_above(Vt* self)
 
 static inline void Vt_clear_display_and_scrollback(Vt* self)
 {
+    Vt_end_synchronized_update(self);
     Vt_visual_scroll_reset(self);
     Vector_destroy_VtLine(&self->lines);
     self->lines = Vector_new_VtLine(self);
@@ -5844,25 +5992,25 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
     }
 }
 
-static void Vt_shift_global_line_index_refs(Vt* self, size_t point, int64_t change, bool refs_only)
+static void Vt_shift_global_line_index_refs(Vt* self, size_t point, int64_t delta, bool refs_only)
 {
-    LOG("Vt::shift_idx{ pt: %zu, delta: %ld }\n", point, change);
+    LOG("Vt::shift_idx{ pt: %zu, delta: %ld }\n", point, delta);
 
     if (!refs_only) {
         if (self->cursor.row >= point) {
-            self->cursor.row += change;
+            self->cursor.row += delta;
         }
 
         if (self->visual_scroll_top >= point) {
-            self->visual_scroll_top += change;
+            self->visual_scroll_top += delta;
         }
 
         if (self->scroll_region_top >= point) {
-            self->scroll_region_top += change;
+            self->scroll_region_top += delta;
         }
 
         if (self->scroll_region_bottom >= point) {
-            self->scroll_region_bottom += change;
+            self->scroll_region_bottom += delta;
         }
     }
 
@@ -5871,7 +6019,7 @@ static void Vt_shift_global_line_index_refs(Vt* self, size_t point, int64_t chan
         VtImageSurfaceView* sv = RcPtr_get_VtImageSurfaceView(rp);
 
         if (sv && sv->anchor_global_index >= point) {
-            sv->anchor_global_index += change;
+            sv->anchor_global_index += delta;
         }
     }
 
@@ -5880,7 +6028,7 @@ static void Vt_shift_global_line_index_refs(Vt* self, size_t point, int64_t chan
         VtSixelSurface* ss = RcPtr_get_VtSixelSurface(rp);
 
         if (ss && ss->anchor_global_index >= point) {
-            ss->anchor_global_index += change;
+            ss->anchor_global_index += delta;
         }
     }
 
@@ -5889,25 +6037,36 @@ static void Vt_shift_global_line_index_refs(Vt* self, size_t point, int64_t chan
         VtCommand* cmd = RcPtr_get_VtCommand(rp);
 
         if (cmd->command_start_row >= point) {
-            cmd->command_start_row += change;
+            cmd->command_start_row += delta;
         }
 
         if (cmd->output_rows.first >= point) {
-            cmd->output_rows.first += change;
+            cmd->output_rows.first += delta;
         }
 
         if (cmd->output_rows.second >= point) {
-            cmd->output_rows.second += change;
+            cmd->output_rows.second += delta;
         }
     }
 
     if (self->selection.mode == SELECT_MODE_NORMAL) {
         if (self->selection.begin_line >= point) {
-            self->selection.begin_line += change;
+            self->selection.begin_line += delta;
         }
 
         if (self->selection.end_line >= point) {
-            self->selection.end_line += change;
+            self->selection.end_line += delta;
+        }
+    }
+
+    if (unlikely(Vt_synchronized_update_is_active(self))) {
+        for (vt_synchronized_update_origin_t* i = NULL;
+             (i = Vector_iter_vt_synchronized_update_origin_t(
+                &self->synchronized_update_state.origins,
+                i));) {
+            if (i->alive && i->global_index >= point) {
+                i->global_index += delta;
+            }
         }
     }
 }
@@ -6022,6 +6181,13 @@ inline void Vt_interpret(Vt* self, char* buf, size_t bytes)
         free(str);
     }
 
+    if (Vt_synchronized_update_is_active(self) &&
+        TimePoint_ms_in_the_past(self->synchronized_update_state.snapshot_create_time) >
+          VT_SYNCHRONIZED_UPDATE_TIMEOUT_MS) {
+        LOG("synchronized update timed out\n");
+        Vt_end_synchronized_update(self);
+    }
+
     memset(&self->defered_events, 0, sizeof(self->defered_events));
 
     for (size_t i = 0; i < bytes; ++i) {
@@ -6043,14 +6209,34 @@ inline void Vt_interpret(Vt* self, char* buf, size_t bytes)
     }
 }
 
+VtLine* Vt_get_visible_line(const Vt* self, size_t idx)
+{
+    if (unlikely(Vt_synchronized_update_is_active(self) && idx >= Vt_top_line(self))) {
+        return &self->synchronized_update_state.lines.buf[idx - Vt_top_line(self)];
+    } else {
+        return &self->lines.buf[idx];
+    }
+}
+
 void Vt_get_visible_lines(const Vt* self, VtLine** out_begin, VtLine** out_end)
 {
-    if (out_begin) {
-        *out_begin = self->lines.buf + Vt_visual_top_line(self);
-    }
+    if (unlikely(Vt_synchronized_update_is_active(self))) {
+        if (out_begin) {
+            *out_begin = self->synchronized_update_state.lines.buf;
+        }
 
-    if (out_end) {
-        *out_end = self->lines.buf + Vt_visual_bottom_line(self) + 1;
+        if (out_end) {
+            *out_end = self->synchronized_update_state.lines.buf +
+                       (self->synchronized_update_state.lines.size);
+        }
+    } else {
+        if (out_begin) {
+            *out_begin = self->lines.buf + Vt_visual_top_line(self);
+        }
+
+        if (out_end) {
+            *out_end = self->lines.buf + Vt_visual_bottom_line(self) + 1;
+        }
     }
 }
 
@@ -6190,6 +6376,8 @@ void Vt_destroy(Vt* self)
         Vector_destroy_RcPtr_VtSixelSurface(&self->alt_scrolled_sixels);
     }
 
+    Vector_destroy_VtLine(&self->synchronized_update_state.lines);
+    Vector_destroy_vt_synchronized_update_origin_t(&self->synchronized_update_state.origins);
     Vector_destroy_char(&self->parser.active_sequence);
     Vector_destroy_DynStr(&self->title_stack);
     Vector_destroy_char(&self->unicode_input.buffer);

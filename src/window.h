@@ -92,7 +92,7 @@ struct IWindow
     void (*events)(struct WindowBase* self);
     TimePoint* (*process_timers)(struct WindowBase* self);
     void (*set_title)(struct WindowBase* self, const char* title);
-    bool (*maybe_swap)(struct WindowBase* self);
+    bool (*maybe_swap)(struct WindowBase* self, bool do_swap);
     void (*destroy)(struct WindowBase* self);
     int (*get_connection_fd)(struct WindowBase* self);
     void (*clipboard_send)(struct WindowBase* self, const char* text);
@@ -238,9 +238,9 @@ static inline void Window_set_title(struct WindowBase* self, const char* title)
     self->interface->set_title(self, title);
 }
 
-static inline bool Window_maybe_swap(struct WindowBase* self)
+static inline bool Window_maybe_swap(struct WindowBase* self, bool do_swap)
 {
-    return self->interface->maybe_swap(self);
+    return self->interface->maybe_swap(self, do_swap);
 }
 
 static inline void Window_destroy(struct WindowBase* self)

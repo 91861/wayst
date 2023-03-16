@@ -483,8 +483,14 @@ __attribute__((cold)) static void find_font()
                                  NULL);
 
     if (!settings.styled_fonts.size) {
-        Vector_push_StyledFontInfo(&settings.styled_fonts, (StyledFontInfo){ 0 });
-        Vector_last_StyledFontInfo(&settings.styled_fonts)->family_name = strdup("Monospace");
+        Vector_push_StyledFontInfo(
+          &settings.styled_fonts,
+          (StyledFontInfo){ .size_offset       = 0,
+                            .family_name       = strdup("Monospace"),
+                            .regular_file_name = NULL,
+                            .bold_file_name    = NULL,
+                            .italic_file_name  = NULL,
+                            .codepoint_ranges = (Vector_Pair_char32_t){ .buf = NULL, .size = 0 } });
     }
 
     int loaded_fonts = 0;
