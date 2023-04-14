@@ -2909,6 +2909,7 @@ static void WindowWl_destroy(struct WindowBase* self)
 {
     WindowWl_set_no_context();
 
+
     if (globalWl->cursor_theme) {
         wl_surface_destroy(globalWl->cursor_surface);
         wl_cursor_theme_destroy(globalWl->cursor_theme);
@@ -2965,10 +2966,10 @@ static void WindowWl_destroy(struct WindowBase* self)
     wl_registry_destroy(globalWl->registry);
     wl_display_disconnect(globalWl->display);
 
+    Map_destroy_wl_output_ptr_WlOutputInfo(&windowWl(self)->outputs);
+
     free((void*)windowWl(self)->data_source_text);
     free((void*)windowWl(self)->primary_source_text);
-
-    Map_destroy_wl_output_ptr_WlOutputInfo(&windowWl(self)->outputs);
 
     free(self);
 }

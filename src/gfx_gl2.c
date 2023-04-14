@@ -2274,6 +2274,7 @@ void GfxOpenGL2_resize(Gfx* self, uint32_t w, uint32_t h, Pair_uint32_t cells)
 
     GfxOpenGL2_realloc_damage_record(gl2, cells.second);
     GfxOpenGL2_regenerate_line_quad_vbo(gl2, cells.second);
+    gl2->line_damage.n_lines = cells.second;
 }
 
 Pair_uint32_t GfxOpenGL2_get_char_size(Gfx* self, Pair_uint32_t pixels)
