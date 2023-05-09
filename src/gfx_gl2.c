@@ -132,7 +132,6 @@ static PFNGLDEBUGMESSAGECALLBACKPROC   glDebugMessageCallback;
 static PFNGLCHECKFRAMEBUFFERSTATUSPROC glCheckFramebufferStatus;
 #endif
 
-
 static void maybe_load_gl_exts(void* loader,
                                void* (*loader_func)(void* loader, const char* proc_name))
 {
@@ -195,7 +194,7 @@ static void maybe_load_gl_exts(void* loader,
 #include "gl.h"
 
 #ifdef DEBUG
-static size_t dbg_line_proxy_textures_created = 0;
+static size_t dbg_line_proxy_textures_created   = 0;
 static size_t dbg_line_proxy_textures_destroyed = 0;
 #define DBG_DELTEX                                                                                 \
     ++dbg_line_proxy_textures_destroyed;                                                           \
@@ -211,10 +210,9 @@ static size_t dbg_line_proxy_textures_destroyed = 0;
          dbg_line_proxy_textures_destroyed,                                                        \
          (dbg_line_proxy_textures_created - dbg_line_proxy_textures_destroyed))
 #else
-#define DBG_DELTEX ;
+#define DBG_DELTEX  ;
 #define DBG_MAKETEX ;
 #endif
-
 
 enum GlyphColor
 {
@@ -529,19 +527,20 @@ static void GfxOpenGL2_rotate_damage_record(GfxOpenGL2* self)
 {
     memmove(self->line_damage.damage_history + self->line_damage.n_lines,
             self->line_damage.damage_history,
-            (MAX_TRACKED_FRAME_DAMAGE - 1) * sizeof(bool));
+            (MAX_TRACKED_FRAME_DAMAGE - 1) * sizeof(bool) * (self->line_damage.n_lines - 1));
     memset(self->line_damage.damage_history, 0, self->line_damage.n_lines * sizeof(bool));
 
     memmove(self->line_damage.proxy_color_component + self->line_damage.n_lines,
             self->line_damage.proxy_color_component,
-            (MAX_TRACKED_FRAME_DAMAGE - 1) * sizeof(uint32_t));
+            (MAX_TRACKED_FRAME_DAMAGE - 1) * sizeof(uint32_t) * (self->line_damage.n_lines - 1));
+
     memset(self->line_damage.proxy_color_component,
            0,
            self->line_damage.n_lines * sizeof(uint32_t));
 
     memmove(self->line_damage.line_length + self->line_damage.n_lines,
             self->line_damage.line_length,
-            (MAX_TRACKED_FRAME_DAMAGE - 1) * sizeof(uint16_t));
+            (MAX_TRACKED_FRAME_DAMAGE - 1) * sizeof(uint16_t) * (self->line_damage.n_lines - 1));
 
     memmove(self->frame_overlay_damage + 1,
             self->frame_overlay_damage,
@@ -4468,42 +4467,36 @@ static window_partial_swap_request_t* GfxOpenGL2_process_line_position_change_da
   uint8_t                        buffer_age,
   Ui*                            ui)
 {
-    bool repainted = self->line_damage.damage_history[visual_index];
-
-    if (swap_request) {
-        if (!repainted) /* just scrolling */ {
-            uint32_t n_lines = self->line_damage.n_lines;
-            uint32_t ix      = visual_index + 1 * n_lines + (buffer_age * n_lines);
-            uint16_t len     = MAX(line->data.size, self->line_damage.line_length[ix]);
-
-            if (swap_request && len > 0) {
-                int32_t x = self->pixel_offset_x;
-                int32_t y = self->pixel_offset_y + self->line_height_pixels * visual_index;
-                int32_t w = self->glyph_width_pixels * len;
-                int32_t h = self->line_height_pixels;
-
-                rect_t dam_rect = GfxOpenGL2_translate_coords(self, x, y, w, h);
-                swap_request    = GfxOpenGL2_merge_or_push_modified_rect(self, dam_rect);
-            }
-        } else /* scrolling, but replaced with shorter content */ {
-            uint32_t n_lines = self->line_damage.n_lines;
-            uint32_t ix      = visual_index + 1 * n_lines + (buffer_age * n_lines);
-            uint16_t new_len = line->data.size;
-            uint16_t old_len = self->line_damage.line_length[ix];
-
-            if (swap_request && old_len > new_len) {
-                int32_t x = self->pixel_offset_x;
-                int32_t y = self->pixel_offset_y + self->line_height_pixels * visual_index;
-                int32_t w = self->glyph_width_pixels * old_len;
-                int32_t h = self->line_height_pixels;
-
-                rect_t dam_rect = GfxOpenGL2_translate_coords(self, x, y, w, h);
-                swap_request    = GfxOpenGL2_merge_or_push_modified_rect(self, dam_rect);
-            }
-        }
+    if (!swap_request) {
+        return swap_request;
     }
 
-    return swap_request;
+    size_t hist_idx  = visual_index + (self->line_damage.n_lines * (buffer_age - 1));
+    bool   repainted = self->line_damage.damage_history[hist_idx];
+    GLint  old_tex   = self->line_damage.proxy_color_component[hist_idx];
+    GLint  new_tex   = line->proxy.data[PROXY_INDEX_TEXTURE];
+
+    /* The texture did not change and was not updated - no damage */
+    if (old_tex == new_tex && !line->damage.type && !repainted) {
+        return swap_request;
+    }
+
+    /* A different texture scrolled into this slot. */
+    uint32_t n_lines = self->line_damage.n_lines;
+    uint32_t ix      = visual_index + 1 * n_lines + (buffer_age * n_lines);
+    uint16_t len     = MAX(line->data.size, self->line_damage.line_length[ix]);
+
+    /* Old and new lines have different proxies but both are blank - no damage */
+    if (len == 0) {
+        return swap_request;
+    }
+
+    int32_t x        = self->pixel_offset_x;
+    int32_t y        = self->pixel_offset_y + self->line_height_pixels * visual_index;
+    int32_t w        = self->glyph_width_pixels * len;
+    int32_t h        = self->line_height_pixels;
+    rect_t  dam_rect = GfxOpenGL2_translate_coords(self, x, y, w, h);
+    return GfxOpenGL2_merge_or_push_modified_rect(self, dam_rect);
 }
 
 /* GIMP RGBA C-Source image dump (close_titlebar_button_icon.c) */
@@ -4973,6 +4966,8 @@ window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, const Vt* vt, Ui* ui, 
 
         /* update damage history data */
         if (gfx->line_damage.n_lines > i - begin) {
+            // printf(TERMCOLOR_RED "> update color record of %ld to : %d!\n" TERMCOLOR_RESET, i -
+            // begin, i->proxy.data[PROXY_INDEX_TEXTURE]);
             gfx->line_damage.proxy_color_component[i - begin] = i->proxy.data[PROXY_INDEX_TEXTURE];
             gfx->line_damage.line_length[i - begin]           = i->data.size;
         }
@@ -5048,15 +5043,10 @@ window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, const Vt* vt, Ui* ui, 
                 glBindTexture(GL_TEXTURE_2D, 0);
                 float vertex_data[] = {
                     -1.0f + r->x * gfx->sx + gfx->sx,    -1.0 + r->y * gfx->sy + gfx->sy,
-
                     -1.0f + r->x * gfx->sx + gfx->sx,    -1.0f + (r->y + r->h - 1) * gfx->sy,
-
                     -1.0f + (r->x + r->w - 1) * gfx->sx, -1.0f + (r->y + r->h - 1) * gfx->sy,
-
                     -1.0f + (r->x + r->w - 1) * gfx->sx, -1.0 + r->y * gfx->sy + gfx->sy,
-
                     -1.0f + r->x * gfx->sx + gfx->sx,    -1.0 + r->y * gfx->sy + gfx->sy,
-
                     -1.0f + (r->x + r->w - 1) * gfx->sx, -1.0f + (r->y + r->h - 1) * gfx->sy,
 
                 };
