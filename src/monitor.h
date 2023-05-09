@@ -13,7 +13,7 @@
 #include <termios.h>
 #endif
 
-#include <sys/poll.h>
+#include <poll.h>
 
 #include "settings.h"
 #include "util.h"
