@@ -1624,7 +1624,7 @@ static void keyboard_handle_repeat_info(void*               data,
                                         int32_t             delay)
 {
     struct WindowBase* win      = data;
-    globalWl->kbd_repeat_rate   = OR(rate, 33);
+    globalWl->kbd_repeat_rate   = OR(rate, 30);
     globalWl->kbd_repeat_dealy  = OR(delay, 500);
     win->key_repeat_interval_ms = globalWl->kbd_repeat_rate;
 }
@@ -2733,8 +2733,9 @@ void WindowWl_resize(struct WindowBase* self, uint32_t w, uint32_t h)
 TimePoint* WindowWl_process_timers(struct WindowBase* self)
 {
     if (globalWl->keycode_to_repeat && TimePoint_passed(globalWl->repeat_point)) {
-        int32_t time_offset    = (1000 / globalWl->kbd_repeat_rate);
-        globalWl->repeat_point = TimePoint_ms_from_now(time_offset);
+        int32_t time_offset = (1000 / globalWl->kbd_repeat_rate);
+
+        globalWl->repeat_point = TimePoint_add_ms(globalWl->repeat_point, time_offset);
 
         keyboard_handle_key(self,
                             NULL,

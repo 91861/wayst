@@ -37,6 +37,14 @@ static inline void TimePoint_add(TimePoint* self, TimePoint offset)
     }
 }
 
+static inline TimePoint TimePoint_add_ms(TimePoint t, uint32_t ms_offset)
+{
+    TimePoint offset = { .tv_sec  = ms_offset / SEC_IN_MS,
+                         .tv_nsec = (ms_offset % SEC_IN_MS) * MS_IN_NSECS };
+    TimePoint_add(&t, offset);
+    return t;
+}
+
 static inline int64_t TimePoint_get_secs(TimePoint* self)
 {
     return (int64_t)self->tv_nsec / SEC_IN_NSECS + self->tv_sec;
