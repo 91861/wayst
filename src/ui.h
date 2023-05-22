@@ -152,5 +152,5 @@ static void Ui_destroy(Ui* self)
 static bool Ui_any_overlay_element_visible(Ui* ui)
 {
     return ui->scrollbar.visible || (ui->draw_out_of_focus_tint && settings.dim_tint.a != 0.0) ||
-           ui->flash_fraction != 0.0;
+           ui->flash_fraction != 0.0 || ui->hovered_link.active;
 }

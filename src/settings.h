@@ -234,6 +234,7 @@ typedef struct
 
     ColorRGBA bell_flash;
     bool      no_flash;
+    bool      always_underline_links;
 
     bool    padding_center;
     uint8_t padding;

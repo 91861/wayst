@@ -3315,7 +3315,7 @@ static void line_reder_pass_run_line_subpass(const line_render_pass_t* pass,
             each_rune->underlined != drawing[0] || each_rune->doubleunderline != drawing[1] ||
             each_rune->strikethrough != drawing[2] || each_rune->overline != drawing[3] ||
             each_rune->curlyunderline != drawing[4] ||
-            (each_rune->hyperlink_idx != 0) != drawing[5]) {
+            (each_rune->hyperlink_idx != 0 && settings.always_underline_links) != drawing[5]) {
 
             if (each_rune == pass->args.vt_line->data.buf + subpass->args.render_range_end) {
                 for (uint_fast8_t tmp = 0; tmp < ARRAY_SIZE(end); tmp++) {

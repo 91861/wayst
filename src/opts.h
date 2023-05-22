@@ -7,6 +7,7 @@
 #pragma once
 
 #include <assert.h>
+#include <bits/getopt_ext.h>
 #include <getopt.h>
 #include <stddef.h>
 
@@ -214,7 +215,7 @@ static struct option long_options[] = {
     [OPT_FONT_BOX_CHARS] = { "font-box-chars", no_argument, 0, 'b' },
 
 #define OPT_OUTPUT_IDX 63
-      [OPT_OUTPUT_IDX] = { "output", required_argument, 0, 0 },
+    [OPT_OUTPUT_IDX] = { "output", required_argument, 0, 0 },
 
 #define OPT_CURSOR_STYLE_IDX 64
     [OPT_CURSOR_STYLE_IDX] = { "cursor-style", required_argument, 0, 0 },
@@ -228,97 +229,100 @@ static struct option long_options[] = {
 #define OPT_PADDING_IDX 67
     [OPT_PADDING_IDX] = { "padding", required_argument, 0, 0 },
 
-#define OPT_SCROLLBAR_IDX 68
+#define OPT_ALWAYS_UNDERLINE_LINKS 68
+    [OPT_ALWAYS_UNDERLINE_LINKS] = { "always-underline-links", optional_argument, 0, 0 },
+
+#define OPT_SCROLLBAR_IDX 69
     [OPT_SCROLLBAR_IDX] = { "scrollbar", required_argument, 0, 0 },
 
-#define OPT_SCROLL_LINES_IDX 69
+#define OPT_SCROLL_LINES_IDX 70
     [OPT_SCROLL_LINES_IDX] = { "scroll-lines", required_argument, 0, 0 },
 
-#define OPT_SCROLLBACK_IDX 70
+#define OPT_SCROLLBACK_IDX 71
     [OPT_SCROLLBACK_IDX] = { "scrollback", required_argument, 0, 0 },
 
-#define OPT_URI_HANDLER_IDX 71
+#define OPT_URI_HANDLER_IDX 72
     [OPT_URI_HANDLER_IDX] = { "uri-handler", required_argument, 0, 0 },
 
-#define OPT_EXTERN_PIPE_HANDLER_IDX 72
+#define OPT_EXTERN_PIPE_HANDLER_IDX 73
     [OPT_EXTERN_PIPE_HANDLER_IDX] = { "extern-pipe", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_COPY_IDX 73
+#define OPT_BIND_KEY_COPY_IDX 74
     [OPT_BIND_KEY_COPY_IDX] = { "bind-key-copy", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_PASTE_IDX 74
+#define OPT_BIND_KEY_PASTE_IDX 75
     [OPT_BIND_KEY_PASTE_IDX] = { "bind-key-paste", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_ENLARGE_IDX 75
+#define OPT_BIND_KEY_ENLARGE_IDX 76
     [OPT_BIND_KEY_ENLARGE_IDX] = { "bind-key-enlarge", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_SHRINK_IDX 76
+#define OPT_BIND_KEY_SHRINK_IDX 77
     [OPT_BIND_KEY_SHRINK_IDX] = { "bind-key-shrink", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_UNI_IDX 77
+#define OPT_BIND_KEY_UNI_IDX 78
     [OPT_BIND_KEY_UNI_IDX] = { "bind-key-unicode", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_PG_UP_IDX 78
+#define OPT_BIND_KEY_PG_UP_IDX 79
     [OPT_BIND_KEY_PG_UP_IDX] = { "bind-key-pg-up", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_PG_DN_IDX 79
+#define OPT_BIND_KEY_PG_DN_IDX 80
     [OPT_BIND_KEY_PG_DN_IDX] = { "bind-key-pg-down", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_LN_UP_IDX 80
+#define OPT_BIND_KEY_LN_UP_IDX 81
     [OPT_BIND_KEY_LN_UP_IDX] = { "bind-key-ln-up", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_LN_DN_IDX 81
+#define OPT_BIND_KEY_LN_DN_IDX 82
     [OPT_BIND_KEY_LN_DN_IDX] = { "bind-key-ln-down", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_MRK_UP_IDX 82
+#define OPT_BIND_KEY_MRK_UP_IDX 83
     [OPT_BIND_KEY_MRK_UP_IDX] = { "bind-key-mark-up", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_MRK_DN_IDX 83
+#define OPT_BIND_KEY_MRK_DN_IDX 84
     [OPT_BIND_KEY_MRK_DN_IDX] = { "bind-key-mark-down", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_COPY_CMD_IDX 84
+#define OPT_BIND_KEY_COPY_CMD_IDX 85
     [OPT_BIND_KEY_COPY_CMD_IDX] = { "bind-key-copy-output", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_EXTERN_PIPE_IDX 85
+#define OPT_BIND_KEY_EXTERN_PIPE_IDX 86
     [OPT_BIND_KEY_EXTERN_PIPE_IDX] = { "bind-key-extern-pipe", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_KSM_IDX 86
+#define OPT_BIND_KEY_KSM_IDX 87
     [OPT_BIND_KEY_KSM_IDX] = { "bind-key-kbd-select", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_OPEN_PWD 87
+#define OPT_BIND_KEY_OPEN_PWD 88
     [OPT_BIND_KEY_OPEN_PWD] = { "bind-key-open-pwd", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_HTML_DUMP_IDX 88
+#define OPT_BIND_KEY_HTML_DUMP_IDX 89
     [OPT_BIND_KEY_HTML_DUMP_IDX] = { "bind-key-html-dump", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_DUP_IDX 89
+#define OPT_BIND_KEY_DUP_IDX 90
     [OPT_BIND_KEY_DUP_IDX] = { "bind-key-duplicate", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_DEBUG_IDX 90
+#define OPT_BIND_KEY_DEBUG_IDX 91
     [OPT_BIND_KEY_DEBUG_IDX] = { "bind-key-debug", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_QUIT_IDX 91
+#define OPT_BIND_KEY_QUIT_IDX 92
     [OPT_BIND_KEY_QUIT_IDX] = { "bind-key-quit", required_argument, 0, 0 },
 
-#define OPT_DEBUG_PTY_IDX 92
+#define OPT_DEBUG_PTY_IDX 93
     [OPT_DEBUG_PTY_IDX] = { "debug-pty", no_argument, 0, 'D' },
 
-#define OPT_DEBUG_VT_IDX 93
+#define OPT_DEBUG_VT_IDX 94
     [OPT_DEBUG_VT_IDX] = { "debug-vt", required_argument, 0, 0 },
 
-#define OPT_DEBUG_GFX_IDX 94
+#define OPT_DEBUG_GFX_IDX 95
     [OPT_DEBUG_GFX_IDX] = { "debug-gfx", no_argument, 0, 'G' },
 
-#define OPT_DEBUG_FONT_IDX 95
+#define OPT_DEBUG_FONT_IDX 96
     [OPT_DEBUG_FONT_IDX] = { "debug-font", no_argument, 0, 'F' },
 
-#define OPT_VERSION_IDX 96
+#define OPT_VERSION_IDX 97
     [OPT_VERSION_IDX] = { "version", no_argument, 0, 'v' },
 
-#define OPT_HELP_IDX 97
+#define OPT_HELP_IDX 98
     [OPT_HELP_IDX] = { "help", no_argument, 0, 'h' },
 
-#define OPT_SENTINEL_IDX 98
+#define OPT_SENTINEL_IDX 99
     [OPT_SENTINEL_IDX] = { 0 }
 };
 
@@ -416,18 +420,18 @@ static const char* long_options_descriptions[][2] = {
     [OPT_DPI_IDX]           = { "int/auto", "Fixed font dpi (default: 96)" },
     [OPT_GLYPH_PADDING_IDX] = { "int:int?", "Glyph padding - horizontal[px]:vertical[px]" },
     [OPT_GLYPH_ALIGN_IDX]   = { "char:int?:int?",
-                              "Adjust glyph alignment - center character:y offset[px]:x offset[px] "
-                                "(default: (:0:0)" },
+                                "Adjust glyph alignment - center character:y offset[px]:x offset[px] "
+                                  "(default: (:0:0)" },
     [OPT_LCD_ORDER_IDX]     = { arg_name, "Force LCD subpixel order: none, rgb, bgr, vrgb, vbgr" },
     [OPT_OUTPUT_IDX]        = { "glob/int:none/rgb/bgr/vrgb/vbgr:int?/auto",
-                         "Set lcd order and DPI rules for a display" },
+                                "Set lcd order and DPI rules for a display" },
 
     [OPT_CURSOR_STYLE_IDX] = { "name:bool?",
                                "Set initial cursor style - block/beam/underline:blinking (default: "
                                "block:true)" },
     [OPT_WM_BG_BLUR_IDX]   = { "bool", "Request background blur on KDE Plasma (default: true)" },
     [OPT_BLINK_IDX]        = { "bool:int?:int?:int?",
-                        "Blinking cursor - enable:rate[ms]:suspend[ms]:end[s](<0 never)" },
+                               "Blinking cursor - enable:rate[ms]:suspend[ms]:end[s](<0 never)" },
 
     [OPT_SCROLL_LINES_IDX]        = { arg_int, "Lines scrolled per wheel click (default: 3)" },
     [OPT_SCROLLBACK_IDX]          = { arg_int, "Scrollback buffer size (default: 2000)" },
@@ -437,17 +441,20 @@ static const char* long_options_descriptions[][2] = {
                                       "executable:command/screen/buffer "
                                       "(default: none:command)" },
     [OPT_PADDING_IDX]             = { "bool:int?",
-                          "Pad screen content: center:extra padding[px] (default: true:0)" },
+                                      "Pad screen content: center:extra padding[px] (default: true:0)" },
+
+    [OPT_ALWAYS_UNDERLINE_LINKS] = {"bool", "Draw links underlined (default: false)"},
+    
     [OPT_SCROLLBAR_IDX]           = { "int:int?:int?:int?",
-                            "width[px]:min length[px]:hide delay[ms]:fade time[ms] (default: "
-                                      "10:20:1500:150)" },
+                                      "width[px]:min length[px]:hide delay[ms]:fade time[ms] (default: "
+                                                "10:20:1500:150)" },
 
     [OPT_BIND_KEY_COPY_IDX]    = { arg_key, "Copy key command (default: C+S+c)" },
     [OPT_BIND_KEY_PASTE_IDX]   = { arg_key, "Paste key command (default: C+S+v)" },
     [OPT_BIND_KEY_ENLARGE_IDX] = { arg_key, "Enlagre font key command (default: C+S+equal)" },
     [OPT_BIND_KEY_SHRINK_IDX]  = { arg_key, "Shrink font key command (default: C+S+minus)" },
     [OPT_BIND_KEY_UNI_IDX]     = { arg_key,
-                               "Unicode entry mode activation key command (default: C+S+u)" },
+                                   "Unicode entry mode activation key command (default: C+S+u)" },
 
     [OPT_BIND_KEY_LN_UP_IDX] = { arg_key, "Scroll up by line key command (default: C+S+Up)" },
     [OPT_BIND_KEY_LN_DN_IDX] = { arg_key, "Scroll down by line key command (default: C+S+Down)" },
@@ -465,8 +472,8 @@ static const char* long_options_descriptions[][2] = {
                                   "C+S+Right)" },
 
     [OPT_BIND_KEY_COPY_CMD_IDX]    = { arg_key,
-                                    "Copy last command output to clipboard key command (default: "
-                                       "C+S+x)" },
+                                       "Copy last command output to clipboard key command (default: "
+                                          "C+S+x)" },
     [OPT_BIND_KEY_EXTERN_PIPE_IDX] = { arg_key,
                                        "Pipe content to external program (default: "
                                        "C+S+backslash)" },
@@ -475,7 +482,7 @@ static const char* long_options_descriptions[][2] = {
     [OPT_BIND_KEY_HTML_DUMP_IDX] = { arg_key, "HTML screen dump key command (default: C+S+F12)" },
     [OPT_BIND_KEY_OPEN_PWD]      = { arg_key, "Open working directory as URI (default: C+S+F10)" },
     [OPT_BIND_KEY_DUP_IDX]       = { arg_key,
-                               "New instance in work directory key command (default: C+S+d)" },
+                                     "New instance in work directory key command (default: C+S+d)" },
 
     [OPT_BIND_KEY_DEBUG_IDX] = { arg_key, "Debug info key command (default: C+S+slash)" },
     [OPT_BIND_KEY_QUIT_IDX]  = { arg_key, "Quit key command" },

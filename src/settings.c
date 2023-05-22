@@ -1726,6 +1726,10 @@ static void handle_option(const char opt, const int array_index, const char* val
             L_ASSIGN_BOOL(settings.background_blur, true)
         } break;
 
+        case OPT_ALWAYS_UNDERLINE_LINKS: {
+            L_ASSIGN_BOOL(settings.always_underline_links, true);
+        } break;
+
         case OPT_INC_WIN_RESIZE: {
             L_ASSIGN_BOOL(settings.incremental_windw_resize, true);
         } break;
