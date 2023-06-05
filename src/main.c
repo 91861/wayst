@@ -659,7 +659,7 @@ static void App_set_title(void* self)
 
     const VtCommand* c                   = Vt_shell_integration_get_active_command(&app->vt);
     char*            sAppTitle           = settings.title.str;
-    char*            sVtTitle            = app->vt_title;
+    char*            sVtTitle            = app->vt_title ? app->vt_title : "";
     bool             bIsReportingMouse   = Vt_is_reporting_mouse(&app->vt);
     bool             bIsAltBufferEnabled = Vt_alt_buffer_enabled(&app->vt);
     /* we do not know what command is running if its using the VTE prompts */
@@ -709,7 +709,10 @@ static void App_update_title(void* self, const char* title)
 {
     App* app = self;
     free(app->vt_title);
-    app->vt_title = strdup(title);
+    app->vt_title = NULL;
+    if (title) {
+	app->vt_title = strdup(title);
+    }
     App_set_title(self);
 }
 

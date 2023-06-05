@@ -4823,6 +4823,8 @@ static void Vt_push_title(Vt* self)
 {
     if (self->title) {
         Vector_push_DynStr(&self->title_stack, (DynStr){ .s = strdup(self->title) });
+    } else {
+        Vector_push_DynStr(&self->title_stack, (DynStr){ .s = NULL });
     }
 }
 
@@ -6346,7 +6348,10 @@ void Vt_handle_clipboard(void* self, const char* text)
 static void Vt_set_title(Vt* self, const char* title)
 {
     free(self->title);
-    self->title = strdup(title);
+    self->title = NULL;
+    if (title) {
+	self->title = strdup(title);
+    }
     CALL(self->callbacks.on_title_changed, self->callbacks.user_data, self->title);
 }
 
