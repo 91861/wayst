@@ -4567,23 +4567,34 @@ GfxOpenGL2_maybe_draw_titlebar(Gfx* self, Ui* ui, window_partial_swap_request_t*
 
     glDisable(GL_BLEND);
     glDisable(GL_SCISSOR_TEST);
-    static const float tb_clr_if[4]      = { 0.188f, 0.188f, 0.188f, 1.0f };
-    static const float tb_clr_of[4]      = { 0.141f, 0.141f, 0.141f, 1.0f };
-    static const float btn_clr_if[4]     = { 0.267f, 0.267f, 0.267f, 1.0f };
-    static const float btn_clr_of[4]     = { 0.184f, 0.184f, 0.184f, 1.0f };
-    static const float btn_clr_hi[4]     = { 0.310f, 0.310f, 0.310f, 1.0f };
+
+    /* titlebar color */
+    static const float tb_clr_if[4] = { 0.188f, 0.188f, 0.188f, 1.0f };
+    static const float tb_clr_of[4] = { 0.141f, 0.141f, 0.141f, 1.0f };
+
+    /* button color */
+    static const float btn_clr_if[4] = { 0.267f, 0.267f, 0.267f, 1.0f };
+    static const float btn_clr_of[4] = { 0.184f, 0.184f, 0.184f, 1.0f };
+    static const float btn_clr_hi[4] = { 0.310f, 0.310f, 0.310f, 1.0f };
+
+    /* button color symbol */
     static const float btn_clr_sym_if[4] = { 0.996f, 0.996f, 0.996f, 1.0f };
     static const float btn_clr_sym_of[4] = { 0.569f, 0.569f, 0.569f, 1.0f };
-    static const float tb_clr_bdr[4]     = { 0.243f, 0.243f, 0.243f, 1.0f };
+
+    /* titlebar border color */
+    static const float tb_clr_bdr_nor[4] = { 0.243f, 0.243f, 0.243f, 1.0f };
 
     const float* tb_clr      = ui->window_in_focus ? tb_clr_if : tb_clr_of;
     const float* btn_clr     = ui->window_in_focus ? btn_clr_if : btn_clr_of;
     const float* btn_clr_sym = ui->window_in_focus ? btn_clr_sym_if : btn_clr_sym_of;
+    const float* tb_clr_bdr  = tb_clr_bdr_nor;
+
+#define L_TINT (ui->csd.requires_attention ? 0.1 : 0.0)
 
     Shader_use(&gfx->solid_fill_shader);
 
     glUniform4f(gfx->solid_fill_shader.uniforms[0].location,
-                tb_clr_bdr[0],
+                tb_clr_bdr[0] + L_TINT,
                 tb_clr_bdr[1],
                 tb_clr_bdr[2],
                 tb_clr_bdr[3]);
@@ -4594,7 +4605,7 @@ GfxOpenGL2_maybe_draw_titlebar(Gfx* self, Ui* ui, window_partial_swap_request_t*
     glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
 
     glUniform4f(gfx->solid_fill_shader.uniforms[0].location,
-                tb_clr[1],
+                tb_clr[1] + L_TINT,
                 tb_clr[1],
                 tb_clr[2],
                 tb_clr[3]);
@@ -4616,7 +4627,7 @@ GfxOpenGL2_maybe_draw_titlebar(Gfx* self, Ui* ui, window_partial_swap_request_t*
                    UI_CSD_TITLEBAR_RADIUS_PX,
                    UI_CSD_TITLEBAR_RADIUS_PX);
         glUniform4f(gfx->circle_shader.uniforms[0].location,
-                    tb_clr_bdr[0],
+                    tb_clr_bdr[0] + L_TINT,
                     tb_clr_bdr[1],
                     tb_clr_bdr[2],
                     tb_clr_bdr[3]);
@@ -4651,12 +4662,12 @@ GfxOpenGL2_maybe_draw_titlebar(Gfx* self, Ui* ui, window_partial_swap_request_t*
                    UI_CSD_TITLEBAR_RADIUS_PX - 1,
                    UI_CSD_TITLEBAR_RADIUS_PX - 1);
         glUniform4f(gfx->circle_shader.uniforms[0].location,
-                    tb_clr[0],
+                    tb_clr[0] + L_TINT,
                     tb_clr[1],
                     tb_clr[2],
                     tb_clr[3]);
         glUniform4f(gfx->circle_shader.uniforms[1].location,
-                    tb_clr_bdr[0],
+                    tb_clr_bdr[0] + L_TINT,
                     tb_clr_bdr[1],
                     tb_clr_bdr[2],
                     0.0f);
@@ -4699,12 +4710,12 @@ GfxOpenGL2_maybe_draw_titlebar(Gfx* self, Ui* ui, window_partial_swap_request_t*
         uint32_t yoffset_px = gfx->win_h - UI_CSD_TITLEBAR_HEIGHT_PX / 2 - vp_h / 2;
 
         glUniform4f(gfx->circle_shader.uniforms[0].location,
-                    btn_clr[0],
+                    btn_clr[0] + L_TINT,
                     btn_clr[1],
                     btn_clr[2],
                     btn_clr[3]);
         glUniform4f(gfx->circle_shader.uniforms[1].location,
-                    tb_clr[0],
+                    tb_clr[0] + L_TINT,
                     tb_clr[1],
                     tb_clr[2],
                     tb_clr[3]);
@@ -4721,7 +4732,7 @@ GfxOpenGL2_maybe_draw_titlebar(Gfx* self, Ui* ui, window_partial_swap_request_t*
             glDisable(GL_BLEND);
             Shader_use(&gfx->circle_shader);
             glUniform4f(gfx->circle_shader.uniforms[0].location,
-                        this_btn_clr[0],
+                        this_btn_clr[0] + L_TINT,
                         this_btn_clr[1],
                         this_btn_clr[2],
                         this_btn_clr[3]);
@@ -4743,7 +4754,7 @@ GfxOpenGL2_maybe_draw_titlebar(Gfx* self, Ui* ui, window_partial_swap_request_t*
                                   0,
                                   0);
             glUniform4f(gfx->solid_fill_shader.uniforms[0].location,
-                        btn_clr_sym[0],
+                        btn_clr_sym[0] + L_TINT,
                         btn_clr_sym[1],
                         btn_clr_sym[2],
                         btn_clr_sym[3]);
@@ -4763,7 +4774,7 @@ GfxOpenGL2_maybe_draw_titlebar(Gfx* self, Ui* ui, window_partial_swap_request_t*
                     Shader_use(&gfx->image_tint_shader);
                     glBindTexture(GL_TEXTURE_2D, gfx->csd_close_button_texture.id);
                     glUniform3f(gfx->image_tint_shader.uniforms[1].location,
-                                btn_clr_sym[0],
+                                btn_clr_sym[0] + L_TINT,
                                 btn_clr_sym[1],
                                 btn_clr_sym[2]);
 
@@ -4811,14 +4822,14 @@ GfxOpenGL2_maybe_draw_titlebar(Gfx* self, Ui* ui, window_partial_swap_request_t*
                 } break;
                 case UI_CSD_TITLEBAR_BUTTON_MAXIMIZE:
                     glUniform4f(gfx->solid_fill_shader.uniforms[0].location,
-                                btn_clr_sym[0],
+                                btn_clr_sym[0] + L_TINT,
                                 btn_clr_sym[1],
                                 btn_clr_sym[2],
                                 btn_clr_sym[3]);
                     glViewport(xoffset_px + 7, yoffset_px + 7, 8, 8);
                     glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
                     glUniform4f(gfx->solid_fill_shader.uniforms[0].location,
-                                this_btn_clr[0],
+                                this_btn_clr[0] + L_TINT,
                                 this_btn_clr[1],
                                 this_btn_clr[2],
                                 this_btn_clr[3]);
@@ -4827,7 +4838,7 @@ GfxOpenGL2_maybe_draw_titlebar(Gfx* self, Ui* ui, window_partial_swap_request_t*
                     break;
                 case UI_CSD_TITLEBAR_BUTTON_MINIMIZE:
                     glUniform4f(gfx->solid_fill_shader.uniforms[0].location,
-                                btn_clr_sym[0],
+                                btn_clr_sym[0] + L_TINT,
                                 btn_clr_sym[1],
                                 btn_clr_sym[2],
                                 btn_clr_sym[3]);
@@ -4843,8 +4854,10 @@ GfxOpenGL2_maybe_draw_titlebar(Gfx* self, Ui* ui, window_partial_swap_request_t*
 
     glViewport(0, 0, gfx->win_w, gfx->win_h);
 
-    rect_t dam_rect = GfxOpenGL2_translate_coords(gfx, 0, 0, gfx->win_w, UI_CSD_TITLEBAR_HEIGHT_PX);
-    return swap_request ? GfxOpenGL2_merge_or_push_modified_rect(gfx, dam_rect) : NULL;
+    // rect_t dam_rect = GfxOpenGL2_translate_coords(gfx, 0, 0, gfx->win_w,
+    // UI_CSD_TITLEBAR_HEIGHT_PX); return swap_request ? GfxOpenGL2_merge_or_push_modified_rect(gfx,
+    // dam_rect) : NULL;
+    return NULL;
 }
 
 window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, const Vt* vt, Ui* ui, uint8_t buffer_age)

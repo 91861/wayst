@@ -95,6 +95,7 @@ typedef struct
         ui_csd_mode_e                        mode;
         ui_csd_style_e                       style;
         bool                                 damage;
+        bool                                 requires_attention;
         VtLine*                              titlebar_caption;
         Vector_ui_csd_titlebar_button_info_t buttons;
     } csd;

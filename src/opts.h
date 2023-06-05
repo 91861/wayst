@@ -247,82 +247,85 @@ static struct option long_options[] = {
 #define OPT_EXTERN_PIPE_HANDLER_IDX 73
     [OPT_EXTERN_PIPE_HANDLER_IDX] = { "extern-pipe", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_COPY_IDX 74
+#define OPT_FORCE_WL_CSD 74
+    [OPT_FORCE_WL_CSD] = { "force-csd", optional_argument, 0, 0 },
+
+#define OPT_BIND_KEY_COPY_IDX 75
     [OPT_BIND_KEY_COPY_IDX] = { "bind-key-copy", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_PASTE_IDX 75
+#define OPT_BIND_KEY_PASTE_IDX 76
     [OPT_BIND_KEY_PASTE_IDX] = { "bind-key-paste", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_ENLARGE_IDX 76
+#define OPT_BIND_KEY_ENLARGE_IDX 77
     [OPT_BIND_KEY_ENLARGE_IDX] = { "bind-key-enlarge", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_SHRINK_IDX 77
+#define OPT_BIND_KEY_SHRINK_IDX 78
     [OPT_BIND_KEY_SHRINK_IDX] = { "bind-key-shrink", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_UNI_IDX 78
+#define OPT_BIND_KEY_UNI_IDX 79
     [OPT_BIND_KEY_UNI_IDX] = { "bind-key-unicode", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_PG_UP_IDX 79
+#define OPT_BIND_KEY_PG_UP_IDX 80
     [OPT_BIND_KEY_PG_UP_IDX] = { "bind-key-pg-up", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_PG_DN_IDX 80
+#define OPT_BIND_KEY_PG_DN_IDX 81
     [OPT_BIND_KEY_PG_DN_IDX] = { "bind-key-pg-down", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_LN_UP_IDX 81
+#define OPT_BIND_KEY_LN_UP_IDX 82
     [OPT_BIND_KEY_LN_UP_IDX] = { "bind-key-ln-up", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_LN_DN_IDX 82
+#define OPT_BIND_KEY_LN_DN_IDX 83
     [OPT_BIND_KEY_LN_DN_IDX] = { "bind-key-ln-down", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_MRK_UP_IDX 83
+#define OPT_BIND_KEY_MRK_UP_IDX 84
     [OPT_BIND_KEY_MRK_UP_IDX] = { "bind-key-mark-up", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_MRK_DN_IDX 84
+#define OPT_BIND_KEY_MRK_DN_IDX 85
     [OPT_BIND_KEY_MRK_DN_IDX] = { "bind-key-mark-down", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_COPY_CMD_IDX 85
+#define OPT_BIND_KEY_COPY_CMD_IDX 86
     [OPT_BIND_KEY_COPY_CMD_IDX] = { "bind-key-copy-output", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_EXTERN_PIPE_IDX 86
+#define OPT_BIND_KEY_EXTERN_PIPE_IDX 87
     [OPT_BIND_KEY_EXTERN_PIPE_IDX] = { "bind-key-extern-pipe", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_KSM_IDX 87
+#define OPT_BIND_KEY_KSM_IDX 88
     [OPT_BIND_KEY_KSM_IDX] = { "bind-key-kbd-select", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_OPEN_PWD 88
+#define OPT_BIND_KEY_OPEN_PWD 89
     [OPT_BIND_KEY_OPEN_PWD] = { "bind-key-open-pwd", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_HTML_DUMP_IDX 89
+#define OPT_BIND_KEY_HTML_DUMP_IDX 90
     [OPT_BIND_KEY_HTML_DUMP_IDX] = { "bind-key-html-dump", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_DUP_IDX 90
+#define OPT_BIND_KEY_DUP_IDX 91
     [OPT_BIND_KEY_DUP_IDX] = { "bind-key-duplicate", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_DEBUG_IDX 91
+#define OPT_BIND_KEY_DEBUG_IDX 92
     [OPT_BIND_KEY_DEBUG_IDX] = { "bind-key-debug", required_argument, 0, 0 },
 
-#define OPT_BIND_KEY_QUIT_IDX 92
+#define OPT_BIND_KEY_QUIT_IDX 93
     [OPT_BIND_KEY_QUIT_IDX] = { "bind-key-quit", required_argument, 0, 0 },
 
-#define OPT_DEBUG_PTY_IDX 93
+#define OPT_DEBUG_PTY_IDX 94
     [OPT_DEBUG_PTY_IDX] = { "debug-pty", no_argument, 0, 'D' },
 
-#define OPT_DEBUG_VT_IDX 94
+#define OPT_DEBUG_VT_IDX 95
     [OPT_DEBUG_VT_IDX] = { "debug-vt", required_argument, 0, 0 },
 
-#define OPT_DEBUG_GFX_IDX 95
+#define OPT_DEBUG_GFX_IDX 96
     [OPT_DEBUG_GFX_IDX] = { "debug-gfx", no_argument, 0, 'G' },
 
-#define OPT_DEBUG_FONT_IDX 96
+#define OPT_DEBUG_FONT_IDX 97
     [OPT_DEBUG_FONT_IDX] = { "debug-font", no_argument, 0, 'F' },
 
-#define OPT_VERSION_IDX 97
+#define OPT_VERSION_IDX 98
     [OPT_VERSION_IDX] = { "version", no_argument, 0, 'v' },
 
-#define OPT_HELP_IDX 98
+#define OPT_HELP_IDX 99
     [OPT_HELP_IDX] = { "help", no_argument, 0, 'h' },
 
-#define OPT_SENTINEL_IDX 99
+#define OPT_SENTINEL_IDX 100
     [OPT_SENTINEL_IDX] = { 0 }
 };
 
@@ -443,11 +446,13 @@ static const char* long_options_descriptions[][2] = {
     [OPT_PADDING_IDX]             = { "bool:int?",
                                       "Pad screen content: center:extra padding[px] (default: true:0)" },
 
-    [OPT_ALWAYS_UNDERLINE_LINKS] = {"bool", "Draw links underlined (default: false)"},
-    
-    [OPT_SCROLLBAR_IDX]           = { "int:int?:int?:int?",
-                                      "width[px]:min length[px]:hide delay[ms]:fade time[ms] (default: "
-                                                "10:20:1500:150)" },
+    [OPT_ALWAYS_UNDERLINE_LINKS] = { "bool", "Draw links underlined (default: false)" },
+
+    [OPT_SCROLLBAR_IDX] = { "int:int?:int?:int?",
+                            "width[px]:min length[px]:hide delay[ms]:fade time[ms] (default: "
+                            "10:20:1500:150)" },
+
+    [OPT_FORCE_WL_CSD] = { "bool?", "Always use CSD's on wayland (dafault: false)" },
 
     [OPT_BIND_KEY_COPY_IDX]    = { arg_key, "Copy key command (default: C+S+c)" },
     [OPT_BIND_KEY_PASTE_IDX]   = { arg_key, "Paste key command (default: C+S+v)" },

@@ -266,6 +266,7 @@ typedef struct
 
     bool initial_cursor_blinking;
     bool bold_is_bright;
+    bool force_csd;
 
     enum decoration_style_e
     {

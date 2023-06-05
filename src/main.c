@@ -2046,6 +2046,11 @@ static void App_focus_changed(void* self, bool current_state)
     Window_notify_content_change(app->win);
     app->ui.window_in_focus = current_state;
 
+    app->ui.csd.requires_attention = false;
+    if (app->ui.csd.mode) {
+        App_framebuffer_damage(self);
+    }
+
     if (!current_state && app->vt.selection.mode) {
         Vector_char txt = Vt_select_region_to_string(&app->vt);
         if (txt.size) {
@@ -2164,6 +2169,11 @@ static void App_set_urgent(void* self)
     App* app = self;
     if (!Window_is_focused(app->win)) {
         Window_set_urgent(app->win);
+
+        if (app->ui.csd.mode) {
+            app->ui.csd.requires_attention = true;
+            App_framebuffer_damage(self);
+        }
     }
 }
 

@@ -2574,7 +2574,7 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h, gfx_api_t gfx_api)
         xdg_toplevel_add_listener(windowWl(win)->xdg_toplevel, &xdg_toplevel_listener, win);
 
         if (settings.decoration_style != DECORATION_STYLE_NONE) {
-            if (globalWl->decoration_manager) {
+            if (globalWl->decoration_manager && !settings.force_csd) {
                 /* KDE has it's own SSD protocol extension, but it is only supported by kwin and
                  * wlr, both of them also support zxdg_toplevel_decoration_v1. There is no point in
                  * implementing it. */
