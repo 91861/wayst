@@ -4,7 +4,6 @@
 
 #include <fcntl.h>
 #include <signal.h>
-#include <sys/poll.h>
 #include <sys/wait.h>
 #ifdef __FreeBSD__
 #include <utmpx.h>

@@ -7,7 +7,6 @@
 #pragma once
 
 #include <assert.h>
-#include <bits/getopt_ext.h>
 #include <getopt.h>
 #include <stddef.h>
 
