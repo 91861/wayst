@@ -76,7 +76,7 @@ static struct option long_options[] = {
     [OPT_HIDE_POINTER] = { "hide-pointer", required_argument, 0, 0 },
 
 #define OPT_SMOOTH_CURSOR 17
-    [OPT_SMOOTH_CURSOR] = { "cursor-animations", optional_argument, 0, 'a' },
+    [OPT_SMOOTH_CURSOR] = { "cursor-anim", required_argument, 0, 0 },
 
 #define OPT_DIRECTORY_IDX 18
     [OPT_DIRECTORY_IDX] = { "directory", required_argument, 0, 0 },
@@ -356,7 +356,9 @@ static const char* long_options_descriptions[][2] = {
                            "Hide pointer: true, false, force_true, force_false, if_not_reporting "
                            "(default: true)" },
 
-    [OPT_SMOOTH_CURSOR] = { "bool?", "Use cursor animations" },
+    [OPT_SMOOTH_CURSOR] = { "bool:bool:float",
+                            "Animate cursor - enable move:enable blink:blink fade period(0.0 - "
+                            "1.0)" },
 
     [OPT_DIRECTORY_IDX] = { arg_path, "Start in directory" },
 
@@ -365,7 +367,8 @@ static const char* long_options_descriptions[][2] = {
                             "true:true)" },
 
     [OPT_IO_CHUNK_DELAY] = { "int:int?",
-                             "Wait for following chunks - time[usec]:timeout[ms] (default: 0:5)" },
+                             "Wait for data chunks (min/max latency) - time[usec]:timeout[ms] "
+                             "(default: 0:5)" },
 
     [OPT_BG_COLOR_IDX] = { arg_color_a, "Background color" },
     [OPT_FG_COLOR_IDX] = { arg_color, "Foreground color" },

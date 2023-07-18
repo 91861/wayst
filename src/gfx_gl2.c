@@ -221,6 +221,11 @@ enum GlyphColor
     GLYPH_COLOR_COLOR,
 };
 
+typedef struct
+{
+    float fade_fraction;
+} cursor_color_animation_override_t;
+
 DEF_VECTOR(Texture, Texture_destroy);
 
 static inline size_t Rune_hash(const Rune* self)
@@ -447,6 +452,7 @@ typedef struct _GfxOpenGL2
     Shader font_shader_blend;
     Shader font_shader_gray;
     Shader line_shader;
+    Shader line_shader_alpha;
     Shader image_shader;
     Shader image_tint_shader;
     Shader circle_shader;
@@ -2367,6 +2373,11 @@ void GfxOpenGL2_init_with_context_activated(Gfx* self)
                                        NULL);
     gl2->font_shader_blend = Shader_new(font_vs_src, font_depth_blend_fs_src, "coord", "tex", NULL);
     gl2->line_shader       = Shader_new(line_vs_src, line_fs_src, "pos", "clr", NULL);
+
+    if (settings.animate_cursor_blink) {
+        gl2->line_shader_alpha = Shader_new(line_a_vs_src, line_a_fs_src, "pos", "clr", NULL);
+    }
+
     gfxOpenGL2(self)->image_shader =
       Shader_new(image_rgb_vs_src, image_rgb_fs_src, "coord", "tex", "offset", NULL);
     gl2->image_tint_shader =
@@ -2510,15 +2521,15 @@ static void GfxOpenGL2_draw_line_quads(GfxOpenGL2*   gfx,
 
 typedef struct
 {
-    GfxOpenGL2*       gl2;
-    const Vt* const   vt;
-    VtLine*           vt_line;
-    VtLineProxy*      proxy;
-    vt_line_damage_t* damage;
-    size_t            visual_index;
-    uint16_t          cnd_cursor_column;
-    bool              is_for_cursor;
-    bool              is_for_blinking;
+    GfxOpenGL2*                        gl2;
+    const Vt* const                    vt;
+    VtLine*                            vt_line;
+    VtLineProxy*                       proxy;
+    vt_line_damage_t*                  damage;
+    size_t                             visual_index;
+    uint16_t                           cnd_cursor_column;
+    cursor_color_animation_override_t* is_for_cursor;
+    bool                               is_for_blinking;
 } line_render_pass_args_t;
 
 typedef struct
@@ -2911,6 +2922,66 @@ static line_render_subpass_t line_render_pass_create_subpass(line_render_pass_t*
     return sub;
 }
 
+static inline ColorRGBA rune_final_bg_blend(const Vt*     self,
+                                            const VtRune* rune,
+                                            int32_t       x,
+                                            int32_t       y,
+                                            bool          is_for_cursor,
+                                            double        blend_factor)
+{
+    if (unlikely(Vt_is_cell_selected(self, x, y))) {
+        return self->colors.highlight.bg;
+    } else if (rune) {
+        ColorRGBA cursor_bg = Vt_rune_cursor_bg(self, rune);
+
+        if (likely(!is_for_cursor)) {
+            return cursor_bg;
+        }
+
+        ColorRGBA normal_bg = Vt_rune_bg(self, rune);
+
+        return ColorRGBA_new_from_blend(normal_bg, cursor_bg, blend_factor);
+    } else {
+        return settings.bg;
+    }
+}
+
+static inline ColorRGB rune_final_fg_blend_apply_dim(const Vt*     self,
+                                                     const VtRune* rune,
+                                                     ColorRGBA     bg_color,
+                                                     bool          is_cursor,
+                                                     double        blend_factor)
+{
+    if (!rune) {
+        return ColorRGB_new_from_blend(settings.fg, ColorRGB_from_RGBA(bg_color), VT_DIM_FACTOR);
+    }
+
+    if (unlikely(rune->dim)) {
+        ColorRGB dft_bg    = ColorRGB_from_RGBA(bg_color);
+        ColorRGB normal_fg = Vt_rune_fg(self, rune);
+
+        if (!is_cursor) {
+            return ColorRGB_new_from_blend(normal_fg, dft_bg, VT_DIM_FACTOR);
+        }
+
+        ColorRGB cursor_fg = Vt_rune_cursor_fg(self, rune);
+
+        return ColorRGB_new_from_blend(ColorRGB_new_from_blend(normal_fg, cursor_fg, blend_factor),
+                                       dft_bg,
+                                       VT_DIM_FACTOR);
+    } else {
+        ColorRGB normal_fg = Vt_rune_fg(self, rune);
+
+        if (!is_cursor) {
+            return normal_fg;
+        }
+
+        ColorRGB cursor_fg = Vt_rune_cursor_fg(self, rune);
+
+        return ColorRGB_new_from_blend(normal_fg, cursor_fg, blend_factor);
+    }
+}
+
 static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
                                              line_render_subpass_t* subpass)
 {
@@ -2936,8 +3007,16 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
             active_bg_color = pass->args.vt->colors.highlight.bg;
         } else {
             active_bg_color = Vt_rune_cursor_bg(pass->args.vt, cursor_rune);
+            if (pass->args.is_for_cursor && settings.animate_cursor_blink) {
+                ColorRGBA cursor_bg = Vt_rune_cursor_bg(pass->args.vt, cursor_rune);
+                ColorRGBA normal_bg = Vt_rune_bg(pass->args.vt, cursor_rune);
+                active_bg_color     = ColorRGBA_new_from_blend(normal_bg,
+                                                           cursor_bg,
+                                                           pass->args.is_for_cursor->fade_fraction);
+            }
         }
     } else {
+        /* not for cursor */
         active_bg_color = pass->args.vt->colors.bg;
     }
 
@@ -2957,11 +3036,18 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
         }
 
 #define L_COLOR_BG                                                                                 \
-    Vt_rune_final_bg(pass->args.vt,                                                                \
-                     pass->args.is_for_cursor ? cursor_rune : each_rune,                           \
-                     idx_each_rune,                                                                \
-                     pass->args.visual_index,                                                      \
-                     pass->args.is_for_cursor)
+    (pass->args.is_for_cursor && settings.animate_cursor_blink)                                    \
+      ? rune_final_bg_blend(pass->args.vt,                                                         \
+                            pass->args.is_for_cursor ? cursor_rune : each_rune,                    \
+                            idx_each_rune,                                                         \
+                            pass->args.visual_index,                                               \
+                            pass->args.is_for_cursor,                                              \
+                            pass->args.is_for_cursor->fade_fraction)                               \
+      : Vt_rune_final_bg(pass->args.vt,                                                            \
+                         pass->args.is_for_cursor ? cursor_rune : each_rune,                       \
+                         idx_each_rune,                                                            \
+                         pass->args.visual_index,                                                  \
+                         pass->args.is_for_cursor)
 
         if (idx_each_rune == subpass->args.render_range_end ||
             !ColorRGBA_eq(L_COLOR_BG, active_bg_color)) {
@@ -2989,12 +3075,14 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
             );
 
             { // for each block of characters with the same background color
-                ColorRGB active_fg_color = (pass->args.is_for_cursor && cursor_rune)
-                                             ? Vt_rune_final_fg_apply_dim(pass->args.vt,
-                                                                          cursor_rune,
-                                                                          active_bg_color,
-                                                                          pass->args.is_for_cursor)
-                                             : settings.fg;
+                ColorRGB active_fg_color =
+                  (pass->args.is_for_cursor && cursor_rune)
+                    ? rune_final_fg_blend_apply_dim(pass->args.vt,
+                                                    cursor_rune,
+                                                    active_bg_color,
+                                                    pass->args.is_for_cursor,
+                                                    pass->args.is_for_cursor->fade_fraction)
+                    : settings.fg;
 
                 const VtRune* same_colors_block_begin_rune = same_bg_block_begin_rune;
 
@@ -3278,13 +3366,15 @@ static void line_reder_pass_run_line_subpass(const line_render_pass_t* pass,
     static float end[6]     = { 1, 1, 1, 1, 1, 1 };
     static bool  drawing[6] = { 0 };
 
+    uint8_t n_objects = ARRAY_SIZE(end) - (settings.always_underline_links ? 0 : 1);
+
     if (unlikely(subpass->args.render_range_begin)) {
         const float init_coord =
           unlikely(subpass->args.render_range_end)
             ? -1.0f + pass->args.gl2->glyph_width_pixels * scalex * subpass->args.render_range_begin
             : 0.0f;
 
-        for (uint_fast8_t i = 0; i < ARRAY_SIZE(begin); ++i) {
+        for (uint_fast8_t i = 0; i < n_objects; ++i) {
             begin[i] = init_coord;
         }
     }
@@ -3314,11 +3404,10 @@ static void line_reder_pass_run_line_subpass(const line_render_pass_t* pass,
             each_rune == pass->args.vt_line->data.buf + subpass->args.render_range_end ||
             each_rune->underlined != drawing[0] || each_rune->doubleunderline != drawing[1] ||
             each_rune->strikethrough != drawing[2] || each_rune->overline != drawing[3] ||
-            each_rune->curlyunderline != drawing[4] ||
-            (each_rune->hyperlink_idx != 0 && settings.always_underline_links) != drawing[5]) {
+            each_rune->curlyunderline != drawing[4] || each_rune->hyperlink_idx != drawing[5]) {
 
             if (each_rune == pass->args.vt_line->data.buf + subpass->args.render_range_end) {
-                for (uint_fast8_t tmp = 0; tmp < ARRAY_SIZE(end); tmp++) {
+                for (uint_fast8_t tmp = 0; tmp < n_objects; tmp++) {
                     end[tmp] =
                       -1.0f + (float)column * scalex * (float)pass->args.gl2->glyph_width_pixels;
                 }
@@ -3396,7 +3485,7 @@ static void line_reder_pass_run_line_subpass(const line_render_pass_t* pass,
                 Vector_push_vertex_t(vb2, (vertex_t){ 1.0f * n_cells, 0.0f });
 #endif
             }
-            if (drawing[5] && !drawing[0]) {
+            if (drawing[5] && !drawing[0] && settings.always_underline_links) {
                 for (float i = begin[5]; i < (end[5] - scalex * 0.5f);
                      i += (scalex * pass->args.gl2->glyph_width_pixels)) {
                     float j = i + scalex * pass->args.gl2->glyph_width_pixels / 2.0;
@@ -3571,6 +3660,9 @@ static void _GfxOpenGL2_draw_block_cursor(GfxOpenGL2* gfx,
     ((vt_line_damage_t*)&ui->cursor_damage)->type = VT_LINE_DAMAGE_FULL;
     VtLine* vt_line                               = Vt_cursor_line(vt);
 
+    static cursor_color_animation_override_t color_override;
+    color_override.fade_fraction = ui->cursor_fade_fraction;
+
     line_render_pass_args_t rp_args = {
         .gl2               = gfx,
         .vt                = vt,
@@ -3579,7 +3671,7 @@ static void _GfxOpenGL2_draw_block_cursor(GfxOpenGL2* gfx,
         .damage            = (vt_line_damage_t*)&ui->cursor_damage,
         .visual_index      = Vt_visual_cursor_row(vt),
         .cnd_cursor_column = ui->cursor->col,
-        .is_for_cursor     = true,
+        .is_for_cursor     = &color_override,
         .is_for_blinking   = false,
     };
 
@@ -3685,8 +3777,16 @@ static void GfxOpenGL2_draw_cursor(GfxOpenGL2* gfx, const Vt* vt, const Ui* ui)
         return;
     }
 
-    bool show_blink = !settings.enable_cursor_blink || !ui->window_in_focus ||
-                      !ui->cursor->blinking || (ui->cursor->blinking && ui->draw_cursor_blinking);
+    bool show_blink;
+
+    if (settings.animate_cursor_blink) {
+        show_blink = !settings.enable_cursor_blink || !ui->window_in_focus ||
+                     !ui->cursor->blinking || (ui->cursor->blinking && ui->draw_cursor_blinking);
+    } else {
+        show_blink = !settings.enable_cursor_blink || !ui->window_in_focus ||
+                     !ui->cursor->blinking ||
+                     (ui->cursor->blinking && ui->cursor_fade_fraction > 0.0);
+    }
 
     gfx->frame_overlay_damage->curosr_position_x =
       ui->cursor_cell_fraction * gfx->glyph_width_pixels + gfx->pixel_offset_x;
@@ -3700,13 +3800,13 @@ static void GfxOpenGL2_draw_cursor(GfxOpenGL2* gfx, const Vt* vt, const Ui* ui)
 
     bool hidden = (!show_blink || ui->cursor->hidden);
 
-    gfx->frame_overlay_damage->cursor_drawn = !hidden;
-
-    if (hidden) {
+    gfx->frame_overlay_damage->cursor_drawn = false;
+    if (hidden || ui->cursor_fade_fraction == 0.0) {
         return;
     }
 
-    bool filled_block = false;
+    bool drawing_with_transparency = ui->cursor_fade_fraction != 1.0;
+    bool filled_block              = false;
 
     if (row >= Vt_row(vt)) {
         return;
@@ -3730,15 +3830,18 @@ static void GfxOpenGL2_draw_cursor(GfxOpenGL2* gfx, const Vt* vt, const Ui* ui)
         case CURSOR_UNDERLINE:
             Vector_pushv_vertex_t(
               &gfx->vec_vertex_buffer,
-              (vertex_t[2]){ { .x = -1.0f + col * gfx->glyph_width_pixels * gfx->sx,
-                               .y = 1.0f - ((row + 1) * gfx->line_height_pixels) * gfx->sy },
-                             { .x = -1.0f + (col + 1) * gfx->glyph_width_pixels * gfx->sx,
-                               .y = 1.0f - ((row + 1) * gfx->line_height_pixels) * gfx->sy } },
+              (vertex_t[2]){
+                { .x = -1.0f + col * gfx->glyph_width_pixels * gfx->sx,
+                  .y = 1.0f - ((row + 1) * gfx->line_height_pixels) * gfx->sy + 1.5f * gfx->sy },
+                { .x = -1.0f + (col + 1) * gfx->glyph_width_pixels * gfx->sx,
+                  .y = 1.0f - ((row + 1) * gfx->line_height_pixels) * gfx->sy + 1.5f * gfx->sy } },
               2);
             break;
 
         case CURSOR_BLOCK:
-            if (!ui->window_in_focus)
+            if (!ui->window_in_focus) {
+                drawing_with_transparency = false;
+
                 Vector_pushv_vertex_t(
                   &gfx->vec_vertex_buffer,
                   (vertex_t[4]){
@@ -3753,7 +3856,7 @@ static void GfxOpenGL2_draw_cursor(GfxOpenGL2* gfx, const Vt* vt, const Ui* ui)
                     { .x = -1.0f + (col * gfx->glyph_width_pixels) * gfx->sx + 0.9f * gfx->sx,
                       .y = 1.0f - (row * gfx->line_height_pixels) * gfx->sy } },
                   4);
-            else
+            } else
                 filled_block = true;
             break;
     }
@@ -3768,19 +3871,30 @@ static void GfxOpenGL2_draw_cursor(GfxOpenGL2* gfx, const Vt* vt, const Ui* ui)
     ColorRGBA clr = Vt_rune_cursor_bg(vt, cursor_rune);
 
     if (!filled_block) {
-        Shader_use(&gfx->line_shader);
+        if (settings.animate_cursor_blink && drawing_with_transparency) {
+            Shader_use(&gfx->line_shader_alpha);
+            glEnable(GL_BLEND);
+            glUniform4f(gfx->line_shader_alpha.uniforms[1].location,
+                        ColorRGBA_get_float(clr, 0),
+                        ColorRGBA_get_float(clr, 1),
+                        ColorRGBA_get_float(clr, 2),
+                        ui->cursor_fade_fraction);
+        } else {
+            Shader_use(&gfx->line_shader);
+            glUniform3f(gfx->line_shader.uniforms[1].location,
+                        ColorRGBA_get_float(clr, 0),
+                        ColorRGBA_get_float(clr, 1),
+                        ColorRGBA_get_float(clr, 2));
+        }
+
         glBindTexture(GL_TEXTURE_2D, 0);
 
         glBindBuffer(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
         glVertexAttribPointer(gfx->line_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
 
-        glUniform3f(gfx->line_shader.uniforms[1].location,
-                    ColorRGBA_get_float(clr, 0),
-                    ColorRGBA_get_float(clr, 1),
-                    ColorRGBA_get_float(clr, 2));
-
         size_t newsize = gfx->vec_vertex_buffer.size * sizeof(vertex_t);
         ARRAY_BUFFER_SUB_OR_SWAP(gfx->vec_vertex_buffer.buf, gfx->flex_vbo.size, newsize);
+
         glDrawArrays(gfx->vec_vertex_buffer.size == 2 ? GL_LINES : GL_LINE_LOOP,
                      0,
                      gfx->vec_vertex_buffer.size);
@@ -4421,17 +4535,20 @@ static bool GfxOpenGL2_get_accumulated_line_damaged(GfxOpenGL2* self,
 }
 
 static window_partial_swap_request_t* GfxOpenGL2_try_push_accumulated_cursor_damage(
-  GfxOpenGL2* self,
-  uint8_t     age)
+  GfxOpenGL2*                    self,
+  uint8_t                        age,
+  window_partial_swap_request_t* swap_request)
 {
-    window_partial_swap_request_t* rv = NULL;
+    window_partial_swap_request_t* rv = swap_request;
     for (int i = 0; i < age; ++i) {
+        if (!self->frame_overlay_damage[i].cursor_drawn) {
+            continue;
+        }
         int32_t x = self->frame_overlay_damage[i].curosr_position_x;
         int32_t y = self->frame_overlay_damage[i].curosr_position_y;
         int32_t w = self->glyph_width_pixels;
         int32_t h = self->line_height_pixels;
-
-        rv = GfxOpenGL2_merge_or_push_modified_rect(self,
+        rv        = GfxOpenGL2_merge_or_push_modified_rect(self,
                                                     GfxOpenGL2_translate_coords(self, x, y, w, h));
         if (!rv)
             break;
@@ -5045,7 +5162,7 @@ window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, const Vt* vt, Ui* ui, 
     retval = GfxOpenGL2_maybe_draw_titlebar(self, ui, retval);
 
     if (retval) {
-        retval = GfxOpenGL2_try_push_accumulated_cursor_damage(gfx, buffer_age);
+        retval = GfxOpenGL2_try_push_accumulated_cursor_damage(gfx, buffer_age, retval);
     }
 
     if (unlikely(settings.debug_gfx)) {
@@ -5296,6 +5413,9 @@ void GfxOpenGL2_destroy(Gfx* self)
     Shader_destroy(&gfxOpenGL2(self)->font_shader_gray);
     Shader_destroy(&gfxOpenGL2(self)->font_shader_blend);
     Shader_destroy(&gfxOpenGL2(self)->line_shader);
+    if (settings.animate_cursor_blink) {
+        Shader_destroy(&gfxOpenGL2(self)->line_shader_alpha);
+    }
     Shader_destroy(&gfxOpenGL2(self)->image_shader);
     Shader_destroy(&gfxOpenGL2(self)->image_tint_shader);
     GlyphAtlas_destroy(&gfxOpenGL2(self)->glyph_atlas);
@@ -5304,7 +5424,7 @@ void GfxOpenGL2_destroy(Gfx* self)
     Vector_destroy_Vector_float(&(gfxOpenGL2(self))->float_vec);
 
 #ifdef DEBUG
-    INFO("proxy textures created: %zu, destroyed: %zu (total: %zu)\n",
+    INFO("proxy textures created: %zu, destroyed: %zu (leaked: %zu)\n",
          dbg_line_proxy_textures_created,
          dbg_line_proxy_textures_destroyed,
          (dbg_line_proxy_textures_created - dbg_line_proxy_textures_destroyed))

@@ -309,6 +309,9 @@ typedef struct
     uint32_t pty_chunk_timeout_ms;
 
     bool smooth_cursor;
+    bool animate_cursor_blink;
+    float animate_cursor_blink_fade_fraction;
+
     bool incremental_windw_resize;
 
 } Settings;

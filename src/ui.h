@@ -81,6 +81,7 @@ typedef struct
     bool           draw_out_of_focus_tint;
     bool           window_in_focus;
     double         flash_fraction;
+    double         cursor_fade_fraction;
 
     bool draw_cursor_blinking;
     bool draw_text_blinking;

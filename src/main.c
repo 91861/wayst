@@ -79,8 +79,8 @@ typedef struct
     TimePoint  next_click_limit;
 
     Timer autoscroll_timer, scrollbar_hide_timer, visual_bell_timer, cursor_blink_end_timer,
-      cursor_blink_switch_timer, cursor_blink_suspend_timer, text_blink_switch_timer,
-      title_update_timer, cursor_movement_timer;
+      cursor_blink_switch_timer, cursor_blink_anim_delay_timer, cursor_blink_suspend_timer,
+      text_blink_switch_timer, title_update_timer, cursor_movement_timer, cursor_fade_timer;
 
     char* hostname;
     char* vt_title;
@@ -231,28 +231,44 @@ static void App_scrollbar_hide_timer_handler(void* self, double fraction, bool c
     App_update_scrollbar_dims(app);
 }
 
+/* Suspend cursor blinking for a short time afer kbd input */
 static void App_cursor_blink_suspend_timer_handler(void* self)
 {
     App* app                                = self;
     app->cursor_blink_animation_should_play = true;
-    app->ui.draw_cursor_blinking            = false;
-    TimerManager_schedule_point(&app->timer_manager,
-                                app->cursor_blink_switch_timer,
-                                TimePoint_ms_from_now(settings.cursor_blink_interval_ms));
+    app->ui.draw_cursor_blinking            = true;
+    app->ui.cursor_fade_fraction            = 1.0;
+
+    if (settings.animate_cursor_blink) {
+        TimerManager_schedule_tween_from_now(
+          &app->timer_manager,
+          app->cursor_blink_switch_timer,
+          TimePoint_ms_from_now((float)settings.cursor_blink_interval_ms *
+                                settings.animate_cursor_blink_fade_fraction));
+        app->ui.draw_cursor_blinking = true;
+    } else {
+        TimerManager_schedule_point(&app->timer_manager,
+                                    app->cursor_blink_switch_timer,
+                                    TimePoint_ms_from_now(settings.cursor_blink_interval_ms));
+    }
+
     App_notify_content_change(self);
 }
 
+/* Stop cursor from blinking alfer a long time of inactivity */
 static void App_cursor_blink_end_timer_handler(void* self)
 {
     App* app                                = self;
     app->cursor_blink_animation_should_play = false;
 }
 
+/* Switch between cursor shown/hidden in non-animated mode */
 static void App_cursor_blink_switch_timer_handler(void* self)
 {
-    App* app = self;
-    if ((app->cursor_blink_animation_should_play || !app->ui.draw_cursor_blinking) &&
-        Window_is_focused(app->win)) {
+    App* app          = self;
+    bool ui_condition = (app->cursor_blink_animation_should_play || !app->ui.draw_cursor_blinking);
+
+    if (ui_condition && Window_is_focused(app->win)) {
         app->ui.draw_cursor_blinking = !app->ui.draw_cursor_blinking;
         TimerManager_schedule_point(&app->timer_manager,
                                     app->cursor_blink_switch_timer,
@@ -260,12 +276,51 @@ static void App_cursor_blink_switch_timer_handler(void* self)
     } else {
         app->ui.draw_cursor_blinking = true;
     }
+
+    app->ui.cursor_fade_fraction = app->ui.draw_cursor_blinking;
+
     App_notify_content_change(self);
 }
 
+/* Delay before animating cursor blink */
+static void App_cursor_fade_switch_delay_timer_handler(void* self)
+{
+    App* app = self;
+    if (app->cursor_blink_animation_should_play) {
+        TimerManager_schedule_tween_from_now(
+          &app->timer_manager,
+          app->cursor_blink_switch_timer,
+          TimePoint_ms_from_now((float)settings.cursor_blink_interval_ms *
+                                settings.animate_cursor_blink_fade_fraction));
+    }
+}
+
+/* Switch between cursor shown/hidden in animated mode */
+static void App_cursor_fade_switch_timer_handler(void* self, double fraction, bool completed)
+{
+    App* app                     = self;
+    app->ui.cursor_fade_fraction = app->ui.draw_cursor_blinking ? 1.0 - fraction : fraction;
+
+    if (completed) {
+        app->ui.draw_cursor_blinking = !app->ui.draw_cursor_blinking;
+
+        if (app->cursor_blink_animation_should_play) {
+            TimerManager_schedule_point(
+              &app->timer_manager,
+              app->cursor_blink_anim_delay_timer,
+              TimePoint_ms_from_now((float)settings.cursor_blink_interval_ms *
+                                    (1.0f - settings.animate_cursor_blink_fade_fraction)));
+        }
+    }
+
+    App_notify_content_change(self);
+}
+
+/* Switch between blinking text shown/hidden */
 static void App_text_blink_switch_timer_handler(void* self)
 {
     App* app = self;
+
     if (app->gfx->has_blinking_text) {
         Window_notify_content_change(app->win);
         app->ui.draw_text_blinking = !app->ui.draw_text_blinking;
@@ -711,7 +766,7 @@ static void App_update_title(void* self, const char* title)
     free(app->vt_title);
     app->vt_title = NULL;
     if (title) {
-	app->vt_title = strdup(title);
+        app->vt_title = strdup(title);
     }
     App_set_title(self);
 }
@@ -747,6 +802,8 @@ static void App_action(void* self)
     App* app                                = self;
     app->cursor_blink_animation_should_play = false;
     app->ui.draw_cursor_blinking            = true;
+    app->ui.cursor_fade_fraction            = 1.0;
+
     TimerManager_schedule_point(&app->timer_manager,
                                 app->cursor_blink_suspend_timer,
                                 TimePoint_ms_from_now(settings.cursor_blink_suspend_ms));
@@ -2345,10 +2402,21 @@ static void App_set_up_timers(App* self)
                                                              TIMER_TYPE_POINT,
                                                              App_cursor_blink_end_timer_handler);
 
-    self->cursor_blink_switch_timer =
-      TimerManager_create_timer(&self->timer_manager,
-                                TIMER_TYPE_POINT,
-                                App_cursor_blink_switch_timer_handler);
+    if (settings.animate_cursor_blink) {
+        self->cursor_blink_anim_delay_timer =
+          TimerManager_create_timer(&self->timer_manager,
+                                    TIMER_TYPE_POINT,
+                                    App_cursor_fade_switch_delay_timer_handler);
+        self->cursor_blink_switch_timer =
+          TimerManager_create_timer(&self->timer_manager,
+                                    TIMER_TYPE_TWEEN,
+                                    App_cursor_fade_switch_timer_handler);
+    } else {
+        self->cursor_blink_switch_timer =
+          TimerManager_create_timer(&self->timer_manager,
+                                    TIMER_TYPE_POINT,
+                                    App_cursor_blink_switch_timer_handler);
+    }
 
     self->text_blink_switch_timer = TimerManager_create_timer(&self->timer_manager,
                                                               TIMER_TYPE_POINT,

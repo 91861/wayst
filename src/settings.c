@@ -801,7 +801,7 @@ static void settings_make_default()
 
         .term        = AString_new_static(DFT_TERM),
         .vte_version = AString_new_static("6201"),
-        
+
         .locale      = AString_new_uninitialized(),
         .title       = AString_new_static(APPLICATION_NAME),
         .user_app_id = NULL,
@@ -907,6 +907,9 @@ static void settings_make_default()
         .vt_debug_delay_usec = 5000,
 
         .smooth_cursor = false,
+        .animate_cursor_blink = false,
+        .animate_cursor_blink_fade_fraction = 0.3f,
+
         .incremental_windw_resize = true,
     };
 }
@@ -1094,9 +1097,6 @@ static void handle_option(const char opt, const int array_index, const char* val
             case 'o':
                 settings.defer_font_loading = true;
                 break;
-            case 'a':
-                settings.smooth_cursor = true;
-                break;
             case 'H':
                 settings.hold_after_child_process_exit = true;
                 break;
@@ -1172,9 +1172,26 @@ static void handle_option(const char opt, const int array_index, const char* val
             L_ASSIGN_BOOL(settings.x11_is_default, true);
             break;
 
-        case OPT_SMOOTH_CURSOR:
-            L_ASSIGN_BOOL(settings.smooth_cursor, true)
-            break;
+        case OPT_SMOOTH_CURSOR: {
+            L_PROCESS_MULTI_ARG_PACK_BEGIN(value)
+            case 0:
+                settings.smooth_cursor = strtob(buf.buf);
+                break;
+            case 1:
+                settings.animate_cursor_blink = strtob(buf.buf);
+                break;
+            case 2: {
+                float val = strtof32(buf.buf, NULL);
+                if (val <= 1.0f || val > 0.0) {
+                    settings.animate_cursor_blink_fade_fraction = val;
+                } else {
+                    WRN("Failed to parse \'%s\' as float in range 0.0 - 1.0 for option \'%s\'\n",
+                        value,
+                        long_options[array_index].name);
+                }
+            } break;
+                L_PROCESS_MULTI_ARG_PACK_END
+        } break;
 
         case OPT_DYNAMIC_TITLE_IDX:
             L_ASSIGN_BOOL(settings.dynamic_title, true)
@@ -1950,7 +1967,7 @@ static void settings_get_opts(const int argc, char* const* argv, const bool cfg_
         /* print 'invalid option' error message only once */
         opterr   = cfg_file_check;
         int opid = 0;
-        o        = getopt_long(argc, argv, "XctDGFhvloaHb", long_options, &opid);
+        o        = getopt_long(argc, argv, "XctDGFhvloHb", long_options, &opid);
         if (o == -1) {
             break;
         }

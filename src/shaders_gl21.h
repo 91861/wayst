@@ -35,6 +35,15 @@ image_rgb_vs_src =
 
 
 const char*
+line_a_vs_src =
+"#version 120\n"
+"attribute vec2 pos;"
+"void main(){"
+"gl_Position=vec4(pos,0,1);"
+"}";
+
+
+const char*
 line_vs_src =
 "#version 120\n"
 "attribute vec2 pos;"
@@ -123,6 +132,15 @@ image_tint_rgb_fs_src =
 "varying vec2 tex_coord;"
 "void main(){"
 "gl_FragColor=texture2D(tex,tex_coord)*vec4(tint,1.0);"
+"}";
+
+
+const char*
+line_a_fs_src =
+"#version 120\n"
+"uniform vec4 clr;"
+"void main(){"
+"gl_FragData[0]=clr;"
 "}";
 
 

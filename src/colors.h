@@ -200,12 +200,22 @@ static inline ColorARGB ColorARGB_from_RGBA(const ColorRGBA c)
     };
 }
 
-static ColorRGB ColorRGB_new_from_blend(ColorRGB base, ColorRGB blend, float factor)
+static inline ColorRGB ColorRGB_new_from_blend(ColorRGB base, ColorRGB blend, float factor)
 {
     return (ColorRGB){
         .r = CLAMP(base.r * (1.0f - factor) + factor * blend.r, 0, 255),
         .g = CLAMP(base.g * (1.0f - factor) + factor * blend.g, 0, 255),
         .b = CLAMP(base.b * (1.0f - factor) + factor * blend.b, 0, 255),
+    };
+}
+
+static inline ColorRGBA ColorRGBA_new_from_blend(ColorRGBA base, ColorRGBA blend, float factor)
+{
+    return (ColorRGBA){
+        .r = CLAMP(base.r * (1.0f - factor) + factor * blend.r, 0, 255),
+        .g = CLAMP(base.g * (1.0f - factor) + factor * blend.g, 0, 255),
+        .b = CLAMP(base.b * (1.0f - factor) + factor * blend.b, 0, 255),
+        .a = CLAMP(base.a * (1.0f - factor) + factor * blend.a, 0, 255),
     };
 }
 
@@ -233,7 +243,7 @@ static ColorRGB ColorRGB_new_from_hsl(float h, float s, float l)
     h = CLAMP(h, 0.0f, 1.0f);
     s = CLAMP(s, 0.0f, 1.0f);
     l = CLAMP(l, 0.0f, 1.0f);
-    
+
     if (s == 0.0) {
         return (ColorRGB){ .r = l, .g = l, .b = l };
     } else {
@@ -249,9 +259,9 @@ static ColorRGB ColorRGB_new_from_hsl(float h, float s, float l)
 
 static ColorRGBA ColorRGBA_new_from_hsla(float h, float s, float l, float a)
 {
-    a = CLAMP(a, 0.0f, 1.0f);
-    ColorRGBA rgba = ColorRGBA_from_RGB(ColorRGB_new_from_hsl(h,s,l));
-    rgba.a = a * UINT8_MAX;
+    a              = CLAMP(a, 0.0f, 1.0f);
+    ColorRGBA rgba = ColorRGBA_from_RGB(ColorRGB_new_from_hsl(h, s, l));
+    rgba.a         = a * UINT8_MAX;
     return rgba;
 }
 
