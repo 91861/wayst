@@ -580,7 +580,7 @@ __attribute__((cold)) void Vt_dump_info(Vt* self)
             case PARSER_STATE_TITLE:
                 puts("legacy title select");
                 break;
-            case PARSER_STATE_CHARSET:
+            case PARSER_STATE_OTHER_ESC_CTL_SEQ:
                 puts("character set select");
                 break;
             case PARSER_STATE_CHARSET_G0:
@@ -715,32 +715,32 @@ __attribute__((cold)) void Vt_dump_info(Vt* self)
 
     for (size_t i = 0; i < self->lines.size; ++i) {
         Vector_char str = rune_vec_to_string(&self->lines.buf[i].data, 0, 0, "");
-        printf(
-          "%s%c %c %c %4zu%c s:%3zu dmg:%d proxy{%3d,%3d,%3d,%3d} reflow{%d,%d,%d} "
-          "marks{%d,%d,%d,%d} data{%.90s%s}" TERMCOLOR_RESET "\n",
-          i == self->cursor.row ? TERMCOLOR_BOLD : "",
-          i == Vt_top_line(self)      ? 'v'
-          : i == Vt_bottom_line(self) ? '^'
-                                      : ' ',
-          i == Vt_get_scroll_region_top(self) || i == Vt_get_scroll_region_bottom(self) ? '-' : ' ',
-          i == Vt_visual_top_line(self) || i == Vt_visual_bottom_line(self) ? '*' : ' ',
-          i,
-          i == self->cursor.row ? '<' : ' ',
-          self->lines.buf[i].data.size,
-          self->lines.buf[i].damage.type != VT_LINE_DAMAGE_NONE,
-          self->lines.buf[i].proxy.data[0],
-          self->lines.buf[i].proxy.data[1],
-          self->lines.buf[i].proxy.data[2],
-          self->lines.buf[i].proxy.data[3],
-          self->lines.buf[i].reflowable,
-          self->lines.buf[i].rejoinable,
-          self->lines.buf[i].was_reflown,
-          self->lines.buf[i].mark_command_invoke,
-          self->lines.buf[i].mark_command_output_start,
-          self->lines.buf[i].mark_command_output_end,
-          self->lines.buf[i].mark_explicit,
-          str.buf,
-          (str.size > 90 ? "…" : ""));
+        printf("%s%c %c %c %4zu%c s:%3zu dmg:%d proxy{%3d,%3d,%3d,%3d} reflow{%d,%d,%d} "
+               "marks{%d,%d,%d,%d} data{%.90s%s}" TERMCOLOR_RESET "\n",
+               i == self->cursor.row ? TERMCOLOR_BOLD : "",
+               i == Vt_top_line(self)      ? 'v'
+               : i == Vt_bottom_line(self) ? '^'
+                                           : ' ',
+               i == Vt_get_scroll_region_top(self) || i == Vt_get_scroll_region_bottom(self) ? '-'
+                                                                                             : ' ',
+               i == Vt_visual_top_line(self) || i == Vt_visual_bottom_line(self) ? '*' : ' ',
+               i,
+               i == self->cursor.row ? '<' : ' ',
+               self->lines.buf[i].data.size,
+               self->lines.buf[i].damage.type != VT_LINE_DAMAGE_NONE,
+               self->lines.buf[i].proxy.data[0],
+               self->lines.buf[i].proxy.data[1],
+               self->lines.buf[i].proxy.data[2],
+               self->lines.buf[i].proxy.data[3],
+               self->lines.buf[i].reflowable,
+               self->lines.buf[i].rejoinable,
+               self->lines.buf[i].was_reflown,
+               self->lines.buf[i].mark_command_invoke,
+               self->lines.buf[i].mark_command_output_start,
+               self->lines.buf[i].mark_command_output_end,
+               self->lines.buf[i].mark_explicit,
+               str.buf,
+               (str.size > 90 ? "…" : ""));
 
         if (self->lines.buf[i].links) {
             for (uint16_t j = 0; j < self->lines.buf[i].links->size; ++j) {

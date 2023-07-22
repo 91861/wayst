@@ -689,7 +689,7 @@ static inline char32_t char_sub_gfx(char original)
 
 /**
  * substitute invisible characters with a readable string */
-__attribute__((cold)) static const char* control_char_get_pretty_string(const char c)
+__attribute__((cold)) const char* control_char_get_pretty_string(const char c)
 {
     static const char* const strings[] = {
         TERMCOLOR_BG_BLACK TERMCOLOR_RED "␀" TERMCOLOR_DEFAULT,
@@ -911,10 +911,6 @@ static inline bool is_csi_sequence_terminated(const char* seq, const size_t size
 
 static inline bool is_string_sequence_terminated(const char* seq, const size_t size)
 {
-    if (unlikely(size > UINT16_MAX)) {
-        return true;
-    }
-
     if (!size) {
         return false;
     }
@@ -1623,6 +1619,10 @@ static inline void Vt_handle_regular_mode(Vt* self, int code, bool on)
         case 20:
             STUB("LNM");
             break;
+        /* Enable Sixel Scrolling (DECSDM) */
+        case 80:
+            self->modes.sixel_scrolling = on;
+            break;
         default:
             WRN("unknown SM mode: %d\n", code);
     }
@@ -1751,11 +1751,6 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
         /* Enable left and right margin mode (DECVSSM) */
         case 69:
             self->modes.vertical_split_screen_mode = on;
-            break;
-
-        /* Enable Sixel Scrolling (DECSDM) */
-        case 80:
-            self->modes.sixel_scrolling = on;
             break;
 
         /* X11 xterm mouse protocol. */
@@ -2100,6 +2095,15 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
             /* <ESC>[> ... */
             case '>': {
                 switch (last_char) {
+                    /* Report xterm name and version (XTVERSION) */
+                    case 'q': {
+                        MULTI_ARG_IS_ERROR;
+                        int arg = short_sequence_get_int_argument(seq);
+                        if (arg == 0) {
+                            Vt_output_formated(self, "\eP|%s%s\e\\", APPLICATION_NAME, VERSION);
+                        }
+                    } break;
+
                         /* <ESC>[> Pp m / <ESC>[> Pp ; Pv m - Set/reset key modifier options
                          * (XTMODKEYS)
                          *
@@ -3849,6 +3853,8 @@ static void Vt_handle_APC(Vt* self, char c)
                 uint32_t                      image_height = 0;
                 bool                          complete     = true;
                 char delete                                = 'a';
+                int quiet_level = 0; // 1 - supress ok, 2 - supress ok and failure messages
+
                 vt_image_proto_display_args_t display_args = {
                     .z_layer         = 0,
                     .cell_width      = 0,
@@ -3937,6 +3943,8 @@ static void Vt_handle_APC(Vt* self, char c)
                         display_args.cell_height = atoi(arg + 2);
                     } else if (strstr(arg, "d=")) {
                         delete = arg[2];
+                    } else if (strstr(arg, "q=")) {
+                        quiet_level = atoi(arg + 2);
                     } else if (strnlen(arg, 1)) {
                         WRN("unknown image protocol argument\'%s\'\n", arg);
                     }
@@ -3962,13 +3970,21 @@ static void Vt_handle_APC(Vt* self, char c)
                           payload);
 
                         if (id) {
-                            Vt_output_formated(self, "\e_Gi=%u;%s\e\\", id, OR(error_string, "OK"));
+                            if (error_string && quiet_level < 2) {
+                                Vt_output_formated(self, "\e_Gi=%u;%s\e\\", id, error_string);
+                            } else if (quiet_level < 1) {
+                                Vt_output_formated(self, "\e_Gi=%u;OK\e\\", id);
+                            }
                         }
                     } break;
                     case VT_IMAGE_PROTO_ACTION_DISPLAY: {
                         Vt_img_proto_display(self, id, display_args);
                         if (id) {
-                            Vt_output_formated(self, "\e_Gi=%u;%s\e\\", id, OR(error_string, "OK"));
+                            if (error_string && quiet_level < 2) {
+                                Vt_output_formated(self, "\e_Gi=%u;%s\e\\", id, error_string);
+                            } else if (quiet_level < 1) {
+                                Vt_output_formated(self, "\e_Gi=%u;OK\e\\", id);
+                            }
                         }
                     } break;
                     case VT_IMAGE_PROTO_ACTION_DELETE: {
@@ -4225,6 +4241,11 @@ static void Vt_handle_DCS(Vt* self, char c)
                         }
 
                         if (self->modes.sixel_scrolling) {
+                            /* When sixel display mode is enabled, the sixel active position begins
+                             * at the upper-left corner of the ANSI text active position. Scrolling
+                             * occurs when the sixel active position reaches the bottom margin of
+                             * the graphics page. When sixel mode is exited, the text cursor is set
+                             * to the current sixel cursor position. */
                             VtLine* ln = Vt_cursor_line(self);
                             if (!ln->graphic_attachments) {
                                 ln->graphic_attachments =
@@ -4249,7 +4270,14 @@ static void Vt_handle_DCS(Vt* self, char c)
                             Vector_push_RcPtr_VtSixelSurface(ln->graphic_attachments->sixels, sp);
                             Vector_push_RcPtr_VtSixelSurface(&self->scrolled_sixels, sp2);
                         } else {
+                            /* When sixel scrolling is disabled, the sixel active position begins at
+                             * the upper-left corner of the active graphics page. The terminal
+                             * ignores any commands that attempt to advance the active position
+                             * below the bottom margin of the graphics page. When sixel mode is
+                             * exited, the text cursor does not change from the position it was in
+                             * when sixel mode was entered. */
                             VtSixelSurface_destroy(self, &surf);
+                            STUB("sixel display with scrolling disabled");
                             // Vector_push_VtSixelSurface(&self->static_sixels, surf);
                         }
                     } else {
@@ -5676,10 +5704,14 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
                     self->parser.state = PARSER_STATE_CHARSET_G3;
                     return;
 
-                /* Select default character set(<ESC>%@) or Select UTF-8 character set(<ESC>%G)
-                 */
+                /* Select default character set(<ESC>%@) or Select UTF-8 character set(<ESC>%G) */
                 case '%':
-                    self->parser.state = PARSER_STATE_CHARSET;
+                    self->parser.state = PARSER_STATE_OTHER_ESC_CTL_SEQ;
+                    return;
+
+                /* Switch 7/8 bit controls or select ANSI conformance level */
+                case ' ':
+                    self->parser.state = PARSER_STATE_OTHER_ESC_CTL_SEQ;
                     return;
 
                 case 'g':
@@ -5821,7 +5853,10 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
                 default: {
                     const char* cs    = control_char_get_pretty_string(c);
                     char        cb[2] = { c, 0 };
-                    WRN("Unknown escape sequence: %s (%d)\n", cs ? cs : cb, c);
+                    WRN("Unknown escape sequence: \'%s" TERMCOLOR_RESET ""
+                        "\' (%d)\n",
+                        cs ? cs : cb,
+                        c);
 
                     self->parser.state = PARSER_STATE_LITERAL;
                     return;
@@ -5925,8 +5960,8 @@ __attribute__((always_inline, hot)) static inline void Vt_handle_char(Vt* self, 
             }
             break;
 
-        case PARSER_STATE_CHARSET:
-            STUB("character set select command");
+        case PARSER_STATE_OTHER_ESC_CTL_SEQ:
+            STUB("character set select/ANSI conformance/switch 7 or 8 bit controls");
             self->parser.state = PARSER_STATE_LITERAL;
             break;
 
@@ -6350,7 +6385,7 @@ static void Vt_set_title(Vt* self, const char* title)
     free(self->title);
     self->title = NULL;
     if (title) {
-	self->title = strdup(title);
+        self->title = strdup(title);
     }
     CALL(self->callbacks.on_title_changed, self->callbacks.user_data, self->title);
 }

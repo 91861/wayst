@@ -605,7 +605,8 @@ typedef struct
      * corner of the active graphics page. The terminal ignores any commands that attempt to
      * advance the active position below the bottom margin of the graphics page. When sixel mode
      * is exited, the text cursor does not change from the position it was in when sixel mode
-     * was entered. */
+     * was entered.
+     */
     uint8_t sixel_scrolling : 1;
 
     /* Use private color registers for each sixel graphic */
@@ -760,7 +761,7 @@ typedef struct
             PARSER_STATE_APC,
             PARSER_STATE_OSC,
             PARSER_STATE_PM,
-            PARSER_STATE_CHARSET,
+            PARSER_STATE_OTHER_ESC_CTL_SEQ,
             PARSER_STATE_CHARSET_G0,
             PARSER_STATE_CHARSET_G1,
             PARSER_STATE_CHARSET_G2,
@@ -1105,6 +1106,10 @@ static inline void VtLine_destroy(void* vt_, VtLine* self)
 
 static void VtImageSurface_destroy(void* vt_, VtImageSurface* self)
 {
+    if (!self || self->state == VT_IMAGE_SURFACE_DESTROYED) {
+        return;
+    }
+
     Vt* vt = vt_;
     Vector_destroy_uint8_t(&self->fragments);
     self->id    = 0;

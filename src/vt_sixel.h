@@ -2,6 +2,7 @@
 
 #include "colors.h"
 #include "vt.h"
+#include "vt_private.h"
 
 DEF_VECTOR(Vector_uint8_t, Vector_destroy_uint8_t);
 
@@ -98,7 +99,10 @@ static VtSixelSurface VtSixelSurface_new_from_data(uint8_t                    pi
                                                                what);
                     }
                 } else {
-                    WRN("invalid character \'%c\' (%d) in sixel repeat sequence\n", what, what);
+                    WRN("invalid character \'%s" TERMCOLOR_RESET ""
+                        "\' (%d) in sixel repeat sequence\n",
+                        control_char_get_pretty_string(what),
+                        what);
                 }
             } break;
 
@@ -189,7 +193,9 @@ static VtSixelSurface VtSixelSurface_new_from_data(uint8_t                    pi
             } break;
 
             default:
-                WRN("Invalid sixel character: %c (%d)\n", data[i], data[i]);
+                WRN("Invalid sixel character: '\%s" TERMCOLOR_RESET "\' (%d)\n",
+                    control_char_get_pretty_string(data[i]),
+                    data[i]);
                 ++i;
                 break;
         }

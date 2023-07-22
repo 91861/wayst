@@ -1,12 +1,13 @@
 #pragma once
 
+#include "util.h"
 #include "vt.h"
 #include "vt_private.h"
 
 #include "base64.h"
 #include "stb_image/stb_image.h"
 
-static const char* Vt_img_proto_display(Vt* self, uint32_t id, vt_image_proto_display_args_t args);
+static const char* Vt_img_proto_display(Vt* self, uint64_t id, vt_image_proto_display_args_t args);
 
 const char* Vt_img_proto_validate(Vt*                           self,
                                   vt_image_proto_transmission_t transmission_type,
@@ -277,8 +278,8 @@ const char* Vt_img_proto_transmit(Vt*                           self,
 
     if (surface && surface->state != VT_IMAGE_SURFACE_INCOMPLETE) {
         Vector_clear_uint8_t(&surface->fragments);
-        CALL(self->callbacks.destroy_image_proxy, self->callbacks.user_data, &surface->proxy);
         surface->state = VT_IMAGE_SURFACE_INCOMPLETE;
+        CALL(self->callbacks.destroy_image_proxy, self->callbacks.user_data, &surface->proxy);
     }
 
     if (!surface) {
@@ -293,12 +294,13 @@ const char* Vt_img_proto_transmit(Vt*                           self,
 
         if (id) {
             Vector_push_RcPtr_VtImageSurface(&self->images, rc);
-            surface = RcPtr_get_VtImageSurface(Vector_last_RcPtr_VtImageSurface(&self->images));
+            RcPtr_new_shared_in_place_of_VtImageSurface(&self->manipulated_image, &rc);
         } else {
             RcPtr_destroy_VtImageSurface(&self->manipulated_image);
             self->manipulated_image = rc;
-            surface                 = RcPtr_get_VtImageSurface(&self->manipulated_image);
         }
+
+        surface = RcPtr_get_VtImageSurface(&self->manipulated_image);
     }
 
     if (!payload) {
@@ -350,6 +352,7 @@ const char* Vt_img_proto_transmit(Vt*                           self,
                                                            &surface->width,
                                                            &surface->height,
                                                            &surface->bytes_per_pixel);
+
                         if (image) {
                             surface->state = VT_IMAGE_SURFACE_READY;
                             Vector_clear_uint8_t(&surface->fragments);
@@ -517,7 +520,7 @@ static void Vt_recalculate_VtImageSurfaceView_dimensions(Vt* self, VtImageSurfac
     }
 }
 
-static const char* Vt_img_proto_display(Vt* self, uint32_t id, vt_image_proto_display_args_t args)
+static const char* Vt_img_proto_display(Vt* self, uint64_t id, vt_image_proto_display_args_t args)
 {
     RcPtr_VtImageSurface* source = Vt_get_image_surface_rp(self, id);
 
