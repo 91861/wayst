@@ -1,73 +1,402 @@
-# '#' starts a line comment
-# Strings with spaces need double quotes (use \" for " and \\ for \).
 
-# Set a list of primary fonts (All available styles will be loaded)
-# You need to list EVERY font you want to use. for example:
-# "IBM Plex Sans Thai" for thai script, "Noto Sans Math" for math symbols.
-font = [
-    # You can set codepoint ranges to which a given font should be applied.
-    # Here we define <min>..u+24ff and u+2580..<max> to exclude the unicode
-    # box drawing block. Those characters will be loaded (if present) from
-    # the following fonts in this list.
-    "mononoki:..u+24ff:u+2580..",
-    "sauce code pro nerd font",
-    # Mixing ttf/otf with bitmap fonts is ok
-    # You can set an offset to keep fonts smaller/larger than the global size.
-    "Terminus:-3"
-]
+#  '#' starts a line comment
+#
+#  This file format uses ini-like key-value syntax.
+#
+#  All options are equivalent to coresponding command line options (except for lower precedence).
+#  To get a list of all options run `wayst --help`.
 
-# Or just use a single font
-# font = "IBM Plex Mono"
 
-# Set a list of 'symbol' fonts (Only the 'Regular' style will be loaded)
-font-symbol = [
-    "Noto Sans Symbols",
-    "FontAwesome"
-]
 
-# Set a list of color bitmap fonts.
-font-color = "Noto Color Emoji"
+#======================================[ FONT CONFIGURATION ]=======================================
 
-# use Semibold as the Bold style
-style-bold = "Semibold"
-font-size = 10
-dpi = 96
+## Set a list of primary fonts (All available styles will be loaded)
+## The list is scanned in order and glyphs are loaded from the first font that contains them.
+## You need to list EVERY font you want to use. For example:
+## "IBM Plex Sans Thai" for thai script, "Noto Sans Math" for math symbols.
+##
+## example
+## font = [
+##     # You can set codepoint ranges to which a given font should be applied.
+##     # Here we set <min>..u+24ff and u+2580..<max> to exclude the unicode
+##     # box drawing block. Those characters will be loaded (if present) from
+##     # the following font(s) in this list.
+##     "Hack:..u+24ff:u+2580..",
+##     "sauce code pro nerd font",
+##     # Mixing ttf/otf with bitmap fonts is ok.
+##     # You can set an offset to keep fonts smaller/larger than the global size.
+##     "Terminus:-3"
+## ]
+##
+## default:
+#
+#font = Monospace
 
-# Load one of the default colorschemes
-colorscheme = "wayst"
-# Overwrite parts of the colorscheme
-fg-color = "#c7eeff"
-bg-color = "#000000ee"
+## A list of fonts used for non-color symbols (only the Regular style is loaded)
+#
+#font-symbol = [
+#    "FontAwesome",
+#    "PowerlineSymbols"
+#]
 
-unfocused-tint = "#00000022"
+## A list of fonts used for color symbols (only the Regular style is loaded)
+#font-color = "Noto Color Emoji"
 
-visual-bell = none
+## Point size
+#font-size = 9
 
-term = "xterm-256color"
+## Bold font style
+#style-bold = Semibold
 
-title = "Terminal"
+## Italic font style
+#style-italic = Italic
+#
+## Bolditalic font style
+#style-bolditalic = Bold:Italic
 
-# Set the type of window decorations hint (depends on window manager support)
-# decorations = minimal
+## Load all fonts on startup
+#preload-all-fonts = true
 
-# You can format the window title using variables: sAppTitle, sVtTitle, bCommandIsRunning,
-# i32CommandTimeSec, sRunningCommand, i32Rows, i32Cols, i32Width, i32Height.
-# To interpolate a variable use '{variableName}'. Variables can be used to define simple conditionals
-# eg: '{?i32Width > 80:the window is wider than 80px}'
-# The default format string displays the reported command if its running longer than a second
-# title-format = "{sVtTitle}{?bCommandIsRunning && i32CommandTimeSec > 1: ({sRunningCommand})} - {sAppTitle}"
-# Other examples:
-# title-format = "{sAppTitle} - [{sVtTitle}]"                                         # Terminal - [zsh:~]
-# title-format = "{sVtTitle} [{i32Cols}x{i32Rows}]"                                   # zsh:~ [80x24]
-# title-format = "{sVtTitle}{?i32Cols != 80 || i32Rows != 24: [{i32Cols}x{i32Rows}]}" # zsh:~ [132x54]
+## Set static font DPI or calculate it based on physical display size and resolution.
+## If set to `auto` DPI will change automatically when the window is moved between displays with
+## different DPIs. The `output` option can override this setting for specific displays.
+#
+#dpi = auto
 
-title-format = "{sVtTitle}" # <set by program>
+## Force LCD subpixel order: none, rgb, bgr, vrgb, vbgr
+#fixed-lcd-order=vrgb
 
-scrollback = 1000
+## Output rule
+##
+## Moving the window to a display matching a wildcard pattern or display index will
+## set lcd geometry and dpi.
+## Lcd geometry options are: none, rgb, bgr, vrgb, vbgr
+## DPI can be set to `auto` to calculate from physical display dimensions. Or omitted to use global
+## setting.
+##
+## example:
+#output = "BENQ*:rgbv:102"
+#output = "S24D*:rgb"
 
-# key names are the same as xorg keysym names (case sensitive!)
-bind-key-debug=Ctrl+Shift+Return
-bind-key-enlarge=Ctrl+Shift+equal
-bind-key-shrink=Ctrl+Shift+minus
-bind-key-copy=Ctrl+Shift+y
-bind-key-paste=Ctrl+Shift+p
+## Glyph to be aligned to the cell center and vertical offset
+#glyph-align = (:2
+
+## Exclude codepoint ranges from lcd filtering (use grayscale)
+#exclude-lcd = 0..94
+
+## Use box-drawing characters contained in font instead of builtin ones
+#font-box-chars = true
+
+## Increase cell dimensions
+##  - Argument 1: horizontal [px]
+##  - Argument 2: vertical [px]
+#glyph-padding = 0:0
+
+
+
+#========================================[ MISCELLANEOUS ]==========================================
+
+## Override system locale
+#locale = C
+
+## Use cell size as window resize increments
+#incremental-resize = true
+
+## Set application id on wayland or WM_CLASS on X11
+## Accepts two arguments as WM_CLASS contains two strings. On wayland only the first one is used.
+#app-id = Wayst:Wayst
+
+## Set mouse pointer hiding behaviour. Options are:
+##  - true             - Hide on key press (client program may override)
+##  - false            - Do not hide (client program may override)
+##  - force_true       - Always hide on key press
+##  - force_false      - Never hide
+##  - if_not_reporting - Hide on key press unless any mouse event reporting mode is active
+#
+#hide-pointer = true
+
+## Start in directory
+#directory = /home/user
+
+
+
+#======================================[ TERMINAL EMULATION ]=======================================
+
+## Set TERM
+#term = "xterm-256color"
+
+## Report VTE compatibility, might break some programs (empty to disable)
+#vte-version = 6201
+
+## Number of usec to wait for incoming data before drawing and timeout in ms.
+## Increase those values to avoid flicker and improve throughput, decrease for more responsiveness.
+## (Similar to st's minlatency and maxlatency)
+#io-chunk-delay=5:30
+
+## Number of lines in scroll history
+#scrollback = 1000
+
+## Show bold text in bright colors
+#bold-is-bright = true
+
+## Application window title
+#title = Terminal
+
+## Window title format
+##
+## You can format the window title using predefined variables:
+## sAppTitle         - Application window title (string)
+## sVtTitle          - Window title set by client program (string)
+## bCommandIsRunning - Shell integration is active and a command is currently running (bool)
+## i32CommandTimeSec - Time in seconds (int32_t)
+## sRunningCommand   - invocation text of currently running command (unavailable when using VTE protocol) (string)
+## i32Rows           - Terminal cell row count (int32_t)
+## i32Cols           - Terminal call column count (int32_t)
+## i32Width          - Window width in pixels (int32_t)
+## i32Height         - Window height in pixels (int32_t)
+##
+## To interpolate a variable use `{variableName}`. Variables can be used to define simple conditionals
+## example: '{?i32Width > 80:the window is wider than 80px}'
+##
+## Supported logical expressions are: <, >, <=, >=, ==, !=, !, &&, ||.
+## The number `0` and empty string evaluate to `false`, other values to `true`
+## Ordering comperison between strings behaves like `strcmp`.
+## Comperison between strings and numbers uses string's length.
+## `\` is an escape character.
+##
+## Some examples:
+## title-format = "{sAppTitle} - [{sVtTitle}]"                                         # Terminal - [zsh:~]
+## title-format = "{sVtTitle} [{i32Cols}x{i32Rows}]"                                   # zsh:~ [80x24]
+## title-format = "{sVtTitle}{?i32Cols != 80 || i32Rows != 24: [{i32Cols}x{i32Rows}]}" # zsh:~ [132x54]
+##
+## default:
+#title-format = "{?sVtTitle:{sVtTitle} - }{?bCommandIsRunning && !bIsAltBufferEnabled && "i32CommandTimeSec > 1: ({sRunningCommand}) }{sAppTitle}"
+
+## Initial number of cell rows
+#rows = 24
+
+## Initial number of cell columns
+#columns = 80
+
+## Keep the terminal window open after program exit
+#hold = true
+
+## Do not allow programs to change the window title
+#no-dynamic-title = true
+
+## Allow programs to interact with the window system through xterm protocol extensions.
+## Note that this system was designed specifically for X11 (some functionality does not work on wayland).
+##  - Argument 1: manipulate the window
+##  - Argument 2: query information
+#
+#windowops = true:true
+
+## Set initial cursor style and if it should blink
+## Style options: block, beam, underline
+#cursor-style = block:true
+
+## Pipe output of the last command to an external program (needs shell integration).
+## Other options are `screen` (only visible line) and `buffer` (includes scrollback)
+## Similar to `https://st.suckless.org/patches/externalpipe/`
+## Your script needs execute permissions and will receive the following arguments:
+##   --rows=<rowCount>
+##   --columns=<columnCount>
+##   --pid=<terminalPid>
+##   --title=<currentWindowTitle>
+##   --x-window-id=<TerminalWindowXID>   (sent only if using X11)
+##   --command=<nameOfCommand>           (only if sending command output and name is available)
+##   --command-exit-code=<exitOfCommand> (only if sending command output)
+# extern-pipe = /path/to/your/script.sh:command
+
+## Lines scrolled per wheel click
+#scroll-lines = 3
+
+## Always use CSD's on wayland
+#force-csd = true
+
+
+
+#======================================[ COLORS AND THEMING ]=======================================
+# Colors can be formatted as:
+#  - CSS hex color notation (the `#` can be omitted)
+#  - CSS-like rgb() and rgba() in 0-255, 0.0-1.0, %, deg, rador grad
+#  - CSS-like hsl() and hsla() in 0.0-1.0, %, deg, rador grad
+#  - XParseColor()'s RGB specification
+#  - XParseColor()'s RGB intensity specification
+
+## Load one of the default colorschemes
+## options are: wayst, linux, xterm, rxvt, yaru, tango, orchis, solarized
+#colorscheme = tango
+
+## Overwrite parts of the colorscheme
+#
+## Background (transparent) and foreground colors (opaque)
+#bg-color = rgba(0,0,0,0.90)
+#fg-color = "#d8d8d8"
+#
+## Primary colorpalette (opaque colors)
+#
+#color-0 = "#606060"
+#color-1 = "#df9a98"
+#color-2 = "#719672"
+#color-3 = "#e0bb71"
+#color-4 = "#96bbdc"
+#color-5 = "#dfbdbc"
+#color-6 = "#97bcbc"
+#color-7 = "#d8d8d8"
+#color-8 = "#757575"
+#color-9 = "#e07798"
+#color-10 = "#97bb98"
+#color-11 = "#ffdd98"
+#color-12 = "#badcfb"
+#color-13 = "#ffbebc"
+#color-14 = "#96ddde"
+#color-15 = "#e9e9e9"
+
+## Highlighted text background color (transparent)
+#highlight-bg-color = "#ffffff"
+
+## Highlighted text foreground color (opaque)
+#highlight-fg-color = "#000000"
+
+### Tint color for aout of focus windws (transparent)
+#unfocused-tint = "#00000011"
+
+## Set visual bell color (transparent) or `none` to disable
+#visual-bell = none
+
+## Enable background blur hints for KDE Plasma
+#bg-blur = true
+
+## Use minimal window decorations.
+## Uses Motif Window Manager hints on X11 (very few WMs support this). Does not work on wayland.
+#decorations = minimal
+
+## Set _GTK_THEME_VARIANT hinting X11 window decorators to use a light or dark theme (very few WMs support this)
+## Options are:
+##  - none
+##  - dark
+##  - light
+##  - auto (autoselect theme based on `bg-color` brightness)
+#decoration-theme = auto
+
+## Animate cursor
+##  - Argument 1: Smooth transitions for horizontal movement
+##  - Argument 2: Smooth blinking
+##  - Argument 3: Fraction of the cursor blink interval fading animation should last
+#cursor-anim = false:true:0.25
+
+## Cursor blinking parameters
+##  - Argument 1: enable
+##  - Argument 2: time to switch between cursor shown/hidden [ms]
+##  - Argument 3: suspend cursor blinking afer kbd input [ms]
+##  - Argument 4: stop cursor from blinking alfer a time of inactivity [s]
+#blink=true:750:500:15
+
+## Scrollbar dimensions
+##  - Argument 1: width [px]
+##  - Argument 2: minimum length [px]
+##  - Argument 3: hide delay [ms]
+##  - Argument 4: hide animation time [ms]
+#
+#scrollbar = 10:20:1500:150
+
+## Pad screen content
+##  - Argument 1: Center screen content instead of aligning to top left
+##  - Argument 2: Blank space around content [px]
+#padding = true:0
+
+## Draw links underlined even if not hovered
+#always-underline-links = false
+
+
+
+#=========================================[ KEYBINDINGS ]===========================================
+# Key names are keysym names (Case sensitive!).
+#     see /usr/include/X11/keysymdef.h
+#
+# Modifier aliases:
+#    Control: C, Ctrl, Control,
+#    Alt:     A, M, Alt, Meta,
+#    Shift:   S, Shift
+#
+# Examples:
+#   Control+Shift+Alt+Super_L
+#   M+x
+
+## Copy to clipbord
+#bind-key-copy=C+S+c
+
+## Paste from clipbord
+#bind-key-paste=C+S+v
+
+## Increase font size
+#bind-key-enlarge=C+S+equal
+
+## Decrease font size
+#bind-key-shrink=C+S+minus
+
+## Activate unicode entry mode
+#bind-key-unicode=C+S+u
+
+## Scroll up by page
+#bind-key-pg-up=C+S+Page_Up
+
+## Scroll down by page
+#bind-key-pg-down=C+S+Page_Down
+
+## Scroll up by line
+#bind-key-ln-up=C+S+Up
+
+## Scroll down by line
+#bind-key-ln-down=C+S+Down
+
+## Scroll up to previous mark or command output (requires shell integration)
+#bind-key-mark-up=C+S+Left
+
+## Scroll down to next mark or command output (requires shell integration)
+#bind-key-mark-down=C+S+Right
+
+## Copy last command output to clipboard (requires shell integration)
+#bind-key-copy-output=C+S+x
+
+## Pipe screen content to external program
+#bind-key-extern-pipe=C+S+backslash
+
+## Enter vim-like keyboard select mode
+#bind-key-kbd-select=C+S+k
+
+## Open shell's working directory (set with shell integration) as URI
+## By default uses xdg-open (should open your default file manager)
+#bind-key-open-pwd=C+S+F10
+
+## Save screen content as HTML document
+#bind-key-html-dump=C+S+F12
+
+## Open a new terminal instance in current directory
+#bind-key-duplicate=C+S+d
+
+## Close terminal
+#bind-key-quit=C+S+q
+
+## Print debuging information to stderr
+#bind-key-debug=C+S+slash
+
+
+
+#=======================================[ DEBUGING OPTIONS ]========================================
+
+## Output pty communication to stderr
+#debug-pty = true
+
+## Slow down the interpreter to usec per byte, force screen redraw after each byte.
+#debug-vt = 5000
+
+## Run renderer in debug mode:
+##  - partial swap regions swapped marked with red boxes (actual partial swap disabled)
+##  - When text proxy textures are reused old content is tinted white
+##  - adds a triangle in the top left alternating visibilityy each frame
+#debug-gfx = true
+
+## Show font information on starts
+#debug-font = true
