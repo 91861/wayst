@@ -1922,6 +1922,7 @@ static void WindowX11_set_wm_name(WindowBase* self, const char* class_name, cons
 static bool WindowX11_maybe_swap(WindowBase* self, bool do_swap)
 {
     WindowX11* winx = windowX11(self);
+    WindowX11_events(self);
 
     if (self->paint && !FLAG_IS_SET(self->state_flags, WINDOW_IS_MINIMIZED) && do_swap) {
         self->paint = false;

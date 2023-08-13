@@ -3842,11 +3842,11 @@ static void GfxOpenGL2_draw_cursor(GfxOpenGL2* gfx, const Vt* vt, const Ui* ui)
 
     if (settings.animate_cursor_blink) {
         show_blink = !settings.enable_cursor_blink || !ui->window_in_focus ||
-                     !ui->cursor->blinking || (ui->cursor->blinking && ui->draw_cursor_blinking);
-    } else {
-        show_blink = !settings.enable_cursor_blink || !ui->window_in_focus ||
                      !ui->cursor->blinking ||
                      (ui->cursor->blinking && ui->cursor_fade_fraction > 0.0);
+    } else {
+        show_blink = !settings.enable_cursor_blink || !ui->window_in_focus ||
+                     !ui->cursor->blinking || (ui->cursor->blinking && ui->draw_cursor_blinking);
     }
 
     gfx->frame_overlay_damage->curosr_position_x =
@@ -3932,7 +3932,7 @@ static void GfxOpenGL2_draw_cursor(GfxOpenGL2* gfx, const Vt* vt, const Ui* ui)
     ColorRGBA clr = Vt_rune_cursor_bg(vt, cursor_rune);
 
     if (!filled_block) {
-        if (settings.animate_cursor_blink && drawing_with_transparency) {
+        if (settings.animate_cursor_blink && drawing_with_transparency && ui->window_in_focus) {
             Shader_use(&gfx->line_shader_alpha);
             glEnable(GL_BLEND);
             glUniform4f(gfx->line_shader_alpha.uniforms[1].location,

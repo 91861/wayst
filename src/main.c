@@ -278,7 +278,6 @@ static void App_cursor_blink_switch_timer_handler(void* self)
     }
 
     app->ui.cursor_fade_fraction = app->ui.draw_cursor_blinking;
-
     App_notify_content_change(self);
 }
 
@@ -287,6 +286,7 @@ static void App_cursor_fade_switch_delay_timer_handler(void* self)
 {
     App* app = self;
     if (app->cursor_blink_animation_should_play) {
+        app->ui.draw_cursor_blinking = !app->ui.draw_cursor_blinking;
         TimerManager_schedule_tween_from_now(
           &app->timer_manager,
           app->cursor_blink_switch_timer,
@@ -299,11 +299,10 @@ static void App_cursor_fade_switch_delay_timer_handler(void* self)
 static void App_cursor_fade_switch_timer_handler(void* self, double fraction, bool completed)
 {
     App* app                     = self;
-    app->ui.cursor_fade_fraction = app->ui.draw_cursor_blinking ? 1.0 - fraction : fraction;
+    app->ui.cursor_fade_fraction = app->ui.draw_cursor_blinking ? (1.0 - fraction) : fraction;
+
 
     if (completed) {
-        app->ui.draw_cursor_blinking = !app->ui.draw_cursor_blinking;
-
         if (app->cursor_blink_animation_should_play) {
             TimerManager_schedule_point(
               &app->timer_manager,
@@ -313,7 +312,14 @@ static void App_cursor_fade_switch_timer_handler(void* self, double fraction, bo
         }
     }
 
-    App_notify_content_change(self);
+
+    if (likely(Window_is_focused(app->win))) {
+        App_notify_content_change(self);
+    } else {
+        app->ui.cursor_fade_fraction = 1.0;
+    }
+
+
 }
 
 /* Switch between blinking text shown/hidden */
