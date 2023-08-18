@@ -182,11 +182,6 @@ static void Window_update_title(struct WindowBase* self, const char* title)
     }
 }
 
-static void Window_set_ui_obj_addr(struct WindowBase* self, Ui* ui)
-{
-    self->ui = ui;
-}
-
 /* Froward interface functions */
 static inline void* Window_get_proc_adress(struct WindowBase* self, const char* procname)
 {

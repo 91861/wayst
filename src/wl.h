@@ -8,9 +8,12 @@
 
 #pragma once
 
-#include "window.h"
 #include "util.h"
+#include "window.h"
 
-struct WindowBase* Window_new_wayland(Pair_uint32_t res, Pair_uint32_t cell_dims, gfx_api_t gfx_api);
+struct WindowBase* Window_new_wayland(Pair_uint32_t res,
+                                      Pair_uint32_t cell_dims,
+                                      gfx_api_t     gfx_api,
+                                      Ui*           ui);
 
 #endif

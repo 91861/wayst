@@ -135,6 +135,7 @@ static void          App_framebuffer_damage(void* self);
 static Pair_uint32_t App_get_char_size(void* self);
 static bool          App_fullscreen(void* self);
 static void          App_maybe_swap_window(App* self);
+static void          App_csd_changed(void* self, ui_csd_mode_e csd_mode);
 static void          App_primary_output_changed(void*         self,
                                                 const int32_t display_index,
                                                 const char*   display_name,
@@ -171,14 +172,14 @@ static void App_create_window(App* self, Pair_uint32_t res, Pair_uint32_t cell_d
 
 #if !defined(NOX) && !defined(NOWL)
     if (!settings.x11_is_default)
-        self->win = Window_new_wayland(res, cell_dims, gfx);
+        self->win = Window_new_wayland(res, cell_dims, gfx, &self->ui);
     if (!self->win) {
-        self->win = Window_new_x11(res, cell_dims, gfx);
+        self->win = Window_new_x11(res, cell_dims, gfx, &self->ui);
     }
 #elif !defined(NOWL)
-    self->win = Window_new_wayland(res, cell_dims, gfx);
+    self->win = Window_new_wayland(res, cell_dims, gfx, &self->ui);
 #else
-    self->win = Window_new_x11(res, cell_dims, gfx);
+    self->win = Window_new_x11(res, cell_dims, gfx, &self->ui);
 #endif
 
     if (!self->win) {
@@ -188,8 +189,6 @@ static void App_create_window(App* self, Pair_uint32_t res, Pair_uint32_t cell_d
 #endif
         );
     }
-
-    Window_set_ui_obj_addr(self->win, &self->ui);
 }
 
 static void App_show_scrollbar(App* self)
@@ -301,7 +300,6 @@ static void App_cursor_fade_switch_timer_handler(void* self, double fraction, bo
     App* app                     = self;
     app->ui.cursor_fade_fraction = app->ui.draw_cursor_blinking ? (1.0 - fraction) : fraction;
 
-
     if (completed) {
         if (app->cursor_blink_animation_should_play) {
             TimerManager_schedule_point(
@@ -312,14 +310,11 @@ static void App_cursor_fade_switch_timer_handler(void* self, double fraction, bo
         }
     }
 
-
     if (likely(Window_is_focused(app->win))) {
         App_notify_content_change(self);
     } else {
         app->ui.cursor_fade_fraction = 1.0;
     }
-
-
 }
 
 /* Switch between blinking text shown/hidden */
@@ -393,9 +388,6 @@ static void App_init(App* self)
                                self->win->lcd_filter,
                                self->win->dpi);
 
-    /* We may have gotten events during initialization. We can ignore everything except for focus */
-    App_focus_changed(self, FLAG_IS_SET(self->win->state_flags, WINDOW_IS_IN_FOCUS));
-
     settings_after_window_system_connected();
     Window_set_swap_interval(self->win, 0);
     Gfx_init_with_context_activated(self->gfx);
@@ -412,6 +404,15 @@ static void App_init(App* self)
     self->ui.draw_cursor_blinking            = true;
     self->cursor_blink_animation_should_play = false;
     self->tex_blink_animation_should_play    = true;
+
+    /* We may have gotten some events before callbacks were connected. We can ignore everything
+     * except for window focus and ... */
+    App_focus_changed(self, FLAG_IS_SET(self->win->state_flags, WINDOW_IS_IN_FOCUS));
+
+    /* ... CSD state. */
+    if (self->ui.csd.mode != UI_CSD_MODE_NONE) {
+        App_csd_changed(self, self->ui.csd.mode);
+    }
 
     Window_events(self->win);
 
@@ -2110,9 +2111,9 @@ static void App_focus_changed(void* self, bool current_state)
 {
     App* app = self;
     Window_notify_content_change(app->win);
-    app->ui.window_in_focus = current_state;
-
+    app->ui.window_in_focus        = current_state;
     app->ui.csd.requires_attention = false;
+
     if (app->ui.csd.mode) {
         App_framebuffer_damage(self);
     }

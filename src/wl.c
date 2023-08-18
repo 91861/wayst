@@ -93,31 +93,31 @@ PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC eglSwapBuffersWithDamageKHR;
 static struct wl_data_source_listener data_source_listener;
 static void                           cursor_set(struct wl_cursor* what, uint32_t serial);
 static void                           WindowWl_dont_swap_buffers(struct WindowBase* self);
-struct WindowBase*                    WindowWl_new(uint32_t w, uint32_t h, gfx_api_t gfx_api_t);
-static void       WindowWl_set_maximized(struct WindowBase* self, bool maximized);
-static void       WindowWl_set_minimized(struct WindowBase* self);
-static void       WindowWl_set_fullscreen(struct WindowBase* self, bool fullscreen);
-static void       WindowWl_resize(struct WindowBase* self, uint32_t w, uint32_t h);
-static void       WindowWl_events(struct WindowBase* self);
-static TimePoint* WindowWl_process_timers(struct WindowBase* self);
-static void       WindowWl_set_swap_interval(struct WindowBase* self, int32_t ival);
-static void       WindowWl_set_wm_name(struct WindowBase* self, const char* title);
-static void       WindowWl_set_title(struct WindowBase* self, const char* title);
-static bool       WindowWl_maybe_swap(WindowBase* self, bool do_swap);
-static void       WindowWl_destroy(struct WindowBase* self);
-static int        WindowWl_get_connection_fd(struct WindowBase* self);
-static void       WindowWl_clipboard_send(struct WindowBase* self, const char* text);
-static void       WindowWl_clipboard_get(struct WindowBase* self);
-static void       WindowWl_primary_send(struct WindowBase* self, const char* text);
-static void       WindowWl_primary_get(struct WindowBase* self);
-static void*      WindowWl_get_gl_ext_proc_adress(struct WindowBase* self, const char* name);
-static uint32_t   WindowWl_get_keycode_from_name(struct WindowBase* self, char* name);
-static void       WindowWl_set_pointer_style(struct WindowBase* self, enum MousePointerStyle style);
-static void       WindowWl_set_current_context(struct WindowBase* self, bool this);
-static void       WindowWl_set_urgent(struct WindowBase* self);
-static void       WindowWl_set_stack_order(struct WindowBase* self, bool front_or_back);
-static void       WindowWl_set_incremental_resize(struct WindowBase* self, uint32_t x, uint32_t y);
-static int64_t    WindowWl_get_window_id(struct WindowBase* self)
+struct WindowBase* WindowWl_new(uint32_t w, uint32_t h, gfx_api_t gfx_api_t, Ui* ui);
+static void        WindowWl_set_maximized(struct WindowBase* self, bool maximized);
+static void        WindowWl_set_minimized(struct WindowBase* self);
+static void        WindowWl_set_fullscreen(struct WindowBase* self, bool fullscreen);
+static void        WindowWl_resize(struct WindowBase* self, uint32_t w, uint32_t h);
+static void        WindowWl_events(struct WindowBase* self);
+static TimePoint*  WindowWl_process_timers(struct WindowBase* self);
+static void        WindowWl_set_swap_interval(struct WindowBase* self, int32_t ival);
+static void        WindowWl_set_wm_name(struct WindowBase* self, const char* title);
+static void        WindowWl_set_title(struct WindowBase* self, const char* title);
+static bool        WindowWl_maybe_swap(WindowBase* self, bool do_swap);
+static void        WindowWl_destroy(struct WindowBase* self);
+static int         WindowWl_get_connection_fd(struct WindowBase* self);
+static void        WindowWl_clipboard_send(struct WindowBase* self, const char* text);
+static void        WindowWl_clipboard_get(struct WindowBase* self);
+static void        WindowWl_primary_send(struct WindowBase* self, const char* text);
+static void        WindowWl_primary_get(struct WindowBase* self);
+static void*       WindowWl_get_gl_ext_proc_adress(struct WindowBase* self, const char* name);
+static uint32_t    WindowWl_get_keycode_from_name(struct WindowBase* self, char* name);
+static void    WindowWl_set_pointer_style(struct WindowBase* self, enum MousePointerStyle style);
+static void    WindowWl_set_current_context(struct WindowBase* self, bool this);
+static void    WindowWl_set_urgent(struct WindowBase* self);
+static void    WindowWl_set_stack_order(struct WindowBase* self, bool front_or_back);
+static void    WindowWl_set_incremental_resize(struct WindowBase* self, uint32_t x, uint32_t y);
+static int64_t WindowWl_get_window_id(struct WindowBase* self)
 {
     return -1;
 }
@@ -1712,7 +1712,6 @@ static void xdg_surface_handle_configure(void*               data,
     Window_notify_content_change(win);
     xdg_surface_ack_configure(xdg_surface, serial);
 }
-
 static const struct xdg_surface_listener xdg_surface_listener = { .configure =
                                                                     xdg_surface_handle_configure };
 
@@ -1760,16 +1759,19 @@ static void xdg_toplevel_handle_configure(void*                data,
     if (WindowWl_csd_enabled(win)) {
         if (is_fullscreen) {
             WindowWl_hide_csd(win);
+            win->ui->csd.mode = UI_CSD_MODE_NONE;
             TRY_CALL(win->callbacks.on_csd_style_changed,
                      win->callbacks.user_data,
                      UI_CSD_MODE_NONE);
         } else if (is_maximized || is_tiled) {
             WindowWl_show_tiled_csd(win);
+            win->ui->csd.mode = UI_CSD_MODE_TILED;
             TRY_CALL(win->callbacks.on_csd_style_changed,
                      win->callbacks.user_data,
                      UI_CSD_MODE_TILED);
         } else {
             WindowWl_show_floating_csd(win);
+            win->ui->csd.mode = UI_CSD_MODE_FLOATING;
             TRY_CALL(win->callbacks.on_csd_style_changed,
                      win->callbacks.user_data,
                      UI_CSD_MODE_FLOATING);
@@ -1839,11 +1841,11 @@ static lcd_filter_e wl_subpixel_to_lcd_filter(int32_t subpixel)
 }
 
 /* Information about an output is sent (initially or updated) by wl_output.geometry and/or
- * wl_output.mode events that can come in any order. The wl_output.done event is used to indicate
- * that the compositor has sent all info about a specific output. Record data from last received
- * 'mode' and 'output' events so we can apply them on 'done'. If the output parameter of 'done'
- * matches any of the existing wl_output-s we have, interpret it as an update to that output
- * atherwise add it. */
+ * wl_output.mode events that can come in any order. The wl_output.done event is used to
+ * indicate that the compositor has sent all info about a specific output. Record data from last
+ * received 'mode' and 'output' events so we can apply them on 'done'. If the output parameter
+ * of 'done' matches any of the existing wl_output-s we have, interpret it as an update to that
+ * output atherwise add it. */
 typedef struct
 {
     bool         geometry_event_received;
@@ -2432,7 +2434,7 @@ static void cursor_set(struct wl_cursor* what, uint32_t serial)
 }
 
 /* Window */
-struct WindowBase* WindowWl_new(uint32_t w, uint32_t h, gfx_api_t gfx_api)
+struct WindowBase* WindowWl_new(uint32_t w, uint32_t h, gfx_api_t gfx_api, Ui* ui)
 {
     global = _calloc(1, sizeof(WindowStatic) + sizeof(GlobalWl) - sizeof(uint8_t));
     global->target_frame_time_ms = 16;
@@ -2453,6 +2455,7 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h, gfx_api_t gfx_api)
 
     win->w                 = w;
     win->h                 = h;
+    win->ui                = ui;
     windowWl(win)->outputs = Map_new_wl_output_ptr_WlOutputInfo(4);
     FLAG_SET(win->state_flags, WINDOW_IS_IN_FOCUS);
     FLAG_SET(win->state_flags, WINDOW_IS_MINIMIZED);
@@ -2576,8 +2579,8 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h, gfx_api_t gfx_api)
         if (settings.decoration_style != DECORATION_STYLE_NONE) {
             if (globalWl->decoration_manager && !settings.force_csd) {
                 /* KDE has it's own SSD protocol extension, but it is only supported by kwin and
-                 * wlr, both of them also support zxdg_toplevel_decoration_v1. There is no point in
-                 * implementing it. */
+                 * wlr, both of them also support zxdg_toplevel_decoration_v1. There is no point
+                 * in implementing it. */
                 windowWl(win)->toplevel_decoration =
                   zxdg_decoration_manager_v1_get_toplevel_decoration(globalWl->decoration_manager,
                                                                      windowWl(win)->xdg_toplevel);
@@ -2648,9 +2651,12 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h, gfx_api_t gfx_api)
     return win;
 }
 
-struct WindowBase* Window_new_wayland(Pair_uint32_t res, Pair_uint32_t cell_dims, gfx_api_t gfx_api)
+struct WindowBase* Window_new_wayland(Pair_uint32_t res,
+                                      Pair_uint32_t cell_dims,
+                                      gfx_api_t     gfx_api,
+                                      Ui*           ui)
 {
-    struct WindowBase* win = WindowWl_new(res.first, res.second, gfx_api);
+    struct WindowBase* win = WindowWl_new(res.first, res.second, gfx_api, ui);
 
     if (!win) {
         return NULL;
@@ -2909,7 +2915,6 @@ static void WindowWl_set_title(struct WindowBase* self, const char* title)
 static void WindowWl_destroy(struct WindowBase* self)
 {
     WindowWl_set_no_context();
-
 
     if (globalWl->cursor_theme) {
         wl_surface_destroy(globalWl->cursor_surface);

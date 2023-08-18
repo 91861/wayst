@@ -116,7 +116,8 @@ static WindowBase* WindowX11_new(uint32_t  w,
                                  uint32_t  h,
                                  uint32_t  cellx,
                                  uint32_t  celly,
-                                 gfx_api_t gfx_api);
+                                 gfx_api_t gfx_api,
+                                 Ui*       ui);
 static void        WindowX11_set_fullscreen(WindowBase* self, bool fullscreen);
 static void        WindowX11_set_maximized(WindowBase* self, bool maximized);
 static void        WindowX11_set_minimized(WindowBase* self)
@@ -448,7 +449,8 @@ static WindowBase* WindowX11_new(uint32_t  w,
                                  uint32_t  h,
                                  uint32_t  cellx,
                                  uint32_t  celly,
-                                 gfx_api_t gfx_api)
+                                 gfx_api_t gfx_api,
+                                 Ui*       ui)
 {
     bool init_globals = false;
 
@@ -518,6 +520,7 @@ static WindowBase* WindowX11_new(uint32_t  w,
 
     win->w                            = w;
     win->h                            = h;
+    win->ui                           = ui;
     win->interface                    = &window_interface_x11;
     static const int visual_attribs[] = { GLX_RENDER_TYPE,
                                           GLX_RGBA_BIT,
@@ -911,10 +914,10 @@ static WindowBase* WindowX11_new(uint32_t  w,
     return win;
 }
 
-WindowBase* Window_new_x11(Pair_uint32_t res, Pair_uint32_t cell_dims, gfx_api_t gfx_api)
+WindowBase* Window_new_x11(Pair_uint32_t res, Pair_uint32_t cell_dims, gfx_api_t gfx_api, Ui* ui)
 {
     WindowBase* win =
-      WindowX11_new(res.first, res.second, cell_dims.first, cell_dims.second, gfx_api);
+      WindowX11_new(res.first, res.second, cell_dims.first, cell_dims.second, gfx_api, ui);
 
     if (!win) {
         return NULL;
