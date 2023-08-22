@@ -232,6 +232,8 @@ static void* _malloc(size_t size)
 }
 
 _Pragma("GCC diagnostic push");
+_Pragma("GCC diagnostic ignored \"-Wpragmas\"");
+_Pragma("GCC diagnostic push");
 _Pragma("GCC diagnostic ignored \"-Wuse-after-free\"");
 static void* _realloc(void* ptr, size_t new_size)
 {
@@ -244,6 +246,7 @@ static void* _realloc(void* ptr, size_t new_size)
     }
     return ret;
 }
+_Pragma("GCC diagnostic pop");
 _Pragma("GCC diagnostic pop");
 
 #ifndef asprintf
@@ -441,6 +444,8 @@ int spawn_process(const char* opt_work_directory,
                   bool        open_pipe_to_stdin);
 
 _Pragma("GCC diagnostic push");
+_Pragma("GCC diagnostic ignored \"-Wpragmas\"");
+_Pragma("GCC diagnostic push");
 _Pragma("GCC diagnostic ignored \"-Wunused-function\"");
 _Pragma("GCC diagnostic push");
 _Pragma("GCC diagnostic ignored \"-Wunused-parameter\"");
@@ -522,7 +527,7 @@ static inline char* get_running_binary_path()
 }
 
 /**
- * string that keep track if it was malloc()-ed */
+ * Static or malloc()-ed string */
 typedef struct
 {
     char* str;
@@ -595,5 +600,6 @@ static inline AString AString_new_copy(AString* other)
     }
 }
 
+_Pragma("GCC diagnostic pop");
 _Pragma("GCC diagnostic pop");
 _Pragma("GCC diagnostic pop");
