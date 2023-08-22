@@ -5210,7 +5210,7 @@ window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, const Vt* vt, Ui* ui, 
         GfxOpenGL2_draw_flash(gfx, ui->flash_fraction);
     }
 
-    if (unlikely(ui->draw_out_of_focus_tint && settings.dim_tint.a)) {
+    if (unlikely(!ui->window_in_focus && settings.dim_tint.a)) {
         retval = NULL;
         if (Ui_csd_titlebar_visible(ui)) {
             glViewport(0, 0, gfx->win_w, gfx->win_h - UI_CSD_TITLEBAR_HEIGHT_PX);

@@ -78,7 +78,6 @@ typedef struct
     uint16_t         last_cursor_row_position;
 
     hovered_link_t hovered_link;
-    bool           draw_out_of_focus_tint;
     bool           window_in_focus;
     double         flash_fraction;
     double         cursor_fade_fraction;
@@ -153,6 +152,6 @@ static void Ui_destroy(Ui* self)
 
 static bool Ui_any_overlay_element_visible(Ui* ui)
 {
-    return ui->scrollbar.visible || (ui->draw_out_of_focus_tint && settings.dim_tint.a != 0.0) ||
+    return ui->scrollbar.visible || (!ui->window_in_focus && settings.dim_tint.a != 0.0) ||
            ui->flash_fraction != 0.0 || ui->hovered_link.active;
 }
