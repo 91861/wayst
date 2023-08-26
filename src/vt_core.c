@@ -2095,12 +2095,13 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
             /* <ESC>[> ... */
             case '>': {
                 switch (last_char) {
-                    /* Report xterm name and version (XTVERSION) */
+                    /* Report xterm name and version (XTVERSION)
+                     *   example: \eP>|XTerm(384)\e\ */
                     case 'q': {
                         MULTI_ARG_IS_ERROR;
                         int arg = short_sequence_get_int_argument(seq);
                         if (arg == 0) {
-                            Vt_output_formated(self, "\eP|%s%s\e\\", APPLICATION_NAME, VERSION);
+                            Vt_output_formated(self, "\eP>|%s(%s)\e\\", APPLICATION_NAME, VERSION);
                         }
                     } break;
 
