@@ -29,9 +29,10 @@ Categories=System;TerminalEmulator;
 Name=$app_name
 GenericName=Terminal
 Comment=A simple terminal emulator
+X-ExecArg=-e
 Keywords=$app_name;terminal;"
 
-echo -e "$content" > "$(dirname $0)/$desktop_file_name"
+echo "$content" > "$(dirname $0)/$desktop_file_name"
 xdg-desktop-menu install "$(dirname $0)/$desktop_file_name" --novendor
 
 install_icons() {
