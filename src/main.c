@@ -100,17 +100,20 @@ typedef struct
         SELECT_DRAG_RIGHT_BACK
     } selection_dragging_right;
 
-    float       scrollbar_drag_position;
-    uint8_t     click_count;
-    bool        selection_dragging_left;
-    bool        keyboard_select_mode;
-    bool        last_scrolling;
-    bool        autoselect;
-    bool        exit;
-    bool        cursor_blink_animation_should_play;
-    bool        tex_blink_animation_should_play;
-    bool        csd_mode_changed_before_resize;
-    bool        did_paint_in_sync_update_mode;
+    float   scrollbar_drag_position;
+    uint8_t click_count;
+    bool    selection_dragging_left;
+    bool    keyboard_select_mode;
+    bool    last_scrolling;
+    bool    autoselect;
+    bool    exit;
+
+    /* we are in a time period after kbd input when the cursor should blink */
+    bool cursor_blink_animation_should_play;
+    bool tex_blink_animation_should_play;
+    bool csd_mode_changed_before_resize;
+    bool did_paint_in_sync_update_mode;
+
     VtCursor    ksm_cursor;
     Vector_char ksm_input_buf;
     TimePoint   ksm_last_input;
@@ -804,9 +807,8 @@ static void App_flash(void* self)
                                       VISUAL_BELL_FLASH_DURATION_MS);
 }
 
-static void App_action(void* self)
+static void App_restart_cursor_blink(App* app)
 {
-    App* app                                = self;
     app->cursor_blink_animation_should_play = false;
     app->ui.draw_cursor_blinking            = true;
     app->ui.cursor_fade_fraction            = 1.0;
@@ -818,6 +820,12 @@ static void App_action(void* self)
                                 app->cursor_blink_end_timer,
                                 TimePoint_s_from_now(settings.cursor_blink_end_s));
     TimerManager_cancel(&app->timer_manager, app->cursor_blink_switch_timer);
+}
+
+static void App_action(void* self)
+{
+    App* app = self;
+    App_restart_cursor_blink(app);
 
     if (!Window_is_pointer_hidden(app->win)) {
         App_update_hover(

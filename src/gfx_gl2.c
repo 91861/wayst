@@ -1088,7 +1088,7 @@ __attribute__((cold)) static void GfxOpenGL2_maybe_generate_boxdraw_atlas_page(G
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glTexImage2D(GL_TEXTURE_2D,
                  0,
-                 GL_RGB,
+                 GL_RED,
                  self.width_px,
                  self.height_px,
                  0,
@@ -1994,7 +1994,7 @@ __attribute__((cold)) GlyphAtlasEntry* GlyphAtlas_get_combined(GfxOpenGL2* gfx,
         float w = scalex * output->width;
         float h = scaley * output->height;
 
-        float x = -1.0 + (i ? ((tex.w - output->width) / 2 * scalex) : l);
+        float x = -1.0 + (i ? ((tex.w - output->width) / 2.0 * scalex) : l);
         float y = 1.0 - t + h;
         y       = CLAMP(y, -1.0 + h, 1.0);
 
@@ -2403,7 +2403,7 @@ void GfxOpenGL2_init_with_context_activated(Gfx* self)
                 glGetString(GL_SHADING_LANGUAGE_VERSION));
     }
 
-    gl2->float_vec = Vector_new_with_capacity_Vector_float(3);
+    gl2->float_vec = Vector_new_with_capacity_Vector_float(4);
     Vector_push_Vector_float(&gl2->float_vec, Vector_new_float());
 
 #ifndef GFX_GLES
@@ -3111,7 +3111,7 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
                          pass->args.is_for_cursor)
 
         if (idx_each_rune == subpass->args.render_range_end ||
-            !ColorRGBA_eq(L_COLOR_BG, active_bg_color)) {
+            (!pass->args.is_for_cursor && !ColorRGBA_eq(L_COLOR_BG, active_bg_color))) {
             int32_t extra_width = 0;
 
             if (idx_each_rune > 1) {
@@ -3191,6 +3191,7 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
                                   GlyphAtlas_get(pass->args.gl2,
                                                  &pass->args.gl2->glyph_atlas,
                                                  &each_rune_filtered_visible->rune);
+
                                 if (!entry) {
                                     continue;
                                 }
@@ -3261,9 +3262,14 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
                             Vector_float*   v    = &pass->args.gl2->float_vec.buf[i];
                             GlyphAtlasPage* page = &pass->args.gl2->glyph_atlas.pages.buf[i];
 
+                            if (!v->size) {
+                                continue;
+                            }
+
                             glBindTexture(GL_TEXTURE_2D, page->texture_id);
                             glBindBuffer(GL_ARRAY_BUFFER, pass->args.gl2->flex_vbo.vbo);
 
+                            const int VERTEX_SIZE = 4;
                             size_t newsize = v->size * sizeof(float);
                             ARRAY_BUFFER_SUB_OR_SWAP(v->buf,
                                                      pass->args.gl2->flex_vbo.size,
@@ -3282,7 +3288,7 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
                                     }
                                     glVertexAttribPointer(
                                       pass->args.gl2->font_shader.attribs->location,
-                                      4,
+                                      VERTEX_SIZE,
                                       GL_FLOAT,
                                       GL_FALSE,
                                       0,
@@ -3305,9 +3311,18 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
                                         pass->args.gl2->bound_resources = BOUND_RESOURCES_FONT_MONO;
                                         glUseProgram(pass->args.gl2->font_shader_gray.id);
                                     }
+#ifndef GFX_GLES
+                                    glDisable(GL_DEPTH_TEST);
+#else
+                                    glEnable(GL_BLEND);
+                                    glBlendFuncSeparate(GL_SRC_ALPHA,
+                                                        GL_ONE_MINUS_SRC_ALPHA,
+                                                        GL_ONE,
+                                                        GL_ONE_MINUS_SRC_ALPHA);
+#endif
                                     glVertexAttribPointer(
                                       pass->args.gl2->font_shader_gray.attribs->location,
-                                      4,
+                                      VERTEX_SIZE,
                                       GL_FLOAT,
                                       GL_FALSE,
                                       0,
@@ -3318,13 +3333,14 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
                                       ColorRGB_get_float(active_fg_color, 0),
                                       ColorRGB_get_float(active_fg_color, 1),
                                       ColorRGB_get_float(active_fg_color, 2));
+#ifndef GFX_GLES
                                     glUniform4f(
                                       pass->args.gl2->font_shader_gray.uniforms[2].location,
                                       ColorRGBA_get_float(active_bg_color, 0),
                                       ColorRGBA_get_float(active_bg_color, 1),
                                       ColorRGBA_get_float(active_bg_color, 2),
                                       ColorRGBA_get_float(active_bg_color, 3));
-
+#endif
                                     break;
                                 case TEX_FMT_RGBA:
                                     if (pass->args.gl2->bound_resources != BOUND_RESOURCES_IMAGE) {
@@ -3342,7 +3358,7 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
                                                         GL_ONE_MINUS_SRC_ALPHA);
                                     glVertexAttribPointer(
                                       pass->args.gl2->image_shader.attribs->location,
-                                      4,
+                                      VERTEX_SIZE,
                                       GL_FLOAT,
                                       GL_FALSE,
                                       0,
@@ -3350,7 +3366,7 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
                                 default:;
                             }
 
-                            glDrawArrays(QUAD_DRAW_MODE, 0, v->size / 4);
+                            glDrawArrays(QUAD_DRAW_MODE, 0, v->size / VERTEX_SIZE);
                             ARRAY_BUFFER_ORPHAN(pass->args.gl2->flex_vbo.size);
                             glDisable(GL_BLEND);
 
@@ -3638,7 +3654,18 @@ static void line_reder_subpass_run_clear_stage(const line_render_pass_t* self,
     glUseProgram(0);
 
     if (self->args.is_for_cursor) {
-        ColorRGBA clr = Vt_rune_cursor_bg(self->args.vt, NULL);
+        ColorRGBA clr;
+        if (settings.animate_cursor_blink) {
+            ColorRGBA cursor_bg = Vt_rune_cursor_bg(self->args.vt, NULL);
+            ColorRGBA normal_bg = Vt_rune_bg(self->args.vt, NULL);
+
+            clr = ColorRGBA_new_from_blend(normal_bg,
+                                           cursor_bg,
+                                           self->args.is_for_cursor->fade_fraction);
+        } else {
+            clr = Vt_rune_cursor_bg(self->args.vt, NULL);
+        }
+
         glClearColor(ColorRGBA_get_float(clr, 0),
                      ColorRGBA_get_float(clr, 1),
                      ColorRGBA_get_float(clr, 2),

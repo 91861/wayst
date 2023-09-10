@@ -35,6 +35,12 @@ typedef struct
 
 #define RELATIVE_LUMINANCE_BRIGHT_COLOR_TRESHOLD 0.04
 
+/* contrast ratios for WCAG conformance */
+#define WCAG_MINIMUM_CONTRAST_RATIO_LARGE_SCALE_TEXT  3.0
+#define WCAG_MINIMUM_CONTRAST_RATIO                   4.5
+#define WCAG_ENHANCED_CONTRAST_RATIO_LARGE_SCALE_TEXT 4.5
+#define WCAG_ENHANCED_CONTRAST_RATIO                  7.0
+
 #define COLOR_RGB_FMT   "rgb(%d, %d, %d)"
 #define COLOR_RGB_AP(c) (c.r), (c.g), (c.b)
 

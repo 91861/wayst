@@ -6,10 +6,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-
 ColorRGB ColorRGB_from_any(const char* string, bool* failed)
 {
-    bool      f = false;
+    bool     f = false;
     ColorRGB c = { 0 };
 
     if (*string == '#') {
@@ -610,5 +609,6 @@ float ColorRGB_get_readability_WCAG(const ColorRGB* color1, const ColorRGB* colo
 
 bool ColorRGB_is_readable_WCAG(const ColorRGB* color1, const ColorRGB* color2)
 {
-    return ColorRGB_get_readability_WCAG(color1, color2) > 3.0;
+    return ColorRGB_get_readability_WCAG(color1, color2) >
+           WCAG_MINIMUM_CONTRAST_RATIO_LARGE_SCALE_TEXT;
 }
