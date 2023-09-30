@@ -315,7 +315,12 @@ typedef struct
         struct wl_subsurface* shadow_subsurf;
         bool                  dragging_button;
         uint32_t              dragging_button_serial;
-        bool                  window_move_inhibits_focus_loss;
+
+        /* Temporarily disable reporting focuss loss events.
+         *
+         * When the surface is beeing resized it loses focus. The application logic should not care
+         * about this and continue as if the window was focused */
+        bool window_move_inhibits_focus_loss;
     } csd;
 } WindowWl;
 
@@ -1197,6 +1202,9 @@ static void pointer_handle_motion(void*              data,
     win->pointer_x         = wl_fixed_to_int(x);
     win->pointer_y         = wl_fixed_to_int(y);
 
+    /* ending a surface move does not emit a button up */
+    windowWl(win)->csd.window_move_inhibits_focus_loss = false;
+
     if (WindowWl_csd_enabled(win) &&
         globalWl->moused_over_surface == windowWl(win)->csd.shadow_surf) {
         windowWl(win)->csd.dragging_button = false;
@@ -1354,7 +1362,10 @@ static void pointer_handle_axis(void*              data,
     windowWl(win)->got_discrete_axis_event = false;
 }
 
-static void pointer_handle_frame(void* data, struct wl_pointer* pointer) {}
+static void pointer_handle_frame(void* data, struct wl_pointer* pointer)
+{
+    /* the compositor sends this every frame */
+}
 
 static void pointer_handle_axis_source(void*              data,
                                        struct wl_pointer* wl_pointer,
