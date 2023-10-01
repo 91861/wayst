@@ -99,7 +99,7 @@
 ## Override system locale
 #locale = C
 
-## Use cell size as window resize increments
+## Use cell size as window resize increments (X11 only)
 #incremental-resize = true
 
 ## Set application id on wayland or WM_CLASS on X11
@@ -393,9 +393,9 @@
 #debug-vt = 5000
 
 ## Run renderer in debug mode:
-##  - partial swap regions swapped marked with red boxes (actual partial swap disabled)
+##  - Partial swap regions swapped marked with red boxes (actual partial swap disabled)
 ##  - When text proxy textures are reused old content is tinted white
-##  - adds a triangle in the top left alternating visibilityy each frame
+##  - Adds a triangle in the top left alternating visibility each frame
 #debug-gfx = true
 
 ## Show font information on starts

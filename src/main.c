@@ -812,6 +812,7 @@ static void App_restart_cursor_blink(App* app)
     app->cursor_blink_animation_should_play = false;
     app->ui.draw_cursor_blinking            = true;
     app->ui.cursor_fade_fraction            = 1.0;
+    App_framebuffer_damage(app);
 
     TimerManager_schedule_point(&app->timer_manager,
                                 app->cursor_blink_suspend_timer,
@@ -820,6 +821,9 @@ static void App_restart_cursor_blink(App* app)
                                 app->cursor_blink_end_timer,
                                 TimePoint_s_from_now(settings.cursor_blink_end_s));
     TimerManager_cancel(&app->timer_manager, app->cursor_blink_switch_timer);
+    if (settings.animate_cursor_blink) {
+        TimerManager_cancel(&app->timer_manager, app->cursor_blink_anim_delay_timer);
+    }
 }
 
 static void App_action(void* self)
