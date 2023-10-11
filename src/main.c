@@ -90,7 +90,6 @@ typedef struct
         AUTOSCROLL_NONE = 0,
         AUTOSCROLL_UP   = 1,
         AUTOSCROLL_DN   = -1,
-
     } autoscroll;
 
     enum SelectionDragRight
@@ -110,6 +109,10 @@ typedef struct
 
     /* we are in a time period after kbd input when the cursor should blink */
     bool cursor_blink_animation_should_play;
+
+    /* do vt modes allow cursor blinking */
+    bool cursor_blink_animation_should_play_vt;
+
     bool tex_blink_animation_should_play;
     bool csd_mode_changed_before_resize;
     bool did_paint_in_sync_update_mode;
@@ -267,8 +270,9 @@ static void App_cursor_blink_end_timer_handler(void* self)
 /* Switch between cursor shown/hidden in non-animated mode */
 static void App_cursor_blink_switch_timer_handler(void* self)
 {
-    App* app          = self;
-    bool ui_condition = (app->cursor_blink_animation_should_play || !app->ui.draw_cursor_blinking);
+    App* app = self;
+    bool ui_condition =
+      ((app->cursor_blink_animation_should_play) || !app->ui.draw_cursor_blinking);
 
     if (ui_condition && Window_is_focused(app->win)) {
         app->ui.draw_cursor_blinking = !app->ui.draw_cursor_blinking;
@@ -287,7 +291,8 @@ static void App_cursor_blink_switch_timer_handler(void* self)
 static void App_cursor_fade_switch_delay_timer_handler(void* self)
 {
     App* app = self;
-    if (app->cursor_blink_animation_should_play) {
+
+    if (app->cursor_blink_animation_should_play || app->ui.draw_cursor_blinking) {
         app->ui.draw_cursor_blinking = !app->ui.draw_cursor_blinking;
         TimerManager_schedule_tween_from_now(
           &app->timer_manager,
@@ -304,7 +309,7 @@ static void App_cursor_fade_switch_timer_handler(void* self, double fraction, bo
     app->ui.cursor_fade_fraction = app->ui.draw_cursor_blinking ? (1.0 - fraction) : fraction;
 
     if (completed) {
-        if (app->cursor_blink_animation_should_play) {
+        if (app->cursor_blink_animation_should_play || app->ui.draw_cursor_blinking) {
             TimerManager_schedule_point(
               &app->timer_manager,
               app->cursor_blink_anim_delay_timer,
@@ -402,11 +407,12 @@ static void App_init(App* self)
 
     Monitor_watch_window_system_fd(&self->monitor, Window_get_connection_fd(self->win));
 
-    self->ui.scrollbar.width                 = settings.scrollbar_width_px;
-    self->ui.hovered_link.active             = false;
-    self->ui.draw_cursor_blinking            = true;
-    self->cursor_blink_animation_should_play = false;
-    self->tex_blink_animation_should_play    = true;
+    self->ui.scrollbar.width                    = settings.scrollbar_width_px;
+    self->ui.hovered_link.active                = false;
+    self->ui.draw_cursor_blinking               = true;
+    self->cursor_blink_animation_should_play    = false;
+    self->cursor_blink_animation_should_play_vt = true;
+    self->tex_blink_animation_should_play       = true;
 
     /* We may have gotten some events before callbacks were connected. We can ignore everything
      * except for window focus and ... */
@@ -814,16 +820,53 @@ static void App_restart_cursor_blink(App* app)
     app->ui.cursor_fade_fraction            = 1.0;
     App_framebuffer_damage(app);
 
-    TimerManager_schedule_point(&app->timer_manager,
-                                app->cursor_blink_suspend_timer,
-                                TimePoint_ms_from_now(settings.cursor_blink_suspend_ms));
+    if (app->cursor_blink_animation_should_play_vt) {
+        TimerManager_schedule_point(&app->timer_manager,
+                                    app->cursor_blink_suspend_timer,
+                                    TimePoint_ms_from_now(settings.cursor_blink_suspend_ms));
+    }
+
     TimerManager_schedule_point(&app->timer_manager,
                                 app->cursor_blink_end_timer,
                                 TimePoint_s_from_now(settings.cursor_blink_end_s));
+
     TimerManager_cancel(&app->timer_manager, app->cursor_blink_switch_timer);
+
     if (settings.animate_cursor_blink) {
         TimerManager_cancel(&app->timer_manager, app->cursor_blink_anim_delay_timer);
     }
+}
+
+static void App_soft_restart_cursor_blink(App* app)
+{
+    if (!TimerManager_is_pending(&app->timer_manager, app->cursor_blink_end_timer)) {
+        return;
+    }
+
+    app->cursor_blink_animation_should_play = true;
+    app->ui.draw_cursor_blinking            = true;
+    app->ui.cursor_fade_fraction            = 1.0;
+
+    if (settings.animate_cursor_blink) {
+        TimerManager_cancel(&app->timer_manager, app->cursor_blink_anim_delay_timer);
+    }
+
+    TimerManager_cancel(&app->timer_manager, app->cursor_blink_switch_timer);
+
+    if (settings.animate_cursor_blink) {
+        TimerManager_schedule_tween_from_now(
+          &app->timer_manager,
+          app->cursor_blink_switch_timer,
+          TimePoint_ms_from_now((float)settings.cursor_blink_interval_ms *
+                                settings.animate_cursor_blink_fade_fraction));
+        app->ui.draw_cursor_blinking = true;
+    } else {
+        TimerManager_schedule_point(&app->timer_manager,
+                                    app->cursor_blink_switch_timer,
+                                    TimePoint_ms_from_now(settings.cursor_blink_interval_ms));
+    }
+
+    App_notify_content_change(app);
 }
 
 static void App_action(void* self)
@@ -1467,6 +1510,29 @@ static bool App_maybe_handle_application_key(App*     self,
         return true;
     }
     return false;
+}
+
+void App_cursor_blink_change_handler(void* self, bool blink_state)
+{
+    App* app                                   = self;
+    app->cursor_blink_animation_should_play_vt = blink_state;
+
+    if (blink_state) {
+        App_soft_restart_cursor_blink(app);
+    } else {
+        app->cursor_blink_animation_should_play = false;
+        app->ui.draw_cursor_blinking            = true;
+        app->ui.cursor_fade_fraction            = 1.0;
+        TimerManager_cancel(&app->timer_manager, app->cursor_blink_end_timer);
+        TimerManager_cancel(&app->timer_manager, app->cursor_blink_switch_timer);
+        TimerManager_cancel(&app->timer_manager, app->cursor_blink_suspend_timer);
+
+        App_framebuffer_damage(app);
+
+        if (settings.animate_cursor_blink) {
+            TimerManager_cancel(&app->timer_manager, app->cursor_blink_anim_delay_timer);
+        }
+    }
 }
 
 void App_gui_pointer_mode_change_handler(void* self)
@@ -2369,6 +2435,7 @@ static void App_set_callbacks(App* self)
     self->vt.callbacks.on_mouse_report_state_changed       = App_mouse_report_changed;
     self->vt.callbacks.on_buffer_changed                   = App_buffer_changed;
     self->vt.callbacks.on_gui_pointer_mode_changed         = App_gui_pointer_mode_change_handler;
+    self->vt.callbacks.on_cursor_blink_state_changed       = App_cursor_blink_change_handler;
     self->vt.callbacks.on_visual_scroll_reset              = App_visual_scroll_reset_handler;
 
     self->win->callbacks.user_data               = self;

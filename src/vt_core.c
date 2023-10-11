@@ -1551,6 +1551,7 @@ static inline void Vt_report_dec_mode(Vt* self, int code)
         case 13:
             value = self->cursor.blinking;
             break;
+
         case 25:
             value = self->cursor.hidden;
             break;
@@ -1700,13 +1701,24 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
         case 12:
         /* Start blinking cursor (xterm non-standard) */
         case 13:
-            self->cursor.blinking = !on;
+            self->cursor.blinking             = on;
+            self->defered_events.cursor_blink = true;
+            break;
+
+        /* Enable XOR of blinking cursor control sequence and menu(?!) */
+        case 14:
+            STUB("DEC Private Mode 14");
             break;
 
         /* Printer status request (DSR) */
         case 15:
             /* Printer not connected. */
             Vt_output(self, "\e[?13n", 6);
+            break;
+
+        /* Don't limit print to scrolling region (DECPEX) - affects (MC) */
+        case 19:
+            /* Can be ignored silently as the printer is `not connected`. */
             break;
 
         /* hide/show cursor (DECTCEM) */
@@ -2299,6 +2311,8 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                     default:
                                         WRN("Unknown DECSCUR code: %d\n", arg);
                                 }
+
+                                self->defered_events.cursor_blink = true;
                             } break;
                         }
                         break;
@@ -6240,6 +6254,12 @@ inline void Vt_interpret(Vt* self, char* buf, size_t bytes)
 
     if (self->defered_events.repaint) {
         CALL(self->callbacks.on_repaint_required, self->callbacks.user_data);
+    }
+
+    if (self->defered_events.cursor_blink) {
+        CALL(self->callbacks.on_cursor_blink_state_changed,
+             self->callbacks.user_data,
+             self->cursor.blinking);
     }
 
     if (self->lines.size > settings.scrollback * 2) {

@@ -693,6 +693,7 @@ typedef struct
         void (*on_buffer_changed)(void*);
         void (*on_visual_scroll_reset)(void*);
         void (*on_mouse_report_state_changed)(void*);
+        void (*on_cursor_blink_state_changed)(void*, bool new_state);
         const char* (*on_application_hostname_requested)(void*);
 
         void (*destroy_proxy)(void*, VtLineProxy*);
@@ -840,6 +841,7 @@ typedef struct
     {
         bool action_performed;
         bool repaint;
+        bool cursor_blink;
     } defered_events;
 
     vt_gui_pointer_mode_t gui_pointer_mode;
