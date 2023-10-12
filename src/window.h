@@ -43,10 +43,8 @@ typedef struct
 
 typedef struct
 {
-    uint32_t target_frame_time_ms;
-
+    double target_frame_time_ms;
     alignas(alignof(void*)) uint8_t extend_data;
-
 } WindowStatic;
 
 typedef struct
@@ -58,7 +56,7 @@ typedef struct
 static void window_partial_swap_request_print(window_partial_swap_request_t* sr) {
     if (!sr)
         return;
-    
+
     for (int8_t i = 0; i < sr->count; ++i) {
         printf("rect %d # " RECT_FMT "\n", i, RECT_AP(&sr->regions[i]));
     }
@@ -108,6 +106,7 @@ struct IWindow
     void (*set_urgent)(struct WindowBase* self);
     void (*set_stack_order)(struct WindowBase* self, bool front_or_back);
     int64_t (*get_window_id)(struct WindowBase* self);
+    WindowStatic* (*get_static_ptr)();
 };
 
 typedef struct WindowBase
@@ -300,6 +299,11 @@ static inline int64_t Window_get_window_id(struct WindowBase* self)
     return self->interface->get_window_id(self);
 }
 
+static inline WindowStatic* Window_get_static_ptr(struct WindowBase* self)
+{
+    return self->interface->get_static_ptr();
+}
+
 /* Trivial base functions */
 static inline int Window_get_connection_fd(struct WindowBase* self)
 {
@@ -359,4 +363,8 @@ static inline void Window_emit_output_change_event(struct WindowBase* self)
              self->output_name,
              self->lcd_filter,
              self->dpi);
+}
+
+static inline double Window_get_target_frame_time_ms(struct WindowBase* self) {
+    return Window_get_static_ptr(self)->target_frame_time_ms;
 }

@@ -6,6 +6,7 @@
 
 #include "x.h"
 #include "rcptr.h"
+#include "timing.h"
 #include "util.h"
 #include "vector.h"
 
@@ -149,8 +150,12 @@ static TimePoint*  WindowX11_process_timers(WindowBase* self)
 {
     return NULL;
 }
-static void WindowX11_update_monitors_info(WindowBase* self);
-static void WindowX11_update_monitor_placement(WindowBase* self);
+static void          WindowX11_update_monitors_info(WindowBase* self);
+static void          WindowX11_update_monitor_placement(WindowBase* self);
+static WindowStatic* WindowX11_get_static_ptr(WindowBase* self)
+{
+    return global;
+}
 
 static struct IWindow window_interface_x11 = {
     .set_fullscreen         = WindowX11_set_fullscreen,
@@ -176,6 +181,7 @@ static struct IWindow window_interface_x11 = {
     .set_stack_order        = WindowX11_set_stack_order,
     .get_window_id          = WindowX11_get_window_id,
     .set_incremental_resize = WindowX11_set_incremental_resize,
+    .get_static_ptr         = WindowX11_get_static_ptr,
 };
 
 typedef struct
@@ -488,10 +494,16 @@ static WindowBase* WindowX11_new(uint32_t  w,
         int xrr_error;
         if (!XRRQueryExtension(globalX11->display, &globalX11->xrr_event_type_base, &xrr_error)) {
             WRN("XRandR not supported by server\n");
+            global->target_frame_time_ms = 16.6667; // assume 60Hz
         } else {
             XRRSelectInput(globalX11->display,
                            DefaultRootWindow(globalX11->display),
                            RROutputChangeNotifyMask);
+            XRRScreenConfiguration* screen_cfg =
+              XRRGetScreenInfo(globalX11->display, DefaultRootWindow(globalX11->display));
+            short fps = XRRConfigCurrentRate(screen_cfg);
+            global->target_frame_time_ms = (double)SEC_IN_MS / fps;
+            XRRFreeScreenConfigInfo(screen_cfg);
         }
     }
 

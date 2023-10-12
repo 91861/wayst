@@ -397,7 +397,7 @@ static void App_init(App* self)
                                self->win->dpi);
 
     settings_after_window_system_connected();
-    Window_set_swap_interval(self->win, 0);
+    Window_set_swap_interval(self->win, 1);
     Gfx_init_with_context_activated(self->gfx);
 
     self->resolution    = Window_size(self->win);
@@ -452,8 +452,10 @@ static void App_run(App* self)
         } else {
             int64_t npa =
               TimerManager_get_next_action_ms(&self->timer_manager,
+                                              Window_get_target_frame_time_ms(self->win),
                                               TIME_POINT_PTR(self->closest_pending_wakeup),
                                               NULL);
+
             if (npa == TIMER_MANAGER_NO_ACTION_PENDING) {
                 timeout_ms = -1;
             } else {
@@ -550,9 +552,13 @@ static void App_maybe_swap_window(App* self)
         bool do_swap = self->win->paint && !self->did_paint_in_sync_update_mode;
         Window_maybe_swap(self->win, do_swap);
         self->did_paint_in_sync_update_mode = true;
+        if (do_swap) {
+            TimerManaget_update_last_swap(&self->timer_manager, TimePoint_now());
+        }
     } else {
         self->did_paint_in_sync_update_mode = false;
         Window_maybe_swap(self->win, true);
+        TimerManaget_update_last_swap(&self->timer_manager, TimePoint_now());
     }
 }
 

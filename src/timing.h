@@ -322,6 +322,7 @@ DEF_VECTOR(timer_data_t, NULL);
 typedef struct
 {
     Vector_timer_data_t timers;
+    TimePoint           previous_frame_swap;
     void*               user_data;
 } TimerManager;
 
@@ -478,6 +479,11 @@ static inline void TimerManager_update(TimerManager* self)
     }
 }
 
+static void TimerManaget_update_last_swap(TimerManager* self, TimePoint swap_time)
+{
+    self->previous_frame_swap = swap_time;
+}
+
 typedef struct
 {
     TimePoint* payload;
@@ -487,8 +493,11 @@ typedef struct
 
 #define TIMER_MANAGER_NO_ACTION_PENDING INT64_MIN
 
-__attribute__((sentinel)) static int64_t
-TimerManager_get_next_action_ms(TimerManager* self, time_point_ptr_t* external_frame, ...)
+__attribute__((sentinel)) static int64_t TimerManager_get_next_action_ms(
+  TimerManager*     self,
+  double            target_frame_time_ms,
+  time_point_ptr_t* external_frame,
+  ...)
 {
     int64_t   ret              = TIMER_MANAGER_NO_ACTION_PENDING;
     TimePoint next_frame_point = { 0, 0 };
@@ -514,9 +523,16 @@ TimerManager_get_next_action_ms(TimerManager* self, time_point_ptr_t* external_f
 
             case TIMER_TYPE_TWEEN: {
                 if (TimeSpan_point_is_within(&i->data.tween_data.time_span, now)) {
-                    has_next_frame   = true;
-                    ret              = 0;
-                    next_frame_point = now;
+                    TimePoint tmp = now;
+                    TimePoint_subtract(&tmp, self->previous_frame_swap);
+                    double offset_from_now_ms =
+                      target_frame_time_ms -
+                      CLAMP(TimePoint_get_ms(tmp), 0.0, target_frame_time_ms);
+
+                    has_next_frame = true;
+                    ret            = offset_from_now_ms;
+                    next_frame_point =
+                      TimePoint_min(next_frame_point, TimePoint_ms_from_now(offset_from_now_ms));
                 } else {
                     next_frame_point =
                       !has_next_frame

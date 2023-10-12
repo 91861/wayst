@@ -75,7 +75,6 @@ static inline bool keysym_is_misc(xkb_keysym_t sym)
 static inline bool keysym_is_dead(xkb_keysym_t sym)
 {
     return (sym >= XKB_KEY_dead_grave && sym <= XKB_KEY_dead_currency) || // Extension function keys
-
            (sym >= XKB_KEY_dead_lowline &&
             sym <= XKB_KEY_dead_longsolidusoverlay) || // Extra dead elements for German T3 layout
            (sym >= XKB_KEY_dead_a &&
@@ -122,6 +121,11 @@ static int64_t WindowWl_get_window_id(struct WindowBase* self)
     return -1;
 }
 
+static WindowStatic* WindowWl_get_static_ptr(struct WindowBase* self)
+{
+    return global;
+}
+
 static struct IWindow window_interface_wayland = {
     .set_fullscreen         = WindowWl_set_fullscreen,
     .set_maximized          = WindowWl_set_maximized,
@@ -146,6 +150,7 @@ static struct IWindow window_interface_wayland = {
     .set_stack_order        = WindowWl_set_stack_order,
     .get_window_id          = WindowWl_get_window_id,
     .set_incremental_resize = WindowWl_set_incremental_resize,
+    .get_static_ptr         = WindowWl_get_static_ptr,
 };
 
 typedef struct
@@ -220,7 +225,7 @@ typedef struct
     lcd_filter_e lcd_filter;
 
     /* based on display refresh rate */
-    int32_t target_frame_time_ms;
+    double target_frame_time_ms;
 
     /* dots per inch calculated from physical dimensions and resolution */
     uint16_t dpi;
@@ -2448,7 +2453,7 @@ static void cursor_set(struct wl_cursor* what, uint32_t serial)
 struct WindowBase* WindowWl_new(uint32_t w, uint32_t h, gfx_api_t gfx_api, Ui* ui)
 {
     global = _calloc(1, sizeof(WindowStatic) + sizeof(GlobalWl) - sizeof(uint8_t));
-    global->target_frame_time_ms = 16;
+    global->target_frame_time_ms = 16.6667;
 
     /* passing NULL grabs WAYLAND_DISPLAY from env */
     globalWl->display = wl_display_connect(NULL);
