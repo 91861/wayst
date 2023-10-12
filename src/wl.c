@@ -75,8 +75,6 @@ static inline bool keysym_is_misc(xkb_keysym_t sym)
 static inline bool keysym_is_dead(xkb_keysym_t sym)
 {
     return (sym >= XKB_KEY_dead_grave && sym <= XKB_KEY_dead_currency) || // Extension function keys
-           (sym >= XKB_KEY_dead_lowline &&
-            sym <= XKB_KEY_dead_longsolidusoverlay) || // Extra dead elements for German T3 layout
            (sym >= XKB_KEY_dead_a &&
             sym <= XKB_KEY_dead_greek); // Dead vowels for universal syllable entry
 }
