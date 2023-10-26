@@ -413,6 +413,7 @@ static void App_init(App* self)
     self->cursor_blink_animation_should_play    = false;
     self->cursor_blink_animation_should_play_vt = true;
     self->tex_blink_animation_should_play       = true;
+    self->ui.cursor_fade_fraction               = 1.0;
 
     /* We may have gotten some events before callbacks were connected. We can ignore everything
      * except for window focus and ... */
@@ -878,7 +879,10 @@ static void App_soft_restart_cursor_blink(App* app)
 static void App_action(void* self)
 {
     App* app = self;
-    App_restart_cursor_blink(app);
+
+    if (settings.enable_cursor_blink) {
+        App_restart_cursor_blink(app);
+    }
 
     if (!Window_is_pointer_hidden(app->win)) {
         App_update_hover(
@@ -1520,7 +1524,12 @@ static bool App_maybe_handle_application_key(App*     self,
 
 void App_cursor_blink_change_handler(void* self, bool blink_state)
 {
-    App* app                                   = self;
+    App* app = self;
+
+    if (!settings.enable_cursor_blink) {
+        return;
+    }
+
     app->cursor_blink_animation_should_play_vt = blink_state;
 
     if (blink_state) {
@@ -2494,20 +2503,22 @@ static void App_set_up_timers(App* self)
                                                              TIMER_TYPE_POINT,
                                                              App_cursor_blink_end_timer_handler);
 
-    if (settings.animate_cursor_blink) {
-        self->cursor_blink_anim_delay_timer =
-          TimerManager_create_timer(&self->timer_manager,
-                                    TIMER_TYPE_POINT,
-                                    App_cursor_fade_switch_delay_timer_handler);
-        self->cursor_blink_switch_timer =
-          TimerManager_create_timer(&self->timer_manager,
-                                    TIMER_TYPE_TWEEN,
-                                    App_cursor_fade_switch_timer_handler);
-    } else {
-        self->cursor_blink_switch_timer =
-          TimerManager_create_timer(&self->timer_manager,
-                                    TIMER_TYPE_POINT,
-                                    App_cursor_blink_switch_timer_handler);
+    if (settings.enable_cursor_blink) {
+        if (settings.animate_cursor_blink) {
+            self->cursor_blink_anim_delay_timer =
+              TimerManager_create_timer(&self->timer_manager,
+                                        TIMER_TYPE_POINT,
+                                        App_cursor_fade_switch_delay_timer_handler);
+            self->cursor_blink_switch_timer =
+              TimerManager_create_timer(&self->timer_manager,
+                                        TIMER_TYPE_TWEEN,
+                                        App_cursor_fade_switch_timer_handler);
+        } else {
+            self->cursor_blink_switch_timer =
+              TimerManager_create_timer(&self->timer_manager,
+                                        TIMER_TYPE_POINT,
+                                        App_cursor_blink_switch_timer_handler);
+        }
     }
 
     self->text_blink_switch_timer = TimerManager_create_timer(&self->timer_manager,
