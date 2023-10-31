@@ -1593,6 +1593,9 @@ static inline void Vt_report_dec_mode(Vt* self, int code)
         case 1070:
             value = self->modes.sixel_private_color_registers;
             break;
+        case 2026:
+            value = Vt_synchronized_update_is_active(self);
+            break;
         case 8452:
             value = self->modes.sixel_scrolling_move_cursor_right;
             break;
