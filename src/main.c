@@ -2045,8 +2045,9 @@ static void App_button_handler(void*    self,
         App_update_scrollbar_dims(self);
     } else if (!App_scrollbar_consume_click(self, button, state, x, y) &&
                !App_maybe_consume_click(self, button, state, x, y, mods)) {
+
         /* Maybe theres a link there */
-        if (FLAG_IS_SET(mods, MODIFIER_CONTROL)) {
+        if (FLAG_IS_SET(mods, MODIFIER_CONTROL) && !state) {
             Pair_uint16_t cells = Vt_pixels_to_cells(vt, x, y);
             cells.second += Vt_visual_top_line(vt);
             const char* uri = Vt_uri_at(vt, cells.first, cells.second);
