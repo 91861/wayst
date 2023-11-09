@@ -485,7 +485,8 @@ void primary_selection_offer_handle_offer(void*                                 
     if (w->new_primary_offer_mime_idx == -1) {
         LOG(" - REJECTED(not supported) }\n");
     } else {
-        LOG(" - REJECTED(\'%s\' is preffered) }\n", ACCEPTED_MIMES[w->new_primary_offer_mime_idx]);
+        LOG(" - REJECTED(\'%s\' is preffered) }\n",
+               ACCEPTED_MIMES[w->new_primary_offer_mime_idx]);
     }
 }
 
@@ -884,9 +885,9 @@ static void primary_selection_device_handle_selection(
     }
 
     LOG("wl::primary_selection_offer::selection{ mime_type: %s }\n",
-        windowWl(self)->new_primary_offer_mime_idx == -1
-          ? "<none>"
-          : ACCEPTED_MIMES[windowWl(self)->new_primary_offer_mime_idx]);
+           windowWl(self)->new_primary_offer_mime_idx == -1
+             ? "<none>"
+             : ACCEPTED_MIMES[windowWl(self)->new_primary_offer_mime_idx]);
 
     if (windowWl(self)->primary_offer &&
         windowWl(self)->primary_offer != windowWl(self)->new_primary_offer) {
@@ -976,7 +977,7 @@ static void WindowWl_primary_get(struct WindowBase* self)
 {
     if (windowWl(self)->primary_offer_mime_idx > -1 && windowWl(self)->primary_offer) {
         LOG("last recorded primary_selection_v1_data_offer mime: \"%s\" \n",
-            ACCEPTED_MIMES[windowWl(self)->primary_offer_mime_idx]);
+               ACCEPTED_MIMES[windowWl(self)->primary_offer_mime_idx]);
 
         int fds[2];
 
@@ -986,9 +987,9 @@ static void WindowWl_primary_get(struct WindowBase* self)
             return;
         }
 
-        zwp_primary_selection_offer_v1_receive(windowWl(self)->primary_offer,
-                                               ACCEPTED_MIMES[windowWl(self)->data_offer_mime_idx],
-                                               fds[1]);
+        const char* offer = ACCEPTED_MIMES[windowWl(self)->primary_offer_mime_idx];
+
+        zwp_primary_selection_offer_v1_receive(windowWl(self)->primary_offer, offer, fds[1]);
         close(fds[1]);
         wl_display_roundtrip(globalWl->display);
         WindowWl_drain_pipe_to_clipboard(self, fds[0], windowWl(self)->data_offer_mime_idx == 0);
@@ -1000,7 +1001,7 @@ static void WindowWl_clipboard_get(struct WindowBase* self)
 {
     if (windowWl(self)->data_offer_mime_idx > -1 && windowWl(self)->data_offer) {
         LOG("last recorded wl_data_offer mime: \"%s\" \n",
-            ACCEPTED_MIMES[windowWl(self)->data_offer_mime_idx]);
+               ACCEPTED_MIMES[windowWl(self)->data_offer_mime_idx]);
 
         if (windowWl(self)->data_offer) {
             int fds[2];
@@ -2476,8 +2477,9 @@ struct WindowBase* WindowWl_new(uint32_t w, uint32_t h, gfx_api_t gfx_api, Ui* u
 
     win->interface = &window_interface_wayland;
 
-    windowWl(win)->data_offer_mime_idx    = -1;
-    windowWl(win)->primary_offer_mime_idx = -1;
+    windowWl(win)->data_offer_mime_idx        = -1;
+    windowWl(win)->primary_offer_mime_idx     = -1;
+    windowWl(win)->new_primary_offer_mime_idx = -1;
 
     globalWl->registry = wl_display_get_registry(globalWl->display);
     wl_registry_add_listener(globalWl->registry, &registry_listener, win);
