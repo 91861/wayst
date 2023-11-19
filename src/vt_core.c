@@ -4797,21 +4797,21 @@ static void Vt_handle_OSC(Vt* self, char c)
                 }
             } break;
 
-            /* Send desktop notification (rxvt)
-             *     OSC 777;notify;title;body ST
-             *
-             * or command integration notification sequence (VTE)
-             *     OSC 777;precmd ST [user@host:~] $ ls -l OSC 777;preexec ST
-             *     total 1
-             *     drwxr-xr-x  6 user user  4096 Dec 12 15:37 Stuff
-             *     OSC 777;notify;Command completed;ls -l ST
-             *
-             *     Ending 'notify' should only send the notification when the terminal is minimized.
-             *     We need to check if the actively running command was inited by VTE sequences, so
-             *     we don't break normal OSC 777 behaviour.
-             *     There is no distinction between the prompt and command invocation, so we don't
-             *     know what we're running until it completes.
-             * */
+                /* Send desktop notification (rxvt)
+                 *     OSC 777;notify;title;body ST
+                 *
+                 * or command integration notification sequence (VTE)
+                 *     OSC 777;precmd ST [user@host:~] $ ls -l OSC 777;preexec ST
+                 *     total 1
+                 *     drwxr-xr-x  6 user user  4096 Dec 12 15:37 Stuff
+                 *     OSC 777;notify;Command completed;ls -l ST
+                 *
+                 * There is no way to differentiate the prompt and command, so until the command
+                 * completes we don't know the command string.
+                 * Some implementations will send `;notify;Command completed;` even if no command
+                 * was started yet.
+                 *
+                 * */
             case 777: {
                 Vector_Vector_char tokens = string_split_on(seq + 4 /* 777; */, ";", NULL, NULL);
                 if (tokens.size >= 2) {
@@ -4822,13 +4822,14 @@ static void Vt_handle_OSC(Vt* self, char c)
                                  NULL,
                                  tokens.buf[1].buf + 1);
                         } else if (tokens.size == 3) {
-                            VtCommand* cmd = Vt_shell_integration_get_active_command(self);
-                            if (cmd && cmd->is_vte_protocol &&
-                                !strcmp(tokens.buf[1].buf + 1, "Command completed")) {
-                                Vt_shell_integration_active_command_name_changed(self,
-                                                                                 tokens.buf[2].buf +
-                                                                                   1);
-                                Vt_shell_integration_end_execution(self, NULL);
+                            if (!strcmp(tokens.buf[1].buf + 1, "Command completed")) {
+                                VtCommand* cmd = Vt_shell_integration_get_active_command(self);
+                                if (cmd && cmd->is_vte_protocol) {
+                                    Vt_shell_integration_active_command_name_changed(
+                                      self,
+                                      tokens.buf[2].buf + 1);
+                                    Vt_shell_integration_end_execution(self, NULL);
+                                }
                             } else {
                                 CALL(self->callbacks.on_desktop_notification_sent,
                                      self->callbacks.user_data,
