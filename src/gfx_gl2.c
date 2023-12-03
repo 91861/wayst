@@ -561,7 +561,7 @@ void                             GfxOpenGL2_load_font(Gfx* self);
 void                             GfxOpenGL2_destroy_recycled(GfxOpenGL2* self);
 
 void                           GfxOpenGL2_destroy(Gfx* self);
-window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, const Vt* vt, Ui* ui, uint8_t age);
+window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, Vt* vt, Ui* ui, uint8_t age);
 Pair_uint32_t                  GfxOpenGL2_get_char_size(Gfx* self, Pair_uint32_t pixels);
 void          GfxOpenGL2_resize(Gfx* self, uint32_t w, uint32_t h, Pair_uint32_t cells);
 void          GfxOpenGL2_init_with_context_activated(Gfx* self);
@@ -2620,7 +2620,7 @@ static void line_reder_pass_run(line_render_pass_t* self);
 static bool should_create_line_render_pass(const line_render_pass_args_t* args)
 {
     vt_line_damage_t* dmg = OR(args->damage, &args->vt_line->damage);
-    return !likely(!args->vt_line->data.size || (dmg->type == VT_LINE_DAMAGE_NONE));
+    return !likely(!(args->vt_line && args->vt_line->data.size) || (dmg->type == VT_LINE_DAMAGE_NONE));
 }
 
 static line_render_pass_t create_line_render_pass(const line_render_pass_args_t* args)
@@ -3058,36 +3058,37 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
 
     VtRune* each_rune = pass->args.vt_line->data.buf + subpass->args.render_range_begin;
     VtRune* same_bg_block_begin_rune = each_rune;
-    VtRune* cursor_rune              = Vt_cursor_cell(pass->args.vt);
+    VtRune* cursor_rune              = NULL;
 
     ColorRGBA active_bg_color;
+
     if (pass->args.is_for_cursor) {
-        if (unlikely(Vt_is_cell_selected(pass->args.vt,
-                                         pass->args.vt->cursor.col,
-                                         pass->args.visual_index))) {
-            active_bg_color = pass->args.vt->colors.highlight.bg;
-        } else {
-            active_bg_color = Vt_rune_cursor_bg(pass->args.vt, cursor_rune);
-            if (pass->args.is_for_cursor && settings.animate_cursor_blink) {
-                ColorRGBA cursor_bg = Vt_rune_cursor_bg(pass->args.vt, cursor_rune);
-                ColorRGBA normal_bg = Vt_rune_bg(pass->args.vt, cursor_rune);
-                active_bg_color     = ColorRGBA_new_from_blend(normal_bg,
-                                                           cursor_bg,
-                                                           pass->args.is_for_cursor->fade_fraction);
-            }
+        if (pass->args.vt_line->data.size > pass->args.cnd_cursor_column) {
+            cursor_rune = Vector_at_VtRune(&pass->args.vt_line->data, pass->args.cnd_cursor_column);
         }
-    } else {
-        /* not for cursor */
+
+        active_bg_color = Vt_rune_cursor_bg(pass->args.vt, cursor_rune);
+
+        if (unlikely(pass->args.is_for_cursor && settings.animate_cursor_blink)) {
+            ColorRGBA cursor_bg = Vt_rune_cursor_bg(pass->args.vt, cursor_rune);
+            ColorRGBA normal_bg = Vt_rune_bg(pass->args.vt, cursor_rune);
+            active_bg_color     = ColorRGBA_new_from_blend(normal_bg,
+                                                       cursor_bg,
+                                                       pass->args.is_for_cursor->fade_fraction);
+        }
+    } else /* not for cursor */ {
         active_bg_color = pass->args.vt->colors.bg;
     }
 
     for (uint16_t idx_each_rune = subpass->args.render_range_begin;
          idx_each_rune <= subpass->args.render_range_end;) {
         each_rune = pass->args.vt_line->data.buf + idx_each_rune;
+
         if (likely(idx_each_rune != subpass->args.render_range_end)) {
             if (unlikely(each_rune->blinkng)) {
                 pass->has_blinking_chars = true;
             }
+
             if (!pass->has_underlined_chars &&
                 unlikely(each_rune->underlined || each_rune->strikethrough ||
                          each_rune->doubleunderline || each_rune->curlyunderline ||
@@ -3270,7 +3271,7 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
                             glBindBuffer(GL_ARRAY_BUFFER, pass->args.gl2->flex_vbo.vbo);
 
                             const int VERTEX_SIZE = 4;
-                            size_t newsize = v->size * sizeof(float);
+                            size_t    newsize     = v->size * sizeof(float);
                             ARRAY_BUFFER_SUB_OR_SWAP(v->buf,
                                                      pass->args.gl2->flex_vbo.size,
                                                      newsize);
@@ -3740,13 +3741,13 @@ static void line_reder_pass_run(line_render_pass_t* self)
 }
 
 static void _GfxOpenGL2_draw_block_cursor(GfxOpenGL2* gfx,
-                                          const Vt*   vt,
+                                          Vt*         vt,
                                           const Ui*   ui,
                                           ColorRGBA   clr,
                                           size_t      row)
 {
     ((vt_line_damage_t*)&ui->cursor_damage)->type = VT_LINE_DAMAGE_FULL;
-    VtLine* vt_line                               = Vt_cursor_line(vt);
+    VtLine* vt_line                               = Vt_line_at(vt, ui->cursor->row);
 
     static cursor_color_animation_override_t color_override;
     color_override.fade_fraction = ui->cursor_fade_fraction;
@@ -3757,13 +3758,13 @@ static void _GfxOpenGL2_draw_block_cursor(GfxOpenGL2* gfx,
         .vt_line           = vt_line,
         .proxy             = (VtLineProxy*)&ui->cursor_proxy,
         .damage            = (vt_line_damage_t*)&ui->cursor_damage,
-        .visual_index      = Vt_visual_cursor_row(vt),
+        .visual_index      = row,
         .cnd_cursor_column = ui->cursor->col,
         .is_for_cursor     = &color_override,
         .is_for_blinking   = false,
     };
 
-    if (should_create_line_render_pass(&rp_args)) {
+    if (vt_line && should_create_line_render_pass(&rp_args)) {
         gfx->bound_resources  = BOUND_RESOURCES_NONE;
         line_render_pass_t rp = create_line_render_pass(&rp_args);
 
@@ -3803,7 +3804,10 @@ static void _GfxOpenGL2_draw_block_cursor(GfxOpenGL2* gfx,
     float tex_begin_x = -1.0f + (gfx->pixel_offset_x) * gfx->sx;
     float tex_end_x =
       -1.0f + (gfx->max_cells_in_line * gfx->glyph_width_pixels + gfx->pixel_offset_x) * gfx->sx;
-    float tex_begin_y = 1.0f - gfx->line_height_pixels * (Vt_visual_cursor_row(vt) + 1) * gfx->sy -
+
+    size_t visual_cursor_row = ui->cursor->row - Vt_visual_top_line(vt);
+
+    float tex_begin_y = 1.0f - gfx->line_height_pixels * (visual_cursor_row + 1) * gfx->sy -
                         gfx->pixel_offset_y * gfx->sy;
 
 #ifdef GFX_GLES
@@ -3859,7 +3863,7 @@ static void _GfxOpenGL2_draw_block_cursor(GfxOpenGL2* gfx,
 #endif
 }
 
-static void GfxOpenGL2_draw_cursor(GfxOpenGL2* gfx, const Vt* vt, const Ui* ui)
+static void GfxOpenGL2_draw_cursor(GfxOpenGL2* gfx, Vt* vt, const Ui* ui)
 {
     if (!ui || !ui->cursor) {
         return;
@@ -4266,7 +4270,7 @@ static void GfxOpenGL2_draw_hovered_link(GfxOpenGL2* self, const Vt* vt, const U
     ARRAY_BUFFER_ORPHAN(self->flex_vbo.size);
 }
 
-static void GfxOpenGL2_draw_overlays(GfxOpenGL2* self, const Vt* vt, const Ui* ui)
+static void GfxOpenGL2_draw_overlays(GfxOpenGL2* self, Vt* vt, const Ui* ui)
 {
     if (vt->unicode_input.active) {
         GfxOpenGL2_draw_unicode_input(self, vt);
@@ -5065,7 +5069,7 @@ GfxOpenGL2_maybe_draw_titlebar(Gfx* self, Ui* ui, window_partial_swap_request_t*
     return NULL;
 }
 
-window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, const Vt* vt, Ui* ui, uint8_t buffer_age)
+window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, Vt* vt, Ui* ui, uint8_t buffer_age)
 {
     GfxOpenGL2* gfx = gfxOpenGL2(self);
 

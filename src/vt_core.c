@@ -31,40 +31,40 @@
 
 static void Vt_shift_global_line_index_refs(Vt* self, size_t point, int64_t change, bool refs_only);
 static inline size_t Vt_top_line(const Vt* const self);
-void                 Vt_visual_scroll_to(Vt* self, size_t line);
-void                 Vt_visual_scroll_reset(Vt* self);
-static void          Vt_alt_buffer_on(Vt* self, bool save_mouse);
-static void          Vt_alt_buffer_off(Vt* self, bool save_mouse);
-static void          Vt_handle_multi_argument_SGR(Vt* self, Vector_char seq, VtRune* opt_target);
-static void          Vt_reset_text_attribs(Vt* self, VtRune* opt_target);
-static void          Vt_carriage_return(Vt* self);
-static void          Vt_clear_right(Vt* self);
-static void          Vt_clear_left(Vt* self);
-static inline void   Vt_scroll_out_all_content(Vt* self);
-static void          Vt_empty_line_fill_bg(Vt* self, size_t idx);
-static void          Vt_line_feed(Vt* self);
-static void          Vt_scroll_up(Vt* self);
-static void          Vt_scroll_down(Vt* self);
-static void          Vt_reverse_line_feed(Vt* self);
-static void          Vt_delete_line(Vt* self);
-static void          Vt_delete_chars(Vt* self, size_t n);
-static void          Vt_erase_chars(Vt* self, size_t n);
-static void          Vt_clear_above(Vt* self);
-static inline void   Vt_scroll_out_above(Vt* self);
-static void          Vt_insert_line(Vt* self);
-static void          Vt_clear_display_and_scrollback(Vt* self);
-static void          Vt_erase_to_end(Vt* self);
-static void          Vt_move_cursor(Vt* self, uint16_t c, uint16_t r);
-static void          Vt_set_title(Vt* self, const char* title);
-static void          Vt_push_title(Vt* self);
-static void          Vt_pop_title(Vt* self);
-static void          Vt_insert_char_at_cursor(Vt* self, VtRune c);
-static void          Vt_insert_char_at_cursor_with_shift(Vt* self, VtRune c);
-static bool          Vt_alt_buffer_enabled(Vt* self);
-static inline void   Vt_mark_proxy_fully_damaged(Vt* self, size_t idx);
-static void          Vt_mark_proxy_damaged_cell(Vt* self, size_t line, size_t rune);
-static void          Vt_init_tab_ruler(Vt* self);
-static void          Vt_reset_tab_ruler(Vt* self);
+void               Vt_visual_scroll_to(Vt* self, size_t line, bool end_scroll_state_if_vp_in_sync);
+void               Vt_visual_scroll_reset(Vt* self);
+static void        Vt_alt_buffer_on(Vt* self, bool save_mouse);
+static void        Vt_alt_buffer_off(Vt* self, bool save_mouse);
+static void        Vt_handle_multi_argument_SGR(Vt* self, Vector_char seq, VtRune* opt_target);
+static void        Vt_reset_text_attribs(Vt* self, VtRune* opt_target);
+static void        Vt_carriage_return(Vt* self);
+static void        Vt_clear_right(Vt* self);
+static void        Vt_clear_left(Vt* self);
+static inline void Vt_scroll_out_all_content(Vt* self);
+static void        Vt_empty_line_fill_bg(Vt* self, size_t idx);
+static void        Vt_line_feed(Vt* self);
+static void        Vt_scroll_up(Vt* self);
+static void        Vt_scroll_down(Vt* self);
+static void        Vt_reverse_line_feed(Vt* self);
+static void        Vt_delete_line(Vt* self);
+static void        Vt_delete_chars(Vt* self, size_t n);
+static void        Vt_erase_chars(Vt* self, size_t n);
+static void        Vt_clear_above(Vt* self);
+static inline void Vt_scroll_out_above(Vt* self);
+static void        Vt_insert_line(Vt* self);
+static void        Vt_clear_display_and_scrollback(Vt* self);
+static void        Vt_erase_to_end(Vt* self);
+static void        Vt_move_cursor(Vt* self, uint16_t c, uint16_t r);
+static void        Vt_set_title(Vt* self, const char* title);
+static void        Vt_push_title(Vt* self);
+static void        Vt_pop_title(Vt* self);
+static void        Vt_insert_char_at_cursor(Vt* self, VtRune c);
+static void        Vt_insert_char_at_cursor_with_shift(Vt* self, VtRune c);
+static bool        Vt_alt_buffer_enabled(Vt* self);
+static inline void Vt_mark_proxy_fully_damaged(Vt* self, size_t idx);
+static void        Vt_mark_proxy_damaged_cell(Vt* self, size_t line, size_t rune);
+static void        Vt_init_tab_ruler(Vt* self);
+static void        Vt_reset_tab_ruler(Vt* self);
 
 static vt_line_damage_t VtLine_diff_to_damage(VtLine*           line_a,
                                               VtLine*           line_b,
@@ -111,6 +111,13 @@ static vt_line_damage_t VtLine_diff_to_damage(VtLine*           line_a,
         return (vt_line_damage_t){
             .type = VT_LINE_DAMAGE_NONE,
         };
+    }
+}
+
+static inline void Vt_maybe_emit_visual_scroll_change(Vt* self)
+{
+    if (unlikely(self->scrolling_visual && !Vt_alt_buffer_enabled(self))) {
+        self->defered_events.visual_scroll_params_changed = true;
     }
 }
 
@@ -1135,7 +1142,7 @@ static inline void Vt_clear_all_tabstops(Vt* self)
     memset(self->tab_ruler, false, Vt_col(self));
 }
 
-bool Vt_visual_scroll_up(Vt* self)
+bool Vt_visual_scroll_up(Vt* self, bool end_scroll_state_if_vp_in_sync)
 {
     if (self->scrolling_visual) {
         if (self->visual_scroll_top) {
@@ -1145,18 +1152,22 @@ bool Vt_visual_scroll_up(Vt* self)
         }
     } else if (Vt_top_line(self)) {
         Vt_end_synchronized_update(self);
-        self->scrolling_visual  = true;
+	if (end_scroll_state_if_vp_in_sync) {
+            self->scrolling_visual = true;
+	}
         self->visual_scroll_top = Vt_top_line(self) - 1;
     }
     return false;
 }
 
-bool Vt_visual_scroll_down(Vt* self)
+bool Vt_visual_scroll_down(Vt* self, bool end_scroll_state_if_vp_in_sync)
 {
     if (self->scrolling_visual && Vt_top_line(self) > self->visual_scroll_top) {
         ++self->visual_scroll_top;
         if (self->visual_scroll_top == Vt_top_line(self)) {
-            self->scrolling_visual = false;
+	    if (end_scroll_state_if_vp_in_sync) {
+                self->scrolling_visual = false;
+	    }
             return true;
         } else {
             Vt_end_synchronized_update(self);
@@ -1165,11 +1176,14 @@ bool Vt_visual_scroll_down(Vt* self)
     return false;
 }
 
-void Vt_visual_scroll_to(Vt* self, size_t line)
+void Vt_visual_scroll_to(Vt* self, size_t line, bool end_scroll_state_if_vp_in_sync)
 {
     line                    = MIN(line, Vt_top_line(self));
     self->visual_scroll_top = line;
-    self->scrolling_visual  = line != Vt_top_line(self);
+
+    if (end_scroll_state_if_vp_in_sync) {
+        self->scrolling_visual = line != Vt_top_line(self);
+    }
 
     Vt_end_synchronized_update(self);
 }
@@ -1178,6 +1192,15 @@ void Vt_visual_scroll_reset(Vt* self)
 {
     self->scrolling_visual = false;
     Vt_end_synchronized_update(self);
+}
+
+void Vt_start_visual_scroll(Vt* self)
+{
+    if (!self->scrolling_visual) {
+        self->visual_scroll_top = Vt_top_line(self);
+        self->scrolling_visual  = true;
+        Vt_end_synchronized_update(self);
+    }
 }
 
 static void Vt_reflow_expand(Vt* self, uint32_t x)
@@ -1501,6 +1524,7 @@ void Vt_resize(Vt* self, uint32_t x, uint32_t y)
     self->pixels_per_cell_x = (double)self->ws.ws_xpixel / Vt_col(self);
     self->pixels_per_cell_y = (double)self->ws.ws_ypixel / Vt_row(self);
 
+#ifndef TEST_MODE
     if (self->master_fd > 1) {
         if (ioctl(self->master_fd, TIOCSWINSZ, &self->ws) < 0) {
             WRN("ioctl(%d, TIOCSWINSZ, winsize { %d, %d, %d, %d }) failed:  %s\n",
@@ -1512,6 +1536,7 @@ void Vt_resize(Vt* self, uint32_t x, uint32_t y)
                 strerror(errno));
         }
     }
+#endif
 
     self->scroll_region_top    = 0;
     self->scroll_region_bottom = Vt_row(self) - 1;
@@ -5139,6 +5164,8 @@ static inline void Vt_scroll_out_all_content(Vt* self)
     if (to_add > 0) {
         self->cursor.row += to_add;
     }
+
+    Vt_maybe_emit_visual_scroll_change(self);
 }
 
 static inline void Vt_scroll_out_above(Vt* self)
@@ -5154,6 +5181,8 @@ static inline void Vt_scroll_out_above(Vt* self)
         Vt_empty_line_fill_bg(self, insert_point);
         ++self->cursor.row;
     }
+
+    Vt_maybe_emit_visual_scroll_change(self);
 }
 
 static inline void Vt_clear_above(Vt* self)
@@ -5181,6 +5210,8 @@ static inline void Vt_clear_display_and_scrollback(Vt* self)
     Vector_clear_RcPtr_VtSixelSurface(&self->scrolled_sixels);
     Vector_clear_RcPtr_VtImageSurfaceView(&self->image_views);
     Vector_clear_RcPtr_VtImageSurface(&self->images);
+
+    Vt_maybe_emit_visual_scroll_change(self);
 }
 
 /**
@@ -5239,6 +5270,7 @@ __attribute__((hot)) static void Vt_insert_char_at_cursor(Vt* self, VtRune c)
 
     while (self->lines.size <= self->cursor.row) {
         Vector_push_VtLine(&self->lines, VtLine_new());
+        Vt_maybe_emit_visual_scroll_change(self);
     }
 
     while (Vt_cursor_line(self)->data.size <= self->cursor.col) {
@@ -5356,6 +5388,7 @@ static inline void Vt_line_feed(Vt* self)
     } else if (Vt_bottom_line(self) == self->cursor.row) {
         Vector_push_VtLine(&self->lines, VtLine_new());
         Vt_empty_line_fill_bg(self, self->lines.size - 1);
+        Vt_maybe_emit_visual_scroll_change(self);
     }
 
     Vt_move_cursor(self, self->cursor.col, Vt_cursor_row(self) + cmove);
@@ -6052,6 +6085,8 @@ static void Vt_shift_global_line_index_refs(Vt* self, size_t point, int64_t delt
 {
     LOG("Vt::shift_idx{ pt: %zu, delta: %ld }\n", point, delta);
 
+    Vt_maybe_emit_visual_scroll_change(self);
+
     if (!refs_only) {
         if (self->cursor.row >= point) {
             self->cursor.row += delta;
@@ -6132,6 +6167,9 @@ static void Vt_remove_scrollback(Vt* self, size_t lines)
     if (Vt_alt_buffer_enabled(self))
         return;
 
+    if (self->scrolling_visual)
+        return;
+
     lines = MIN(lines, (self->lines.size - Vt_row(self)));
     Vector_remove_at_VtLine(&self->lines, 0, lines);
     Vt_shift_global_line_index_refs(self, lines, -(int64_t)lines, false);
@@ -6205,7 +6243,7 @@ void Vt_clear_scrollback(Vt* self)
 
 void Vt_shrink_scrollback(Vt* self)
 {
-    if (Vt_alt_buffer_enabled(self)) {
+    if (Vt_alt_buffer_enabled(self) || self->scrolling_visual) {
         return;
     }
 
@@ -6260,10 +6298,14 @@ inline void Vt_interpret(Vt* self, char* buf, size_t bytes)
         CALL(self->callbacks.on_repaint_required, self->callbacks.user_data);
     }
 
-    if (self->defered_events.cursor_blink) {
+    if (unlikely(self->defered_events.cursor_blink)) {
         CALL(self->callbacks.on_cursor_blink_state_changed,
              self->callbacks.user_data,
              self->cursor.blinking);
+    }
+
+    if (unlikely(self->defered_events.visual_scroll_params_changed)) {
+        TRY_CALL(self->callbacks.on_visual_scroll_params_changed, self->callbacks.user_data);
     }
 
     if (self->lines.size > settings.scrollback * 2) {

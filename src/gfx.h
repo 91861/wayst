@@ -67,7 +67,7 @@ typedef struct
 
 struct IGfx
 {
-    window_partial_swap_request_t* (*draw)(Gfx* self, const Vt*, Ui* ui, uint8_t buffer_age);
+    window_partial_swap_request_t* (*draw)(Gfx* self, Vt*, Ui* ui, uint8_t buffer_age);
     void (*resize)(Gfx* self, uint32_t w, uint32_t h, Pair_uint32_t cells);
     Pair_uint32_t (*get_char_size)(Gfx* self, Pair_uint32_t pixles);
     void (*init_with_context_activated)(Gfx* self);
@@ -90,7 +90,7 @@ static bool Window_is_framebuffer_dirty(Gfx* self)
     return self->interface->is_framebuffer_dirty(self);
 }
 
-static window_partial_swap_request_t* Gfx_draw(Gfx* self, const Vt* vt, Ui* ui, uint8_t buffer_age)
+static window_partial_swap_request_t* Gfx_draw(Gfx* self, Vt* vt, Ui* ui, uint8_t buffer_age)
 {
     return self->interface->draw(self, vt, ui, buffer_age);
 }

@@ -695,6 +695,7 @@ typedef struct
         void (*on_mouse_report_state_changed)(void*);
         void (*on_cursor_blink_state_changed)(void*, bool new_state);
         const char* (*on_application_hostname_requested)(void*);
+	void (*on_visual_scroll_params_changed)(void*);
 
         void (*destroy_proxy)(void*, VtLineProxy*);
         void (*destroy_image_proxy)(void*, VtImageSurfaceProxy*);
@@ -842,6 +843,7 @@ typedef struct
         bool action_performed;
         bool repaint;
         bool cursor_blink;
+	bool visual_scroll_params_changed;
     } defered_events;
 
     vt_gui_pointer_mode_t gui_pointer_mode;
@@ -1190,6 +1192,16 @@ static inline VtLine* Vt_line_at(Vt* self, size_t row)
 }
 
 /**
+ * Get line at global index if it exists */
+static inline const VtLine* Vt_line_at_const(const Vt* self, size_t row)
+{
+    if (row > Vt_max_line(self)) {
+        return NULL;
+    }
+    return &self->lines.buf[row];
+}
+
+/**
  * Get cell at global position if it exists */
 static inline VtRune* Vt_at(Vt* self, uint16_t column, size_t row)
 {
@@ -1255,6 +1267,23 @@ static inline VtRune* Vt_cursor_cell(const Vt* self)
         return NULL;
     }
     return &cursor_line->data.buf[self->cursor.col];
+}
+
+/**
+ * Get cell at global coordinates */
+static inline VtRune* Vt_cell(Vt* self, size_t row, uint16_t col)
+{
+    VtLine* line = Vt_line_at(self, row);
+
+    if (self->cursor.col >= line->data.size) {
+        return NULL;
+    }
+
+    if (col >= line->data.size) {
+        return NULL;
+    }
+
+    return Vector_at_VtRune(&line->data, col);
 }
 
 /**
@@ -1373,17 +1402,20 @@ static inline size_t Vt_visual_bottom_line(const Vt* const self)
 
 /**
  * Move the first visible line of the visual viewport to global line index (out of range values are
- * clamped) starts/stops scrolling */
-void Vt_visual_scroll_to(Vt* self, size_t line);
+ * clamped) starts/stops scrolling
+ *
+ * @arg end_scroll_state_if_vp_in_sync - exit visual scrolling state if visual and real viewports
+ * become synchronized */
+void Vt_visual_scroll_to(Vt* self, size_t line, bool end_scroll_state_if_vp_in_sync);
 
 /**
  * Move visual viewport one line up and start visual scrolling
  * @return can scroll more */
-bool Vt_visual_scroll_up(Vt* self);
+bool Vt_visual_scroll_up(Vt* self, bool end_scroll_state_if_vp_in_sync);
 
 /**
  * Move visual viewport to previous line mark and start visual scrolling */
-static inline bool Vt_visual_scroll_mark_up(Vt* self)
+static inline bool Vt_visual_scroll_mark_up(Vt* self, bool     end_scroll_state_if_vp_in_sync)
 {
     if (!Vt_visual_top_line(self) || Vt_alt_buffer_enabled(self)) {
         return false;
@@ -1393,7 +1425,7 @@ static inline bool Vt_visual_scroll_mark_up(Vt* self)
         VtLine* ln = Vt_line_at(self, i);
 
         if (ln && (ln->mark_explicit || ln->mark_command_output_start)) {
-            Vt_visual_scroll_to(self, i ? (i - 1) : i);
+            Vt_visual_scroll_to(self, i ? (i - 1) : i, end_scroll_state_if_vp_in_sync);
             return true;
         }
     }
@@ -1401,8 +1433,12 @@ static inline bool Vt_visual_scroll_mark_up(Vt* self)
 }
 
 /**
+ * Start visual scrolling without moving the viewport */
+void Vt_start_visual_scroll(Vt* self);
+
+/**
  * Move visual viewport to next line mark and start visual scrolling */
-static inline bool Vt_visual_scroll_mark_down(Vt* self)
+static inline bool Vt_visual_scroll_mark_down(Vt* self, bool end_scroll_state_if_vp_in_sync)
 {
     if (Vt_alt_buffer_enabled(self)) {
         return false;
@@ -1413,7 +1449,7 @@ static inline bool Vt_visual_scroll_mark_down(Vt* self)
         VtLine* ln = Vt_line_at(self, i);
         if (ln && (ln->mark_explicit || ln->mark_command_output_start)) {
             if (found_first) {
-                Vt_visual_scroll_to(self, i ? (i - 1) : i);
+                Vt_visual_scroll_to(self, i ? (i - 1) : i, end_scroll_state_if_vp_in_sync);
                 return true;
             } else {
                 found_first = true;
@@ -1422,7 +1458,7 @@ static inline bool Vt_visual_scroll_mark_down(Vt* self)
     }
 
     if (Vt_visual_top_line(self) != Vt_top_line(self)) {
-        Vt_visual_scroll_to(self, Vt_top_line(self));
+        Vt_visual_scroll_to(self, Vt_top_line(self), end_scroll_state_if_vp_in_sync);
         return true;
     } else {
         return false;
@@ -1431,23 +1467,26 @@ static inline bool Vt_visual_scroll_mark_down(Vt* self)
 
 /**
  * Move visual viewport one page up and start visual scrolling */
-static inline void Vt_visual_scroll_page_up(Vt* self)
+static inline void Vt_visual_scroll_page_up(Vt*      self,
+                                            uint16_t margin,
+                                            bool     end_scroll_state_if_vp_in_sync)
 {
-    size_t tgt_pos =
-      (Vt_visual_top_line(self) > Vt_row(self)) ? Vt_visual_top_line(self) - Vt_row(self) : 0;
-    Vt_visual_scroll_to(self, tgt_pos);
+    uint16_t offset  = Vt_row(self) > margin ? (Vt_row(self) - margin) : 1;
+    size_t   tgt_pos = (Vt_visual_top_line(self) > offset) ? Vt_visual_top_line(self) - offset : 0;
+    Vt_visual_scroll_to(self, tgt_pos, end_scroll_state_if_vp_in_sync);
 }
 
 /**
  * Move visual viewport one line down and stop scrolling if lowest position
  * @return can scroll more  */
-bool Vt_visual_scroll_down(Vt* self);
+bool Vt_visual_scroll_down(Vt* self, bool end_scroll_state_if_vp_in_sync);
 
 /**
  * Move visual viewport one page down and stop scrolling if lowest position */
-static inline void Vt_visual_scroll_page_down(Vt* self)
+static inline void Vt_visual_scroll_page_down(Vt* self, uint16_t margin, bool     end_scroll_state_if_vp_in_sync)
 {
-    Vt_visual_scroll_to(self, self->visual_scroll_top + Vt_row(self));
+    uint16_t offset = Vt_row(self) > margin ? (Vt_row(self) - margin) : 1;
+    Vt_visual_scroll_to(self, self->visual_scroll_top + offset, end_scroll_state_if_vp_in_sync);
 }
 
 /**
