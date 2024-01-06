@@ -1,4 +1,5 @@
 #include "colors.h"
+#include "util.h"
 #include <ctype.h>
 #include <inttypes.h>
 #include <stdint.h>
@@ -50,6 +51,13 @@ ColorRGBA ColorRGBA_from_any(const char* string, bool* failed)
 {
     bool      f = false;
     ColorRGBA c = { 0 };
+
+    if (unlikely(!string)) {
+        if (failed) {
+            *failed = true;
+        }
+        return c;
+    }
 
     if (*string == '#') {
         c = ColorRGBA_from_hex(string, &f);

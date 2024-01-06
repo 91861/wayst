@@ -1149,9 +1149,9 @@ static void handle_option(const char opt, const int array_index, const char* val
 
 #define L_WARN_BAD_COLOR                                                                           \
     WRN("Failed to parse \'%s\' as color for option \'%s\'%s.\n",                                  \
-        value,                                                                                     \
+        OR(value, ""),                                                                                     \
         long_options[array_index].name,                                                            \
-        strlen(value) ? "" : ", expected syntax =\"#rrggbb\" or =rrggbb");
+        value && strlen(value) ? "" : ", expected syntax =\"#rrggbb\" or =rrggbb");
 
 #define L_ASSIGN_BOOL(_var, _dft)                                                                  \
     {                                                                                              \
