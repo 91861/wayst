@@ -234,6 +234,8 @@ static void* _malloc(size_t size)
 _Pragma("GCC diagnostic push");
 _Pragma("GCC diagnostic ignored \"-Wpragmas\"");
 _Pragma("GCC diagnostic push");
+_Pragma("GCC diagnostic ignored \"-Wunknown-warning-option\"");
+_Pragma("GCC diagnostic push");
 _Pragma("GCC diagnostic ignored \"-Wuse-after-free\"");
 static void* _realloc(void* ptr, size_t new_size)
 {
@@ -246,6 +248,7 @@ static void* _realloc(void* ptr, size_t new_size)
     }
     return ret;
 }
+_Pragma("GCC diagnostic pop");
 _Pragma("GCC diagnostic pop");
 _Pragma("GCC diagnostic pop");
 
