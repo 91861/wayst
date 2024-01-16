@@ -6,6 +6,7 @@
 
 #pragma once
 
+#define _GNU_SOURCE
 #include "gfx.h"
 #include "freetype.h"
 

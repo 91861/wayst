@@ -2,286 +2,14 @@
 
 #define _GNU_SOURCE
 
-#include "colors.h"
-#include "ui.h"
-
-#include "gfx_gl2.h"
-#include "vt.h"
-
-#include <assert.h>
-#include <math.h>
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <time.h>
-#include <unistd.h>
-
-#include "freetype.h"
-#include "fterrors.h"
-#include <GL/gl.h>
-
-#include "map.h"
-#include "util.h"
-#include "wcwidth/wcwidth.h"
+#include "gfx_gl2_boxdraw_page.h"
+#include "gfx_gl2_private.h"
 
 #ifdef GFX_GLES
 #include "shaders_gles20.h"
 #else
 #include "shaders_gl21.h"
 #endif
-
-DEF_PAIR(GLuint);
-
-/* Number of buckets in the glyph atlas reference data hash map */
-#define NUM_BUCKETS 513
-
-/* Maximum number of frames we record damage for */
-#define MAX_TRACKED_FRAME_DAMAGE 6
-
-/* Maximum number of damaged cells that don't cause full surface damage */
-#define CELL_DAMAGE_TO_SURF_LIMIT 10
-
-#define ATLAS_SIZE_LIMIT INT32_MAX
-
-#define DIM_COLOR_BLEND_FACTOR 0.4f
-
-/* Maximum number of textures stored for reuse */
-#define N_RECYCLED_TEXTURES 5
-
-#define PROXY_INDEX_TEXTURE       0
-#define PROXY_INDEX_TEXTURE_BLINK 1
-
-#ifndef GFX_GLES
-#define PROXY_INDEX_DEPTHBUFFER       2
-#define PROXY_INDEX_DEPTHBUFFER_BLINK 3
-#endif
-
-#define IMG_PROXY_INDEX_TEXTURE_ID 0
-
-#define IMG_VIEW_PROXY_INDEX_VBO_ID 0
-
-#define SIXEL_PROXY_INDEX_TEXTURE_ID 0
-#define SIXEL_PROXY_INDEX_VBO_ID     1
-
-#define BOUND_RESOURCES_NONE      0
-#define BOUND_RESOURCES_BG        1
-#define BOUND_RESOURCES_FONT      2
-#define BOUND_RESOURCES_LINES     3
-#define BOUND_RESOURCES_IMAGE     4
-#define BOUND_RESOURCES_FONT_MONO 5
-
-/* GLES does not support GL_QUADS */
-#ifdef GFX_GLES
-#define QUAD_DRAW_MODE GL_TRIANGLES
-#define QUAD_V_SZ      6 /* number of verts per quad (GL_TRIANGLES) */
-#else
-#define QUAD_DRAW_MODE GL_QUADS
-#define QUAD_V_SZ      4 /* number of verts per quad (GL_QUADS) */
-#endif
-
-#include "gl_exts/glext.h"
-
-static PFNGLBUFFERSUBDATAARBPROC        glBufferSubData;
-static PFNGLUNIFORM4FPROC               glUniform4f;
-static PFNGLUNIFORM3FPROC               glUniform3f;
-static PFNGLUNIFORM2FPROC               glUniform2f;
-static PFNGLBUFFERDATAPROC              glBufferData;
-static PFNGLDELETEPROGRAMPROC           glDeleteProgram;
-static PFNGLUSEPROGRAMPROC              glUseProgram;
-static PFNGLGETUNIFORMLOCATIONPROC      glGetUniformLocation;
-static PFNGLGETATTRIBLOCATIONPROC       glGetAttribLocation;
-static PFNGLDELETESHADERPROC            glDeleteShader;
-static PFNGLDETACHSHADERPROC            glDetachShader;
-static PFNGLGETPROGRAMINFOLOGPROC       glGetProgramInfoLog;
-static PFNGLGETPROGRAMIVPROC            glGetProgramiv;
-static PFNGLLINKPROGRAMPROC             glLinkProgram;
-static PFNGLATTACHSHADERPROC            glAttachShader;
-static PFNGLCOMPILESHADERPROC           glCompileShader;
-static PFNGLSHADERSOURCEPROC            glShaderSource;
-static PFNGLCREATESHADERPROC            glCreateShader;
-static PFNGLCREATEPROGRAMPROC           glCreateProgram;
-static PFNGLGETSHADERINFOLOGPROC        glGetShaderInfoLog;
-static PFNGLGETSHADERIVPROC             glGetShaderiv;
-static PFNGLDELETEBUFFERSPROC           glDeleteBuffers;
-static PFNGLVERTEXATTRIBPOINTERPROC     glVertexAttribPointer;
-static PFNGLENABLEVERTEXATTRIBARRAYPROC glEnableVertexAttribArray;
-static PFNGLBINDBUFFERPROC              glBindBuffer;
-static PFNGLGENBUFFERSPROC              glGenBuffers;
-static PFNGLDELETEFRAMEBUFFERSPROC      glDeleteFramebuffers;
-static PFNGLBINDBUFFERPROC              glBindBuffer;
-static PFNGLGENBUFFERSPROC              glGenBuffers;
-static PFNGLDELETEFRAMEBUFFERSPROC      glDeleteFramebuffers;
-static PFNGLFRAMEBUFFERTEXTURE2DPROC    glFramebufferTexture2D;
-static PFNGLBINDFRAMEBUFFERPROC         glBindFramebuffer;
-static PFNGLGENFRAMEBUFFERSPROC         glGenFramebuffers;
-static PFNGLGENERATEMIPMAPPROC          glGenerateMipmap;
-static PFNGLBLENDFUNCSEPARATEPROC       glBlendFuncSeparate;
-
-#ifndef GFX_GLES
-static PFNGLFRAMEBUFFERRENDERBUFFERPROC glFramebufferRenderbuffer;
-static PFNGLRENDERBUFFERSTORAGEPROC     glRenderbufferStorage;
-static PFNGLBINDRENDERBUFFERPROC        glBindRenderbuffer;
-static PFNGLGENRENDERBUFFERSPROC        glGenRenderbuffers;
-static PFNGLDELETERENDERBUFFERSPROC     glDeleteRenderbuffers;
-#endif
-
-#ifdef DEBUG
-static PFNGLDEBUGMESSAGECALLBACKPROC   glDebugMessageCallback;
-static PFNGLCHECKFRAMEBUFFERSTATUSPROC glCheckFramebufferStatus;
-#endif
-
-static void maybe_load_gl_exts(void* loader,
-                               void* (*loader_func)(void* loader, const char* proc_name))
-{
-    static bool loaded = false;
-    if (loaded)
-        return;
-
-    glBufferSubData           = loader_func(loader, "glBufferSubData");
-    glUniform4f               = loader_func(loader, "glUniform4f");
-    glUniform3f               = loader_func(loader, "glUniform3f");
-    glUniform2f               = loader_func(loader, "glUniform2f");
-    glBufferData              = loader_func(loader, "glBufferData");
-    glDeleteProgram           = loader_func(loader, "glDeleteProgram");
-    glUseProgram              = loader_func(loader, "glUseProgram");
-    glGetUniformLocation      = loader_func(loader, "glGetUniformLocation");
-    glGetAttribLocation       = loader_func(loader, "glGetAttribLocation");
-    glDeleteShader            = loader_func(loader, "glDeleteShader");
-    glDetachShader            = loader_func(loader, "glDetachShader");
-    glGetProgramInfoLog       = loader_func(loader, "glGetProgramInfoLog");
-    glGetProgramiv            = loader_func(loader, "glGetProgramiv");
-    glLinkProgram             = loader_func(loader, "glLinkProgram");
-    glAttachShader            = loader_func(loader, "glAttachShader");
-    glCompileShader           = loader_func(loader, "glCompileShader");
-    glShaderSource            = loader_func(loader, "glShaderSource");
-    glCreateShader            = loader_func(loader, "glCreateShader");
-    glCreateProgram           = loader_func(loader, "glCreateProgram");
-    glGetShaderInfoLog        = loader_func(loader, "glGetShaderInfoLog");
-    glGetShaderiv             = loader_func(loader, "glGetShaderiv");
-    glDeleteBuffers           = loader_func(loader, "glDeleteBuffers");
-    glVertexAttribPointer     = loader_func(loader, "glVertexAttribPointer");
-    glEnableVertexAttribArray = loader_func(loader, "glEnableVertexAttribArray");
-    glBindBuffer              = loader_func(loader, "glBindBuffer");
-    glGenBuffers              = loader_func(loader, "glGenBuffers");
-    glDeleteFramebuffers      = loader_func(loader, "glDeleteFramebuffers");
-
-#ifndef GFX_GLES
-    glFramebufferRenderbuffer = loader_func(loader, "glFramebufferRenderbuffer");
-    glRenderbufferStorage     = loader_func(loader, "glRenderbufferStorage");
-    glDeleteRenderbuffers     = loader_func(loader, "glDeleteRenderbuffers");
-    glBindRenderbuffer        = loader_func(loader, "glBindRenderbuffer");
-    glGenRenderbuffers        = loader_func(loader, "glGenRenderbuffers");
-#endif
-
-    glBindBuffer           = loader_func(loader, "glBindBuffer");
-    glGenBuffers           = loader_func(loader, "glGenBuffers");
-    glDeleteFramebuffers   = loader_func(loader, "glDeleteFramebuffers");
-    glFramebufferTexture2D = loader_func(loader, "glFramebufferTexture2D");
-    glBindFramebuffer      = loader_func(loader, "glBindFramebuffer");
-    glGenFramebuffers      = loader_func(loader, "glGenFramebuffers");
-    glGenerateMipmap       = loader_func(loader, "glGenerateMipmap");
-    glBlendFuncSeparate    = loader_func(loader, "glBlendFuncSeparate");
-#ifdef DEBUG
-    glDebugMessageCallback   = loader_func(loader, "glDebugMessageCallback");
-    glCheckFramebufferStatus = loader_func(loader, "glCheckFramebufferStatus");
-#endif
-
-    loaded = true;
-}
-
-#include "gl.h"
-
-#ifdef DEBUG
-static size_t dbg_line_proxy_textures_created   = 0;
-static size_t dbg_line_proxy_textures_destroyed = 0;
-#define DBG_DELTEX                                                                                 \
-    ++dbg_line_proxy_textures_destroyed;                                                           \
-    INFO("proxy-- created: %zu, destroyed: %zu (total: %zu)\n",                                    \
-         dbg_line_proxy_textures_created,                                                          \
-         dbg_line_proxy_textures_destroyed,                                                        \
-         (dbg_line_proxy_textures_created - dbg_line_proxy_textures_destroyed))
-
-#define DBG_MAKETEX                                                                                \
-    ++dbg_line_proxy_textures_created;                                                             \
-    INFO("proxy++ created: %zu, destroyed: %zu (total: %zu)\n",                                    \
-         dbg_line_proxy_textures_created,                                                          \
-         dbg_line_proxy_textures_destroyed,                                                        \
-         (dbg_line_proxy_textures_created - dbg_line_proxy_textures_destroyed))
-#else
-#define DBG_DELTEX  ;
-#define DBG_MAKETEX ;
-#endif
-
-enum GlyphColor
-{
-    GLYPH_COLOR_MONO,
-    GLYPH_COLOR_LCD,
-    GLYPH_COLOR_COLOR,
-};
-
-typedef struct
-{
-    float fade_fraction;
-} cursor_color_animation_override_t;
-
-DEF_VECTOR(Texture, Texture_destroy);
-
-static inline size_t Rune_hash(const Rune* self)
-{
-    return self->code;
-}
-
-static inline size_t Rune_eq(const Rune* self, const Rune* other)
-{
-    bool combinable_eq = true;
-    for (int i = 0; i < VT_RUNE_MAX_COMBINE; ++i) {
-        if (self->combine[i] == other->combine[i]) {
-            if (!self->combine[i])
-                break;
-            continue;
-        } else {
-            combinable_eq = false;
-            break;
-        }
-    }
-    return self->code == other->code && self->style == other->style && combinable_eq;
-}
-
-#define ATLAS_RENDERABLE_START ' '
-#define ATLAS_RENDERABLE_END   CHAR_MAX
-
-typedef struct
-{
-    float x, y;
-} vertex_t;
-
-DEF_VECTOR(float, NULL);
-DEF_VECTOR(Vector_float, Vector_destroy_float);
-
-DEF_VECTOR(vertex_t, NULL);
-
-typedef struct
-{
-    GLuint color_tex;
-    GLuint depth_rb;
-} LineTexture;
-
-static void LineTexture_destroy(LineTexture* self)
-{
-    if (self->color_tex) {
-        DBG_DELTEX
-        glDeleteTextures(1, &self->color_tex);
-        self->color_tex = 0;
-
-#ifndef GFX_GLES
-        ASSERT(self->depth_rb, "deleted texture has depth renderbuffer");
-        glDeleteRenderbuffers(1, &self->depth_rb);
-        self->depth_rb = 0;
-#endif
-    }
-}
 
 typedef struct
 {
@@ -318,8 +46,8 @@ static stored_common_gl_state_t store_common_state()
 
 static void restore_gl_state(stored_common_gl_state_t* state)
 {
-    glUseProgram(state->shader);
-    glBindFramebuffer(GL_FRAMEBUFFER, state->framebuffer);
+    glUseProgram_(state->shader);
+    glBindFramebuffer_(GL_FRAMEBUFFER, state->framebuffer);
     glViewport(state->viewport[0], state->viewport[1], state->viewport[2], state->viewport[3]);
     glBlendFunc(state->blend_src, state->blend_dst);
 
@@ -350,145 +78,6 @@ static uint32_t titlebar_height_px(Ui* ui)
 }
 
 struct _GfxOpenGL2;
-
-typedef struct
-{
-    uint32_t           page_id;
-    GLuint             texture_id;
-    GLenum             internal_format;
-    enum TextureFormat texture_format;
-    uint32_t           width_px, height_px;
-    uint32_t           current_line_height_px, current_offset_y, current_offset_x;
-    float              sx, sy;
-} GlyphAtlasPage;
-
-typedef struct
-{
-    uint8_t page_id;
-    GLuint  texture_id;
-
-    float   left, top;
-    int32_t height, width;
-    float   tex_coords[4];
-} GlyphAtlasEntry;
-
-static void GlyphAtlasPage_destroy(GlyphAtlasPage* self)
-{
-    if (self->texture_id) {
-        glDeleteTextures(1, &self->texture_id);
-        self->texture_id = 0;
-    }
-}
-
-DEF_VECTOR(GlyphAtlasPage, GlyphAtlasPage_destroy);
-DEF_MAP(Rune, GlyphAtlasEntry, Rune_hash, Rune_eq, NULL);
-
-typedef struct
-{
-    Vector_GlyphAtlasPage    pages;
-    GlyphAtlasPage*          current_rgb_page;
-    GlyphAtlasPage*          current_rgba_page;
-    GlyphAtlasPage*          current_grayscale_page;
-    Map_Rune_GlyphAtlasEntry entry_map;
-    uint32_t                 page_size_px;
-    uint32_t                 color_page_size_px;
-} GlyphAtlas;
-
-typedef struct
-{
-    uint32_t width, height, top, left;
-} freetype_output_scaling_t;
-
-typedef struct
-{
-    uint32_t curosr_position_x;
-    uint32_t curosr_position_y;
-    uint16_t line_index;
-    bool     cursor_drawn;
-    bool     overlay_state;
-} overlay_damage_record_t;
-
-typedef struct
-{
-    bool*     damage_history;
-    uint32_t* proxy_color_component;
-    uint16_t* line_length;
-
-    uint16_t n_lines;
-} lines_damage_record_t;
-
-typedef struct _GfxOpenGL2
-{
-    GLint max_tex_res;
-
-    Vector_vertex_t vec_vertex_buffer;
-    Vector_vertex_t vec_vertex_buffer2;
-
-    VBO flex_vbo;
-
-    GLuint full_framebuffer_quad_vbo;
-    GLuint line_quads_vbo;
-
-    /* pen position to begin drawing font */
-    float pen_begin_y;
-    int   pen_begin_pixels_y;
-    int   pen_begin_pixels_x;
-
-    uint32_t win_w, win_h;
-    float    line_height, glyph_width;
-    uint16_t line_height_pixels, glyph_width_pixels;
-    size_t   max_cells_in_line;
-    float    sx, sy;
-    uint32_t gw;
-
-    /* padding offset from the top right corner */
-    uint8_t pixel_offset_x;
-    uint8_t pixel_offset_y;
-
-    GLuint line_framebuffer;
-
-    Shader solid_fill_shader;
-    Shader font_shader;
-    Shader font_shader_blend;
-    Shader font_shader_gray;
-    Shader line_shader;
-    Shader line_shader_alpha;
-    Shader image_shader;
-    Shader image_tint_shader;
-    Shader circle_shader;
-
-    GLuint csd_close_button_vbo;
-
-    ColorRGB  color;
-    ColorRGBA bg_color;
-
-    GlyphAtlas          glyph_atlas;
-    Vector_Vector_float float_vec;
-
-    // keep textures for reuse in order of length
-    LineTexture recycled_textures[5];
-
-    Texture squiggle_texture;
-    Texture csd_close_button_texture;
-
-    TimePoint blink_switch;
-    TimePoint blink_switch_text;
-    TimePoint action;
-    TimePoint inactive;
-
-    bool is_main_font_rgb;
-
-    Freetype* freetype;
-
-    int_fast8_t bound_resources;
-
-    Pair_uint32_t cells;
-
-    window_partial_swap_request_t modified_region;
-
-    lines_damage_record_t   line_damage;
-    overlay_damage_record_t frame_overlay_damage[MAX_TRACKED_FRAME_DAMAGE];
-} GfxOpenGL2;
 
 #define gfxBase(gfxGl2) ((Gfx*)(((uint8_t*)(gfxGl2)) - offsetof(Gfx, extend_data)))
 Pair_uint32_t GfxOpenGL2_get_char_size(Gfx* self, Pair_uint32_t pixels);
@@ -603,9 +192,9 @@ Gfx* Gfx_new_OpenGL2(Freetype* freetype)
 #define ARRAY_BUFFER_SUB_OR_SWAP(_buf, _size, _newsize)                                            \
     if ((_newsize) > _size) {                                                                      \
         _size = (_newsize);                                                                        \
-        glBufferData(GL_ARRAY_BUFFER, (_newsize), (_buf), GL_STREAM_DRAW);                         \
+        glBufferData_(GL_ARRAY_BUFFER, (_newsize), (_buf), GL_STREAM_DRAW);                        \
     } else {                                                                                       \
-        glBufferSubData(GL_ARRAY_BUFFER, 0, (_newsize), (_buf));                                   \
+        glBufferSubData_(GL_ARRAY_BUFFER, 0, (_newsize), (_buf));                                  \
     }
 
 /*
@@ -617,7 +206,7 @@ Gfx* Gfx_new_OpenGL2(Freetype* freetype)
  * https://www.khronos.org/opengl/wiki/Buffer_Object_Streaming#Buffer_re-specification
  * https://www.khronos.org/opengl/wiki/Buffer_Object#Streaming
  * */
-#define ARRAY_BUFFER_ORPHAN(_size) glBufferData(GL_ARRAY_BUFFER, (_size), NULL, GL_STREAM_DRAW);
+#define ARRAY_BUFFER_ORPHAN(_size) glBufferData_(GL_ARRAY_BUFFER, (_size), NULL, GL_STREAM_DRAW);
 
 static GlyphAtlasPage GlyphAtlasPage_new(GfxOpenGL2*        gfx,
                                          uint32_t           page_id,
@@ -721,16 +310,16 @@ static GlyphAtlasEntry GlyphAtlasPage_push_tex(GfxOpenGL2*                gfx,
     stored_common_gl_state_t old_state = store_common_state();
 
     GLuint tmp_fb;
-    glGenFramebuffers(1, &tmp_fb);
-    glBindFramebuffer(GL_FRAMEBUFFER, tmp_fb);
-    glFramebufferTexture2D(GL_FRAMEBUFFER,
-                           GL_COLOR_ATTACHMENT0,
-                           GL_TEXTURE_2D,
-                           self->texture_id,
-                           0);
+    glGenFramebuffers_(1, &tmp_fb);
+    glBindFramebuffer_(GL_FRAMEBUFFER, tmp_fb);
+    glFramebufferTexture2D_(GL_FRAMEBUFFER,
+                            GL_COLOR_ATTACHMENT0,
+                            GL_TEXTURE_2D,
+                            self->texture_id,
+                            0);
 
 #ifndef GFX_GLES
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, 0);
+    glFramebufferRenderbuffer_(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, 0);
 #endif
     glViewport(0, 0, self->width_px, self->height_px);
 
@@ -747,9 +336,9 @@ static GlyphAtlasEntry GlyphAtlasPage_push_tex(GfxOpenGL2*                gfx,
 #endif
 
     GLuint tmp_vbo;
-    glGenBuffers(1, &tmp_vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, tmp_vbo);
-    glUseProgram(gfx->image_shader.id);
+    glGenBuffers_(1, &tmp_vbo);
+    glBindBuffer_(GL_ARRAY_BUFFER, tmp_vbo);
+    glUseProgram_(gfx->image_shader.id);
     glBindTexture(GL_TEXTURE_2D, tex.id);
 
     float sx = 2.0f / self->width_px;
@@ -773,15 +362,15 @@ static GlyphAtlasEntry GlyphAtlasPage_push_tex(GfxOpenGL2*                gfx,
     };
 #endif
 
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 4 * QUAD_V_SZ, vbo_data, GL_STREAM_DRAW);
-    glVertexAttribPointer(gfx->image_shader.attribs->location, 4, GL_FLOAT, GL_FALSE, 0, 0);
+    glBufferData_(GL_ARRAY_BUFFER, sizeof(float) * 4 * QUAD_V_SZ, vbo_data, GL_STREAM_DRAW);
+    glVertexAttribPointer_(gfx->image_shader.attribs->location, 4, GL_FLOAT, GL_FALSE, 0, 0);
 
     glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
 
     glBindTexture(GL_TEXTURE_2D, 0);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glDeleteFramebuffers(1, &tmp_fb);
-    glDeleteBuffers(1, &tmp_vbo);
+    glBindBuffer_(GL_ARRAY_BUFFER, 0);
+    glDeleteFramebuffers_(1, &tmp_fb);
+    glDeleteBuffers_(1, &tmp_vbo);
 
     restore_gl_state(&old_state);
 
@@ -889,7 +478,7 @@ static GlyphAtlasEntry GlyphAtlasPage_push(GfxOpenGL2*     gfx,
                      GL_UNSIGNED_BYTE,
                      glyph->pixels);
 
-        glGenerateMipmap(GL_TEXTURE_2D);
+        glGenerateMipmap_(GL_TEXTURE_2D);
 
         Texture tex = {
             .format = TEX_FMT_RGBA,
@@ -915,7 +504,7 @@ static GlyphAtlasEntry GlyphAtlasPage_push(GfxOpenGL2*     gfx,
     self->current_line_height_px = MAX(self->current_line_height_px, (uint32_t)glyph->height);
 
     if (unlikely(glyph->type == FT_OUTPUT_COLOR_BGRA)) {
-        glGenerateMipmap(GL_TEXTURE_2D);
+        glGenerateMipmap_(GL_TEXTURE_2D);
     }
 
     float tc[] = {
@@ -939,874 +528,6 @@ static GlyphAtlasEntry GlyphAtlasPage_push(GfxOpenGL2*     gfx,
     self->current_offset_x += final_width;
 
     return retval;
-}
-
-/* Generate a private atlas page with consistant looking block elements from unicode block
- * "Block Elements" and mirrored equivalents from "Symbols for Legacy Computing". */
-__attribute__((cold)) static void GfxOpenGL2_maybe_generate_boxdraw_atlas_page(GfxOpenGL2* gfx)
-{
-    if (settings.font_box_drawing_chars) {
-        return;
-    }
-
-    uint32_t page_width  = gfx->glyph_width_pixels * 2;
-    uint32_t page_height = gfx->line_height_pixels * 4 + 1;
-
-    GlyphAtlasPage self = (GlyphAtlasPage){
-        .height_px       = page_height,
-        .width_px        = page_width,
-        .texture_id      = 0,
-        .texture_format  = TEX_FMT_MONO,
-        .internal_format = GL_RED,
-        .page_id         = gfx->glyph_atlas.pages.size,
-    };
-
-    self.sx = 2.0 / self.width_px;
-    self.sy = 2.0 / self.height_px;
-
-    float scale_tex_u = 1.0 / self.width_px;
-    float scale_tex_v = 1.0 / self.height_px;
-
-    size_t bs = self.height_px * self.width_px * sizeof(uint8_t) * 4;
-
-    uint8_t* fragments = _calloc(1, bs);
-
-#define L_OFFSET(_x, _y) (self.width_px * (_y) + (_x))
-
-    /* texture layout:
-       +--------+
-       |LMD     | section 0, h = 1px
-       +--------+
-       |####    | section 1, h = 2 * glyph.h
-       |####    |
-       |####    |
-       |    ####|
-       |    ####|
-       |    ####|
-       |    ####|
-       +--------+
-       |##  #   | section 2, h = 1 * glyph.h
-       |########|
-       |########|
-       |##  #   |
-       +--------+
-       |##      | section 3, h = 1 * glyph.h
-       |###     |
-       |####    |
-       +--------+ */
-
-    /* section 0 */
-    fragments[L_OFFSET(0, 0)] = 50;  // LIGHT SHADE
-    fragments[L_OFFSET(1, 0)] = 100; // MEDIUM SHADE
-    fragments[L_OFFSET(2, 0)] = 200; // DARK SHADE
-
-    /* section 1 */
-    for (int32_t x = 0; x < gfx->glyph_width_pixels; ++x) {
-        for (int32_t y = 1; y < (gfx->line_height_pixels + 1); ++y) {
-            fragments[L_OFFSET(x, y)] = UINT8_MAX;
-        }
-    }
-
-    for (uint32_t x = gfx->glyph_width_pixels; x < (gfx->glyph_width_pixels * 2); ++x) {
-        for (int32_t y = (gfx->line_height_pixels + 1); y < (gfx->line_height_pixels * 2 + 1);
-             ++y) {
-            fragments[L_OFFSET(x, y)] = UINT8_MAX;
-        }
-    }
-
-    /* section 2 */
-    /*  and  from private-use area (filled triangles) */
-    const float    sx      = 1.0 / gfx->glyph_width_pixels;
-    const uint32_t yoffset = 1 + gfx->line_height_pixels * 2;
-    const uint32_t xoffset = gfx->glyph_width_pixels;
-    for (uint32_t dx = 0; dx < gfx->glyph_width_pixels; ++dx) {
-        for (int32_t dy = 0; dy <= gfx->line_height_pixels; ++dy) {
-            double x     = ((double)dx + 0.5) / (double)gfx->glyph_width_pixels;
-            double y     = ((double)dy + 0.5) / ((double)gfx->line_height_pixels / 2.0) - 1.0;
-            double sd    = CLAMP((x - fabs(y)), -sx, sx);
-            double value = (sd / (2.0 * sx)) + 0.5;
-            fragments[L_OFFSET(xoffset + dx, yoffset + dy)] = value * UINT8_MAX;
-        }
-    }
-
-    /*  and  from private-use area (filled semielipses) */
-    for (uint32_t dx = 0; dx < gfx->glyph_width_pixels; ++dx) {
-        for (int32_t dy = 0; dy < gfx->line_height_pixels; ++dy) {
-            int32_t  y_out = 1 + gfx->line_height_pixels * 2 + dy;
-            uint32_t x_out = dx;
-            double   x     = (double)dx / gfx->glyph_width_pixels;
-            double   y     = (double)((double)dy + 0.5 - (double)gfx->line_height_pixels / 2.0) /
-                       gfx->line_height_pixels * 2.0;
-            float   x2 = x * x;
-            float   y2 = y * y;
-            float   w2 = gfx->glyph_width_pixels * gfx->glyph_width_pixels;
-            float   h2 = (gfx->line_height_pixels) * (gfx->line_height_pixels);
-            float   f  = sqrt(x * x + y * y);
-            float   sd = (f - 1.0) * f / (2.0 * sqrt(x2 / w2 + y2 / h2));
-            uint8_t value;
-            if (sd > 0.5) {
-                value = 0;
-            } else if (sd > -0.5) {
-                value = (0.5 - sd) * UINT8_MAX;
-            } else if (sd > +0.5) {
-                value = UINT8_MAX;
-            } else if (sd > -0.5) {
-                value = (sd + 0.5) * UINT8_MAX;
-            } else {
-                value = UINT8_MAX;
-            }
-
-            fragments[L_OFFSET(x_out, y_out)] = value;
-        }
-    }
-
-    /* section 3 */
-    /*  and  from private-use area (half-cell triangles) */
-    for (uint32_t dx = 0; dx < gfx->glyph_width_pixels; ++dx) {
-        for (int32_t dy = 0; dy <= gfx->line_height_pixels; ++dy) {
-            int32_t  y_out = 1 + gfx->line_height_pixels * 3 + dy;
-            uint32_t x_out = dx;
-            double   x     = ((double)dx + 0.5) / (double)gfx->glyph_width_pixels;
-            double   y     = ((double)dy + 0.5) / (double)gfx->line_height_pixels;
-            double   sd    = CLAMP((x - fabs(y)), -sx, sx);
-            double   value = (sd / (2.0 * sx)) + 0.5;
-
-            fragments[L_OFFSET(x_out, y_out)] = value * value * UINT8_MAX;
-        }
-    }
-
-#undef L_OFFSET
-
-    glActiveTexture(GL_TEXTURE0);
-    glGenTextures(1, &self.texture_id);
-    glBindTexture(GL_TEXTURE_2D, self.texture_id);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-    glTexImage2D(GL_TEXTURE_2D,
-                 0,
-                 GL_RED,
-                 self.width_px,
-                 self.height_px,
-                 0,
-                 GL_RED,
-                 GL_UNSIGNED_BYTE,
-                 fragments);
-    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-    free(fragments);
-
-    Vector_push_GlyphAtlasPage(&gfx->glyph_atlas.pages, self);
-    GlyphAtlasPage* page = Vector_last_GlyphAtlasPage(&gfx->glyph_atlas.pages);
-    float           t    = gfx->pen_begin_pixels_y;
-
-#define L_TC_U(_u) (((float)(_u)) * scale_tex_u)
-#define L_TC_V(_v) (((float)(_v)) * scale_tex_v)
-#define L_ENT_PROPS                                                                                \
-    .page_id = page->page_id, .texture_id = self.texture_id, .height = gfx->line_height_pixels,    \
-    .width = gfx->glyph_width_pixels, .top = t, .left = 0
-
-    { /* LIGHT SHADE */
-        Rune rune = (Rune){
-            .code    = 0x2591,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry = (GlyphAtlasEntry){ L_ENT_PROPS,
-                                                   .tex_coords = {
-                                                     L_TC_U(0.5f),
-                                                     L_TC_V(0.5f),
-                                                     L_TC_U(0.5f),
-                                                     L_TC_V(0.5f),
-                                                   } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* MEDIUM SHADE */
-        Rune rune = (Rune){
-            .code    = 0x2592,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry = (GlyphAtlasEntry){ L_ENT_PROPS,
-                                                   .tex_coords = {
-                                                     L_TC_U(1.5f),
-                                                     L_TC_V(0.5f),
-                                                     L_TC_U(1.5f),
-                                                     L_TC_V(0.5f),
-                                                   } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* DARK SHADE */
-        Rune rune = (Rune){
-            .code    = 0x2593,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry = (GlyphAtlasEntry){ L_ENT_PROPS,
-                                                   .tex_coords = {
-                                                     L_TC_U(2.5f),
-                                                     L_TC_V(0.5f),
-                                                     L_TC_U(2.5f),
-                                                     L_TC_V(0.5f),
-                                                   } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* FULL BLOCK */
-        Rune rune = (Rune){
-            .code    = 0x2588,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry = (GlyphAtlasEntry){ L_ENT_PROPS,
-                                                   .tex_coords = {
-                                                     L_TC_U(0.5f),
-                                                     L_TC_V(1.5f),
-                                                     L_TC_U(0.5f),
-                                                     L_TC_V(1.5f),
-                                                   } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* UPPER HALF BLOCK */
-        Rune rune = (Rune){
-            .code    = 0x2580,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry =
-          (GlyphAtlasEntry){ L_ENT_PROPS,
-                             .tex_coords = {
-                               L_TC_U(gfx->glyph_width_pixels),
-                               L_TC_V(1.0f + (gfx->line_height_pixels / 2) * 3),
-                               L_TC_U(gfx->glyph_width_pixels * 2),
-                               L_TC_V(1.0f + (gfx->line_height_pixels / 2)),
-                             } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* LOWER HALF BLOCK */
-        Rune rune = (Rune){
-            .code    = 0x2584,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry =
-          (GlyphAtlasEntry){ L_ENT_PROPS,
-                             .tex_coords = {
-                               L_TC_U(gfx->glyph_width_pixels),
-                               L_TC_V(1.0f + (gfx->line_height_pixels / 2)),
-                               L_TC_U(gfx->glyph_width_pixels * 2),
-                               L_TC_V(1.0f + (gfx->line_height_pixels * 3) / 2),
-                             } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* LOWER ONE QUARTER BLOCK */
-        Rune rune = (Rune){
-            .code    = 0x2582,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry = (GlyphAtlasEntry){ L_ENT_PROPS,
-                                                   .tex_coords = {
-                                                     L_TC_U(gfx->glyph_width_pixels),
-                                                     L_TC_V(1.0f + (gfx->line_height_pixels / 4)),
-                                                     L_TC_U(gfx->glyph_width_pixels * 2),
-                                                     L_TC_V(1.0f + (gfx->line_height_pixels / 4) +
-                                                            gfx->line_height_pixels),
-                                                   } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* UPPER ONE QUARTER BLOCK */
-        Rune rune = (Rune){
-            .code    = 0x1FB82,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry = (GlyphAtlasEntry){ L_ENT_PROPS,
-                                                   .tex_coords = {
-                                                     L_TC_U(gfx->glyph_width_pixels),
-                                                     L_TC_V(1.0f + (gfx->line_height_pixels / 4) +
-                                                            gfx->line_height_pixels),
-                                                     L_TC_U(gfx->glyph_width_pixels * 2),
-                                                     L_TC_V(1.0f + (gfx->line_height_pixels / 4)),
-                                                   } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* LOWER THREE QUARTERS BLOCK */
-        Rune rune = (Rune){
-            .code    = 0x2586,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry =
-          (GlyphAtlasEntry){ L_ENT_PROPS,
-                             .tex_coords = {
-                               L_TC_U(gfx->glyph_width_pixels),
-                               L_TC_V(1.0f + ((int)((float)gfx->line_height_pixels / 4.0f * 3.0f))),
-                               L_TC_U(gfx->glyph_width_pixels * 2),
-                               L_TC_V(1.0f + (int)((float)gfx->line_height_pixels / 4.0f * 3.0f) +
-                                      gfx->line_height_pixels),
-                             } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* UPPER THREE QUARTERS BLOCK */
-        Rune rune = (Rune){
-            .code    = 0x1FB85,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry =
-          (GlyphAtlasEntry){ L_ENT_PROPS,
-                             .tex_coords = {
-                               L_TC_U(gfx->glyph_width_pixels),
-                               L_TC_V(1.0f + (int)((float)gfx->line_height_pixels / 4.0f * 3.0f) +
-                                      gfx->line_height_pixels),
-                               L_TC_U(gfx->glyph_width_pixels * 2),
-                               L_TC_V(1.0f + ((int)((float)gfx->line_height_pixels / 4.0f * 3.0f))),
-                             } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* LOWER ONE EIGTH BLOCK */
-        Rune rune = (Rune){
-            .code    = 0x2581,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry =
-          (GlyphAtlasEntry){ L_ENT_PROPS,
-                             .tex_coords = {
-                               L_TC_U(gfx->glyph_width_pixels),
-                               L_TC_V(1.0f + MAX(1, gfx->line_height_pixels / 8)),
-                               L_TC_U(gfx->glyph_width_pixels * 2),
-                               L_TC_V(1.0f + MAX(1, gfx->line_height_pixels / 8) +
-                                      gfx->line_height_pixels),
-                             } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* UPPER ONE EIGTH BLOCK */
-        Rune rune = (Rune){
-            .code    = 0x2594,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry =
-          (GlyphAtlasEntry){ L_ENT_PROPS,
-                             .tex_coords = {
-                               L_TC_U(gfx->glyph_width_pixels),
-                               L_TC_V(1.0f + MAX(1, gfx->line_height_pixels / 8) +
-                                      gfx->line_height_pixels),
-                               L_TC_U(gfx->glyph_width_pixels * 2),
-                               L_TC_V(1.0f + MAX(1, gfx->line_height_pixels / 8)),
-                             } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* LOWER THREE EIGTHS BLOCK */
-        Rune rune = (Rune){
-            .code    = 0x2583,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry =
-          (GlyphAtlasEntry){ L_ENT_PROPS,
-                             .tex_coords = {
-                               L_TC_U(gfx->glyph_width_pixels),
-                               L_TC_V(1.0f + ((int)((float)gfx->line_height_pixels / 8.0f * 3.0f))),
-                               L_TC_U(gfx->glyph_width_pixels * 2),
-                               L_TC_V(1.0f + ((int)((float)gfx->line_height_pixels / 8.0f * 3.0f)) +
-                                      gfx->line_height_pixels),
-                             } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* UPPER THREE EIGTHS BLOCK */
-        Rune rune = (Rune){
-            .code    = 0x1fb83,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry =
-          (GlyphAtlasEntry){ L_ENT_PROPS,
-                             .tex_coords = {
-                               L_TC_U(gfx->glyph_width_pixels),
-                               L_TC_V(1.0f + ((int)((float)gfx->line_height_pixels / 8.0f * 3.0f)) +
-                                      gfx->line_height_pixels),
-                               L_TC_U(gfx->glyph_width_pixels * 2),
-                               L_TC_V(1.0f + ((int)((float)gfx->line_height_pixels / 8.0f * 3.0f))),
-                             } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* UPPER FIVE EIGTHS BLOCK */
-        Rune rune = (Rune){
-            .code    = 0x2585,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry =
-          (GlyphAtlasEntry){ L_ENT_PROPS,
-                             .tex_coords = {
-                               L_TC_U(gfx->glyph_width_pixels),
-                               L_TC_V(1.0f + ((int)((float)gfx->line_height_pixels / 8.0f * 5.0f))),
-                               L_TC_U(gfx->glyph_width_pixels * 2),
-                               L_TC_V(1.0f + ((int)((float)gfx->line_height_pixels / 8.0f * 5.0f)) +
-                                      gfx->line_height_pixels),
-                             } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* LOWER FIVE EIGTHS BLOCK */
-        Rune rune = (Rune){
-            .code    = 0x1FB84,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry =
-          (GlyphAtlasEntry){ L_ENT_PROPS,
-                             .tex_coords = {
-                               L_TC_U(gfx->glyph_width_pixels),
-                               L_TC_V(1.0f + ((int)((float)gfx->line_height_pixels / 8.0f * 5.0f)) +
-                                      gfx->line_height_pixels),
-                               L_TC_U(gfx->glyph_width_pixels * 2),
-                               L_TC_V(1.0f + ((int)((float)gfx->line_height_pixels / 8.0f * 5.0f))),
-                             } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* UPPER SEVEN EIGHTHS BLOCK */
-        Rune rune = (Rune){
-            .code    = 0x1FB86,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry =
-          (GlyphAtlasEntry){ L_ENT_PROPS,
-                             .tex_coords = {
-                               L_TC_U(gfx->glyph_width_pixels),
-                               L_TC_V(1.0f + ((gfx->line_height_pixels * 7) / 8) +
-                                      gfx->line_height_pixels),
-                               L_TC_U(gfx->glyph_width_pixels * 2),
-                               L_TC_V(1.0f + ((gfx->line_height_pixels * 7) / 8)),
-                             } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* LOWER SEVEN EIGHTHS BLOCK */
-        Rune rune = (Rune){
-            .code    = 0x2587,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry =
-          (GlyphAtlasEntry){ L_ENT_PROPS,
-                             .tex_coords = {
-                               L_TC_U(gfx->glyph_width_pixels),
-                               L_TC_V(1.0f + ((gfx->line_height_pixels * 7) / 8)),
-                               L_TC_U(gfx->glyph_width_pixels * 2),
-                               L_TC_V(1.0f + ((gfx->line_height_pixels * 7) / 8) +
-                                      gfx->line_height_pixels),
-                             } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* LEFT SEVEN EIGHTHS BLOCK */
-        Rune rune = (Rune){
-            .code    = 0x2589,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry =
-          (GlyphAtlasEntry){ L_ENT_PROPS,
-                             .tex_coords = {
-                               L_TC_U((int)((float)gfx->glyph_width_pixels / 8.0f * 1.0f)),
-                               L_TC_V(1.0),
-                               L_TC_U(gfx->glyph_width_pixels +
-                                      (int)((float)gfx->glyph_width_pixels / 8.0f * 1.0f)),
-                               L_TC_V(1.0f + gfx->line_height_pixels),
-                             } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* RIGHT SEVEN EIGHTHS BLOCK */
-        Rune rune = (Rune){
-            .code    = 0x1FB8B,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry =
-          (GlyphAtlasEntry){ L_ENT_PROPS,
-                             .tex_coords = {
-                               L_TC_U(gfx->glyph_width_pixels +
-                                      (int)((float)gfx->glyph_width_pixels / 8.0f * 1.0f)),
-                               L_TC_V(1.0),
-                               L_TC_U((int)((float)gfx->glyph_width_pixels / 8.0f * 1.0f)),
-                               L_TC_V(1.0f + gfx->line_height_pixels),
-                             } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* LEFT THREE QUARTERS BLOCK */
-        Rune rune = (Rune){
-            .code    = 0x258A,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry =
-          (GlyphAtlasEntry){ L_ENT_PROPS,
-                             .tex_coords = {
-                               L_TC_U((int)((float)gfx->glyph_width_pixels / 4.0f)),
-                               L_TC_V(1.0),
-                               L_TC_U(gfx->glyph_width_pixels +
-                                      (int)((float)gfx->glyph_width_pixels / 4.0f)),
-                               L_TC_V(1.0f + gfx->line_height_pixels),
-                             } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* RIGHT THREE QUARTERS BLOCK */
-        Rune rune = (Rune){
-            .code    = 0x1FB8A,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry =
-          (GlyphAtlasEntry){ L_ENT_PROPS,
-                             .tex_coords = {
-                               L_TC_U(gfx->glyph_width_pixels +
-                                      (int)((float)gfx->glyph_width_pixels / 4.0f)),
-                               L_TC_V(1.0),
-                               L_TC_U((int)((float)gfx->glyph_width_pixels / 4.0f)),
-                               L_TC_V(1.0f + gfx->line_height_pixels),
-                             } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* LEFT FIVE EIGHTHS BLOCK */
-        Rune rune = (Rune){
-            .code    = 0x258B,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry =
-          (GlyphAtlasEntry){ L_ENT_PROPS,
-                             .tex_coords = {
-                               L_TC_U((int)((float)gfx->glyph_width_pixels / 8.0f * 3.0f)),
-                               L_TC_V(1.0),
-                               L_TC_U(gfx->glyph_width_pixels +
-                                      (int)((float)gfx->glyph_width_pixels / 8.0f * 3.0f)),
-                               L_TC_V(1.0f + gfx->line_height_pixels),
-                             } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* RIGHT FIVE EIGHTHS BLOCK */
-        Rune rune = (Rune){
-            .code    = 0x1FB89,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry =
-          (GlyphAtlasEntry){ L_ENT_PROPS,
-                             .tex_coords = {
-                               L_TC_U(gfx->glyph_width_pixels +
-                                      (int)((float)gfx->glyph_width_pixels / 8.0f * 3.0f)),
-                               L_TC_V(1.0),
-                               L_TC_U((int)((float)gfx->glyph_width_pixels / 8.0f * 3.0f)),
-                               L_TC_V(1.0f + gfx->line_height_pixels),
-                             } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* LEFT HALF BLOCK */
-        Rune rune = (Rune){
-            .code    = 0x258C,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry =
-          (GlyphAtlasEntry){ L_ENT_PROPS,
-                             .tex_coords = {
-                               L_TC_U(gfx->glyph_width_pixels / 2.0),
-                               L_TC_V(1.0),
-                               L_TC_U(gfx->glyph_width_pixels + gfx->glyph_width_pixels / 2.0),
-                               L_TC_V(1.0f + gfx->line_height_pixels),
-                             } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* RIGHT HALF BLOCK */
-        Rune rune = (Rune){
-            .code    = 0x2590,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry =
-          (GlyphAtlasEntry){ L_ENT_PROPS,
-                             .tex_coords = {
-                               L_TC_U(gfx->glyph_width_pixels + gfx->glyph_width_pixels / 2.0f),
-                               L_TC_V(1.0),
-                               L_TC_U(gfx->glyph_width_pixels / 2.0f),
-                               L_TC_V(1.0f + gfx->line_height_pixels),
-                             } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* LEFT THREE EIGHTHS BLOCK */
-        Rune rune = (Rune){
-            .code    = 0x258D,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry =
-          (GlyphAtlasEntry){ L_ENT_PROPS,
-                             .tex_coords = {
-                               L_TC_U((int)((float)gfx->glyph_width_pixels / 8.0f * 5.0f)),
-                               L_TC_V(1.0),
-                               L_TC_U(gfx->glyph_width_pixels +
-                                      (int)((float)gfx->glyph_width_pixels / 8.0f * 5.0f)),
-                               L_TC_V(1.0f + gfx->line_height_pixels),
-                             } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* RIGHT THREE EIGHTHS BLOCK */
-        Rune rune = (Rune){
-            .code    = 0x1FB88,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry =
-          (GlyphAtlasEntry){ L_ENT_PROPS,
-                             .tex_coords = {
-                               L_TC_U(gfx->glyph_width_pixels +
-                                      (int)((float)gfx->glyph_width_pixels / 8.0f * 5.0f)),
-                               L_TC_V(1.0),
-                               L_TC_U((int)((float)gfx->glyph_width_pixels / 8.0f * 5.0f)),
-                               L_TC_V(1.0f + gfx->line_height_pixels),
-                             } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* LEFT ONE QUARTER BLOCK */
-        Rune rune = (Rune){
-            .code    = 0x258E,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry =
-          (GlyphAtlasEntry){ L_ENT_PROPS,
-                             .tex_coords = {
-                               L_TC_U((int)((float)gfx->glyph_width_pixels / 4.0f * 3.0f)),
-                               L_TC_V(1.0),
-                               L_TC_U(gfx->glyph_width_pixels +
-                                      (int)((float)gfx->glyph_width_pixels / 4.0f * 3.0f)),
-                               L_TC_V(1.0f + gfx->line_height_pixels),
-                             } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* RIGHT ONE QUARTER BLOCK */
-        Rune rune = (Rune){
-            .code    = 0x1FB87,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry =
-          (GlyphAtlasEntry){ L_ENT_PROPS,
-                             .tex_coords = {
-                               L_TC_U(gfx->glyph_width_pixels +
-                                      (int)((float)gfx->glyph_width_pixels / 4.0f * 3.0f)),
-                               L_TC_V(1.0),
-                               L_TC_U((int)((float)gfx->glyph_width_pixels / 4.0f * 3.0f)),
-                               L_TC_V(1.0f + gfx->line_height_pixels),
-                             } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* LEFT ONE EIGHTH BLOCK */
-        Rune rune = (Rune){
-            .code    = 0x258E,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry =
-          (GlyphAtlasEntry){ L_ENT_PROPS,
-                             .tex_coords = {
-                               L_TC_U((int)(gfx->glyph_width_pixels / 8.0f * 7.0f)),
-                               L_TC_V(1.0),
-                               L_TC_U(gfx->glyph_width_pixels +
-                                      (int)((float)gfx->glyph_width_pixels / 8.0f * 7.0f)),
-                               L_TC_V(1.0f + gfx->line_height_pixels),
-                             } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* RIGHT ONE EIGHTH BLOCK */
-        Rune rune = (Rune){
-            .code    = 0x2595,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry =
-          (GlyphAtlasEntry){ L_ENT_PROPS,
-                             .tex_coords = {
-                               L_TC_U(gfx->glyph_width_pixels +
-                                      (int)((float)gfx->glyph_width_pixels / 8.0f * 7.0f)),
-                               L_TC_V(1.0),
-                               L_TC_U((int)((float)gfx->glyph_width_pixels / 8.0f * 7.0f)),
-                               L_TC_V(1.0f + gfx->line_height_pixels),
-                             } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* left semielipse */
-        Rune rune = (Rune){
-            .code    = 0xE0B6,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry = (GlyphAtlasEntry){ L_ENT_PROPS,
-                                                   .tex_coords = {
-                                                     L_TC_U(gfx->glyph_width_pixels),
-                                                     L_TC_V(1.0 + gfx->line_height_pixels * 2),
-                                                     L_TC_U(0),
-                                                     L_TC_V(1.0 + gfx->line_height_pixels * 3),
-                                                   } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* right semielipse */
-        Rune rune = (Rune){
-            .code    = 0xE0B4,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry = (GlyphAtlasEntry){ L_ENT_PROPS,
-                                                   .tex_coords = {
-                                                     L_TC_U(0),
-                                                     L_TC_V(1.0 + gfx->line_height_pixels * 2),
-                                                     L_TC_U(gfx->glyph_width_pixels),
-                                                     L_TC_V(1.0 + gfx->line_height_pixels * 3),
-                                                   } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* left filled triangle */
-        Rune rune = (Rune){
-            .code    = 0xE0B0,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry = (GlyphAtlasEntry){ L_ENT_PROPS,
-                                                   .tex_coords = {
-                                                     L_TC_U(gfx->glyph_width_pixels * 2.0),
-                                                     L_TC_V(1.0 + gfx->line_height_pixels * 2.0),
-                                                     L_TC_U(gfx->glyph_width_pixels),
-                                                     L_TC_V(1.0 + gfx->line_height_pixels * 3.0),
-                                                   } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* right filled triangle */
-        Rune rune = (Rune){
-            .code    = 0xE0B2,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry = (GlyphAtlasEntry){ L_ENT_PROPS,
-                                                   .tex_coords = {
-                                                     L_TC_U(gfx->glyph_width_pixels),
-                                                     L_TC_V(1.0 + gfx->line_height_pixels * 2.0),
-                                                     L_TC_U(gfx->glyph_width_pixels * 2.0),
-                                                     L_TC_V(1.0 + gfx->line_height_pixels * 3.0),
-                                                   } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* left slant */
-        Rune rune = (Rune){
-            .code    = 0xE0B8,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry = (GlyphAtlasEntry){ L_ENT_PROPS,
-                                                   .tex_coords = {
-                                                     L_TC_U(gfx->glyph_width_pixels),
-                                                     L_TC_V(1.0 + gfx->line_height_pixels * 4.0),
-                                                     L_TC_U(0),
-                                                     L_TC_V(1.0 + gfx->line_height_pixels * 3.0),
-                                                   } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-    { /* right slant */
-        Rune rune = (Rune){
-            .code    = 0xE0BA,
-            .combine = { 0 },
-            .style   = VT_RUNE_UNSTYLED,
-        };
-        GlyphAtlasEntry entry = (GlyphAtlasEntry){ L_ENT_PROPS,
-                                                   .tex_coords = {
-                                                     L_TC_U(0),
-                                                     L_TC_V(1.0 + gfx->line_height_pixels * 4.0),
-                                                     L_TC_U(gfx->glyph_width_pixels),
-                                                     L_TC_V(1.0 + gfx->line_height_pixels * 3.0),
-                                                   } };
-
-        Map_insert_Rune_GlyphAtlasEntry(&gfx->glyph_atlas.entry_map, rune, entry);
-    }
-
-#undef L_TC_U
-#undef L_TC_V
-#undef L_ENT_PROPS
 }
 
 static GlyphAtlas GlyphAtlas_new(uint32_t page_size_px, uint32_t color_page_size_px)
@@ -1914,18 +635,18 @@ __attribute__((cold)) GlyphAtlasEntry* GlyphAtlas_get_combined(GfxOpenGL2* gfx,
 
 #ifndef GFX_GLES
     GLuint tmp_rb;
-    glGenRenderbuffers(1, &tmp_rb);
-    glBindRenderbuffer(GL_RENDERBUFFER, tmp_rb);
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, tex.w, tex.h);
+    glGenRenderbuffers_(1, &tmp_rb);
+    glBindRenderbuffer_(GL_RENDERBUFFER, tmp_rb);
+    glRenderbufferStorage_(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, tex.w, tex.h);
 #endif
 
     GLuint tmp_fb;
-    glGenFramebuffers(1, &tmp_fb);
-    glBindFramebuffer(GL_FRAMEBUFFER, tmp_fb);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex.id, 0);
+    glGenFramebuffers_(1, &tmp_fb);
+    glBindFramebuffer_(GL_FRAMEBUFFER, tmp_fb);
+    glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex.id, 0);
 
 #ifndef GFX_GLES
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, tmp_rb);
+    glFramebufferRenderbuffer_(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, tmp_rb);
 #endif
 
     glViewport(0, 0, tex.w, tex.h);
@@ -1946,11 +667,11 @@ __attribute__((cold)) GlyphAtlasEntry* GlyphAtlas_get_combined(GfxOpenGL2* gfx,
     );
 
     GLuint tmp_vbo;
-    glGenBuffers(1, &tmp_vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, tmp_vbo);
-    glUseProgram(gfx->font_shader_blend.id);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float[QUAD_V_SZ][4]), NULL, GL_STREAM_DRAW);
-    glVertexAttribPointer(gfx->font_shader_blend.attribs->location, 4, GL_FLOAT, GL_FALSE, 0, 0);
+    glGenBuffers_(1, &tmp_vbo);
+    glBindBuffer_(GL_ARRAY_BUFFER, tmp_vbo);
+    glUseProgram_(gfx->font_shader_blend.id);
+    glBufferData_(GL_ARRAY_BUFFER, sizeof(float[QUAD_V_SZ][4]), NULL, GL_STREAM_DRAW);
+    glVertexAttribPointer_(gfx->font_shader_blend.attribs->location, 4, GL_FLOAT, GL_FALSE, 0, 0);
 
 #ifdef GFX_GLES
     glEnable(GL_BLEND);
@@ -2012,20 +733,20 @@ __attribute__((cold)) GlyphAtlasEntry* GlyphAtlas_get_combined(GfxOpenGL2* gfx,
         };
 #endif
 
-        glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(float) * QUAD_V_SZ * 4, vbo_data);
+        glBufferSubData_(GL_ARRAY_BUFFER, 0, sizeof(float) * QUAD_V_SZ * 4, vbo_data);
         glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
 
         glDeleteTextures(1, &tmp_tex);
         gl_check_error();
     }
 
-    glDeleteFramebuffers(1, &tmp_fb);
+    glDeleteFramebuffers_(1, &tmp_fb);
 
 #ifndef GFX_GLES
-    glDeleteRenderbuffers(1, &tmp_rb);
+    glDeleteRenderbuffers_(1, &tmp_rb);
 #endif
 
-    glDeleteBuffers(1, &tmp_vbo);
+    glDeleteBuffers_(1, &tmp_vbo);
 
     restore_gl_state(&old_state);
 
@@ -2386,12 +1107,12 @@ void GfxOpenGL2_init_with_context_activated(Gfx* self)
     ASSERT(self->callbacks.user_data, "callback user data defined");
     ASSERT(self->callbacks.load_extension_proc_address, "callback func defined");
 
-    maybe_load_gl_exts(self->callbacks.user_data, self->callbacks.load_extension_proc_address);
+    gl2_maybe_load_gl_exts(self->callbacks.user_data, self->callbacks.load_extension_proc_address);
 
 #ifdef DEBUG
     glEnable(GL_DEBUG_OUTPUT);
     glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
-    glDebugMessageCallback(on_gl_error, NULL);
+    glDebugMessageCallback_(on_gl_error, NULL);
 #endif
 
     if (unlikely(settings.debug_gfx)) {
@@ -2445,14 +1166,14 @@ void GfxOpenGL2_init_with_context_activated(Gfx* self)
       Shader_new(image_rgb_vs_src, image_tint_rgb_fs_src, "coord", "tex", "tint", "offset", NULL);
 
     gl2->flex_vbo = VBO_new(4, 1, gl2->font_shader.attribs);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * 4 * 4, NULL, GL_STREAM_DRAW);
+    glBufferData_(GL_ARRAY_BUFFER, sizeof(float) * 4 * 4, NULL, GL_STREAM_DRAW);
 
     GLuint new_vbos[2];
-    glGenBuffers(2, new_vbos);
+    glGenBuffers_(2, new_vbos);
     gl2->full_framebuffer_quad_vbo = new_vbos[0];
     gl2->line_quads_vbo            = new_vbos[1];
 
-    glBindBuffer(GL_ARRAY_BUFFER, gl2->full_framebuffer_quad_vbo);
+    glBindBuffer_(GL_ARRAY_BUFFER, gl2->full_framebuffer_quad_vbo);
 
 #ifdef GFX_GLES
     const float vertex_data[] = {
@@ -2464,7 +1185,7 @@ void GfxOpenGL2_init_with_context_activated(Gfx* self)
     };
 #endif
 
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_data), vertex_data, GL_STATIC_DRAW);
+    glBufferData_(GL_ARRAY_BUFFER, sizeof(vertex_data), vertex_data, GL_STATIC_DRAW);
     GfxOpenGL2_regenerate_line_quad_vbo(gl2, gl2->cells.second);
 
     glGetIntegerv(GL_MAX_TEXTURE_SIZE, &gl2->max_tex_res);
@@ -2475,12 +1196,12 @@ void GfxOpenGL2_init_with_context_activated(Gfx* self)
     gl2->glyph_atlas = GlyphAtlas_new(1024, 512);
 
     Shader_use(&gl2->font_shader);
-    glUniform3f(gl2->font_shader.uniforms[1].location,
-                ColorRGB_get_float(settings.fg, 0),
-                ColorRGB_get_float(settings.fg, 1),
-                ColorRGB_get_float(settings.fg, 2));
+    glUniform3f_(gl2->font_shader.uniforms[1].location,
+                 ColorRGB_get_float(settings.fg, 0),
+                 ColorRGB_get_float(settings.fg, 1),
+                 ColorRGB_get_float(settings.fg, 2));
 
-    glGenFramebuffers(1, &gl2->line_framebuffer);
+    glGenFramebuffers_(1, &gl2->line_framebuffer);
 
     gl2->blink_switch       = TimePoint_ms_from_now(settings.cursor_blink_interval_ms);
     gl2->blink_switch_text  = TimePoint_now();
@@ -2557,8 +1278,8 @@ static void GfxOpenGL2_regenerate_line_quad_vbo(GfxOpenGL2* gfx, uint32_t n_line
         Vector_pushv_float(&transfer, buf, ARRAY_SIZE(buf));
     }
 
-    glBindBuffer(GL_ARRAY_BUFFER, gfx->line_quads_vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(float) * transfer.size, transfer.buf, GL_STATIC_DRAW);
+    glBindBuffer_(GL_ARRAY_BUFFER, gfx->line_quads_vbo);
+    glBufferData_(GL_ARRAY_BUFFER, sizeof(float) * transfer.size, transfer.buf, GL_STATIC_DRAW);
     Vector_destroy_float(&transfer);
 }
 
@@ -2620,7 +1341,8 @@ static void line_reder_pass_run(line_render_pass_t* self);
 static bool should_create_line_render_pass(const line_render_pass_args_t* args)
 {
     vt_line_damage_t* dmg = OR(args->damage, &args->vt_line->damage);
-    return !likely(!(args->vt_line && args->vt_line->data.size) || (dmg->type == VT_LINE_DAMAGE_NONE));
+    return !likely(!(args->vt_line && args->vt_line->data.size) ||
+                   (dmg->type == VT_LINE_DAMAGE_NONE));
 }
 
 static line_render_pass_t create_line_render_pass(const line_render_pass_args_t* args)
@@ -2808,18 +1530,18 @@ static void line_render_pass_finalize(line_render_pass_t* self)
         Shader_use(&self->args.gl2->solid_fill_shader);
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        glUniform4f(self->args.gl2->solid_fill_shader.uniforms[0].location,
-                    fabs(sin(debug_tint)),
-                    fabs(cos(debug_tint)),
-                    sin(debug_tint),
-                    0.1);
-        glBindBuffer(GL_ARRAY_BUFFER, self->args.gl2->full_framebuffer_quad_vbo);
-        glVertexAttribPointer(self->args.gl2->solid_fill_shader.attribs->location,
-                              2,
-                              GL_FLOAT,
-                              GL_FALSE,
-                              0,
-                              0);
+        glUniform4f_(self->args.gl2->solid_fill_shader.uniforms[0].location,
+                     fabs(sin(debug_tint)),
+                     fabs(cos(debug_tint)),
+                     sin(debug_tint),
+                     0.1);
+        glBindBuffer_(GL_ARRAY_BUFFER, self->args.gl2->full_framebuffer_quad_vbo);
+        glVertexAttribPointer_(self->args.gl2->solid_fill_shader.attribs->location,
+                               2,
+                               GL_FLOAT,
+                               GL_FALSE,
+                               0,
+                               0);
 
         glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
 
@@ -2834,14 +1556,14 @@ static void line_render_pass_finalize(line_render_pass_t* self)
     glDisable(GL_DEPTH_TEST);
 #endif
 
-    glBindFramebuffer(GL_FRAMEBUFFER, self->args.gl2->line_framebuffer);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
+    glBindFramebuffer_(GL_FRAMEBUFFER, self->args.gl2->line_framebuffer);
+    glFramebufferTexture2D_(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, 0, 0);
 
 #ifndef GFX_GLES
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, 0);
+    glFramebufferRenderbuffer_(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, 0);
 #endif
 
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindFramebuffer_(GL_FRAMEBUFFER, 0);
     gl_check_error();
 
     glViewport(0, 0, self->args.gl2->win_w, self->args.gl2->win_h);
@@ -2856,7 +1578,7 @@ static void line_render_pass_finalize(line_render_pass_t* self)
 #ifndef GFX_GLES
         ASSERT(self->args.proxy->data[PROXY_INDEX_DEPTHBUFFER_BLINK],
                "deleted proxy texture has depth rb");
-        glDeleteRenderbuffers(1, (GLuint*)&self->args.proxy->data[PROXY_INDEX_DEPTHBUFFER_BLINK]);
+        glDeleteRenderbuffers_(1, (GLuint*)&self->args.proxy->data[PROXY_INDEX_DEPTHBUFFER_BLINK]);
         self->args.proxy->data[PROXY_INDEX_DEPTHBUFFER_BLINK] = 0;
 #endif
     }
@@ -2865,21 +1587,21 @@ static void line_render_pass_finalize(line_render_pass_t* self)
 static void line_render_pass_set_up_framebuffer(line_render_pass_t* self)
 {
     if (self->is_reusing) {
-        glBindFramebuffer(GL_FRAMEBUFFER, self->args.gl2->line_framebuffer);
+        glBindFramebuffer_(GL_FRAMEBUFFER, self->args.gl2->line_framebuffer);
 
         glBindTexture(GL_TEXTURE_2D, self->final_texture);
-        glFramebufferTexture2D(GL_FRAMEBUFFER,
-                               GL_COLOR_ATTACHMENT0,
-                               GL_TEXTURE_2D,
-                               self->final_texture,
-                               0);
+        glFramebufferTexture2D_(GL_FRAMEBUFFER,
+                                GL_COLOR_ATTACHMENT0,
+                                GL_TEXTURE_2D,
+                                self->final_texture,
+                                0);
 
 #ifndef GFX_GLES
-        glBindRenderbuffer(GL_RENDERBUFFER, self->final_depthbuffer);
-        glFramebufferRenderbuffer(GL_FRAMEBUFFER,
-                                  GL_DEPTH_ATTACHMENT,
-                                  GL_RENDERBUFFER,
-                                  self->final_depthbuffer);
+        glBindRenderbuffer_(GL_RENDERBUFFER, self->final_depthbuffer);
+        glFramebufferRenderbuffer_(GL_FRAMEBUFFER,
+                                   GL_DEPTH_ATTACHMENT,
+                                   GL_RENDERBUFFER,
+                                   self->final_depthbuffer);
 #endif
 
         glViewport(0, 0, self->texture_width, self->texture_height);
@@ -2900,21 +1622,21 @@ static void line_render_pass_set_up_framebuffer(line_render_pass_t* self)
             Pair_GLuint recycled    = GfxOpenGL2_pop_recycled(self->args.gl2);
             self->final_texture     = recycled.first;
             self->final_depthbuffer = recycled.second;
-            glBindFramebuffer(GL_FRAMEBUFFER, self->args.gl2->line_framebuffer);
+            glBindFramebuffer_(GL_FRAMEBUFFER, self->args.gl2->line_framebuffer);
             glBindTexture(GL_TEXTURE_2D, self->final_texture);
 
-            glFramebufferTexture2D(GL_FRAMEBUFFER,
-                                   GL_COLOR_ATTACHMENT0,
-                                   GL_TEXTURE_2D,
-                                   self->final_texture,
-                                   0);
+            glFramebufferTexture2D_(GL_FRAMEBUFFER,
+                                    GL_COLOR_ATTACHMENT0,
+                                    GL_TEXTURE_2D,
+                                    self->final_texture,
+                                    0);
 
 #ifndef GFX_GLES
             ASSERT(recycled.second, "recovered texture has a depth rb");
-            glFramebufferRenderbuffer(GL_FRAMEBUFFER,
-                                      GL_DEPTH_ATTACHMENT,
-                                      GL_RENDERBUFFER,
-                                      self->final_depthbuffer);
+            glFramebufferRenderbuffer_(GL_FRAMEBUFFER,
+                                       GL_DEPTH_ATTACHMENT,
+                                       GL_RENDERBUFFER,
+                                       self->final_depthbuffer);
 #endif
 
             gl_check_error();
@@ -2937,26 +1659,26 @@ static void line_render_pass_set_up_framebuffer(line_render_pass_t* self)
                          0);
 
 #ifndef GFX_GLES
-            glGenRenderbuffers(1, &self->final_depthbuffer);
-            glBindRenderbuffer(GL_RENDERBUFFER, self->final_depthbuffer);
-            glRenderbufferStorage(GL_RENDERBUFFER,
-                                  GL_DEPTH_COMPONENT,
-                                  self->texture_width,
-                                  self->texture_height);
+            glGenRenderbuffers_(1, &self->final_depthbuffer);
+            glBindRenderbuffer_(GL_RENDERBUFFER, self->final_depthbuffer);
+            glRenderbufferStorage_(GL_RENDERBUFFER,
+                                   GL_DEPTH_COMPONENT,
+                                   self->texture_width,
+                                   self->texture_height);
 #endif
 
-            glBindFramebuffer(GL_FRAMEBUFFER, self->args.gl2->line_framebuffer);
-            glFramebufferTexture2D(GL_FRAMEBUFFER,
-                                   GL_COLOR_ATTACHMENT0,
-                                   GL_TEXTURE_2D,
-                                   self->final_texture,
-                                   0);
+            glBindFramebuffer_(GL_FRAMEBUFFER, self->args.gl2->line_framebuffer);
+            glFramebufferTexture2D_(GL_FRAMEBUFFER,
+                                    GL_COLOR_ATTACHMENT0,
+                                    GL_TEXTURE_2D,
+                                    self->final_texture,
+                                    0);
 
 #ifndef GFX_GLES
-            glFramebufferRenderbuffer(GL_FRAMEBUFFER,
-                                      GL_DEPTH_ATTACHMENT,
-                                      GL_RENDERBUFFER,
-                                      self->final_depthbuffer);
+            glFramebufferRenderbuffer_(GL_FRAMEBUFFER,
+                                       GL_DEPTH_ATTACHMENT,
+                                       GL_RENDERBUFFER,
+                                       self->final_depthbuffer);
 #endif
             gl_check_error();
         }
@@ -3268,7 +1990,7 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
                             }
 
                             glBindTexture(GL_TEXTURE_2D, page->texture_id);
-                            glBindBuffer(GL_ARRAY_BUFFER, pass->args.gl2->flex_vbo.vbo);
+                            glBindBuffer_(GL_ARRAY_BUFFER, pass->args.gl2->flex_vbo.vbo);
 
                             const int VERTEX_SIZE = 4;
                             size_t    newsize     = v->size * sizeof(float);
@@ -3285,32 +2007,32 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
                                 case TEX_FMT_RGB:
                                     if (pass->args.gl2->bound_resources != BOUND_RESOURCES_FONT) {
                                         pass->args.gl2->bound_resources = BOUND_RESOURCES_FONT;
-                                        glUseProgram(pass->args.gl2->font_shader.id);
+                                        glUseProgram_(pass->args.gl2->font_shader.id);
                                     }
-                                    glVertexAttribPointer(
+                                    glVertexAttribPointer_(
                                       pass->args.gl2->font_shader.attribs->location,
                                       VERTEX_SIZE,
                                       GL_FLOAT,
                                       GL_FALSE,
                                       0,
                                       0);
-                                    glUniform3f(pass->args.gl2->font_shader.uniforms[1].location,
-                                                ColorRGB_get_float(active_fg_color, 0),
-                                                ColorRGB_get_float(active_fg_color, 1),
-                                                ColorRGB_get_float(active_fg_color, 2));
+                                    glUniform3f_(pass->args.gl2->font_shader.uniforms[1].location,
+                                                 ColorRGB_get_float(active_fg_color, 0),
+                                                 ColorRGB_get_float(active_fg_color, 1),
+                                                 ColorRGB_get_float(active_fg_color, 2));
 
-                                    glUniform4f(pass->args.gl2->font_shader.uniforms[2].location,
-                                                ColorRGBA_get_float(active_bg_color, 0),
-                                                ColorRGBA_get_float(active_bg_color, 1),
-                                                ColorRGBA_get_float(active_bg_color, 2),
-                                                ColorRGBA_get_float(active_bg_color, 3));
+                                    glUniform4f_(pass->args.gl2->font_shader.uniforms[2].location,
+                                                 ColorRGBA_get_float(active_bg_color, 0),
+                                                 ColorRGBA_get_float(active_bg_color, 1),
+                                                 ColorRGBA_get_float(active_bg_color, 2),
+                                                 ColorRGBA_get_float(active_bg_color, 3));
                                     break;
 
                                 case TEX_FMT_MONO:
                                     if (pass->args.gl2->bound_resources !=
                                         BOUND_RESOURCES_FONT_MONO) {
                                         pass->args.gl2->bound_resources = BOUND_RESOURCES_FONT_MONO;
-                                        glUseProgram(pass->args.gl2->font_shader_gray.id);
+                                        glUseProgram_(pass->args.gl2->font_shader_gray.id);
                                     }
 #ifndef GFX_GLES
                                     glDisable(GL_DEPTH_TEST);
@@ -3321,7 +2043,7 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
                                                         GL_ONE,
                                                         GL_ONE_MINUS_SRC_ALPHA);
 #endif
-                                    glVertexAttribPointer(
+                                    glVertexAttribPointer_(
                                       pass->args.gl2->font_shader_gray.attribs->location,
                                       VERTEX_SIZE,
                                       GL_FLOAT,
@@ -3329,13 +2051,13 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
                                       0,
                                       0);
 
-                                    glUniform3f(
+                                    glUniform3f_(
                                       pass->args.gl2->font_shader_gray.uniforms[1].location,
                                       ColorRGB_get_float(active_fg_color, 0),
                                       ColorRGB_get_float(active_fg_color, 1),
                                       ColorRGB_get_float(active_fg_color, 2));
 #ifndef GFX_GLES
-                                    glUniform4f(
+                                    glUniform4f_(
                                       pass->args.gl2->font_shader_gray.uniforms[2].location,
                                       ColorRGBA_get_float(active_bg_color, 0),
                                       ColorRGBA_get_float(active_bg_color, 1),
@@ -3346,18 +2068,18 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
                                 case TEX_FMT_RGBA:
                                     if (pass->args.gl2->bound_resources != BOUND_RESOURCES_IMAGE) {
                                         pass->args.gl2->bound_resources = BOUND_RESOURCES_IMAGE;
-                                        glUseProgram(pass->args.gl2->image_shader.id);
+                                        glUseProgram_(pass->args.gl2->image_shader.id);
                                     }
 
 #ifndef GFX_GLES
                                     glDisable(GL_DEPTH_TEST);
 #endif
                                     glEnable(GL_BLEND);
-                                    glBlendFuncSeparate(GL_SRC_ALPHA,
-                                                        GL_ONE_MINUS_SRC_ALPHA,
-                                                        GL_ONE,
-                                                        GL_ONE_MINUS_SRC_ALPHA);
-                                    glVertexAttribPointer(
+                                    glBlendFuncSeparate_(GL_SRC_ALPHA,
+                                                         GL_ONE_MINUS_SRC_ALPHA,
+                                                         GL_ONE,
+                                                         GL_ONE_MINUS_SRC_ALPHA);
+                                    glVertexAttribPointer_(
                                       pass->args.gl2->image_shader.attribs->location,
                                       VERTEX_SIZE,
                                       GL_FLOAT,
@@ -3576,18 +2298,18 @@ static void line_reder_pass_run_line_subpass(const line_render_pass_t* pass,
                 if (pass->args.gl2->bound_resources != BOUND_RESOURCES_LINES) {
                     pass->args.gl2->bound_resources = BOUND_RESOURCES_LINES;
                     Shader_use(&pass->args.gl2->line_shader);
-                    glBindBuffer(GL_ARRAY_BUFFER, pass->args.gl2->flex_vbo.vbo);
-                    glVertexAttribPointer(pass->args.gl2->line_shader.attribs->location,
-                                          2,
-                                          GL_FLOAT,
-                                          GL_FALSE,
-                                          0,
-                                          0);
+                    glBindBuffer_(GL_ARRAY_BUFFER, pass->args.gl2->flex_vbo.vbo);
+                    glVertexAttribPointer_(pass->args.gl2->line_shader.attribs->location,
+                                           2,
+                                           GL_FLOAT,
+                                           GL_FALSE,
+                                           0,
+                                           0);
                 }
-                glUniform3f(pass->args.gl2->line_shader.uniforms[1].location,
-                            ColorRGB_get_float(line_color, 0),
-                            ColorRGB_get_float(line_color, 1),
-                            ColorRGB_get_float(line_color, 2));
+                glUniform3f_(pass->args.gl2->line_shader.uniforms[1].location,
+                             ColorRGB_get_float(line_color, 0),
+                             ColorRGB_get_float(line_color, 1),
+                             ColorRGB_get_float(line_color, 2));
                 size_t new_size = sizeof(vertex_t) * pass->args.gl2->vec_vertex_buffer.size;
                 ARRAY_BUFFER_SUB_OR_SWAP(pass->args.gl2->vec_vertex_buffer.buf,
                                          pass->args.gl2->flex_vbo.size,
@@ -3600,17 +2322,17 @@ static void line_reder_pass_run_line_subpass(const line_render_pass_t* pass,
                 pass->args.gl2->bound_resources = BOUND_RESOURCES_NONE;
                 Shader_use(&pass->args.gl2->image_tint_shader);
                 glBindTexture(GL_TEXTURE_2D, pass->args.gl2->squiggle_texture.id);
-                glUniform3f(pass->args.gl2->image_tint_shader.uniforms[1].location,
-                            ColorRGB_get_float(line_color, 0),
-                            ColorRGB_get_float(line_color, 1),
-                            ColorRGB_get_float(line_color, 2));
-                glBindBuffer(GL_ARRAY_BUFFER, pass->args.gl2->flex_vbo.vbo);
-                glVertexAttribPointer(pass->args.gl2->font_shader.attribs->location,
-                                      4,
-                                      GL_FLOAT,
-                                      GL_FALSE,
-                                      0,
-                                      0);
+                glUniform3f_(pass->args.gl2->image_tint_shader.uniforms[1].location,
+                             ColorRGB_get_float(line_color, 0),
+                             ColorRGB_get_float(line_color, 1),
+                             ColorRGB_get_float(line_color, 2));
+                glBindBuffer_(GL_ARRAY_BUFFER, pass->args.gl2->flex_vbo.vbo);
+                glVertexAttribPointer_(pass->args.gl2->font_shader.attribs->location,
+                                       4,
+                                       GL_FLOAT,
+                                       GL_FALSE,
+                                       0,
+                                       0);
                 size_t new_size = sizeof(vertex_t) * pass->args.gl2->vec_vertex_buffer2.size;
                 ARRAY_BUFFER_SUB_OR_SWAP(pass->args.gl2->vec_vertex_buffer2.buf,
                                          pass->args.gl2->flex_vbo.size,
@@ -3652,7 +2374,7 @@ static void line_reder_subpass_run_clear_stage(const line_render_pass_t* self,
 {
     glViewport(0, 0, self->texture_width, self->texture_height);
     glBindTexture(GL_TEXTURE_2D, 0);
-    glUseProgram(0);
+    glUseProgram_(0);
 
     if (self->args.is_for_cursor) {
         ColorRGBA clr;
@@ -3848,10 +2570,10 @@ static void _GfxOpenGL2_draw_block_cursor(GfxOpenGL2* gfx,
                   ui->cursor_proxy.data[PROXY_INDEX_TEXTURE_BLINK] && !ui->draw_text_blinking
                     ? ui->cursor_proxy.data[PROXY_INDEX_TEXTURE_BLINK]
                     : ui->cursor_proxy.data[PROXY_INDEX_TEXTURE]);
-    glUniform2f(gfx->image_shader.uniforms[1].location, 0, 0);
+    glUniform2f_(gfx->image_shader.uniforms[1].location, 0, 0);
 
-    glVertexAttribPointer(gfx->image_shader.attribs->location, 4, GL_FLOAT, GL_FALSE, 0, 0);
-    glBindBuffer(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
+    glVertexAttribPointer_(gfx->image_shader.attribs->location, 4, GL_FLOAT, GL_FALSE, 0, 0);
+    glBindBuffer_(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
 
     size_t newsize = sizeof(buf);
     ARRAY_BUFFER_SUB_OR_SWAP(buf, gfx->flex_vbo.size, newsize);
@@ -3966,23 +2688,23 @@ static void GfxOpenGL2_draw_cursor(GfxOpenGL2* gfx, Vt* vt, const Ui* ui)
         if (settings.animate_cursor_blink && drawing_with_transparency && ui->window_in_focus) {
             Shader_use(&gfx->line_shader_alpha);
             glEnable(GL_BLEND);
-            glUniform4f(gfx->line_shader_alpha.uniforms[1].location,
-                        ColorRGBA_get_float(clr, 0),
-                        ColorRGBA_get_float(clr, 1),
-                        ColorRGBA_get_float(clr, 2),
-                        ui->cursor_fade_fraction);
+            glUniform4f_(gfx->line_shader_alpha.uniforms[1].location,
+                         ColorRGBA_get_float(clr, 0),
+                         ColorRGBA_get_float(clr, 1),
+                         ColorRGBA_get_float(clr, 2),
+                         ui->cursor_fade_fraction);
         } else {
             Shader_use(&gfx->line_shader);
-            glUniform3f(gfx->line_shader.uniforms[1].location,
-                        ColorRGBA_get_float(clr, 0),
-                        ColorRGBA_get_float(clr, 1),
-                        ColorRGBA_get_float(clr, 2));
+            glUniform3f_(gfx->line_shader.uniforms[1].location,
+                         ColorRGBA_get_float(clr, 0),
+                         ColorRGBA_get_float(clr, 1),
+                         ColorRGBA_get_float(clr, 2));
         }
 
         glBindTexture(GL_TEXTURE_2D, 0);
 
-        glBindBuffer(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
-        glVertexAttribPointer(gfx->line_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
+        glBindBuffer_(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
+        glVertexAttribPointer_(gfx->line_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
 
         size_t newsize = gfx->vec_vertex_buffer.size * sizeof(vertex_t);
         ARRAY_BUFFER_SUB_OR_SWAP(gfx->vec_vertex_buffer.buf, gfx->flex_vbo.size, newsize);
@@ -4012,7 +2734,7 @@ __attribute__((cold)) static void GfxOpenGL2_draw_unicode_input(GfxOpenGL2* gfx,
                   gfx->line_height_pixels);
         glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
-        glBindBuffer(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
+        glBindBuffer_(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
 
         Rune rune = {
             .code    = 'u',
@@ -4051,25 +2773,25 @@ __attribute__((cold)) static void GfxOpenGL2_draw_unicode_input(GfxOpenGL2* gfx,
 
         GlyphAtlasPage* page = &gfx->glyph_atlas.pages.buf[entry->page_id];
         glBindTexture(GL_TEXTURE_2D, page->texture_id);
-        glBindBuffer(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
+        glBindBuffer_(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
         size_t newsize = sizeof(buf);
         ARRAY_BUFFER_SUB_OR_SWAP(buf, gfx->flex_vbo.size, newsize);
         switch (page->texture_format) {
             case TEX_FMT_RGB: {
-                glUseProgram(gfx->font_shader.id);
+                glUseProgram_(gfx->font_shader.id);
                 GLuint loc = gfx->font_shader.attribs->location;
-                glVertexAttribPointer(loc, 4, GL_FLOAT, GL_FALSE, 0, 0);
-                glUniform3f(gfx->font_shader.uniforms[1].location, 0.0f, 0.0f, 0.0f);
-                glUniform4f(gfx->font_shader.uniforms[2].location, 1.0f, 1.0f, 1.0f, 1.0f);
+                glVertexAttribPointer_(loc, 4, GL_FLOAT, GL_FALSE, 0, 0);
+                glUniform3f_(gfx->font_shader.uniforms[1].location, 0.0f, 0.0f, 0.0f);
+                glUniform4f_(gfx->font_shader.uniforms[2].location, 1.0f, 1.0f, 1.0f, 1.0f);
             } break;
             case TEX_FMT_MONO: {
-                glUseProgram(gfx->font_shader_gray.id);
+                glUseProgram_(gfx->font_shader_gray.id);
                 GLuint loc = gfx->font_shader_gray.attribs->location;
-                glVertexAttribPointer(loc, 4, GL_FLOAT, GL_FALSE, 0, 0);
-                glUniform3f(gfx->font_shader_gray.uniforms[1].location, 0.0f, 0.0f, 0.0f);
+                glVertexAttribPointer_(loc, 4, GL_FLOAT, GL_FALSE, 0, 0);
+                glUniform3f_(gfx->font_shader_gray.uniforms[1].location, 0.0f, 0.0f, 0.0f);
 
 #ifndef GFX_GLES
-                glUniform4f(gfx->font_shader_gray.uniforms[2].location, 1.0f, 1.0f, 1.0f, 1.0f);
+                glUniform4f_(gfx->font_shader_gray.uniforms[2].location, 1.0f, 1.0f, 1.0f, 1.0f);
 #endif
             } break;
             default:
@@ -4082,7 +2804,7 @@ __attribute__((cold)) static void GfxOpenGL2_draw_unicode_input(GfxOpenGL2* gfx,
 
     for (size_t i = 0; i < vt->unicode_input.buffer.size; ++i) {
         ++col;
-        glBindBuffer(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
+        glBindBuffer_(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
         Rune rune = (Rune){
             .code    = vt->unicode_input.buffer.buf[i],
             .combine = { 0 },
@@ -4120,29 +2842,29 @@ __attribute__((cold)) static void GfxOpenGL2_draw_unicode_input(GfxOpenGL2* gfx,
 
         GlyphAtlasPage* page = &gfx->glyph_atlas.pages.buf[entry->page_id];
         glBindTexture(GL_TEXTURE_2D, page->texture_id);
-        glBindBuffer(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
+        glBindBuffer_(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
         size_t newsize = sizeof(buf);
         ARRAY_BUFFER_SUB_OR_SWAP(buf, gfx->flex_vbo.size, newsize);
 
         switch (page->texture_format) {
             case TEX_FMT_RGB: {
-                glUseProgram(gfx->font_shader.id);
+                glUseProgram_(gfx->font_shader.id);
                 GLuint loc = gfx->font_shader.attribs->location;
-                glVertexAttribPointer(loc, 4, GL_FLOAT, GL_FALSE, 0, 0);
-                glUniform3f(gfx->font_shader.uniforms[1].location, 0.0f, 0.0f, 0.0f);
+                glVertexAttribPointer_(loc, 4, GL_FLOAT, GL_FALSE, 0, 0);
+                glUniform3f_(gfx->font_shader.uniforms[1].location, 0.0f, 0.0f, 0.0f);
 
 #ifndef GFX_GLES
-                glUniform4f(gfx->font_shader.uniforms[2].location, 1.0f, 1.0f, 1.0f, 1.0f);
+                glUniform4f_(gfx->font_shader.uniforms[2].location, 1.0f, 1.0f, 1.0f, 1.0f);
 #endif
             } break;
             case TEX_FMT_MONO: {
-                glUseProgram(gfx->font_shader_gray.id);
+                glUseProgram_(gfx->font_shader_gray.id);
                 GLuint loc = gfx->font_shader_gray.attribs->location;
-                glVertexAttribPointer(loc, 4, GL_FLOAT, GL_FALSE, 0, 0);
-                glUniform3f(gfx->font_shader_gray.uniforms[1].location, 0.0f, 0.0f, 0.0f);
+                glVertexAttribPointer_(loc, 4, GL_FLOAT, GL_FALSE, 0, 0);
+                glUniform3f_(gfx->font_shader_gray.uniforms[1].location, 0.0f, 0.0f, 0.0f);
 
 #ifndef GFX_GLES
-                glUniform4f(gfx->font_shader_gray.uniforms[2].location, 1.0f, 1.0f, 1.0f, 1.0f);
+                glUniform4f_(gfx->font_shader_gray.uniforms[2].location, 1.0f, 1.0f, 1.0f, 1.0f);
 #endif
             } break;
             default:
@@ -4162,7 +2884,7 @@ static void GfxOpenGL2_draw_scrollbar(GfxOpenGL2* self, const Scrollbar* scrollb
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     Shader_use(&self->solid_fill_shader);
     float alpha = scrollbar->dragging ? 0.8f : scrollbar->opacity * 0.5f;
-    glUniform4f(self->solid_fill_shader.uniforms[0].location, 1.0f, 1.0f, 1.0f, alpha);
+    glUniform4f_(self->solid_fill_shader.uniforms[0].location, 1.0f, 1.0f, 1.0f, alpha);
     glViewport(0, 0, self->win_w, self->win_h);
     glBindTexture(GL_TEXTURE_2D, 0);
 
@@ -4199,9 +2921,9 @@ static void GfxOpenGL2_draw_scrollbar(GfxOpenGL2* self, const Scrollbar* scrollb
     };
 #endif
 
-    glBindBuffer(GL_ARRAY_BUFFER, self->flex_vbo.vbo);
+    glBindBuffer_(GL_ARRAY_BUFFER, self->flex_vbo.vbo);
     ARRAY_BUFFER_SUB_OR_SWAP(vertex_data, self->flex_vbo.size, (sizeof vertex_data));
-    glVertexAttribPointer(self->solid_fill_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
+    glVertexAttribPointer_(self->solid_fill_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
     glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
     ARRAY_BUFFER_ORPHAN(self->flex_vbo.size);
 }
@@ -4256,12 +2978,12 @@ static void GfxOpenGL2_draw_hovered_link(GfxOpenGL2* self, const Vt* vt, const U
     glViewport(0, 0, self->win_w, self->win_h);
     glBindTexture(GL_TEXTURE_2D, 0);
     Shader_use(&self->line_shader);
-    glBindBuffer(GL_ARRAY_BUFFER, self->flex_vbo.vbo);
-    glVertexAttribPointer(self->line_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
-    glUniform3f(self->line_shader.uniforms[1].location,
-                ColorRGB_get_float(vt->colors.fg, 0),
-                ColorRGB_get_float(vt->colors.fg, 1),
-                ColorRGB_get_float(vt->colors.fg, 2));
+    glBindBuffer_(GL_ARRAY_BUFFER, self->flex_vbo.vbo);
+    glVertexAttribPointer_(self->line_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
+    glUniform3f_(self->line_shader.uniforms[1].location,
+                 ColorRGB_get_float(vt->colors.fg, 0),
+                 ColorRGB_get_float(vt->colors.fg, 1),
+                 ColorRGB_get_float(vt->colors.fg, 2));
 
     size_t new_size = sizeof(vertex_t) * self->vec_vertex_buffer.size;
     ARRAY_BUFFER_SUB_OR_SWAP(self->vec_vertex_buffer.buf, self->flex_vbo.size, new_size);
@@ -4294,13 +3016,13 @@ static void GfxOpenGL2_draw_flash(GfxOpenGL2* self, double fraction)
     glDisable(GL_SCISSOR_TEST);
     glBindTexture(GL_TEXTURE_2D, 0);
     Shader_use(&self->solid_fill_shader);
-    glUniform4f(self->solid_fill_shader.uniforms[0].location,
-                ColorRGBA_get_float(settings.bell_flash, 0),
-                ColorRGBA_get_float(settings.bell_flash, 1),
-                ColorRGBA_get_float(settings.bell_flash, 2),
-                (double)ColorRGBA_get_float(settings.bell_flash, 3) * fraction);
-    glBindBuffer(GL_ARRAY_BUFFER, self->full_framebuffer_quad_vbo);
-    glVertexAttribPointer(self->solid_fill_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
+    glUniform4f_(self->solid_fill_shader.uniforms[0].location,
+                 ColorRGBA_get_float(settings.bell_flash, 0),
+                 ColorRGBA_get_float(settings.bell_flash, 1),
+                 ColorRGBA_get_float(settings.bell_flash, 2),
+                 (double)ColorRGBA_get_float(settings.bell_flash, 3) * fraction);
+    glBindBuffer_(GL_ARRAY_BUFFER, self->full_framebuffer_quad_vbo);
+    glVertexAttribPointer_(self->solid_fill_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
     glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
 }
 
@@ -4311,13 +3033,13 @@ static void GfxOpenGL2_draw_tint(GfxOpenGL2* self)
     glDisable(GL_SCISSOR_TEST);
     glBindTexture(GL_TEXTURE_2D, 0);
     Shader_use(&self->solid_fill_shader);
-    glUniform4f(self->solid_fill_shader.uniforms[0].location,
-                ColorRGBA_get_float(settings.dim_tint, 0),
-                ColorRGBA_get_float(settings.dim_tint, 1),
-                ColorRGBA_get_float(settings.dim_tint, 2),
-                ColorRGBA_get_float(settings.dim_tint, 3));
-    glBindBuffer(GL_ARRAY_BUFFER, self->full_framebuffer_quad_vbo);
-    glVertexAttribPointer(self->solid_fill_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
+    glUniform4f_(self->solid_fill_shader.uniforms[0].location,
+                 ColorRGBA_get_float(settings.dim_tint, 0),
+                 ColorRGBA_get_float(settings.dim_tint, 1),
+                 ColorRGBA_get_float(settings.dim_tint, 2),
+                 ColorRGBA_get_float(settings.dim_tint, 3));
+    glBindBuffer_(GL_ARRAY_BUFFER, self->full_framebuffer_quad_vbo);
+    glVertexAttribPointer_(self->solid_fill_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
 
     glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
 }
@@ -4346,7 +3068,7 @@ static void GfxOpenGL2_load_image(GfxOpenGL2* self, VtImageSurface* surface)
                  surface->bytes_per_pixel == 3 ? GL_RGB : GL_RGBA,
                  GL_UNSIGNED_BYTE,
                  surface->fragments.buf);
-    glGenerateMipmap(GL_TEXTURE_2D);
+    glGenerateMipmap_(GL_TEXTURE_2D);
     surface->proxy.data[IMG_PROXY_INDEX_TEXTURE_ID] = tex;
 }
 
@@ -4394,9 +3116,9 @@ static void GfxOpenGL2_load_image_view(GfxOpenGL2* self, VtImageSurfaceView* vie
 #endif
 
     GLuint vbo;
-    glGenBuffers(1, &vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_data), vertex_data, GL_STATIC_DRAW);
+    glGenBuffers_(1, &vbo);
+    glBindBuffer_(GL_ARRAY_BUFFER, vbo);
+    glBufferData_(GL_ARRAY_BUFFER, sizeof(vertex_data), vertex_data, GL_STATIC_DRAW);
     view->proxy.data[IMG_VIEW_PROXY_INDEX_VBO_ID] = vbo;
 }
 
@@ -4411,11 +3133,11 @@ static void GfxOpenGL2_draw_image_view(GfxOpenGL2* self, const Vt* vt, VtImageSu
     GfxOpenGL2_load_image_view(self, view);
 
     GLuint vbo = view->proxy.data[IMG_VIEW_PROXY_INDEX_VBO_ID];
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
+    glBindBuffer_(GL_ARRAY_BUFFER, vbo);
 
     glEnable(GL_BLEND);
     glDisable(GL_SCISSOR_TEST);
-    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
+    glBlendFuncSeparate_(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
 
     Shader_use(&self->image_shader);
     glBindTexture(GL_TEXTURE_2D, surf->proxy.data[IMG_PROXY_INDEX_TEXTURE_ID]);
@@ -4427,8 +3149,8 @@ static void GfxOpenGL2_draw_image_view(GfxOpenGL2* self, const Vt* vt, VtImageSu
     float offset_y =
       -self->sy * (y_index * self->line_height_pixels + view->anchor_offset_px.second);
 
-    glVertexAttribPointer(self->image_shader.attribs->location, 4, GL_FLOAT, GL_FALSE, 0, 0);
-    glUniform2f(self->image_shader.uniforms[1].location, offset_x, offset_y);
+    glVertexAttribPointer_(self->image_shader.attribs->location, 4, GL_FLOAT, GL_FALSE, 0, 0);
+    glUniform2f_(self->image_shader.uniforms[1].location, offset_x, offset_y);
 
     glDrawArrays(QUAD_DRAW_MODE, 0, 4);
 }
@@ -4473,9 +3195,9 @@ void GfxOpenGL2_load_sixel(GfxOpenGL2* self, Vt* vt, VtSixelSurface* srf)
 #endif
 
     GLuint vbo;
-    glGenBuffers(1, &vbo);
-    glBindBuffer(GL_ARRAY_BUFFER, vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(vertex_data), vertex_data, GL_STATIC_DRAW);
+    glGenBuffers_(1, &vbo);
+    glBindBuffer_(GL_ARRAY_BUFFER, vbo);
+    glBufferData_(GL_ARRAY_BUFFER, sizeof(vertex_data), vertex_data, GL_STATIC_DRAW);
     srf->proxy.data[SIXEL_PROXY_INDEX_VBO_ID] = vbo;
 }
 
@@ -4494,9 +3216,9 @@ void GfxOpenGL2_draw_sixel(GfxOpenGL2* self, Vt* vt, VtSixelSurface* srf)
     float   offset_x = self->sx * (srf->anchor_cell_idx * self->glyph_width_pixels);
     float   offset_y = -self->sy * (y_index * self->line_height_pixels);
 
-    glBindBuffer(GL_ARRAY_BUFFER, srf->proxy.data[SIXEL_PROXY_INDEX_VBO_ID]);
-    glVertexAttribPointer(self->image_shader.attribs->location, 4, GL_FLOAT, GL_FALSE, 0, 0);
-    glUniform2f(self->image_shader.uniforms[1].location, offset_x, offset_y);
+    glBindBuffer_(GL_ARRAY_BUFFER, srf->proxy.data[SIXEL_PROXY_INDEX_VBO_ID]);
+    glVertexAttribPointer_(self->image_shader.attribs->location, 4, GL_FLOAT, GL_FALSE, 0, 0);
+    glUniform2f_(self->image_shader.uniforms[1].location, offset_x, offset_y);
 
     glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
 }
@@ -4802,27 +3524,27 @@ GfxOpenGL2_maybe_draw_titlebar(Gfx* self, Ui* ui, window_partial_swap_request_t*
 
     Shader_use(&gfx->solid_fill_shader);
 
-    glUniform4f(gfx->solid_fill_shader.uniforms[0].location,
-                tb_clr_bdr[0] + L_TINT,
-                tb_clr_bdr[1],
-                tb_clr_bdr[2],
-                tb_clr_bdr[3]);
+    glUniform4f_(gfx->solid_fill_shader.uniforms[0].location,
+                 tb_clr_bdr[0] + L_TINT,
+                 tb_clr_bdr[1],
+                 tb_clr_bdr[2],
+                 tb_clr_bdr[3]);
     glViewport(0, gfx->win_h - UI_CSD_TITLEBAR_HEIGHT_PX, gfx->win_w, UI_CSD_TITLEBAR_HEIGHT_PX);
     glBindTexture(GL_TEXTURE_2D, 0);
-    glBindBuffer(GL_ARRAY_BUFFER, gfx->full_framebuffer_quad_vbo);
-    glVertexAttribPointer(gfx->solid_fill_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
+    glBindBuffer_(GL_ARRAY_BUFFER, gfx->full_framebuffer_quad_vbo);
+    glVertexAttribPointer_(gfx->solid_fill_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
     glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
 
-    glUniform4f(gfx->solid_fill_shader.uniforms[0].location,
-                tb_clr[1] + L_TINT,
-                tb_clr[1],
-                tb_clr[2],
-                tb_clr[3]);
+    glUniform4f_(gfx->solid_fill_shader.uniforms[0].location,
+                 tb_clr[1] + L_TINT,
+                 tb_clr[1],
+                 tb_clr[2],
+                 tb_clr[3]);
     glViewport(1,
                gfx->win_h - UI_CSD_TITLEBAR_HEIGHT_PX + 1,
                gfx->win_w - 2,
                UI_CSD_TITLEBAR_HEIGHT_PX - 2);
-    glVertexAttribPointer(gfx->solid_fill_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
+    glVertexAttribPointer_(gfx->solid_fill_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
     glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
 
     if (ui->csd.mode == UI_CSD_MODE_FLOATING) {
@@ -4835,28 +3557,28 @@ GfxOpenGL2_maybe_draw_titlebar(Gfx* self, Ui* ui, window_partial_swap_request_t*
                    gfx->win_h - UI_CSD_TITLEBAR_RADIUS_PX,
                    UI_CSD_TITLEBAR_RADIUS_PX,
                    UI_CSD_TITLEBAR_RADIUS_PX);
-        glUniform4f(gfx->circle_shader.uniforms[0].location,
-                    tb_clr_bdr[0] + L_TINT,
-                    tb_clr_bdr[1],
-                    tb_clr_bdr[2],
-                    tb_clr_bdr[3]);
-        glUniform4f(gfx->circle_shader.uniforms[1].location, 0.0f, 0.0f, 0.0f, 0.0f);
-        glUniform4f(gfx->circle_shader.uniforms[2].location,
-                    1.0f,
-                    -1.0f,
-                    2.0f,
-                    1.2f / UI_CSD_TITLEBAR_RADIUS_PX);
-        glVertexAttribPointer(gfx->circle_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
+        glUniform4f_(gfx->circle_shader.uniforms[0].location,
+                     tb_clr_bdr[0] + L_TINT,
+                     tb_clr_bdr[1],
+                     tb_clr_bdr[2],
+                     tb_clr_bdr[3]);
+        glUniform4f_(gfx->circle_shader.uniforms[1].location, 0.0f, 0.0f, 0.0f, 0.0f);
+        glUniform4f_(gfx->circle_shader.uniforms[2].location,
+                     1.0f,
+                     -1.0f,
+                     2.0f,
+                     1.2f / UI_CSD_TITLEBAR_RADIUS_PX);
+        glVertexAttribPointer_(gfx->circle_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
         glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
         glViewport(gfx->win_w - UI_CSD_TITLEBAR_RADIUS_PX,
                    gfx->win_h - UI_CSD_TITLEBAR_RADIUS_PX,
                    UI_CSD_TITLEBAR_RADIUS_PX,
                    UI_CSD_TITLEBAR_RADIUS_PX);
-        glUniform4f(gfx->circle_shader.uniforms[2].location,
-                    -1.0f,
-                    -1.0f,
-                    2.0f,
-                    1.2f / UI_CSD_TITLEBAR_RADIUS_PX);
+        glUniform4f_(gfx->circle_shader.uniforms[2].location,
+                     -1.0f,
+                     -1.0f,
+                     2.0f,
+                     1.2f / UI_CSD_TITLEBAR_RADIUS_PX);
         glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
     }
 
@@ -4870,34 +3592,34 @@ GfxOpenGL2_maybe_draw_titlebar(Gfx* self, Ui* ui, window_partial_swap_request_t*
                    gfx->win_h - UI_CSD_TITLEBAR_RADIUS_PX,
                    UI_CSD_TITLEBAR_RADIUS_PX - 1,
                    UI_CSD_TITLEBAR_RADIUS_PX - 1);
-        glUniform4f(gfx->circle_shader.uniforms[0].location,
-                    tb_clr[0] + L_TINT,
-                    tb_clr[1],
-                    tb_clr[2],
-                    tb_clr[3]);
-        glUniform4f(gfx->circle_shader.uniforms[1].location,
-                    tb_clr_bdr[0] + L_TINT,
-                    tb_clr_bdr[1],
-                    tb_clr_bdr[2],
-                    0.0f);
-        glUniform4f(gfx->circle_shader.uniforms[2].location,
-                    1.0f,
-                    -1.0f,
-                    2.0f,
-                    1.25f / (UI_CSD_TITLEBAR_RADIUS_PX - 1));
-        glVertexAttribPointer(gfx->circle_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
+        glUniform4f_(gfx->circle_shader.uniforms[0].location,
+                     tb_clr[0] + L_TINT,
+                     tb_clr[1],
+                     tb_clr[2],
+                     tb_clr[3]);
+        glUniform4f_(gfx->circle_shader.uniforms[1].location,
+                     tb_clr_bdr[0] + L_TINT,
+                     tb_clr_bdr[1],
+                     tb_clr_bdr[2],
+                     0.0f);
+        glUniform4f_(gfx->circle_shader.uniforms[2].location,
+                     1.0f,
+                     -1.0f,
+                     2.0f,
+                     1.25f / (UI_CSD_TITLEBAR_RADIUS_PX - 1));
+        glVertexAttribPointer_(gfx->circle_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
         glEnable(GL_BLEND);
-        glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA, GL_DST_ALPHA);
+        glBlendFuncSeparate_(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_SRC_ALPHA, GL_DST_ALPHA);
         glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
         glViewport(gfx->win_w - UI_CSD_TITLEBAR_RADIUS_PX,
                    gfx->win_h - UI_CSD_TITLEBAR_RADIUS_PX,
                    UI_CSD_TITLEBAR_RADIUS_PX - 1,
                    UI_CSD_TITLEBAR_RADIUS_PX - 1);
-        glUniform4f(gfx->circle_shader.uniforms[2].location,
-                    -1.0f,
-                    -1.0f,
-                    2.0f,
-                    1.25f / (UI_CSD_TITLEBAR_RADIUS_PX - 1));
+        glUniform4f_(gfx->circle_shader.uniforms[2].location,
+                     -1.0f,
+                     -1.0f,
+                     2.0f,
+                     1.25f / (UI_CSD_TITLEBAR_RADIUS_PX - 1));
         glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
         glDisable(GL_BLEND);
     } else /* no rounded corners */ {
@@ -4907,8 +3629,8 @@ GfxOpenGL2_maybe_draw_titlebar(Gfx* self, Ui* ui, window_partial_swap_request_t*
         }
         Shader_use(&gfx->circle_shader);
         glBindTexture(GL_TEXTURE_2D, 0);
-        glBindBuffer(GL_ARRAY_BUFFER, gfx->full_framebuffer_quad_vbo);
-        glVertexAttribPointer(gfx->circle_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
+        glBindBuffer_(GL_ARRAY_BUFFER, gfx->full_framebuffer_quad_vbo);
+        glVertexAttribPointer_(gfx->circle_shader.attribs->location, 2, GL_FLOAT, GL_FALSE, 0, 0);
     }
 
     if (ui->csd.buttons.size) {
@@ -4918,17 +3640,17 @@ GfxOpenGL2_maybe_draw_titlebar(Gfx* self, Ui* ui, window_partial_swap_request_t*
         uint32_t xoffset_px = gfx->win_w - UI_CSD_TITLEBAR_HEIGHT_PX / 2 - vp_w / 2;
         uint32_t yoffset_px = gfx->win_h - UI_CSD_TITLEBAR_HEIGHT_PX / 2 - vp_h / 2;
 
-        glUniform4f(gfx->circle_shader.uniforms[0].location,
-                    btn_clr[0] + L_TINT,
-                    btn_clr[1],
-                    btn_clr[2],
-                    btn_clr[3]);
-        glUniform4f(gfx->circle_shader.uniforms[1].location,
-                    tb_clr[0] + L_TINT,
-                    tb_clr[1],
-                    tb_clr[2],
-                    tb_clr[3]);
-        glUniform4f(gfx->circle_shader.uniforms[2].location, 0.0f, 0.0f, 1.0f, 1.5f / vp_w);
+        glUniform4f_(gfx->circle_shader.uniforms[0].location,
+                     btn_clr[0] + L_TINT,
+                     btn_clr[1],
+                     btn_clr[2],
+                     btn_clr[3]);
+        glUniform4f_(gfx->circle_shader.uniforms[1].location,
+                     tb_clr[0] + L_TINT,
+                     tb_clr[1],
+                     tb_clr[2],
+                     tb_clr[3]);
+        glUniform4f_(gfx->circle_shader.uniforms[2].location, 0.0f, 0.0f, 1.0f, 1.5f / vp_w);
 
         for (ui_csd_titlebar_button_info_t* i = NULL;
              (i = Vector_iter_ui_csd_titlebar_button_info_t(&ui->csd.buttons, i));) {
@@ -4940,33 +3662,33 @@ GfxOpenGL2_maybe_draw_titlebar(Gfx* self, Ui* ui, window_partial_swap_request_t*
 
             glDisable(GL_BLEND);
             Shader_use(&gfx->circle_shader);
-            glUniform4f(gfx->circle_shader.uniforms[0].location,
-                        this_btn_clr[0] + L_TINT,
-                        this_btn_clr[1],
-                        this_btn_clr[2],
-                        this_btn_clr[3]);
+            glUniform4f_(gfx->circle_shader.uniforms[0].location,
+                         this_btn_clr[0] + L_TINT,
+                         this_btn_clr[1],
+                         this_btn_clr[2],
+                         this_btn_clr[3]);
             glViewport(xoffset_px, yoffset_px, vp_w, vp_h);
-            glBindBuffer(GL_ARRAY_BUFFER, gfx->full_framebuffer_quad_vbo);
-            glVertexAttribPointer(gfx->circle_shader.attribs->location,
-                                  2,
-                                  GL_FLOAT,
-                                  GL_FALSE,
-                                  0,
-                                  0);
+            glBindBuffer_(GL_ARRAY_BUFFER, gfx->full_framebuffer_quad_vbo);
+            glVertexAttribPointer_(gfx->circle_shader.attribs->location,
+                                   2,
+                                   GL_FLOAT,
+                                   GL_FALSE,
+                                   0,
+                                   0);
             glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
 
             Shader_use(&gfx->solid_fill_shader);
-            glVertexAttribPointer(gfx->solid_fill_shader.attribs->location,
-                                  2,
-                                  GL_FLOAT,
-                                  GL_FALSE,
-                                  0,
-                                  0);
-            glUniform4f(gfx->solid_fill_shader.uniforms[0].location,
-                        btn_clr_sym[0] + L_TINT,
-                        btn_clr_sym[1],
-                        btn_clr_sym[2],
-                        btn_clr_sym[3]);
+            glVertexAttribPointer_(gfx->solid_fill_shader.attribs->location,
+                                   2,
+                                   GL_FLOAT,
+                                   GL_FALSE,
+                                   0,
+                                   0);
+            glUniform4f_(gfx->solid_fill_shader.uniforms[0].location,
+                         btn_clr_sym[0] + L_TINT,
+                         btn_clr_sym[1],
+                         btn_clr_sym[2],
+                         btn_clr_sym[3]);
             switch (i->type) {
                 case UI_CSD_TITLEBAR_BUTTON_CLOSE: {
                     glEnable(GL_BLEND);
@@ -4982,13 +3704,13 @@ GfxOpenGL2_maybe_draw_titlebar(Gfx* self, Ui* ui, window_partial_swap_request_t*
 
                     Shader_use(&gfx->image_tint_shader);
                     glBindTexture(GL_TEXTURE_2D, gfx->csd_close_button_texture.id);
-                    glUniform3f(gfx->image_tint_shader.uniforms[1].location,
-                                btn_clr_sym[0] + L_TINT,
-                                btn_clr_sym[1],
-                                btn_clr_sym[2]);
+                    glUniform3f_(gfx->image_tint_shader.uniforms[1].location,
+                                 btn_clr_sym[0] + L_TINT,
+                                 btn_clr_sym[1],
+                                 btn_clr_sym[2]);
 
                     if (!gfx->csd_close_button_vbo) {
-                        glGenBuffers(1, &gfx->csd_close_button_vbo);
+                        glGenBuffers_(1, &gfx->csd_close_button_vbo);
 
                         Vector_clear_vertex_t(&gfx->vec_vertex_buffer);
                         Vector_push_vertex_t(&gfx->vec_vertex_buffer, (vertex_t){ -1, -1 });
@@ -5012,45 +3734,45 @@ GfxOpenGL2_maybe_draw_titlebar(Gfx* self, Ui* ui, window_partial_swap_request_t*
                         Vector_push_vertex_t(&gfx->vec_vertex_buffer, (vertex_t){ 1, 0 });
 
                         size_t new_size = sizeof(vertex_t) * gfx->vec_vertex_buffer.size;
-                        glBindBuffer(GL_ARRAY_BUFFER, gfx->csd_close_button_vbo);
-                        glBufferData(GL_ARRAY_BUFFER,
-                                     new_size,
-                                     gfx->vec_vertex_buffer.buf,
-                                     GL_STATIC_DRAW);
+                        glBindBuffer_(GL_ARRAY_BUFFER, gfx->csd_close_button_vbo);
+                        glBufferData_(GL_ARRAY_BUFFER,
+                                      new_size,
+                                      gfx->vec_vertex_buffer.buf,
+                                      GL_STATIC_DRAW);
                     } else {
-                        glBindBuffer(GL_ARRAY_BUFFER, gfx->csd_close_button_vbo);
+                        glBindBuffer_(GL_ARRAY_BUFFER, gfx->csd_close_button_vbo);
                     }
 
-                    glVertexAttribPointer(gfx->font_shader.attribs->location,
-                                          4,
-                                          GL_FLOAT,
-                                          GL_FALSE,
-                                          0,
-                                          0);
+                    glVertexAttribPointer_(gfx->font_shader.attribs->location,
+                                           4,
+                                           GL_FLOAT,
+                                           GL_FALSE,
+                                           0,
+                                           0);
                     glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
                 } break;
                 case UI_CSD_TITLEBAR_BUTTON_MAXIMIZE:
-                    glUniform4f(gfx->solid_fill_shader.uniforms[0].location,
-                                btn_clr_sym[0] + L_TINT,
-                                btn_clr_sym[1],
-                                btn_clr_sym[2],
-                                btn_clr_sym[3]);
+                    glUniform4f_(gfx->solid_fill_shader.uniforms[0].location,
+                                 btn_clr_sym[0] + L_TINT,
+                                 btn_clr_sym[1],
+                                 btn_clr_sym[2],
+                                 btn_clr_sym[3]);
                     glViewport(xoffset_px + 7, yoffset_px + 7, 8, 8);
                     glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
-                    glUniform4f(gfx->solid_fill_shader.uniforms[0].location,
-                                this_btn_clr[0] + L_TINT,
-                                this_btn_clr[1],
-                                this_btn_clr[2],
-                                this_btn_clr[3]);
+                    glUniform4f_(gfx->solid_fill_shader.uniforms[0].location,
+                                 this_btn_clr[0] + L_TINT,
+                                 this_btn_clr[1],
+                                 this_btn_clr[2],
+                                 this_btn_clr[3]);
                     glViewport(xoffset_px + 9, yoffset_px + 9, 4, 4);
                     glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
                     break;
                 case UI_CSD_TITLEBAR_BUTTON_MINIMIZE:
-                    glUniform4f(gfx->solid_fill_shader.uniforms[0].location,
-                                btn_clr_sym[0] + L_TINT,
-                                btn_clr_sym[1],
-                                btn_clr_sym[2],
-                                btn_clr_sym[3]);
+                    glUniform4f_(gfx->solid_fill_shader.uniforms[0].location,
+                                 btn_clr_sym[0] + L_TINT,
+                                 btn_clr_sym[1],
+                                 btn_clr_sym[2],
+                                 btn_clr_sym[3]);
                     glViewport(xoffset_px + 7, yoffset_px + 7, 8, 2);
                     glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
                     break;
@@ -5215,10 +3937,10 @@ window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, Vt* vt, Ui* ui, uint8_
     }
 
     GfxOpenGL2_draw_images(gfx, vt, true);
-    glBindBuffer(GL_ARRAY_BUFFER, gfx->line_quads_vbo);
+    glBindBuffer_(GL_ARRAY_BUFFER, gfx->line_quads_vbo);
     Shader_use(&gfx->image_shader);
-    glUniform2f(gfx->image_shader.uniforms[1].location, 0, 0);
-    glVertexAttribPointer(gfx->image_shader.attribs->location, 4, GL_FLOAT, GL_FALSE, 0, 0);
+    glUniform2f_(gfx->image_shader.uniforms[1].location, 0, 0);
+    glVertexAttribPointer_(gfx->image_shader.attribs->location, 4, GL_FLOAT, GL_FALSE, 0, 0);
     glViewport(gfx->pixel_offset_x, -gfx->pixel_offset_y, gfx->win_w, gfx->win_h);
 
     for (VtLine* i = begin; i < end; ++i) {
@@ -5272,15 +3994,15 @@ window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, Vt* vt, Ui* ui, uint8_
                     -1.0f + (r->x + r->w - 1) * gfx->sx, -1.0f + (r->y + r->h - 1) * gfx->sy,
 
                 };
-                glBindBuffer(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
+                glBindBuffer_(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
                 ARRAY_BUFFER_SUB_OR_SWAP(vertex_data, gfx->flex_vbo.size, (sizeof vertex_data));
-                glVertexAttribPointer(gfx->solid_fill_shader.attribs->location,
-                                      2,
-                                      GL_FLOAT,
-                                      GL_FALSE,
-                                      0,
-                                      0);
-                glUniform4f(gfx->solid_fill_shader.uniforms[0].location, 1.0f, 0.0f, 0.0f, 1.0f);
+                glVertexAttribPointer_(gfx->solid_fill_shader.attribs->location,
+                                       2,
+                                       GL_FLOAT,
+                                       GL_FALSE,
+                                       0,
+                                       0);
+                glUniform4f_(gfx->solid_fill_shader.uniforms[0].location, 1.0f, 0.0f, 0.0f, 1.0f);
                 glDrawArrays(GL_LINE_STRIP, 0, 6);
             }
             retval = NULL;
@@ -5296,15 +4018,15 @@ window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, Vt* vt, Ui* ui, uint8_
             float vertex_data[] = { -1.0f, 1.0f,  -1.0f + gfx->sx * 5.0f,
                                     1.0f,  -1.0f, 1.0f - gfx->sy * 5.0f };
 
-            glBindBuffer(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
+            glBindBuffer_(GL_ARRAY_BUFFER, gfx->flex_vbo.vbo);
             ARRAY_BUFFER_SUB_OR_SWAP(vertex_data, gfx->flex_vbo.size, (sizeof vertex_data));
 
-            glVertexAttribPointer(gfx->solid_fill_shader.attribs->location,
-                                  2,
-                                  GL_FLOAT,
-                                  GL_FALSE,
-                                  0,
-                                  0);
+            glVertexAttribPointer_(gfx->solid_fill_shader.attribs->location,
+                                   2,
+                                   GL_FLOAT,
+                                   GL_FALSE,
+                                   0,
+                                   0);
             glDrawArrays(GL_TRIANGLES, 0, 3);
         }
         repaint_indicator_visible = !repaint_indicator_visible;
@@ -5321,7 +4043,7 @@ void GfxOpenGL2_destroy_recycled(GfxOpenGL2* self)
             glDeleteTextures(1, &self->recycled_textures[i].color_tex);
 
 #ifndef GFX_GLES
-            glDeleteRenderbuffers(1, &self->recycled_textures[i].depth_rb);
+            glDeleteRenderbuffers_(1, &self->recycled_textures[i].depth_rb);
 #endif
         }
         self->recycled_textures[i].color_tex = 0;
@@ -5350,7 +4072,7 @@ void GfxOpenGL2_push_recycled(GfxOpenGL2* self,
 #ifndef GFX_GLES
                 ASSERT(ARRAY_LAST(self->recycled_textures).depth_rb,
                        "deleted texture has depth rb");
-                glDeleteRenderbuffers(1, &ARRAY_LAST(self->recycled_textures).depth_rb);
+                glDeleteRenderbuffers_(1, &ARRAY_LAST(self->recycled_textures).depth_rb);
 #endif
             }
 
@@ -5372,7 +4094,7 @@ void GfxOpenGL2_push_recycled(GfxOpenGL2* self,
     glDeleteTextures(1, &tex_id);
 
 #ifndef GFX_GLES
-    glDeleteRenderbuffers(1, &rb_id);
+    glDeleteRenderbuffers_(1, &rb_id);
 #endif
 }
 
@@ -5402,7 +4124,7 @@ void GfxOpenGL2_destroy_sixel_proxy(Gfx* self, uint32_t* proxy)
 {
     if (proxy[SIXEL_PROXY_INDEX_TEXTURE_ID]) {
         glDeleteTextures(1, &proxy[SIXEL_PROXY_INDEX_TEXTURE_ID]);
-        glDeleteBuffers(1, &proxy[SIXEL_PROXY_INDEX_VBO_ID]);
+        glDeleteBuffers_(1, &proxy[SIXEL_PROXY_INDEX_VBO_ID]);
         proxy[SIXEL_PROXY_INDEX_TEXTURE_ID] = 0;
         proxy[SIXEL_PROXY_INDEX_VBO_ID]     = 0;
     }
@@ -5411,7 +4133,7 @@ void GfxOpenGL2_destroy_sixel_proxy(Gfx* self, uint32_t* proxy)
 void GfxOpenGL2_destroy_image_view_proxy(Gfx* self, uint32_t* proxy)
 {
     if (proxy[IMG_VIEW_PROXY_INDEX_VBO_ID]) {
-        glDeleteBuffers(1, proxy);
+        glDeleteBuffers_(1, proxy);
         proxy[IMG_VIEW_PROXY_INDEX_VBO_ID] = 0;
     }
 }
@@ -5455,7 +4177,7 @@ __attribute__((hot)) void GfxOpenGL2_destroy_proxy(Gfx* self, uint32_t* proxy)
             ASSERT(proxy[PROXY_INDEX_DEPTHBUFFER_BLINK],
                    "deleted proxy texture has a renderbuffer");
         }
-        glDeleteRenderbuffers(del_num, (GLuint*)&proxy[PROXY_INDEX_DEPTHBUFFER]);
+        glDeleteRenderbuffers_(del_num, (GLuint*)&proxy[PROXY_INDEX_DEPTHBUFFER]);
 #endif
 
     } else if (unlikely(proxy[PROXY_INDEX_TEXTURE_BLINK])) {
@@ -5464,7 +4186,7 @@ __attribute__((hot)) void GfxOpenGL2_destroy_proxy(Gfx* self, uint32_t* proxy)
         glDeleteTextures(1, (GLuint*)&proxy[PROXY_INDEX_TEXTURE_BLINK]);
 
 #ifndef GFX_GLES
-        glDeleteRenderbuffers(1, (GLuint*)&proxy[PROXY_INDEX_DEPTHBUFFER_BLINK]);
+        glDeleteRenderbuffers_(1, (GLuint*)&proxy[PROXY_INDEX_DEPTHBUFFER_BLINK]);
 #endif
     }
 
@@ -5479,13 +4201,13 @@ __attribute__((hot)) void GfxOpenGL2_destroy_proxy(Gfx* self, uint32_t* proxy)
 
 void GfxOpenGL2_destroy(Gfx* self)
 {
-    glUseProgram(0);
+    glUseProgram_(0);
     free(gfxOpenGL2(self)->line_damage.damage_history);
     free(gfxOpenGL2(self)->line_damage.proxy_color_component);
     free(gfxOpenGL2(self)->line_damage.line_length);
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    glBindFramebuffer_(GL_FRAMEBUFFER, 0);
     glBindTexture(GL_TEXTURE_2D, 0);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindBuffer_(GL_ARRAY_BUFFER, 0);
     GfxOpenGL2_destroy_recycled(gfxOpenGL2(self));
     glDeleteTextures(1, &gfxOpenGL2(self)->squiggle_texture.id);
     if (gfxOpenGL2(self)->csd_close_button_texture.id) {
@@ -5493,13 +4215,13 @@ void GfxOpenGL2_destroy(Gfx* self)
         gfxOpenGL2(self)->csd_close_button_texture.id = 0;
     }
     if (gfxOpenGL2(self)->csd_close_button_vbo) {
-        glDeleteBuffers(1, &gfxOpenGL2(self)->csd_close_button_vbo);
+        glDeleteBuffers_(1, &gfxOpenGL2(self)->csd_close_button_vbo);
         gfxOpenGL2(self)->csd_close_button_vbo = 0;
     }
-    glDeleteFramebuffers(1, &gfxOpenGL2(self)->line_framebuffer);
+    glDeleteFramebuffers_(1, &gfxOpenGL2(self)->line_framebuffer);
     VBO_destroy(&gfxOpenGL2(self)->flex_vbo);
-    glDeleteBuffers(1, &gfxOpenGL2(self)->line_quads_vbo);
-    glDeleteBuffers(1, &gfxOpenGL2(self)->full_framebuffer_quad_vbo);
+    glDeleteBuffers_(1, &gfxOpenGL2(self)->line_quads_vbo);
+    glDeleteBuffers_(1, &gfxOpenGL2(self)->full_framebuffer_quad_vbo);
     Shader_destroy(&gfxOpenGL2(self)->solid_fill_shader);
     Shader_destroy(&gfxOpenGL2(self)->font_shader);
     Shader_destroy(&gfxOpenGL2(self)->font_shader_gray);

@@ -4,12 +4,64 @@
 
 #define _GNU_SOURCE
 
-#include "gl_exts/glext.h"
+// clang-format off
 #include <GL/gl.h>
+#include "gl_exts/glext.h"
+// clang-format on
+
 #include <assert.h>
 #include <stdarg.h>
 
 #include "util.h"
+
+/* Our symbols must be named different than those in libGL.so. Otherwise GCC's lto gets confused */
+extern PFNGLBUFFERSUBDATAARBPROC        glBufferSubData_;
+extern PFNGLUNIFORM4FPROC               glUniform4f_;
+extern PFNGLUNIFORM3FPROC               glUniform3f_;
+extern PFNGLUNIFORM2FPROC               glUniform2f_;
+extern PFNGLBUFFERDATAPROC              glBufferData_;
+extern PFNGLDELETEPROGRAMPROC           glDeleteProgram_;
+extern PFNGLUSEPROGRAMPROC              glUseProgram_;
+extern PFNGLGETUNIFORMLOCATIONPROC      glGetUniformLocation_;
+extern PFNGLGETATTRIBLOCATIONPROC       glGetAttribLocation_;
+extern PFNGLDELETESHADERPROC            glDeleteShader_;
+extern PFNGLDETACHSHADERPROC            glDetachShader_;
+extern PFNGLGETPROGRAMINFOLOGPROC       glGetProgramInfoLog_;
+extern PFNGLGETPROGRAMIVPROC            glGetProgramiv_;
+extern PFNGLLINKPROGRAMPROC             glLinkProgram_;
+extern PFNGLATTACHSHADERPROC            glAttachShader_;
+extern PFNGLCOMPILESHADERPROC           glCompileShader_;
+extern PFNGLSHADERSOURCEPROC            glShaderSource_;
+extern PFNGLCREATESHADERPROC            glCreateShader_;
+extern PFNGLCREATEPROGRAMPROC           glCreateProgram_;
+extern PFNGLGETSHADERINFOLOGPROC        glGetShaderInfoLog_;
+extern PFNGLGETSHADERIVPROC             glGetShaderiv_;
+extern PFNGLDELETEBUFFERSPROC           glDeleteBuffers_;
+extern PFNGLVERTEXATTRIBPOINTERPROC     glVertexAttribPointer_;
+extern PFNGLENABLEVERTEXATTRIBARRAYPROC glEnableVertexAttribArray_;
+extern PFNGLBINDBUFFERPROC              glBindBuffer_;
+extern PFNGLGENBUFFERSPROC              glGenBuffers_;
+extern PFNGLDELETEFRAMEBUFFERSPROC      glDeleteFramebuffers_;
+extern PFNGLFRAMEBUFFERTEXTURE2DPROC    glFramebufferTexture2D_;
+extern PFNGLBINDFRAMEBUFFERPROC         glBindFramebuffer_;
+extern PFNGLGENFRAMEBUFFERSPROC         glGenFramebuffers_;
+extern PFNGLGENERATEMIPMAPPROC          glGenerateMipmap_;
+extern PFNGLBLENDFUNCSEPARATEPROC       glBlendFuncSeparate_;
+
+#ifndef GFX_GLES
+extern PFNGLFRAMEBUFFERRENDERBUFFERPROC glFramebufferRenderbuffer_;
+extern PFNGLRENDERBUFFERSTORAGEPROC     glRenderbufferStorage_;
+extern PFNGLBINDRENDERBUFFERPROC        glBindRenderbuffer_;
+extern PFNGLGENRENDERBUFFERSPROC        glGenRenderbuffers_;
+extern PFNGLDELETERENDERBUFFERSPROC     glDeleteRenderbuffers_;
+#endif
+
+#ifdef DEBUG
+extern PFNGLDEBUGMESSAGECALLBACKPROC   glDebugMessageCallback_;
+extern PFNGLCHECKFRAMEBUFFERSTATUSPROC glCheckFramebufferStatus_;
+#endif
+
+void gl2_maybe_load_gl_exts(void* loader, void* (*loader_func)(void* loader, const char* proc_name));
 
 static void gl_check_error();
 
@@ -73,7 +125,7 @@ static void Texture_destroy(Texture* self)
 #ifdef DEBUG
 static inline void assert_farmebuffer_complete()
 {
-    GLenum status = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    GLenum status = glCheckFramebufferStatus_(GL_FRAMEBUFFER);
 
     if (status != GL_FRAMEBUFFER_COMPLETE) {
         const char* string;
@@ -101,12 +153,12 @@ static VBO VBO_new(const uint32_t vertices, uint32_t nattribs, const Attribute* 
 {
     GLuint id = 0;
 
-    glGenBuffers(1, &id);
-    glBindBuffer(GL_ARRAY_BUFFER, id);
+    glGenBuffers_(1, &id);
+    glBindBuffer_(GL_ARRAY_BUFFER, id);
 
     for (uint32_t i = 0; i < nattribs; ++i) {
-        glEnableVertexAttribArray(attr[i].location);
-        glVertexAttribPointer(attr[i].location, vertices, GL_FLOAT, GL_FALSE, 0, 0);
+        glEnableVertexAttribArray_(attr[i].location);
+        glVertexAttribPointer_(attr[i].location, vertices, GL_FLOAT, GL_FALSE, 0, 0);
     }
 
     return (VBO){ .vbo = id, .size = 0 };
@@ -114,19 +166,19 @@ static VBO VBO_new(const uint32_t vertices, uint32_t nattribs, const Attribute* 
 
 static void VBO_destroy(VBO* self)
 {
-    glDeleteBuffers(1, &self->vbo);
+    glDeleteBuffers_(1, &self->vbo);
 }
 
 __attribute__((cold)) static void check_compile_error(GLuint id)
 {
     int result = 0;
-    glGetShaderiv(id, GL_COMPILE_STATUS, &result);
+    glGetShaderiv_(id, GL_COMPILE_STATUS, &result);
 
     if (result == GL_FALSE) {
-        glGetShaderiv(id, GL_INFO_LOG_LENGTH, &result);
+        glGetShaderiv_(id, GL_INFO_LOG_LENGTH, &result);
         char msg[result + 1];
 
-        glGetShaderInfoLog(id, result, &result, msg);
+        glGetShaderInfoLog_(id, result, &result, msg);
 
         ERR("Shader compilation error:\n%s\n", msg);
     }
@@ -141,50 +193,50 @@ __attribute__((sentinel, cold)) static Shader Shader_new(const char* vs_src,
                                                          const char* vars,
                                                          ...)
 {
-    GLuint id = glCreateProgram();
+    GLuint id = glCreateProgram_();
 
-    GLuint vs = glCreateShader(GL_VERTEX_SHADER);
-    GLuint fs = glCreateShader(GL_FRAGMENT_SHADER);
+    GLuint vs = glCreateShader_(GL_VERTEX_SHADER);
+    GLuint fs = glCreateShader_(GL_FRAGMENT_SHADER);
 
-    glShaderSource(vs, 1, &vs_src, NULL);
-    glCompileShader(vs);
+    glShaderSource_(vs, 1, &vs_src, NULL);
+    glCompileShader_(vs);
     check_compile_error(vs);
 
-    glShaderSource(fs, 1, &fs_src, NULL);
-    glCompileShader(fs);
+    glShaderSource_(fs, 1, &fs_src, NULL);
+    glCompileShader_(fs);
     check_compile_error(fs);
 
-    glAttachShader(id, vs);
-    glAttachShader(id, fs);
+    glAttachShader_(id, vs);
+    glAttachShader_(id, fs);
 
-    glLinkProgram(id);
+    glLinkProgram_(id);
 
     int lnkres;
-    glGetProgramiv(id, GL_LINK_STATUS, &lnkres);
+    glGetProgramiv_(id, GL_LINK_STATUS, &lnkres);
     if (lnkres == GL_FALSE) {
-        glGetProgramiv(id, GL_INFO_LOG_LENGTH, &lnkres);
+        glGetProgramiv_(id, GL_INFO_LOG_LENGTH, &lnkres);
         char msg[lnkres + 1];
-        glGetProgramInfoLog(id, lnkres, &lnkres, msg);
+        glGetProgramInfoLog_(id, lnkres, &lnkres, msg);
         ERR("Shader linking error:\n%s\n", msg);
     }
 
-    glDetachShader(id, vs);
-    glDeleteShader(vs);
-    glDetachShader(id, fs);
-    glDeleteShader(fs);
+    glDetachShader_(id, vs);
+    glDeleteShader_(vs);
+    glDetachShader_(id, fs);
+    glDeleteShader_(fs);
 
-    Shader ret = { .id = id, .attribs = {{{0},0}}, .uniforms = {{{0},0}}};
+    Shader ret = { .id = id, .attribs = { { { 0 }, 0 } }, .uniforms = { { { 0 }, 0 } } };
 
     uint32_t attr_idx = 0, uni_idx = 0;
     va_list  ap;
     va_start(ap, vars);
     for (char* name = NULL; (name = va_arg(ap, char*));) {
-        GLint res = glGetAttribLocation(id, name);
+        GLint res = glGetAttribLocation_(id, name);
         if (res != -1) {
             ret.attribs[attr_idx] = (Attribute){ .location = res };
             memcpy(ret.attribs[attr_idx++].name, name, strnlen(name, 16) + 1);
         } else {
-            res = glGetUniformLocation(id, name);
+            res = glGetUniformLocation_(id, name);
             if (res != -1) {
                 ret.uniforms[uni_idx] = (Uniform){ .location = res };
                 memcpy(ret.uniforms[uni_idx++].name, name, strnlen(name, 16) + 1);
@@ -202,15 +254,15 @@ static void Shader_use(Shader* s)
 {
     if (s) {
         ASSERT(s->id, "use of uninitialized shader");
-        glUseProgram(s->id);
+        glUseProgram_(s->id);
     } else
-        glUseProgram(0);
+        glUseProgram_(0);
 }
 
 static void Shader_destroy(Shader* s)
 {
     ASSERT(s->id, "deleted uninitialized/deleted shader program");
-    glDeleteProgram(s->id);
+    glDeleteProgram_(s->id);
     s->id = 0;
 }
 

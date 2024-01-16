@@ -35,7 +35,7 @@ else ifeq ($(mode),debugoptimized)
 	LDFLAGS = -O2 -g
 	LDLIBS += -lGLU
 else
-	CFLAGS = -std=c18 -MD -O2 -flto=auto -mtune=generic -ffast-math -fshort-enums
+	CFLAGS = -std=c18 -MD -O2 -mtune=generic -ffast-math -fshort-enums -flto=auto
 	LDFLAGS = -O2 -flto=auto
 endif
 

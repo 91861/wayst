@@ -130,8 +130,7 @@ void FreetypeFace_load(Freetype*                      freetype,
                        FreetypeFace*                  self,
                        int32_t                        size,
                        uint32_t                       dpi,
-                       enum FreetypeOutputTextureType output_type,
-                       bool                           warn_not_fixed)
+                       enum FreetypeOutputTextureType output_type)
 {
     FT_F26Dot6 siz = MAX(size, 1) * 64;
     FT_UInt    res = dpi;
@@ -152,10 +151,6 @@ void FreetypeFace_load(Freetype*                      freetype,
         } else {
             ERR("failed to set font size for %s %s", self->file_name, ft_error_to_string(e));
         }
-    }
-
-    if (warn_not_fixed && !FT_IS_FIXED_WIDTH(self->face)) {
-        WRN("face %s is not fixed-width\n", self->file_name);
     }
 
     if ((e = FT_Load_Char(self->face, '(', FT_LOAD_TARGET_NORMAL))) {
@@ -369,7 +364,7 @@ void FreetypeStyledFamily_load(Freetype*             freetype,
                                uint32_t              dpi)
 {
     for (FreetypeFace* i = NULL; (i = Vector_iter_FreetypeFace(&self->faces, i));) {
-        FreetypeFace_load(freetype, i, size + i->size_offset, dpi, self->output_type, true);
+        FreetypeFace_load(freetype, i, size + i->size_offset, dpi, self->output_type);
     }
 
     self->output_type = Vector_first_FreetypeFace(&self->faces)->output_type;
@@ -583,8 +578,7 @@ void Freetype_load_fonts(Freetype* self)
                               i,
                               settings.font_size + i->size_offset,
                               settings.font_dpi,
-                              self->target_output_type,
-                              false);
+                              self->target_output_type);
         }
 
         for (FreetypeFace* i = NULL; (i = Vector_iter_FreetypeFace(&self->color_faces, i));) {
@@ -592,8 +586,7 @@ void Freetype_load_fonts(Freetype* self)
                               i,
                               settings.font_size + i->size_offset,
                               settings.font_dpi,
-                              FT_OUTPUT_COLOR_BGRA,
-                              false);
+                              FT_OUTPUT_COLOR_BGRA);
         }
     }
 
@@ -671,8 +664,7 @@ FreetypeOutput* Freetype_load_and_render_glyph(Freetype*              self,
                                       i,
                                       settings.font_size + i->size_offset,
                                       settings.font_dpi,
-                                      self->target_output_type,
-                                      false);
+                                      self->target_output_type);
                 }
 
                 output = FreetypeFace_load_and_render_glyph(self, i, codepoint);
@@ -691,8 +683,7 @@ FreetypeOutput* Freetype_load_and_render_glyph(Freetype*              self,
                                       i,
                                       settings.font_size + i->size_offset,
                                       settings.font_dpi,
-                                      FT_OUTPUT_COLOR_BGRA,
-                                      false);
+                                      FT_OUTPUT_COLOR_BGRA);
                 }
 
                 output = FreetypeFace_load_and_render_glyph(self, i, codepoint);

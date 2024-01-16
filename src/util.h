@@ -20,6 +20,7 @@
 #include <unistd.h>
 
 #define INCH_IN_MM 0.03937008
+#define SQRT2 1.41421356237
 
 #define TERMCOLOR_RESET "\e[m"
 

@@ -133,8 +133,7 @@ void FreetypeFace_load(Freetype*                      freetype,
                        FreetypeFace*                  self,
                        int32_t                        size,
                        uint32_t                       dpi,
-                       enum FreetypeOutputTextureType output_type,
-                       bool                           warn_not_fixed);
+                       enum FreetypeOutputTextureType output_type);
 
 void FreetypeFace_unload(FreetypeFace* self);
 
