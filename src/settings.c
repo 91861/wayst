@@ -1185,7 +1185,7 @@ static void handle_option(const char opt, const int array_index, const char* val
                 settings.animate_cursor_blink = strtob(buf.buf);
                 break;
             case 2: {
-                float val = strtof32(buf.buf, NULL);
+                float val = strtof(buf.buf, NULL);
                 if (val <= 1.0f || val > 0.0) {
                     settings.animate_cursor_blink_fade_fraction = val;
                 } else {
