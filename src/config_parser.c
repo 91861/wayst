@@ -49,8 +49,9 @@ void settings_file_parse(
                 if (c == '\n') {
                     in_comment = false;
                 }
-                continue;
-            } else if (in_value) {
+            }
+
+            if (in_value) {
                 if (c == '\\' && !escaped) {
                     escaped = true;
                     if (in_list) {
@@ -68,15 +69,20 @@ void settings_file_parse(
                                                         value.buf)) {
                             goto abort;
                         }
+
                         Vector_clear_char(&value);
                     }
+
                     if (!in_string) {
                         Vector_clear_char(&whitespace);
                     }
+
                     in_string = !in_string;
+
                     if (in_list) {
                         Vector_push_char(&value, c);
                     }
+
                     continue;
                 } else if (c == '[' && !escaped && !in_string) {
                     if (in_list) {
@@ -103,20 +109,22 @@ void settings_file_parse(
                 }
 
                 if (c == '\n' && !in_list) {
-                    Vector_push_char(&value, '\0');
-                    on_property_read_func(key.buf, value.buf, key_line);
+                    if (in_value || key.size) {
+                        Vector_push_char(&value, '\0');
+                        on_property_read_func(key.buf, value.buf, key_line);
+                        if (in_string) {
+                            if (opt_on_syntax_error_func &&
+                                call_on_syntax_error_helper(opt_on_syntax_error_func,
+                                                            line,
+                                                            "\'\"\' expected before end of line")) {
+                                goto abort;
+                            }
+                        }
+                    }
                     Vector_clear_char(&whitespace);
                     Vector_clear_char(&key);
                     Vector_clear_char(&value);
-                    in_value = false;
-                    if (in_string) {
-                        if (opt_on_syntax_error_func &&
-                            call_on_syntax_error_helper(opt_on_syntax_error_func,
-                                                        line,
-                                                        "\'\"\' expected before end of line")) {
-                            goto abort;
-                        }
-                    }
+                    in_value  = false;
                     in_string = false;
                     continue;
                 } else if (escaped && !in_list) {
@@ -134,7 +142,7 @@ void settings_file_parse(
                             goto abort;
                         }
                     }
-                } else if (!iscntrl(c)) {
+                } else if (!iscntrl(c) && !in_comment) {
                     switch (c) {
                         case ']':
                         case '[':
@@ -154,19 +162,24 @@ void settings_file_parse(
                 }
                 escaped = false;
             }
-
             /* in key */
             else if (c == '=') {
-                Vector_push_char(&key, '\0');
-                key_line = line;
-                in_value = true;
+                if (!in_comment) {
+                    Vector_push_char(&key, '\0');
+                    key_line = line;
+                    in_value = true;
+                }
             } else if (c == '\n' && key.size) {
-                Vector_push_char(&key, '\0');
-                on_property_read_func(key.buf, NULL, key_line);
-                Vector_clear_char(&key);
+                if (!in_comment) {
+                    Vector_push_char(&key, '\0');
+                    on_property_read_func(key.buf, NULL, key_line);
+                    Vector_clear_char(&key);
+                }
             } else {
-                if (!iscntrl(c) && !isblank(c)) {
-                    Vector_push_char(&key, c);
+                if (!in_comment) {
+                    if (!iscntrl(c) && !isblank(c)) {
+                        Vector_push_char(&key, c);
+                    }
                 }
             }
         }

@@ -1,5 +1,6 @@
 /* See LICENSE for license information. */
 
+#include "colors.h"
 #define _GNU_SOURCE
 
 #include <errno.h>
@@ -237,7 +238,7 @@ static const char* const colors_default[9][18] = {
       "d3869b",
       "8ec07c",
       "ebdbb2",
-      "1d2021",
+      "282828",
       "ebdbb2",
     },
 };
@@ -250,25 +251,28 @@ const char* _lcd_filt_names[] = {
     [LCD_FILTER_V_RGB] = "Vertical RGB",   [LCD_FILTER_V_BGR] = "Vertical BGR"
 };
 
-static void settings_colorscheme_load_preset(uint8_t idx)
+static void settings_colorscheme_load_preset(uint8_t preset_idx)
 {
-    if (idx >= ARRAY_SIZE(colors_default)) {
-        idx = 0;
+    if (preset_idx >= ARRAY_SIZE(colors_default)) {
+        preset_idx = 0;
         ASSERT_UNREACHABLE
     }
+
     for (uint32_t i = 0; i < 16; ++i) {
         if (!(settings._explicit_colors_set && settings._explicit_colors_set[i + 2])) {
-            settings.colorscheme.color[i] = ColorRGB_from_hex(colors_default[idx][i], NULL);
+            settings.colorscheme.color[i] = ColorRGB_from_hex(colors_default[preset_idx][i], NULL);
         }
     }
-    if (colors_default[idx][16]) {
+
+    if (colors_default[preset_idx][16]) {
         if (!(settings._explicit_colors_set && settings._explicit_colors_set[0])) {
-            settings.bg = ColorRGBA_from_any(colors_default[idx][16], NULL);
+            settings.bg = ColorRGBA_from_hex(colors_default[preset_idx][16], NULL);
         }
     }
-    if (colors_default[idx][17]) {
+
+    if (colors_default[preset_idx][17]) {
         if (!(settings._explicit_colors_set && settings._explicit_colors_set[1])) {
-            settings.fg = ColorRGB_from_hex(colors_default[idx][17], NULL);
+            settings.fg = ColorRGB_from_hex(colors_default[preset_idx][17], NULL);
         }
     }
 }
@@ -1149,9 +1153,9 @@ static void handle_option(const char opt, const int array_index, const char* val
 
 #define L_WARN_BAD_COLOR                                                                           \
     WRN("Failed to parse \'%s\' as color for option \'%s\'%s.\n",                                  \
-        OR(value, ""),                                                                                     \
+        OR(value, ""),                                                                             \
         long_options[array_index].name,                                                            \
-        value && strlen(value) ? "" : ", expected syntax =\"#rrggbb\" or =rrggbb");
+        value&& strlen(value) ? "" : ", expected syntax =\"#rrggbb\" or =rrggbb");
 
 #define L_ASSIGN_BOOL(_var, _dft)                                                                  \
     {                                                                                              \
