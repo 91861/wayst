@@ -364,8 +364,10 @@ static void App_init(App* self)
 {
     memset(self, 0, sizeof(App));
 
-    self->ksm_input_buf = Vector_new_char();
-    self->monitor       = Monitor_new();
+    WindowSystemLaunchEnv launch_env = WindowSystemLaunchEnv_capture();
+    self->ksm_input_buf              = Vector_new_char();
+    self->monitor                    = Monitor_new();
+
     App_set_monitor_callbacks(self);
     App_set_up_timers(self);
 
@@ -442,6 +444,9 @@ static void App_init(App* self)
     App_update_padding(self);
     App_action(self);
     App_framebuffer_damage(self);
+
+    Window_notify_initialization_complete(self->win, &launch_env);
+    WindowSystemLaunchEnv_destroy(&launch_env);
 }
 
 static void App_run(App* self)
@@ -451,16 +456,16 @@ static void App_run(App* self)
         if (Vt_get_output_size(&self->vt)) {
             timeout_ms = 0;
         } else {
-            int64_t npa =
+            int64_t next_pending_action_ms =
               TimerManager_get_next_action_ms(&self->timer_manager,
                                               Window_get_target_frame_time_ms(self->win),
                                               TIME_POINT_PTR(self->closest_pending_wakeup),
                                               NULL);
 
-            if (npa == TIMER_MANAGER_NO_ACTION_PENDING) {
+            if (next_pending_action_ms == TIMER_MANAGER_NO_ACTION_PENDING) {
                 timeout_ms = -1;
             } else {
-                timeout_ms = CLAMP(npa, 0, INT_MAX);
+                timeout_ms = CLAMP(next_pending_action_ms, 0, INT_MAX);
             }
         }
 

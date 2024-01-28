@@ -20,7 +20,7 @@
 #include <unistd.h>
 
 #define INCH_IN_MM 0.03937008
-#define SQRT2 1.41421356237
+#define SQRT2      1.41421356237
 
 #define TERMCOLOR_RESET "\e[m"
 
@@ -119,11 +119,20 @@
     }
 #define ASSERT_UNREACHABLE                                                                         \
     {                                                                                              \
-        ERR("got to section declared unreachable. file: %s func: %s line: %d",                     \
+        ERR("Got to section declared unreachable. file: %s func: %s line: %d",                     \
             __FILE__,                                                                              \
             __func__,                                                                              \
             __LINE__);                                                                             \
         __builtin_unreachable();                                                                   \
+    }
+
+#define ASSERT_CALLED_ONCE                                                                         \
+    {                                                                                              \
+        static bool _assert_once = false;                                                          \
+        if (_assert_once) {                                                                        \
+            ERR("Assertion failed: function called multiple times");                               \
+        }                                                                                          \
+        _assert_once = true;                                                                       \
     }
 
 #define LOG(...) fprintf(stderr, __VA_ARGS__)
@@ -159,6 +168,7 @@ static inline void* _call_fp_helper(const char* const msg,
     {                                                                                              \
         __builtin_unreachable();                                                                   \
     }
+#define ASSERT_CALLED_ONCE ;
 #define LOG(...)                                                                                   \
     {                                                                                              \
         ;                                                                                          \

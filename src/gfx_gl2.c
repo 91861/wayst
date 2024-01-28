@@ -2038,7 +2038,7 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
                                     glDisable(GL_DEPTH_TEST);
 #else
                                     glEnable(GL_BLEND);
-                                    glBlendFuncSeparate(GL_SRC_ALPHA,
+                                    glBlendFuncSeparate_(GL_SRC_ALPHA,
                                                         GL_ONE_MINUS_SRC_ALPHA,
                                                         GL_ONE,
                                                         GL_ONE_MINUS_SRC_ALPHA);

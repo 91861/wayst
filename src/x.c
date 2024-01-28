@@ -12,6 +12,7 @@
 
 #include <X11/Xlib.h>
 #include <limits.h>
+#include <stdio.h>
 #include <uchar.h>
 
 #include <GL/glx.h>
@@ -152,36 +153,39 @@ static TimePoint*  WindowX11_process_timers(WindowBase* self)
 }
 static void          WindowX11_update_monitors_info(WindowBase* self);
 static void          WindowX11_update_monitor_placement(WindowBase* self);
+static void          WindowX11_notify_initialization_complete(WindowBase*            win,
+                                                              WindowSystemLaunchEnv* launch_env);
 static WindowStatic* WindowX11_get_static_ptr(WindowBase* self)
 {
     return global;
 }
 
 static struct IWindow window_interface_x11 = {
-    .set_fullscreen         = WindowX11_set_fullscreen,
-    .set_maximized          = WindowX11_set_maximized,
-    .set_minimized          = WindowX11_set_minimized,
-    .resize                 = WindowX11_resize,
-    .events                 = WindowX11_events,
-    .process_timers         = WindowX11_process_timers,
-    .set_title              = WindowX11_set_title,
-    .maybe_swap             = WindowX11_maybe_swap,
-    .destroy                = WindowX11_destroy,
-    .get_connection_fd      = WindowX11_get_connection_fd,
-    .clipboard_send         = WindowX11_clipboard_send,
-    .clipboard_get          = WindowX11_clipboard_get,
-    .primary_get            = WindowX11_primary_get,
-    .primary_send           = WindowX11_primary_send,
-    .set_swap_interval      = WindowX11_set_swap_interval,
-    .get_gl_ext_proc_adress = WindowX11_get_gl_ext_proc_adress,
-    .get_keycode_from_name  = WindowX11_get_keycode_from_name,
-    .set_pointer_style      = WindowX11_set_pointer_style,
-    .set_current_context    = WindowX11_set_current_context,
-    .set_urgent             = WindowX11_set_urgent,
-    .set_stack_order        = WindowX11_set_stack_order,
-    .get_window_id          = WindowX11_get_window_id,
-    .set_incremental_resize = WindowX11_set_incremental_resize,
-    .get_static_ptr         = WindowX11_get_static_ptr,
+    .set_fullscreen                 = WindowX11_set_fullscreen,
+    .set_maximized                  = WindowX11_set_maximized,
+    .set_minimized                  = WindowX11_set_minimized,
+    .resize                         = WindowX11_resize,
+    .events                         = WindowX11_events,
+    .process_timers                 = WindowX11_process_timers,
+    .set_title                      = WindowX11_set_title,
+    .maybe_swap                     = WindowX11_maybe_swap,
+    .destroy                        = WindowX11_destroy,
+    .get_connection_fd              = WindowX11_get_connection_fd,
+    .clipboard_send                 = WindowX11_clipboard_send,
+    .clipboard_get                  = WindowX11_clipboard_get,
+    .primary_get                    = WindowX11_primary_get,
+    .primary_send                   = WindowX11_primary_send,
+    .set_swap_interval              = WindowX11_set_swap_interval,
+    .get_gl_ext_proc_adress         = WindowX11_get_gl_ext_proc_adress,
+    .get_keycode_from_name          = WindowX11_get_keycode_from_name,
+    .set_pointer_style              = WindowX11_set_pointer_style,
+    .set_current_context            = WindowX11_set_current_context,
+    .set_urgent                     = WindowX11_set_urgent,
+    .set_stack_order                = WindowX11_set_stack_order,
+    .get_window_id                  = WindowX11_get_window_id,
+    .set_incremental_resize         = WindowX11_set_incremental_resize,
+    .get_static_ptr                 = WindowX11_get_static_ptr,
+    .notify_initialization_complete = WindowX11_notify_initialization_complete,
 };
 
 typedef struct
@@ -215,6 +219,9 @@ typedef struct
           dnd_selection, dnd_action_copy, dnd_proxy;
 
         Atom gtk_theme_variant;
+
+        Atom remove;
+
     } atom;
 
     struct globalX11_incr_transfer_inbound
@@ -501,7 +508,7 @@ static WindowBase* WindowX11_new(uint32_t  w,
                            RROutputChangeNotifyMask);
             XRRScreenConfiguration* screen_cfg =
               XRRGetScreenInfo(globalX11->display, DefaultRootWindow(globalX11->display));
-            short fps = XRRConfigCurrentRate(screen_cfg);
+            short fps                    = XRRConfigCurrentRate(screen_cfg);
             global->target_frame_time_ms = (double)SEC_IN_MS / fps;
             XRRFreeScreenConfigInfo(screen_cfg);
         }
@@ -863,6 +870,8 @@ static WindowBase* WindowX11_new(uint32_t  w,
         globalX11->atom.gtk_theme_variant =
           XInternAtom(globalX11->display, "_GTK_THEME_VARIANT", False);
 
+        globalX11->atom.remove = XInternAtom(globalX11->display, "remove", True);
+
         /* There is no actual limit on property size, ICCCM only says that INCR should be used for
          * data 'large relative to max request size'. It seems that (XExtendedMaxRequestSize() or
          * XMaxRequestSize()) / 4 is considered the max size by most clients. */
@@ -926,6 +935,69 @@ static WindowBase* WindowX11_new(uint32_t  w,
     return win;
 }
 
+static void WindowX11_notify_initialization_complete(WindowBase*            win,
+                                                     WindowSystemLaunchEnv* launch_env)
+{
+    char* id_str = launch_env->desktop_startup_id;
+    char* msg    = NULL;
+
+    if (id_str) {
+        msg                  = asprintf("remove: ID=%s", id_str);
+        Atom type_atom       = XInternAtom(globalX11->display, "_NET_STARTUP_INFO", false);
+        Atom type_atom_begin = XInternAtom(globalX11->display, "_NET_STARTUP_INFO_BEGIN", false);
+
+        Window xwindow = XCreateWindow(globalX11->display,
+                                       RootWindow(globalX11->display, 0),
+                                       -100,
+                                       -100,
+                                       1,
+                                       1,
+                                       0,
+                                       CopyFromParent,
+                                       CopyFromParent,
+                                       CopyFromParent,
+                                       CWOverrideRedirect | CWEventMask,
+                                       &(XSetWindowAttributes){
+                                         .override_redirect = True,
+                                         .event_mask = PropertyChangeMask | StructureNotifyMask,
+                                       });
+
+        {
+            XEvent xevent = {
+                .xclient.type         = ClientMessage,
+                .xclient.message_type = type_atom_begin,
+                .xclient.display      = globalX11->display,
+                .xclient.window       = xwindow,
+                .xclient.format       = 8,
+            };
+
+            const char* src     = msg;
+            const char* src_end = msg + strlen(msg) + 1; /* +1 to include nul byte */
+            while (src != src_end) {
+                char* dest     = &xevent.xclient.data.b[0];
+                char* dest_end = dest + 20;
+
+                while (dest != dest_end && src != src_end) {
+                    *dest = *src;
+                    ++dest;
+                    ++src;
+                }
+
+                XSendEvent(globalX11->display,
+                           RootWindow(globalX11->display, DefaultScreen(globalX11->display)),
+                           False,
+                           PropertyChangeMask,
+                           &xevent);
+                xevent.xclient.message_type = type_atom;
+            }
+        }
+
+        XFlush(globalX11->display);
+        XDestroyWindow(globalX11->display, xwindow);
+        free(msg);
+    }
+}
+
 WindowBase* Window_new_x11(Pair_uint32_t res, Pair_uint32_t cell_dims, gfx_api_t gfx_api, Ui* ui)
 {
     WindowBase* win =
@@ -939,6 +1011,7 @@ WindowBase* Window_new_x11(Pair_uint32_t res, Pair_uint32_t cell_dims, gfx_api_t
     WindowX11_set_wm_name(win,
                           OR(settings.user_app_id, APPLICATION_NAME),
                           OR(settings.user_app_id_2, NULL));
+
     WindowX11_set_title(win, settings.title.str);
 
     // TODO: WM_COMMAND(STRING) = { "wayst", "--foo", "bar" }

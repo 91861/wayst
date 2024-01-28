@@ -13,6 +13,32 @@
 #include <stdalign.h>
 #include <stdio.h>
 
+typedef struct
+{
+    char* desktop_startup_id;
+} WindowSystemLaunchEnv;
+
+static inline WindowSystemLaunchEnv WindowSystemLaunchEnv_capture()
+{
+    ASSERT_CALLED_ONCE;
+    const char* const     DESKTOP_STARTUP_ID = "DESKTOP_STARTUP_ID";
+    const char*           startup_id         = getenv(DESKTOP_STARTUP_ID);
+    WindowSystemLaunchEnv env                = { .desktop_startup_id = NULL };
+
+    if (startup_id && strlen(startup_id) > 0) {
+        env.desktop_startup_id = strdup(startup_id);
+        unsetenv(DESKTOP_STARTUP_ID);
+    }
+
+    return env;
+}
+
+static inline void WindowSystemLaunchEnv_destroy(WindowSystemLaunchEnv* self)
+{
+    free(self->desktop_startup_id);
+    self->desktop_startup_id = NULL;
+}
+
 typedef enum
 {
     GFX_API_GLES,
@@ -53,7 +79,8 @@ typedef struct
     rect_t regions[WINDOW_MAX_SWAP_REGION_COUNT];
 } window_partial_swap_request_t;
 
-static void window_partial_swap_request_print(window_partial_swap_request_t* sr) {
+static void window_partial_swap_request_print(window_partial_swap_request_t* sr)
+{
     if (!sr)
         return;
 
@@ -106,6 +133,8 @@ struct IWindow
     void (*set_urgent)(struct WindowBase* self);
     void (*set_stack_order)(struct WindowBase* self, bool front_or_back);
     int64_t (*get_window_id)(struct WindowBase* self);
+    void (*notify_initialization_complete)(struct WindowBase*     self,
+                                           WindowSystemLaunchEnv* launch_env);
     WindowStatic* (*get_static_ptr)();
 };
 
@@ -304,6 +333,12 @@ static inline WindowStatic* Window_get_static_ptr(struct WindowBase* self)
     return self->interface->get_static_ptr();
 }
 
+static inline void Window_notify_initialization_complete(struct WindowBase*     self,
+                                                         WindowSystemLaunchEnv* launch_env)
+{
+    return self->interface->notify_initialization_complete(self, launch_env);
+}
+
 /* Trivial base functions */
 static inline int Window_get_connection_fd(struct WindowBase* self)
 {
@@ -365,6 +400,7 @@ static inline void Window_emit_output_change_event(struct WindowBase* self)
              self->dpi);
 }
 
-static inline double Window_get_target_frame_time_ms(struct WindowBase* self) {
+static inline double Window_get_target_frame_time_ms(struct WindowBase* self)
+{
     return Window_get_static_ptr(self)->target_frame_time_ms;
 }

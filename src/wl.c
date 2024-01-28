@@ -123,32 +123,37 @@ static WindowStatic* WindowWl_get_static_ptr(struct WindowBase* self)
 {
     return global;
 }
+static void WindowWl_notify_initialization_complete(WindowBase*            win,
+                                                    WindowSystemLaunchEnv* launch_env)
+{
+}
 
 static struct IWindow window_interface_wayland = {
-    .set_fullscreen         = WindowWl_set_fullscreen,
-    .set_maximized          = WindowWl_set_maximized,
-    .set_minimized          = WindowWl_set_minimized,
-    .resize                 = WindowWl_resize,
-    .events                 = WindowWl_events,
-    .process_timers         = WindowWl_process_timers,
-    .set_title              = WindowWl_set_title,
-    .maybe_swap             = WindowWl_maybe_swap,
-    .destroy                = WindowWl_destroy,
-    .get_connection_fd      = WindowWl_get_connection_fd,
-    .clipboard_send         = WindowWl_clipboard_send,
-    .clipboard_get          = WindowWl_clipboard_get,
-    .primary_send           = WindowWl_primary_send,
-    .primary_get            = WindowWl_primary_get,
-    .set_swap_interval      = WindowWl_set_swap_interval,
-    .get_gl_ext_proc_adress = WindowWl_get_gl_ext_proc_adress,
-    .get_keycode_from_name  = WindowWl_get_keycode_from_name,
-    .set_pointer_style      = WindowWl_set_pointer_style,
-    .set_current_context    = WindowWl_set_current_context,
-    .set_urgent             = WindowWl_set_urgent,
-    .set_stack_order        = WindowWl_set_stack_order,
-    .get_window_id          = WindowWl_get_window_id,
-    .set_incremental_resize = WindowWl_set_incremental_resize,
-    .get_static_ptr         = WindowWl_get_static_ptr,
+    .set_fullscreen                 = WindowWl_set_fullscreen,
+    .set_maximized                  = WindowWl_set_maximized,
+    .set_minimized                  = WindowWl_set_minimized,
+    .resize                         = WindowWl_resize,
+    .events                         = WindowWl_events,
+    .process_timers                 = WindowWl_process_timers,
+    .set_title                      = WindowWl_set_title,
+    .maybe_swap                     = WindowWl_maybe_swap,
+    .destroy                        = WindowWl_destroy,
+    .get_connection_fd              = WindowWl_get_connection_fd,
+    .clipboard_send                 = WindowWl_clipboard_send,
+    .clipboard_get                  = WindowWl_clipboard_get,
+    .primary_send                   = WindowWl_primary_send,
+    .primary_get                    = WindowWl_primary_get,
+    .set_swap_interval              = WindowWl_set_swap_interval,
+    .get_gl_ext_proc_adress         = WindowWl_get_gl_ext_proc_adress,
+    .get_keycode_from_name          = WindowWl_get_keycode_from_name,
+    .set_pointer_style              = WindowWl_set_pointer_style,
+    .set_current_context            = WindowWl_set_current_context,
+    .set_urgent                     = WindowWl_set_urgent,
+    .set_stack_order                = WindowWl_set_stack_order,
+    .get_window_id                  = WindowWl_get_window_id,
+    .set_incremental_resize         = WindowWl_set_incremental_resize,
+    .get_static_ptr                 = WindowWl_get_static_ptr,
+    .notify_initialization_complete = WindowWl_notify_initialization_complete,
 };
 
 typedef struct
@@ -485,8 +490,7 @@ void primary_selection_offer_handle_offer(void*                                 
     if (w->new_primary_offer_mime_idx == -1) {
         LOG(" - REJECTED(not supported) }\n");
     } else {
-        LOG(" - REJECTED(\'%s\' is preffered) }\n",
-               ACCEPTED_MIMES[w->new_primary_offer_mime_idx]);
+        LOG(" - REJECTED(\'%s\' is preffered) }\n", ACCEPTED_MIMES[w->new_primary_offer_mime_idx]);
     }
 }
 
@@ -885,9 +889,9 @@ static void primary_selection_device_handle_selection(
     }
 
     LOG("wl::primary_selection_offer::selection{ mime_type: %s }\n",
-           windowWl(self)->new_primary_offer_mime_idx == -1
-             ? "<none>"
-             : ACCEPTED_MIMES[windowWl(self)->new_primary_offer_mime_idx]);
+        windowWl(self)->new_primary_offer_mime_idx == -1
+          ? "<none>"
+          : ACCEPTED_MIMES[windowWl(self)->new_primary_offer_mime_idx]);
 
     if (windowWl(self)->primary_offer &&
         windowWl(self)->primary_offer != windowWl(self)->new_primary_offer) {
@@ -977,7 +981,7 @@ static void WindowWl_primary_get(struct WindowBase* self)
 {
     if (windowWl(self)->primary_offer_mime_idx > -1 && windowWl(self)->primary_offer) {
         LOG("last recorded primary_selection_v1_data_offer mime: \"%s\" \n",
-               ACCEPTED_MIMES[windowWl(self)->primary_offer_mime_idx]);
+            ACCEPTED_MIMES[windowWl(self)->primary_offer_mime_idx]);
 
         int fds[2];
 
@@ -1001,7 +1005,7 @@ static void WindowWl_clipboard_get(struct WindowBase* self)
 {
     if (windowWl(self)->data_offer_mime_idx > -1 && windowWl(self)->data_offer) {
         LOG("last recorded wl_data_offer mime: \"%s\" \n",
-               ACCEPTED_MIMES[windowWl(self)->data_offer_mime_idx]);
+            ACCEPTED_MIMES[windowWl(self)->data_offer_mime_idx]);
 
         if (windowWl(self)->data_offer) {
             int fds[2];
