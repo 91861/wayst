@@ -1,22 +1,23 @@
 /* See LICENSE for license information. */
 
-#include "colors.h"
-#include "timing.h"
-#include <string.h>
 #define _GNU_SOURCE
-#include <stdint.h>
-
-#include "settings.h"
-#include "util.h"
 
 #include "vt.h"
 #include "vt_private.h"
 #include "vt_shell.h"
 #include "vt_sixel.h"
 
+#include "colors.h"
+#include "timing.h"
+
+#include "settings.h"
+#include "util.h"
+
 #include <fcntl.h>
 #include <limits.h>
 #include <signal.h>
+#include <stdint.h>
+#include <string.h>
 #include <sys/ioctl.h>
 #include <sys/select.h>
 #include <sys/time.h>
@@ -1152,9 +1153,9 @@ bool Vt_visual_scroll_up(Vt* self, bool end_scroll_state_if_vp_in_sync)
         }
     } else if (Vt_top_line(self)) {
         Vt_end_synchronized_update(self);
-	if (end_scroll_state_if_vp_in_sync) {
+        if (end_scroll_state_if_vp_in_sync) {
             self->scrolling_visual = true;
-	}
+        }
         self->visual_scroll_top = Vt_top_line(self) - 1;
     }
     return false;
@@ -1165,9 +1166,9 @@ bool Vt_visual_scroll_down(Vt* self, bool end_scroll_state_if_vp_in_sync)
     if (self->scrolling_visual && Vt_top_line(self) > self->visual_scroll_top) {
         ++self->visual_scroll_top;
         if (self->visual_scroll_top == Vt_top_line(self)) {
-	    if (end_scroll_state_if_vp_in_sync) {
+            if (end_scroll_state_if_vp_in_sync) {
                 self->scrolling_visual = false;
-	    }
+            }
             return true;
         } else {
             Vt_end_synchronized_update(self);
@@ -4770,9 +4771,12 @@ static void Vt_handle_OSC(Vt* self, char c)
 
                     /* COMMAND_FINISHED */
                     case 'D':
-                        Vt_shell_integration_end_execution(
-                          self,
-                          strnlen(seq, 6) >= 6 ? seq + 6 : NULL /* 133;D; */);
+                        if (Vt_alt_buffer_enabled(self) &&
+                            Vt_shell_integration_get_active_command(self)) {
+                            Vt_shell_integration_end_execution(
+                              self,
+                              strnlen(seq, 6) >= 6 ? seq + 6 : NULL /* 133;D; */);
+                        }
                         break;
 
                     default:
@@ -5294,7 +5298,11 @@ __attribute__((hot)) static void Vt_insert_char_at_cursor(Vt* self, VtRune c)
         }
     }
 
-    self->last_inserted = *Vt_cursor_cell(self);
+    self->last_inserted          = *Vt_cursor_cell(self);
+    self->last_inserted_line_nr  = self->cursor.row;
+    self->last_inserted_col_nr   = self->cursor.col;
+    self->has_last_inserted_rune = true;
+
     ++self->cursor.col;
 
     int width = C_WIDTH(c.rune.code);
@@ -5470,12 +5478,46 @@ static bool VtRune_try_normalize_as_property(VtRune* self, char32_t codepoint)
     return false;
 }
 
+static inline bool Rune_is_subcluster(Rune* base, Rune* extended)
+{
+    if (base->code != extended->code) {
+        return false;
+    }
+
+    for (int32_t i = 0; i < VT_RUNE_MAX_COMBINE; ++i) {
+        if (!base->combine[i] && extended->combine[i]) {
+            return true;
+        }
+    }
+
+    return true; // if equal still update props
+}
+
+static inline void Vt_update_last_inserted_char_in_cellgrid(Vt* self)
+{
+    VtRune* maybe_last = Vt_at(self, self->last_inserted_col_nr, self->last_inserted_line_nr);
+    if (likely(maybe_last)) {
+        if (likely(Rune_is_subcluster(&maybe_last->rune, &self->last_inserted.rune))) {
+            maybe_last->rune            = self->last_inserted.rune;
+            maybe_last->strikethrough   = self->last_inserted.strikethrough;
+            maybe_last->underlined      = self->last_inserted.underlined;
+            maybe_last->strikethrough   = self->last_inserted.strikethrough;
+            maybe_last->curlyunderline  = self->last_inserted.curlyunderline;
+            maybe_last->doubleunderline = self->last_inserted.doubleunderline;
+            maybe_last->overline        = self->last_inserted.overline;
+        } else {
+            self->has_last_inserted_rune = false;
+        }
+    }
+}
+
 /**
  * Try to do something about combinable characters */
 static void Vt_handle_combinable(Vt* self, char32_t c)
 {
     if (self->has_last_inserted_rune) {
         if (VtRune_try_normalize_as_property(&self->last_inserted, c)) {
+            Vt_update_last_inserted_char_in_cellgrid(self);
             return;
         }
 #ifndef NOUTF8PROC
@@ -5483,6 +5525,7 @@ static void Vt_handle_combinable(Vt* self, char32_t c)
 #endif
             /* Already contains a combining char that failed to normalize */
             VtRune_push_combining(&self->last_inserted, c);
+            Vt_update_last_inserted_char_in_cellgrid(self);
 #ifndef NOUTF8PROC
         } else {
             mbstate_t mbs;
@@ -5496,6 +5539,7 @@ static void Vt_handle_combinable(Vt* self, char32_t c)
 
             if (res && old_len == strnlen(res, old_len + 1)) {
                 VtRune_push_combining(&self->last_inserted, c);
+                Vt_update_last_inserted_char_in_cellgrid(self);
             } else if (mbrtoc32(conv, res, ARRAY_SIZE(buff) - 1, &mbs) < 1) {
                 /* conversion failed */
                 WRN("Unicode normalization failed %s\n", strerror(errno));
@@ -5513,11 +5557,11 @@ static void Vt_handle_combinable(Vt* self, char32_t c)
         }
 #endif
     } else {
-        WRN("Got combining character, but no previous character is recorded\n");
+        WRN("Got combining character but no previous character is recorded\n");
     }
 }
 
-__attribute__((hot, flatten)) void Vt_handle_literal(Vt* self, char c)
+__attribute__((hot, flatten)) inline void Vt_handle_literal(Vt* self, char c)
 {
     if (self->parser.in_mb_seq) {
         char32_t res;

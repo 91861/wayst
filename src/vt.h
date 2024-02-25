@@ -164,7 +164,7 @@ static inline uint8_t Rune_width(Rune r)
     uint8_t extra = 0;
 
     for (int i = 0; i < VT_RUNE_MAX_COMBINE; ++i) {
-        extra = MAX(extra, r.combine[i]);
+        extra = MAX(extra, C_WIDTH(r.combine[i]));
     }
 
     return base + extra;
@@ -695,7 +695,7 @@ typedef struct
         void (*on_mouse_report_state_changed)(void*);
         void (*on_cursor_blink_state_changed)(void*, bool new_state);
         const char* (*on_application_hostname_requested)(void*);
-	void (*on_visual_scroll_params_changed)(void*);
+        void (*on_visual_scroll_params_changed)(void*);
 
         void (*destroy_proxy)(void*, VtLineProxy*);
         void (*destroy_image_proxy)(void*, VtImageSurfaceProxy*);
@@ -843,7 +843,7 @@ typedef struct
         bool action_performed;
         bool repaint;
         bool cursor_blink;
-	bool visual_scroll_params_changed;
+        bool visual_scroll_params_changed;
     } defered_events;
 
     vt_gui_pointer_mode_t gui_pointer_mode;
@@ -903,8 +903,10 @@ typedef struct
 
     char* active_hyperlink;
 
-    VtRune last_inserted;
-    bool   has_last_inserted_rune;
+    VtRune   last_inserted;
+    bool     has_last_inserted_rune;
+    size_t   last_inserted_line_nr;
+    uint16_t last_inserted_col_nr;
 
     char32_t last_codepoint;
 #ifndef NOUTF8PROC
@@ -1415,7 +1417,7 @@ bool Vt_visual_scroll_up(Vt* self, bool end_scroll_state_if_vp_in_sync);
 
 /**
  * Move visual viewport to previous line mark and start visual scrolling */
-static inline bool Vt_visual_scroll_mark_up(Vt* self, bool     end_scroll_state_if_vp_in_sync)
+static inline bool Vt_visual_scroll_mark_up(Vt* self, bool end_scroll_state_if_vp_in_sync)
 {
     if (!Vt_visual_top_line(self) || Vt_alt_buffer_enabled(self)) {
         return false;
@@ -1483,7 +1485,9 @@ bool Vt_visual_scroll_down(Vt* self, bool end_scroll_state_if_vp_in_sync);
 
 /**
  * Move visual viewport one page down and stop scrolling if lowest position */
-static inline void Vt_visual_scroll_page_down(Vt* self, uint16_t margin, bool     end_scroll_state_if_vp_in_sync)
+static inline void Vt_visual_scroll_page_down(Vt*      self,
+                                              uint16_t margin,
+                                              bool     end_scroll_state_if_vp_in_sync)
 {
     uint16_t offset = Vt_row(self) > margin ? (Vt_row(self) - margin) : 1;
     Vt_visual_scroll_to(self, self->visual_scroll_top + offset, end_scroll_state_if_vp_in_sync);

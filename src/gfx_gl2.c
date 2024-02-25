@@ -812,6 +812,9 @@ __attribute__((cold)) GlyphAtlasEntry* GlyphAtlas_get_combined(GfxOpenGL2* gfx,
     if (output->style == FT_STYLE_NONE)
         key.style = VT_RUNE_UNSTYLED;
 
+    /* texture height == line height */
+    base_output->top = gfx->line_height_pixels;
+
     return Map_insert_Rune_GlyphAtlasEntry(
       &self->entry_map,
       key,
@@ -2034,14 +2037,12 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
                                         pass->args.gl2->bound_resources = BOUND_RESOURCES_FONT_MONO;
                                         glUseProgram_(pass->args.gl2->font_shader_gray.id);
                                     }
-#ifndef GFX_GLES
-                                    glDisable(GL_DEPTH_TEST);
-#else
+#ifdef GFX_GLES
                                     glEnable(GL_BLEND);
                                     glBlendFuncSeparate_(GL_SRC_ALPHA,
-                                                        GL_ONE_MINUS_SRC_ALPHA,
-                                                        GL_ONE,
-                                                        GL_ONE_MINUS_SRC_ALPHA);
+                                                         GL_ONE_MINUS_SRC_ALPHA,
+                                                         GL_ONE,
+                                                         GL_ONE_MINUS_SRC_ALPHA);
 #endif
                                     glVertexAttribPointer_(
                                       pass->args.gl2->font_shader_gray.attribs->location,

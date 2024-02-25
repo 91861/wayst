@@ -412,8 +412,9 @@ static const char* long_options_descriptions[][2] = {
     [OPT_FONT_STYLE_BOLD_ITALIC_IDX] = { arg_name,
                                          "Font style to use as bold italic (default: "
                                          "Bold:Italic)" },
-    [OPT_FONT_FALLBACK_IDX]          = { "[font, ...]", "Symbol fonts" },
-    [OPT_FONT_FALLBACK2_IDX]         = { "[font, ...]", "Color bitmap fonts" },
+
+    [OPT_FONT_FALLBACK_IDX]  = { "[font, ...]", "Symbol fonts" },
+    [OPT_FONT_FALLBACK2_IDX] = { "[font, ...]", "Color bitmap fonts" },
 
     [OPT_FLUSH_FC_CACHE_IDX]    = { NULL, "Rebuild fontconfig cache" },
     [OPT_PRELOAD_ALL_FONTS_IDX] = { NULL, "Load all fonts on startup" },
