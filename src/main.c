@@ -388,6 +388,9 @@ static void App_init(App* self)
     Pair_uint32_t cell_dims = { .first  = pixels.first / settings.cols,
                                 .second = pixels.second / settings.rows };
 
+    pixels.first  += settings.padding * 2;
+    pixels.second += settings.padding * 2;
+
     App_create_window(self, pixels, cell_dims);
 
     App_set_callbacks(self);
@@ -728,6 +731,9 @@ static Pair_uint32_t App_get_char_size(void* self)
     if (Ui_csd_titlebar_visible(&app->ui) && !App_fullscreen(app)) {
         res.second -= (UI_CSD_TITLEBAR_HEIGHT_PX);
     }
+
+    res.first  -= settings.padding * 2;
+    res.second -= settings.padding * 2;
 
     return Gfx_get_char_size(app->gfx, res);
 }
