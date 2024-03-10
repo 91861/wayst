@@ -8,7 +8,6 @@
 #include "rcptr.h"
 #include "timing.h"
 #include "util.h"
-#include "vector.h"
 
 #include <X11/Xlib.h>
 #include <limits.h>

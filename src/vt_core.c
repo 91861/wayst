@@ -1,6 +1,7 @@
 /* See LICENSE for license information. */
 
 #define _GNU_SOURCE
+#include <unistd.h>
 
 #include "vt.h"
 #include "vt_private.h"
@@ -15,7 +16,6 @@
 
 #include <fcntl.h>
 #include <limits.h>
-#include <signal.h>
 #include <stdint.h>
 #include <string.h>
 #include <sys/ioctl.h>
@@ -27,8 +27,6 @@
 #include <uchar.h>
 
 #include "vt_img_proto.h"
-
-#include "key.h"
 
 static void Vt_shift_global_line_index_refs(Vt* self, size_t point, int64_t change, bool refs_only);
 static inline size_t Vt_top_line(const Vt* const self);
@@ -81,6 +79,7 @@ static vt_line_damage_t VtLine_diff_to_damage(VtLine*           line_a,
     size_t min_size        = MIN(line_a->data.size, line_b->data.size);
     size_t dmg_range_begin = 0;
     size_t dmg_range_end   = min_size != max_size ? max_size : 0;
+    bool   has_cell_diff      = false;
 
     for (size_t i = 0; i < min_size; ++i) {
         VtRune* rune_a = &line_a->data.buf[i];
@@ -89,9 +88,11 @@ static vt_line_damage_t VtLine_diff_to_damage(VtLine*           line_a,
         if (memcmp(rune_a, rune_b, sizeof(VtRune))) {
             dmg_range_begin = MIN(dmg_range_begin, i);
             dmg_range_end   = MAX(dmg_range_end, i);
+            has_cell_diff      = true;
         }
     }
 
+    // merge cell diff damage with previous damage
     switch (damage->type) {
         case VT_LINE_DAMAGE_RANGE:
             dmg_range_begin = MIN(dmg_range_begin, damage->front);
@@ -102,7 +103,7 @@ static vt_line_damage_t VtLine_diff_to_damage(VtLine*           line_a,
         default:;
     }
 
-    if (dmg_range_begin != dmg_range_end) {
+    if (has_cell_diff || damage->type != VT_LINE_DAMAGE_NONE) {
         return (vt_line_damage_t){
             .type  = VT_LINE_DAMAGE_RANGE,
             .front = dmg_range_begin,
@@ -2896,10 +2897,12 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                         WRN("invalid CSI(DECSTBM) sequence %s\n", seq);
                                         break;
                                     }
-                                    if (top <= 0)
+                                    if (top <= 0) {
                                         top = 1;
-                                    if (bottom <= 0)
-                                        bottom = 1;
+                                    }
+                                    if (bottom <= 0) {
+                                        bottom = Vt_row(self) - 1;
+                                    }
                                     --top;
                                     --bottom;
                                 } else {
@@ -5272,30 +5275,32 @@ __attribute__((hot)) static void Vt_insert_char_at_cursor(Vt* self, VtRune c)
         Vt_cursor_line(self)->rejoinable = true;
     }
 
+    // add lines if missing
     while (self->lines.size <= self->cursor.row) {
         Vector_push_VtLine(&self->lines, VtLine_new());
         Vt_maybe_emit_visual_scroll_change(self);
     }
 
+    // add cells if missing
     while (Vt_cursor_line(self)->data.size <= self->cursor.col) {
         Vector_push_VtRune(&Vt_cursor_line(self)->data, self->blank_space);
     }
 
     VtRune* insert_point = &self->lines.buf[self->cursor.row].data.buf[self->cursor.col];
 
-    if (likely(memcmp(insert_point, &c, sizeof(VtRune)))) {
+    if (unlikely(self->modes.no_insert_replace_mode)) {
+        // insert and shift existing characters
+        // TODO: Vt_mark_proxy_damaged_shift()
+        Vt_mark_proxy_fully_damaged(self, self->cursor.row);
+        Vector_insert_at_VtRune(&Vt_cursor_line(self)->data, self->cursor.col, c);
 
-        if (self->modes.no_insert_replace_mode) {
-            // TODO: Vt_mark_proxy_damaged_shift()
-            Vt_mark_proxy_fully_damaged(self, self->cursor.row);
-            Vector_insert_at_VtRune(&Vt_cursor_line(self)->data, self->cursor.col, c);
-            if (Vt_cursor_line(self)->data.size >= Vt_col(self)) {
-                Vector_pop_VtRune(&Vt_cursor_line(self)->data);
-            }
-        } else {
-            Vt_mark_proxy_damaged_cell(self, self->cursor.row, self->cursor.col);
-            *Vt_cursor_cell(self) = c;
+        if (Vt_cursor_line(self)->data.size >= Vt_col(self)) {
+            Vector_pop_VtRune(&Vt_cursor_line(self)->data);
         }
+    } else if (likely(memcmp(insert_point, &c, sizeof(VtRune)))) {
+        // standard behaviour - overwrite (if differs)
+        Vt_mark_proxy_damaged_cell(self, self->cursor.row, self->cursor.col);
+        *Vt_cursor_cell(self) = c;
     }
 
     self->last_inserted          = *Vt_cursor_cell(self);
@@ -6138,14 +6143,6 @@ static void Vt_shift_global_line_index_refs(Vt* self, size_t point, int64_t delt
 
         if (self->visual_scroll_top >= point) {
             self->visual_scroll_top += delta;
-        }
-
-        if (self->scroll_region_top >= point) {
-            self->scroll_region_top += delta;
-        }
-
-        if (self->scroll_region_bottom >= point) {
-            self->scroll_region_bottom += delta;
         }
     }
 

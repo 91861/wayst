@@ -1,5 +1,6 @@
 /* See LICENSE for license information. */
 
+#include "vt.h"
 #define _GNU_SOURCE
 
 #include "gfx_gl2_boxdraw_page.h"
