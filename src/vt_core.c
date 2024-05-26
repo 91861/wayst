@@ -3,13 +3,12 @@
 #define _GNU_SOURCE
 #include <unistd.h>
 
+#include "colors.h"
+#include "timing.h"
+
 #include "vt.h"
 #include "vt_private.h"
 #include "vt_shell.h"
-#include "vt_sixel.h"
-
-#include "colors.h"
-#include "timing.h"
 
 #include "settings.h"
 #include "util.h"
@@ -79,7 +78,7 @@ static vt_line_damage_t VtLine_diff_to_damage(VtLine*           line_a,
     size_t min_size        = MIN(line_a->data.size, line_b->data.size);
     size_t dmg_range_begin = 0;
     size_t dmg_range_end   = min_size != max_size ? max_size : 0;
-    bool   has_cell_diff      = false;
+    bool   has_cell_diff   = false;
 
     for (size_t i = 0; i < min_size; ++i) {
         VtRune* rune_a = &line_a->data.buf[i];
@@ -88,7 +87,7 @@ static vt_line_damage_t VtLine_diff_to_damage(VtLine*           line_a,
         if (memcmp(rune_a, rune_b, sizeof(VtRune))) {
             dmg_range_begin = MIN(dmg_range_begin, i);
             dmg_range_end   = MAX(dmg_range_end, i);
-            has_cell_diff      = true;
+            has_cell_diff   = true;
         }
     }
 
@@ -618,12 +617,6 @@ void Vt_clear_all_image_proxies(Vt* self)
         VtImageSurfaceView* srf = RcPtr_get_VtImageSurfaceView(i);
         CALL(self->callbacks.destroy_image_view_proxy, self->callbacks.user_data, &srf->proxy);
     }
-
-    for (RcPtr_VtSixelSurface* i = NULL;
-         (i = Vector_iter_RcPtr_VtSixelSurface(&self->scrolled_sixels, i));) {
-        VtSixelSurface* srf = RcPtr_get_VtSixelSurface(i);
-        CALL(self->callbacks.destroy_sixel_proxy, self->callbacks.user_data, &srf->proxy);
-    }
 }
 
 Vector_char Vt_region_to_string(Vt* self, size_t begin_line, size_t end_line)
@@ -974,10 +967,9 @@ static void Vt_hard_reset(Vt* self)
     memset(&self->modes, 0, sizeof(self->modes));
     Vt_alt_buffer_off(self, false);
     Vt_select_end(self);
-    Vt_clear_display_and_scrollback(self);
-    Vector_clear_RcPtr_VtSixelSurface(&self->alt_scrolled_sixels);
-    Vector_clear_RcPtr_VtImageSurfaceView(&self->alt_image_views);
     Vt_move_cursor(self, 0, 0);
+    Vt_clear_display_and_scrollback(self);
+    Vector_clear_RcPtr_VtImageSurfaceView(&self->alt_image_views);
 
     self->parser.state = PARSER_STATE_LITERAL;
 
@@ -1109,9 +1101,6 @@ void Vt_init(Vt* self, uint32_t cols, uint32_t rows)
 
     self->images      = Vector_new_RcPtr_VtImageSurface();
     self->image_views = Vector_new_RcPtr_VtImageSurfaceView();
-
-    // self->static_sixels   = Vector_new_VtSixelSurface(self);
-    self->scrolled_sixels = Vector_new_RcPtr_VtSixelSurface();
 
     self->shell_commands = Vector_new_RcPtr_VtCommand();
 
@@ -1583,7 +1572,7 @@ static inline void Vt_report_dec_mode(Vt* self, int code)
             value = self->cursor.hidden;
             break;
         case 80:
-            value = self->modes.sixel_scrolling;
+            value = !self->modes.no_sixel_scrolling;
             break;
         case 1000:
             value = self->modes.mouse_btn_report;
@@ -1652,7 +1641,7 @@ static inline void Vt_handle_regular_mode(Vt* self, int code, bool on)
             break;
         /* Enable Sixel Scrolling (DECSDM) */
         case 80:
-            self->modes.sixel_scrolling = on;
+            self->modes.no_sixel_scrolling = !on;
             break;
         default:
             WRN("unknown SM mode: %d\n", code);
@@ -3527,10 +3516,8 @@ static inline void Vt_alt_buffer_on(Vt* self, bool save_mouse)
     self->has_last_inserted_rune = false;
     self->alt_lines              = self->lines;
     self->alt_image_views        = self->image_views;
-    self->alt_scrolled_sixels    = self->scrolled_sixels;
     self->lines                  = Vector_new_VtLine(self);
     self->image_views            = Vector_new_RcPtr_VtImageSurfaceView();
-    self->scrolled_sixels        = Vector_new_RcPtr_VtSixelSurface();
     for (uint16_t i = 0; i < Vt_row(self); ++i) {
         Vector_push_VtLine(&self->lines, VtLine_new());
     }
@@ -3551,12 +3538,10 @@ static inline void Vt_alt_buffer_off(Vt* self, bool save_mouse)
         Vt_select_end(self);
         Vector_destroy_VtLine(&self->lines);
         Vector_destroy_RcPtr_VtImageSurfaceView(&self->image_views);
-        Vector_destroy_RcPtr_VtSixelSurface(&self->scrolled_sixels);
-        self->lines           = self->alt_lines;
-        self->image_views     = self->alt_image_views;
-        self->scrolled_sixels = self->alt_scrolled_sixels;
-        self->alt_lines.buf   = NULL;
-        self->alt_lines.size  = 0;
+        self->lines          = self->alt_lines;
+        self->image_views    = self->alt_image_views;
+        self->alt_lines.buf  = NULL;
+        self->alt_lines.size = 0;
         if (save_mouse) {
             self->cursor.col = self->alt_cursor_pos;
             self->cursor.row = self->alt_active_line;
@@ -4069,8 +4054,6 @@ static void Vt_handle_APC(Vt* self, char c)
                 Vector_destroy_RcPtr_VtImageSurfaceView(ln->graphic_attachments->images);          \
                 free(ln->graphic_attachments->images);                                             \
                 ln->graphic_attachments->images = NULL;                                            \
-            }                                                                                      \
-            if (!ln->graphic_attachments->sixels) {                                                \
                 free(ln->graphic_attachments);                                                     \
                 ln->graphic_attachments = NULL;                                                    \
             }                                                                                      \
@@ -4220,9 +4203,12 @@ static void Vt_handle_DCS(Vt* self, char c)
 
                 if ((graphic_data = strstr(seq, "q")) == fst_non_arg && seq_len > 4) {
                     WRN("sixel graphics support is incomplete and unstable!\n");
+
                     int32_t pixel_aspect_ratio = 0, p2_param = 0, horizontal_grid_size = 0;
                     bool    zero_pos_retains_color = false;
+
                     sscanf(seq, "%d;%d;%d", &pixel_aspect_ratio, &p2_param, &horizontal_grid_size);
+
                     if (pixel_aspect_ratio) {
                         WRN("sixel pixel aspect ratio set via DCS instead of raster attributes "
                             "command\n");
@@ -4248,7 +4234,7 @@ static void Vt_handle_DCS(Vt* self, char c)
                             pixel_aspect_ratio = 1;
                             break;
                         default:
-                            WRN("incorect sixel pixel aspect ratio parameter \'%d\'\n",
+                            WRN("incorrect sixel pixel aspect ratio parameter \'%d\'\n",
                                 pixel_aspect_ratio);
                     }
 
@@ -4274,8 +4260,7 @@ static void Vt_handle_DCS(Vt* self, char c)
                         : &self->colors.global_graphic_color_registers);
 
                     if (surf.width && surf.height) {
-                        surf.anchor_cell_idx     = self->cursor.col;
-                        surf.anchor_global_index = self->cursor.row;
+                        surf.anchor_cell_idx = self->cursor.col;
 
                         Pair_uint32_t cellsize =
                           CALL(self->callbacks.on_window_size_from_cells_requested,
@@ -4283,26 +4268,39 @@ static void Vt_handle_DCS(Vt* self, char c)
                                1,
                                1);
 
-                        for (uint32_t i = 0; i <= (surf.height - 1) / cellsize.second; ++i) {
-                            Vt_line_feed(self);
-                        }
+                        surf.cell_width_created_px  = cellsize.first;
+                        surf.line_height_created_px = cellsize.second;
 
-                        if (self->modes.sixel_scrolling) {
+                        if (!self->modes.no_sixel_scrolling) {
                             /* When sixel display mode is enabled, the sixel active position begins
                              * at the upper-left corner of the ANSI text active position. Scrolling
                              * occurs when the sixel active position reaches the bottom margin of
                              * the graphics page. When sixel mode is exited, the text cursor is set
                              * to the current sixel cursor position. */
-                            VtLine* ln = Vt_cursor_line(self);
-                            if (!ln->graphic_attachments) {
-                                ln->graphic_attachments =
-                                  _calloc(1, sizeof(VtGraphicLineAttachments));
-                            }
-                            if (!ln->graphic_attachments->sixels) {
-                                ln->graphic_attachments->sixels =
-                                  _malloc(sizeof(Vector_RcPtr_VtSixelSurface));
-                                *ln->graphic_attachments->sixels =
-                                  Vector_new_RcPtr_VtSixelSurface();
+
+                            Vector_RcPtr_VtSixelSurface slices =
+                              VtSixelSurface_split_into_lines(&surf, self);
+
+                            for (uint32_t i = 0; i <= (surf.height - 1) / cellsize.second; ++i) {
+
+                                VtLine* ln = Vt_cursor_line(self);
+                                if (!ln->graphic_attachments) {
+                                    ln->graphic_attachments =
+                                      _calloc(1, sizeof(VtGraphicLineAttachments));
+                                }
+
+                                if (!ln->graphic_attachments->sixels) {
+                                    ln->graphic_attachments->sixels =
+                                      _malloc(sizeof(Vector_RcPtr_VtSixelSurface));
+                                    *ln->graphic_attachments->sixels =
+                                      Vector_new_RcPtr_VtSixelSurface();
+                                }
+
+                                Vector_push_RcPtr_VtSixelSurface(ln->graphic_attachments->sixels,
+                                                                 slices.buf[i]);
+
+                                Vt_mark_proxy_fully_damaged(self, self->cursor.row);
+                                Vt_line_feed(self);
                             }
 
                             if (self->modes.sixel_scrolling_move_cursor_right) {
@@ -4310,12 +4308,8 @@ static void Vt_handle_DCS(Vt* self, char c)
                                   MIN((surf.width - 1 / cellsize.first) + 1, Vt_col(self));
                             }
 
-                            RcPtr_VtSixelSurface sp        = RcPtr_new_VtSixelSurface(self);
-                            *RcPtr_get_VtSixelSurface(&sp) = surf;
-                            RcPtr_VtSixelSurface sp2       = RcPtr_new_shared_VtSixelSurface(&sp);
-
-                            Vector_push_RcPtr_VtSixelSurface(ln->graphic_attachments->sixels, sp);
-                            Vector_push_RcPtr_VtSixelSurface(&self->scrolled_sixels, sp2);
+                            VtSixelSurface_destroy(self, &surf);
+                            free(slices.buf);
                         } else {
                             /* When sixel scrolling is disabled, the sixel active position begins at
                              * the upper-left corner of the active graphics page. The terminal
@@ -4324,7 +4318,7 @@ static void Vt_handle_DCS(Vt* self, char c)
                              * exited, the text cursor does not change from the position it was in
                              * when sixel mode was entered. */
                             VtSixelSurface_destroy(self, &surf);
-                            STUB("sixel display with scrolling disabled");
+                            STUB("sixel display without scrolling");
                             // Vector_push_VtSixelSurface(&self->static_sixels, surf);
                         }
                     } else {
@@ -5049,6 +5043,7 @@ static inline void Vt_erase_to_end(Vt* self)
     for (size_t i = self->cursor.row + 1; i <= Vt_bottom_line(self); ++i) {
         Vector_clear_VtRune(&self->lines.buf[i].data);
         Vt_empty_line_fill_bg(self, i);
+        Vt_sixel_clear_line(self, i);
     }
     Vt_clear_right(self);
     Vt_clear_proxies_in_region(self, self->cursor.row, Vt_bottom_line(self));
@@ -5075,6 +5070,7 @@ static inline void Vt_erase_chars(Vt* self, size_t n)
         } else {
             Vt_cursor_line(self)->data.buf[idx] = self->parser.char_state;
         }
+        Vt_sixel_overwrite_cell(self, self->cursor.row, idx);
     }
     Vt_mark_proxy_fully_damaged(self, self->cursor.row);
 }
@@ -5088,6 +5084,8 @@ static void Vt_delete_chars(Vt* self, size_t n)
         Vector_pop_n_VtRune(&Vt_cursor_line(self)->data,
                             Vt_cursor_line(self)->data.size - Vt_col(self));
     }
+
+    Vt_sixel_clear_line(self, self->cursor.row);
 
     size_t rm_size = Vt_cursor_line(self)->data.size == self->cursor.col
                        ? Vt_cursor_line(self)->data.size - self->cursor.col
@@ -5197,6 +5195,7 @@ static inline void Vt_clear_above(Vt* self)
     for (size_t i = Vt_visual_top_line(self); i < self->cursor.row; ++i) {
         self->lines.buf[i].data.size = 0;
         Vt_empty_line_fill_bg(self, i);
+        Vt_sixel_clear_line(self, i);
     }
     Vt_clear_left(self);
 }
@@ -5214,7 +5213,6 @@ static inline void Vt_clear_display_and_scrollback(Vt* self)
     }
     self->cursor.row = 0;
 
-    Vector_clear_RcPtr_VtSixelSurface(&self->scrolled_sixels);
     Vector_clear_RcPtr_VtImageSurfaceView(&self->image_views);
     Vector_clear_RcPtr_VtImageSurface(&self->images);
 
@@ -5236,6 +5234,11 @@ static inline void Vt_clear_left(Vt* self)
     }
 
     Vt_mark_proxy_fully_damaged(self, self->cursor.row);
+
+    if (unlikely(Vt_cursor_line(self)->graphic_attachments &&
+                 Vt_cursor_line(self)->graphic_attachments->sixels)) {
+        Vt_sixel_overwrite_cell_range(self, self->cursor.row, 0, self->cursor.col);
+    }
 }
 
 /**
@@ -5251,21 +5254,24 @@ static inline void Vt_clear_right(Vt* self)
     }
 
     Vt_mark_proxy_fully_damaged(self, self->cursor.row);
+    Vt_sixel_clear_line(self, self->cursor.row); // TODO: improve?
 }
 
-static void Vt_overwrite_char_at(Vt* self, size_t column, size_t row, VtRune c)
+static void Vt_overwrite_char_at(Vt* self, size_t col, size_t row, VtRune c)
 {
     VtLine* line = Vt_line_at(self, row);
-    while (line->data.size <= column) {
+    while (line->data.size <= col) {
         Vector_push_VtRune(&line->data, self->blank_space);
     }
-    line->data.buf[column] = c;
+    line->data.buf[col] = c;
+    Vt_sixel_overwrite_cell(self, row, col);
 }
 
 /**
  * Insert character literal at cursor position, deal with reaching column limit */
 __attribute__((hot)) static void Vt_insert_char_at_cursor(Vt* self, VtRune c)
 {
+
     self->defered_events.repaint = true;
 
     if (self->wrap_next && !self->modes.no_wraparound) {
@@ -5303,6 +5309,8 @@ __attribute__((hot)) static void Vt_insert_char_at_cursor(Vt* self, VtRune c)
         *Vt_cursor_cell(self) = c;
     }
 
+    Vt_sixel_overwrite_cell(self, self->cursor.row, self->cursor.col);
+
     self->last_inserted          = *Vt_cursor_cell(self);
     self->last_inserted_line_nr  = self->cursor.row;
     self->last_inserted_col_nr   = self->cursor.col;
@@ -5326,6 +5334,8 @@ __attribute__((hot)) static void Vt_insert_char_at_cursor(Vt* self, VtRune c)
                     *Vt_cursor_cell(self) = tmp;
                 }
             }
+
+            Vt_sixel_overwrite_cell(self, self->cursor.row, self->cursor.col);
 
             ++self->cursor.col;
 
@@ -5364,6 +5374,7 @@ static void Vt_insert_char_at_cursor_with_shift(Vt* self, VtRune c)
     Vector_insert_at_VtRune(&Vt_cursor_line(self)->data, self->cursor.col, c);
 
     Vt_mark_proxy_fully_damaged(self, self->cursor.row);
+    Vt_sixel_clear_line(self, self->cursor.row); // TODO: improve?
 }
 
 static inline void Vt_empty_line_fill_bg(Vt* self, size_t idx)
@@ -5371,6 +5382,7 @@ static inline void Vt_empty_line_fill_bg(Vt* self, size_t idx)
     ASSERT(self->lines.buf[idx].data.size == 0, "line is empty");
 
     Vt_mark_proxy_fully_damaged(self, idx);
+    Vt_sixel_clear_line(self, idx);
     if (!ColorRGBA_eq(Vt_active_bg_color(self), self->colors.bg)) {
         for (uint16_t i = 0; i < Vt_col(self); ++i) {
             Vector_push_VtRune(&self->lines.buf[idx].data, self->parser.char_state);
@@ -6155,15 +6167,6 @@ static void Vt_shift_global_line_index_refs(Vt* self, size_t point, int64_t delt
         }
     }
 
-    for (RcPtr_VtSixelSurface* rp = NULL;
-         (rp = Vector_iter_RcPtr_VtSixelSurface(&self->scrolled_sixels, rp));) {
-        VtSixelSurface* ss = RcPtr_get_VtSixelSurface(rp);
-
-        if (ss && ss->anchor_global_index >= point) {
-            ss->anchor_global_index += delta;
-        }
-    }
-
     for (RcPtr_VtCommand* rp = NULL;
          (rp = Vector_iter_RcPtr_VtCommand(&self->shell_commands, rp));) {
         VtCommand* cmd = RcPtr_get_VtCommand(rp);
@@ -6247,28 +6250,6 @@ static void Vt_remove_scrollback(Vt* self, size_t lines)
             } else {
                 break;
             }
-        }
-    }
-
-    while (self->scrolled_sixels.size) {
-        bool removed = false;
-        for (RcPtr_VtSixelSurface* i = NULL;
-             (i = Vector_iter_RcPtr_VtSixelSurface(&self->scrolled_sixels, i));) {
-            if (RcPtr_is_unique_VtSixelSurface(i)) {
-                Vector_remove_at_RcPtr_VtSixelSurface(
-                  &self->scrolled_sixels,
-                  Vector_index_RcPtr_VtSixelSurface(&self->scrolled_sixels, i),
-                  1);
-                RcPtr_destroy_VtSixelSurface(i);
-                removed = true;
-                break;
-            }
-        }
-
-        if (removed) {
-            continue;
-        } else {
-            break;
         }
     }
 }
@@ -6521,7 +6502,6 @@ void Vt_destroy(Vt* self)
     if (Vt_alt_buffer_enabled(self)) {
         Vector_destroy_VtLine(&self->alt_lines);
         Vector_destroy_RcPtr_VtImageSurfaceView(&self->alt_image_views);
-        Vector_destroy_RcPtr_VtSixelSurface(&self->alt_scrolled_sixels);
     }
 
     Vector_destroy_VtLine(&self->synchronized_update_state.lines);
@@ -6535,7 +6515,6 @@ void Vt_destroy(Vt* self)
     Vector_destroy_RcPtr_VtImageSurface(&self->images);
     Vector_destroy_RcPtr_VtImageSurfaceView(&self->image_views);
     Vector_destroy_RcPtr_VtCommand(&self->shell_commands);
-    Vector_destroy_RcPtr_VtSixelSurface(&self->scrolled_sixels);
     RcPtr_destroy_VtImageSurface(&self->manipulated_image);
     free(self->title);
     free(self->active_hyperlink);

@@ -2,7 +2,9 @@
 
 #pragma once
 
+#include "util.h"
 #include "vt.h"
+#include "vt_sixel.h"
 
 static void                              Vt_line_feed(Vt* self);
 static inline void                       Vt_move_cursor(Vt* self, uint16_t column, uint16_t rows);
@@ -11,6 +13,7 @@ __attribute__((cold)) const char* control_char_get_pretty_string(const char c);
 __attribute__((cold)) char*              pty_string_prettyfy(const char* str, int32_t max);
 void                                     Vt_start_synchronized_update(Vt* self);
 void                                     Vt_end_synchronized_update(Vt* self);
+static void Vt_clear_line_sixel_proxies(Vt* self, VtLine* ln);
 
 static inline void Vt_output(Vt* self, const char* buf, size_t len)
 {
@@ -81,6 +84,7 @@ static inline void Vt_clear_line_proxy(Vt* self, VtLine* line)
 static inline void Vt_clear_proxy(Vt* self, size_t idx)
 {
     Vt_clear_line_proxy(self, &self->lines.buf[idx]);
+    Vt_clear_line_sixel_proxies(self, &self->lines.buf[idx]);
 }
 
 static inline void Vt_clear_proxies_in_region(Vt* self, size_t begin, size_t end)

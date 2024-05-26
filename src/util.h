@@ -74,6 +74,7 @@
 #define MIN(_a, _b)         ((_a) < (_b) ? (_a) : (_b))
 #define CLAMP(_v, _lo, _hi) ((_v) > (_hi) ? (_hi) : (_v) < (_lo) ? (_lo) : (_v))
 #define OR(_obj, _alt)      ((_obj) ? (_obj) : (_alt))
+#define CEIL_DIV(a, b)      (a / b + !!(a % b))
 
 #define ARRAY_SIZE(_array) (sizeof((_array)) / sizeof((_array[0])))
 #define ARRAY_LAST(_array) (_array[(sizeof((_array)) / sizeof((_array[0]))) - 1])

@@ -80,6 +80,7 @@ static uint32_t titlebar_height_px(Ui* ui)
 
 struct _GfxOpenGL2;
 
+void GfxOpenGL2_load_sixel(GfxOpenGL2* self, const Vt* vt, VtSixelSurface* srf, double scale);
 #define gfxBase(gfxGl2) ((Gfx*)(((uint8_t*)(gfxGl2)) - offsetof(Gfx, extend_data)))
 Pair_uint32_t GfxOpenGL2_get_char_size(Gfx* self, Pair_uint32_t pixels);
 #define gfxOpenGL2(gfx) ((GfxOpenGL2*)&gfx->extend_data)
@@ -1340,12 +1341,14 @@ typedef struct
     bool                        is_reusing;
 } line_render_pass_t;
 
-static void line_reder_pass_run(line_render_pass_t* self);
+static void line_render_pass_run(line_render_pass_t* self);
 
 static bool should_create_line_render_pass(const line_render_pass_args_t* args)
 {
     vt_line_damage_t* dmg = OR(args->damage, &args->vt_line->damage);
-    return !likely(!(args->vt_line && args->vt_line->data.size) ||
+    return !likely(!(args->vt_line &&
+                     (args->vt_line->data.size || (args->vt_line->graphic_attachments &&
+                                                   args->vt_line->graphic_attachments->sixels))) ||
                    (dmg->type == VT_LINE_DAMAGE_NONE));
 }
 
@@ -1616,7 +1619,8 @@ static void line_render_pass_set_up_framebuffer(line_render_pass_t* self)
             GfxOpenGL2_destroy_proxy((void*)((uint8_t*)self->args.gl2 - offsetof(Gfx, extend_data)),
                                      self->args.proxy->data);
         }
-        if (!self->args.vt_line->data.size) {
+        if (!self->args.vt_line->data.size && !(self->args.vt_line->graphic_attachments &&
+                                                self->args.vt_line->graphic_attachments->sixels)) {
             return;
         }
 
@@ -1769,8 +1773,8 @@ static inline ColorRGB rune_final_fg_blend_apply_dim(const Vt*     self,
     }
 }
 
-static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
-                                             line_render_subpass_t* subpass)
+static void line_render_pass_run_cell_subpass(line_render_pass_t*    pass,
+                                              line_render_subpass_t* subpass)
 {
     ASSERT(subpass->args.render_range_begin <= pass->args.vt_line->data.size &&
              subpass->args.render_range_end <= pass->args.vt_line->data.size,
@@ -2156,8 +2160,75 @@ static void line_reder_pass_run_cell_subpass(line_render_pass_t*    pass,
     }
 }
 
-static void line_reder_pass_run_line_subpass(const line_render_pass_t* pass,
-                                             line_render_subpass_t*    subpass)
+static void line_render_pass_run_sixel_subpass(const line_render_pass_t* pass,
+                                               line_render_subpass_t*    subpass)
+{
+    for (RcPtr_VtSixelSurface* i = NULL;
+         (i = Vector_iter_RcPtr_VtSixelSurface(pass->args.vt_line->graphic_attachments->sixels,
+                                               i));) {
+
+        VtSixelSurface* srf = RcPtr_get_VtSixelSurface(i);
+
+        double scale = (double)pass->args.gl2->line_height_pixels / srf->line_height_created_px;
+        if (unlikely(!srf->proxy.data[SIXEL_PROXY_INDEX_TEXTURE_ID] ||
+                     scale != srf->proxy.data[SIXEL_PROXY_INDEX_PROXY_SCALE])) {
+            GfxOpenGL2_load_sixel(pass->args.gl2, pass->args.vt, srf, scale);
+            srf->proxy.data[SIXEL_PROXY_INDEX_PROXY_SCALE] = scale;
+        }
+
+        glDisable(GL_DEPTH_TEST);
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        glDisable(GL_SCISSOR_TEST);
+        Shader_use(&pass->args.gl2->image_shader);
+        glBindTexture(GL_TEXTURE_2D, srf->proxy.data[SIXEL_PROXY_INDEX_TEXTURE_ID]);
+
+        float offset_x =
+          pass->args.gl2->sx * (srf->anchor_cell_idx * pass->args.gl2->glyph_width_pixels);
+        float offset_y = -pass->args.gl2->sy * 4;
+
+        glBindBuffer_(GL_ARRAY_BUFFER, srf->proxy.data[SIXEL_PROXY_INDEX_VBO_ID]);
+        glVertexAttribPointer_(pass->args.gl2->image_shader.attribs->location,
+                               4,
+                               GL_FLOAT,
+                               GL_FALSE,
+                               0,
+                               0);
+        glUniform2f_(pass->args.gl2->image_shader.uniforms[1].location, offset_x, offset_y);
+
+        bool     cell_visibility_state = true;
+        bool     all_visible           = true;
+        uint32_t start_cell_index      = 0;
+        for (uint32_t j = 0; j < srf->cell_mask.size; ++j) {
+            bool cell_visible = srf->cell_mask.buf[j];
+            bool end_of_block =
+              (cell_visibility_state && !cell_visible && j) || j == srf->cell_mask.size - 1;
+            bool start_of_block = !cell_visibility_state && cell_visible;
+            all_visible &= cell_visible;
+
+            if (end_of_block) {
+                if (!all_visible) {
+                    glEnable(GL_SCISSOR_TEST);
+                    glScissor((start_cell_index + srf->anchor_cell_idx) *
+                                pass->args.gl2->glyph_width_pixels,
+                              0,
+                              (j - start_cell_index + 1) * pass->args.gl2->glyph_width_pixels,
+                              pass->texture_height);
+                }
+                glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
+                cell_visibility_state = false;
+            } else if (start_of_block) {
+                start_cell_index = j;
+            }
+            cell_visibility_state = cell_visible;
+        }
+        glDisable(GL_BLEND);
+        glDisable(GL_SCISSOR_TEST);
+    }
+}
+
+static void line_render_pass_run_line_subpass(const line_render_pass_t* pass,
+                                              line_render_subpass_t*    subpass)
 {
     /* Scale from pixels to GL coordinates */
     const double scalex = 2.0f / pass->texture_width;
@@ -2371,8 +2442,8 @@ static void line_reder_pass_run_line_subpass(const line_render_pass_t* pass,
     }
 }
 
-static void line_reder_subpass_run_clear_stage(const line_render_pass_t* self,
-                                               line_render_subpass_t*    subpass)
+static void line_render_subpass_run_clear_stage(const line_render_pass_t* self,
+                                                line_render_subpass_t*    subpass)
 {
     glViewport(0, 0, self->texture_width, self->texture_height);
     glBindTexture(GL_TEXTURE_2D, 0);
@@ -2425,24 +2496,30 @@ static void line_reder_subpass_run_clear_stage(const line_render_pass_t* self,
 #endif
 }
 
-static void line_reder_pass_run_subpass(line_render_pass_t* pass, line_render_subpass_t* subpass)
+static void line_render_pass_run_subpass(line_render_pass_t* pass, line_render_subpass_t* subpass)
 {
-    line_reder_subpass_run_clear_stage(pass, subpass);
-    line_reder_pass_run_cell_subpass(pass, subpass);
+    line_render_subpass_run_clear_stage(pass, subpass);
+    line_render_pass_run_cell_subpass(pass, subpass);
 
     if (pass->has_underlined_chars) {
-        line_reder_pass_run_line_subpass(pass, subpass);
+        line_render_pass_run_line_subpass(pass, subpass);
+    }
+
+    if (unlikely(!pass->args.is_for_cursor && pass->args.vt_line->graphic_attachments &&
+                 pass->args.vt_line->graphic_attachments->sixels &&
+                 pass->args.vt_line->graphic_attachments->sixels->size)) {
+        line_render_pass_run_sixel_subpass(pass, subpass);
     }
 }
 
-static void line_reder_pass_run_initial_setup(line_render_pass_t* self)
+static void line_render_pass_run_initial_setup(line_render_pass_t* self)
 {
     line_render_pass_try_to_recover_proxies(self);
     line_render_pass_set_up_framebuffer(self);
     line_render_pass_set_up_subpasses(self);
 }
 
-static Pair_uint16_t line_reder_pass_run_subpasses(line_render_pass_t* self)
+static Pair_uint16_t line_render_pass_run_subpasses(line_render_pass_t* self)
 {
     Pair_uint16_t retval = { .first = self->args.vt_line->data.size - 1, .second = 0 };
 
@@ -2452,16 +2529,16 @@ static Pair_uint16_t line_reder_pass_run_subpasses(line_render_pass_t* self)
         retval.first  = MIN(retval.first, sub.args.render_range_begin);
         retval.second = MAX(retval.second, sub.args.render_range_end);
 
-        line_reder_pass_run_subpass(self, &sub);
+        line_render_pass_run_subpass(self, &sub);
     }
 
     return retval;
 }
 
-static void line_reder_pass_run(line_render_pass_t* self)
+static void line_render_pass_run(line_render_pass_t* self)
 {
-    line_reder_pass_run_initial_setup(self);
-    line_reder_pass_run_subpasses(self);
+    line_render_pass_run_initial_setup(self);
+    line_render_pass_run_subpasses(self);
 }
 
 static void _GfxOpenGL2_draw_block_cursor(GfxOpenGL2* gfx,
@@ -2492,14 +2569,14 @@ static void _GfxOpenGL2_draw_block_cursor(GfxOpenGL2* gfx,
         gfx->bound_resources  = BOUND_RESOURCES_NONE;
         line_render_pass_t rp = create_line_render_pass(&rp_args);
 
-        line_reder_pass_run(&rp);
+        line_render_pass_run(&rp);
 
         if (rp.has_blinking_chars) {
             gfxBase(gfx)->has_blinking_text = true;
             rp_args.is_for_blinking         = true;
             gfx->bound_resources            = BOUND_RESOURCES_NONE;
             line_render_pass_t rp_b         = create_line_render_pass(&rp_args);
-            line_reder_pass_run(&rp_b);
+            line_render_pass_run(&rp_b);
             rp_b.has_blinking_chars = true;
             line_render_pass_finalize(&rp_b);
             rp_args.is_for_blinking = false;
@@ -2883,7 +2960,7 @@ static void GfxOpenGL2_draw_scrollbar(GfxOpenGL2* self, const Scrollbar* scrollb
 {
     glEnable(GL_BLEND);
     glDisable(GL_SCISSOR_TEST);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
     Shader_use(&self->solid_fill_shader);
     float alpha = scrollbar->dragging ? 0.8f : scrollbar->opacity * 0.5f;
     glUniform4f_(self->solid_fill_shader.uniforms[0].location, 1.0f, 1.0f, 1.0f, alpha);
@@ -3157,42 +3234,42 @@ static void GfxOpenGL2_draw_image_view(GfxOpenGL2* self, const Vt* vt, VtImageSu
     glDrawArrays(QUAD_DRAW_MODE, 0, 4);
 }
 
-void GfxOpenGL2_load_sixel(GfxOpenGL2* self, Vt* vt, VtSixelSurface* srf)
+void GfxOpenGL2_load_sixel(GfxOpenGL2* self, const Vt* vt, VtSixelSurface* srf, double scale)
 {
     GLuint tex = 0;
     glGenTextures(1, &tex);
     glBindTexture(GL_TEXTURE_2D, tex);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, scale == 1.0 ? GL_NEAREST : GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, scale == 1.0 ? GL_NEAREST : GL_LINEAR);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glTexImage2D(GL_TEXTURE_2D,
                  0,
-                 GL_RGB,
+                 GL_RGBA,
                  srf->width,
                  srf->height,
                  0,
-                 GL_RGB,
+                 GL_RGBA,
                  GL_UNSIGNED_BYTE,
                  srf->fragments.buf);
     srf->proxy.data[SIXEL_PROXY_INDEX_TEXTURE_ID] = tex;
 
-    float w = self->sx * srf->width;
-    float h = self->sy * srf->height;
+    float w = self->sx * srf->width * scale;
+    float h = 2.0f;
 
 #ifndef GFX_GLES
     float vertex_data[][4] = {
-        { -1.0f, 1.0f - h, 0.0f, 1.0f },
-        { -1.0f + w, 1.0f - h, 1.0f, 1.0f },
-        { -1.0f + w, 1, 1.0f, 0.0f },
-        { -1.0f, 1, 0.0f, 0.0f },
+        { -1.0f, 1.0f - h, 0.0f, 0.0f },
+        { -1.0f + w, 1.0f - h, 1.0f, 0.0f },
+        { -1.0f + w, 1, 1.0f, 1.0f },
+        { -1.0f, 1, 0.0f, 1.0f },
     };
 #else
-    float vertex_data[][4] = {
-        { -1.0f, 1.0f - h, 0.0f, 1.0f }, { -1.0f + w, 1.0f - h, 1.0f, 1.0f },
-        { -1.0f + w, 1, 1.0f, 0.0f },    { -1.0f, 1, 0.0f, 0.0f },
-        { -1.0f, 1.0f - h, 0.0f, 1.0f }, { -1.0f + w, 1, 1.0f, 0.0f },
+    float vertex_data[][3] = {
+        { -1.0f, 1.0f - h, 0.0f, 0.0f }, { -1.0f + w, 1.0f - h, 1.0f, 0.0f },
+        { -1.0f + w, 1, 1.0f, 1.0f },    { -1.0f, 1, 0.0f, 1.0f },
+        { -1.0f, 1.0f - h, 0.0f, 0.0f }, { -1.0f + w, 1, 1.0f, 1.0f },
     };
 #endif
 
@@ -3201,48 +3278,6 @@ void GfxOpenGL2_load_sixel(GfxOpenGL2* self, Vt* vt, VtSixelSurface* srf)
     glBindBuffer_(GL_ARRAY_BUFFER, vbo);
     glBufferData_(GL_ARRAY_BUFFER, sizeof(vertex_data), vertex_data, GL_STATIC_DRAW);
     srf->proxy.data[SIXEL_PROXY_INDEX_VBO_ID] = vbo;
-}
-
-void GfxOpenGL2_draw_sixel(GfxOpenGL2* self, Vt* vt, VtSixelSurface* srf)
-{
-    if (unlikely(!srf->proxy.data[SIXEL_PROXY_INDEX_TEXTURE_ID])) {
-        GfxOpenGL2_load_sixel(self, vt, srf);
-    }
-
-    glDisable(GL_BLEND);
-    glDisable(GL_SCISSOR_TEST);
-    Shader_use(&self->image_shader);
-    glBindTexture(GL_TEXTURE_2D, srf->proxy.data[SIXEL_PROXY_INDEX_TEXTURE_ID]);
-
-    int64_t y_index  = srf->anchor_global_index - Vt_visual_top_line(vt);
-    float   offset_x = self->sx * (srf->anchor_cell_idx * self->glyph_width_pixels);
-    float   offset_y = -self->sy * (y_index * self->line_height_pixels);
-
-    glBindBuffer_(GL_ARRAY_BUFFER, srf->proxy.data[SIXEL_PROXY_INDEX_VBO_ID]);
-    glVertexAttribPointer_(self->image_shader.attribs->location, 4, GL_FLOAT, GL_FALSE, 0, 0);
-    glUniform2f_(self->image_shader.uniforms[1].location, offset_x, offset_y);
-
-    glDrawArrays(QUAD_DRAW_MODE, 0, QUAD_V_SZ);
-}
-
-void GfxOpenGL2_draw_sixels(GfxOpenGL2* self, Vt* vt)
-{
-    for (RcPtr_VtSixelSurface* i = NULL;
-         (i = Vector_iter_RcPtr_VtSixelSurface(&vt->scrolled_sixels, i));) {
-        VtSixelSurface* ptr = RcPtr_get_VtSixelSurface(i);
-
-        if (!ptr) {
-            continue;
-        }
-
-        self->frame_overlay_damage->overlay_state = true;
-
-        uint32_t six_ycells = Vt_pixels_to_cells(vt, 0, ptr->height).second + 1;
-        if (ptr->anchor_global_index < Vt_visual_bottom_line(vt) &&
-            ptr->anchor_global_index + six_ycells > Vt_visual_top_line(vt)) {
-            GfxOpenGL2_draw_sixel(self, vt, ptr);
-        }
-    }
 }
 
 void GfxOpenGL2_draw_images(GfxOpenGL2* self, const Vt* vt, bool up_to_zero_z)
@@ -3856,9 +3891,9 @@ window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, Vt* vt, Ui* ui, uint8_
         if (should_repaint) {
             gfx->bound_resources  = BOUND_RESOURCES_NONE;
             line_render_pass_t rp = create_line_render_pass(&rp_args);
-            line_reder_pass_run_initial_setup(&rp);
+            line_render_pass_run_initial_setup(&rp);
 
-            Pair_uint16_t damage = line_reder_pass_run_subpasses(&rp);
+            Pair_uint16_t damage = line_render_pass_run_subpasses(&rp);
 
             uint16_t dam_len = (damage.second < damage.first) ? (uint16_t)i->data.size
                                                               : (damage.second - damage.first) + 1;
@@ -3889,7 +3924,7 @@ window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, Vt* vt, Ui* ui, uint8_
                 gfx->bound_resources    = BOUND_RESOURCES_NONE;
                 rp_args.is_for_blinking = true;
                 line_render_pass_t rp_b = create_line_render_pass(&rp_args);
-                line_reder_pass_run(&rp_b);
+                line_render_pass_run(&rp_b);
                 rp_b.has_blinking_chars = true;
                 line_render_pass_finalize(&rp_b);
                 rp_args.is_for_blinking = false;
@@ -3952,7 +3987,6 @@ window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, Vt* vt, Ui* ui, uint8_
     }
 
     GfxOpenGL2_draw_images(gfx, vt, false);
-    GfxOpenGL2_draw_sixels(gfx, (Vt*)vt);
     GfxOpenGL2_draw_overlays(gfx, vt, ui);
 
     if (ui->flash_fraction != 0.0) {

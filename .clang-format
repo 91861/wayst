@@ -7,7 +7,6 @@
   AlwaysBreakAfterDefinitionReturnType: None,
   AllowAllParametersOfDeclarationOnNextLine: false,
   AllowAllArgumentsOnNextLine: false,
-  AllowAllParametersOfDeclarationOnNextLine: false,
   BinPackArguments: false,
   AlignConsecutiveMacros: true,
   AlignConsecutiveDeclarations: true,

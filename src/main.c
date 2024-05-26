@@ -11,8 +11,8 @@
  *   we can add a SpliterWidget:IWidget nesting other widgets and forwarding mouse/kbd events etc.
  */
 
-#include "timing.h"
 #define _GNU_SOURCE
+#include "timing.h"
 #include "gfx.h"
 #include "util.h"
 #include "window.h"
@@ -39,6 +39,7 @@
 #include "settings.h"
 #include "ui.h"
 #include "vt.h"
+#include "monitor.h"
 
 #ifndef DOUBLE_CLICK_DELAY_MS
 #define DOUBLE_CLICK_DELAY_MS 300

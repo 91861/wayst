@@ -2,11 +2,11 @@
 
 #define _GNU_SOURCE
 
-#include "gl2_util.h"
 #include "colors.h"
+#include "gfx_gl2.h"
+#include "gl2_util.h"
 #include "ui.h"
 #include "vt.h"
-#include "gfx_gl2.h"
 
 #include "freetype.h"
 #include "fterrors.h"
@@ -23,8 +23,6 @@
 
 #include "map.h"
 #include "util.h"
-#include "wcwidth/wcwidth.h"
-
 
 /* Number of buckets in the glyph atlas reference data hash map */
 #define NUM_BUCKETS 513
@@ -54,8 +52,9 @@
 
 #define IMG_VIEW_PROXY_INDEX_VBO_ID 0
 
-#define SIXEL_PROXY_INDEX_TEXTURE_ID 0
-#define SIXEL_PROXY_INDEX_VBO_ID     1
+#define SIXEL_PROXY_INDEX_TEXTURE_ID  0
+#define SIXEL_PROXY_INDEX_VBO_ID      1
+#define SIXEL_PROXY_INDEX_PROXY_SCALE 2
 
 #define BOUND_RESOURCES_NONE      0
 #define BOUND_RESOURCES_BG        1
@@ -72,7 +71,6 @@
 #define QUAD_DRAW_MODE GL_QUADS
 #define QUAD_V_SZ      4 /* number of verts per quad (GL_QUADS) */
 #endif
-
 
 DEF_PAIR(GLuint);
 DEF_VECTOR(float, NULL);

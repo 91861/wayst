@@ -22,7 +22,7 @@
 #define C_WIDTH(c) ((uint8_t)wcwidth((c)))
 #endif
 
-#include <errno.h>
+// #include <errno.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -32,8 +32,6 @@
 #include <unistd.h>
 
 #include "colors.h"
-#include "map.h"
-#include "monitor.h"
 #include "rcptr.h"
 #include "settings.h"
 #include "timing.h"
@@ -236,7 +234,7 @@ typedef struct
 DEF_VECTOR(VtRune, NULL);
 
 DEF_VECTOR(char, NULL);
-
+DEF_VECTOR(bool, NULL);
 DEF_VECTOR(size_t, NULL);
 
 DEF_VECTOR(Vector_VtRune, Vector_destroy_VtRune);
@@ -351,10 +349,19 @@ typedef struct
 
 typedef struct
 {
-    size_t   anchor_global_index;
     uint16_t anchor_cell_idx;
+    uint32_t width, height;
 
-    uint32_t            width, height;
+    /* Sixels are relative to text so resizing text should resize sixels
+     * use cell size at upload time to scale when drawing */
+    uint16_t line_height_created_px;
+    uint16_t cell_width_created_px;
+
+    uint8_t pixel_aspect_ratio;
+
+    /* Record what parts of the image were 'overwritten' by insertings text over it */
+    Vector_bool cell_mask;
+
     VtSixelSurfaceProxy proxy;
     Vector_uint8_t      fragments;
 } VtSixelSurface;
@@ -393,7 +400,7 @@ typedef struct
 
 static VtGraphicLineAttachments VtGraphicLineAttachments_clone(VtGraphicLineAttachments* source)
 {
-    VtGraphicLineAttachments dest = { NULL, NULL };
+    VtGraphicLineAttachments dest = { .images = NULL, .sixels = NULL };
 
     if (source->images) {
         dest.images  = _malloc(sizeof(Vector_RcPtr_VtImageSurfaceView));
@@ -555,21 +562,6 @@ static inline void VtLine_destroy(void* vt_, VtLine* self);
 
 DEF_VECTOR_DA(VtLine, VtLine_destroy, void);
 
-/* typedef struct */
-/* { */
-/*     Vector_VtLine                   lines; */
-/*     Vector_RcPtr_VtImageSurfaceView image_views; */
-/*     Vector_RcPtr_VtSixelSurface     scrolled_sixels; */
-/*     // TODO: Vector_VtSixelSurface           static_sixels; */
-/* } VtScreenBuffer; */
-
-/* static void VtScreenBuffer_destroy(VtScreenBuffer* self) */
-/* { */
-/*     Vector_destroy_VtLine(&self->lines); */
-/*     Vector_destroy_RcPtr_VtImageSurfaceView(&self->image_views); */
-/*     Vector_destroy_RcPtr_VtSixelSurface(&self->scrolled_sixels); */
-/* } */
-
 /* 'reverse' some modes so default is 0  */
 typedef struct
 {
@@ -606,8 +598,13 @@ typedef struct
      * advance the active position below the bottom margin of the graphics page. When sixel mode
      * is exited, the text cursor does not change from the position it was in when sixel mode
      * was entered.
+     *
+     * But most programs expect scrolling to be enabled by default.
+     *
+     * If this should be enabled by SM or RM nobody actually seems to know
+     * https://github.com/dankamongmen/notcurses/issues/1782
      */
-    uint8_t sixel_scrolling : 1;
+    uint8_t no_sixel_scrolling : 1;
 
     /* Use private color registers for each sixel graphic */
     uint8_t sixel_private_color_registers : 1;
@@ -824,7 +821,6 @@ typedef struct
     RcPtr_VtImageSurface            manipulated_image;
     Vector_RcPtr_VtImageSurface     images;
     Vector_RcPtr_VtImageSurfaceView image_views, alt_image_views;
-    Vector_RcPtr_VtSixelSurface     scrolled_sixels, alt_scrolled_sixels;
 
     Vector_RcPtr_VtCommand shell_commands;
 
@@ -1134,6 +1130,7 @@ static void VtSixelSurface_destroy(void* _vt, VtSixelSurface* self)
 {
     Vt* vt = _vt;
     Vector_destroy_uint8_t(&self->fragments);
+    Vector_destroy_bool(&self->cell_mask);
     CALL(vt->callbacks.destroy_sixel_proxy, vt->callbacks.user_data, &self->proxy);
 }
 
@@ -1232,33 +1229,11 @@ const char* Vt_uri_range_at(Vt*            self,
                             Pair_size_t*   out_rows,
                             Pair_uint16_t* out_columns);
 
-#ifdef DEBUG
-static inline VtLine* _ERRVt_cursor_line(int ln, const Vt* self)
-{
-    ERR("line count overflow on line %d. line cnt %zu cursor pos %zu\n",
-        ln,
-        self->lines.size,
-        self->cursor.row);
-    return NULL;
-}
-
-static inline VtLine* _Vt_cursor_line(const Vt* self)
-{
-    return &self->lines.buf[self->cursor.row];
-}
-
-#define Vt_cursor_line(_s)                                                                         \
-    (((_s)->lines.size < (_s)->cursor.row) ? _ERRVt_cursor_line(__LINE__, (_s))                    \
-                                           : _Vt_cursor_line((_s)))
-
-#else
-/**
- * Get line under terminal cursor */
+/* Get line under terminal cursor */
 static inline VtLine* Vt_cursor_line(const Vt* self)
 {
     return &self->lines.buf[self->cursor.row];
 }
-#endif
 
 /**
  * Get cell under terminal cursor */

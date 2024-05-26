@@ -176,38 +176,39 @@ void write_html_screen_dump(const Vt* vt, FILE* file)
 
     Vector_char sixel_html = Vector_new_char();
 
-    for (const RcPtr_VtSixelSurface* i = NULL;
-         (i = Vector_iter_const_RcPtr_VtSixelSurface(&vt->scrolled_sixels, i));) {
+    // TODO: fix for line-based sixel rendering
+    //for (const RcPtr_VtSixelSurface* i = NULL;
+    //     (i = Vector_iter_const_RcPtr_VtSixelSurface(&vt->scrolled_sixels, i));) {
 
-        const VtSixelSurface* srf = RcPtr_get_const_VtSixelSurface(i);
+    //    const VtSixelSurface* srf = RcPtr_get_const_VtSixelSurface(i);
 
-        if (!srf || !VtSixelSurface_is_visible(vt, srf)) {
-            continue;
-        }
+    //    if (!srf || !VtSixelSurface_is_visible(vt, srf)) {
+    //        continue;
+    //    }
 
-        int32_t top = srf->anchor_global_index - Vt_top_line(vt), left = srf->anchor_cell_idx,
-            height = Vt_row(vt) - (top < 0 ? top : 0), width = Vt_col(vt) - (left < 0 ? left : 0);
+    //    int32_t top = srf->anchor_global_index - Vt_top_line(vt), left = srf->anchor_cell_idx,
+    //        height = Vt_row(vt) - (top < 0 ? top : 0), width = Vt_col(vt) - (left < 0 ? left : 0);
 
-        static const char* sixel_image_begin_format =
-          "<div z-index=2 class=\"sixel\" style=\"top: %dem; left: %dem height %dem; width: "
-          "%dem;\"><img src=\"data:image/png;base64,";
+    //    static const char* sixel_image_begin_format =
+    //      "<div z-index=2 class=\"sixel\" style=\"top: %dem; left: %dem height %dem; width: "
+    //      "%dem;\"><img src=\"data:image/png;base64,";
 
-        char* sixel_image_begin = asprintf(sixel_image_begin_format, top, left, height, width);
-        Vector_pushv_char(&sixel_html, sixel_image_begin, strlen(sixel_image_begin));
-        free(sixel_image_begin);
+    //    char* sixel_image_begin = asprintf(sixel_image_begin_format, top, left, height, width);
+    //    Vector_pushv_char(&sixel_html, sixel_image_begin, strlen(sixel_image_begin));
+    //    free(sixel_image_begin);
 
-        stbi_write_png_compression_level = 9;
-        stbi_write_png_to_func(png_write_to_vec_as_b64_func,
-                               &sixel_html,
-                               srf->width,
-                               srf->height,
-                               3,
-                               srf->fragments.buf,
-                               0);
+    //    stbi_write_png_compression_level = 9;
+    //    stbi_write_png_to_func(png_write_to_vec_as_b64_func,
+    //                           &sixel_html,
+    //                           srf->width,
+    //                           srf->height,
+    //                           3,
+    //                           srf->fragments.buf,
+    //                           0);
 
-        static const char* sixel_image_end = "\"></div>";
-        Vector_pushv_char(&sixel_html, sixel_image_end, strlen(sixel_image_end));
-    }
+    //    static const char* sixel_image_end = "\"></div>";
+    //    Vector_pushv_char(&sixel_html, sixel_image_end, strlen(sixel_image_end));
+    //}
 
     static const char* const page_template =
       "<!DOCTYPE html>\n"
