@@ -12,7 +12,6 @@
 #include "util.h"
 #include "vector.h"
 
-#include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -295,6 +294,8 @@ typedef struct
     struct xdg_surface*                 xdg_surface;
     struct xdg_toplevel*                xdg_toplevel;
     struct zxdg_toplevel_decoration_v1* toplevel_decoration;
+
+    struct wl_callback* active_frame_callback;
 
     struct org_kde_kwin_blur* kde_kwin_blur;
 
@@ -1033,7 +1034,8 @@ static void WindowWl_clipboard_get(struct WindowBase* self)
 static void frame_handle_done(void* data, struct wl_callback* callback, uint32_t time)
 {
     wl_callback_destroy(callback);
-    windowWl(((struct WindowBase*)data))->draw_next_frame = true;
+    windowWl(((struct WindowBase*)data))->active_frame_callback = NULL;
+    windowWl(((struct WindowBase*)data))->draw_next_frame       = true;
 }
 
 static struct wl_callback_listener frame_listener = {
@@ -2849,8 +2851,9 @@ static void WindowWl_swap_buffers(WindowBase* self)
         ERR("EGL buffer swap failed: %s\n", egl_get_error_string(eglGetError()));
     }
 
-    struct wl_callback* frame_callback = wl_surface_frame(windowWl(self)->surface);
-    wl_callback_add_listener(frame_callback, &frame_listener, self);
+    windowWl(self)->active_frame_callback = wl_surface_frame(windowWl(self)->surface);
+
+    wl_callback_add_listener(windowWl(self)->active_frame_callback, &frame_listener, self);
 }
 
 static bool WindowWl_maybe_swap(WindowBase* self, bool do_swap)
@@ -2934,7 +2937,18 @@ static void WindowWl_set_title(struct WindowBase* self, const char* title)
 
 static void WindowWl_destroy(struct WindowBase* self)
 {
-    WindowWl_set_no_context();
+    WindowWl_destroy_csd(self);
+
+    if (windowWl(self)->active_frame_callback) {
+        wl_callback_destroy(windowWl(self)->active_frame_callback);
+        windowWl(self)->active_frame_callback = NULL;
+    }
+
+    wl_display_roundtrip(globalWl->display);
+    wl_display_dispatch_pending(globalWl->display);
+    wl_display_flush(globalWl->display);
+
+    wl_pointer_release(globalWl->pointer);
 
     if (globalWl->cursor_theme) {
         wl_surface_destroy(globalWl->cursor_surface);
@@ -2948,10 +2962,6 @@ static void WindowWl_destroy(struct WindowBase* self)
     if (globalWl->kde_kwin_blur_manager) {
         org_kde_kwin_blur_manager_destroy(globalWl->kde_kwin_blur_manager);
     }
-
-    wl_egl_window_destroy(windowWl(self)->egl_window);
-    eglDestroySurface(globalWl->egl_display, windowWl(self)->egl_surface);
-    eglDestroyContext(globalWl->egl_display, windowWl(self)->egl_context);
 
     if (globalWl->decoration_manager && windowWl(self)->toplevel_decoration) {
         zxdg_toplevel_decoration_v1_destroy(windowWl(self)->toplevel_decoration);
@@ -2982,15 +2992,18 @@ static void WindowWl_destroy(struct WindowBase* self)
         zwp_primary_selection_source_v1_destroy(windowWl(self)->primary_source);
     }
 
+    wl_egl_window_destroy(windowWl(self)->egl_window);
+    eglDestroySurface(globalWl->egl_display, windowWl(self)->egl_surface);
+    eglDestroyContext(globalWl->egl_display, windowWl(self)->egl_context);
+
     if (globalWl->subcompositor) {
         wl_subcompositor_destroy(globalWl->subcompositor);
     }
 
-    eglTerminate(globalWl->egl_display);
-    eglReleaseThread();
-
     wl_registry_destroy(globalWl->registry);
     wl_display_disconnect(globalWl->display);
+
+    eglTerminate(globalWl->egl_display);
 
     Map_destroy_wl_output_ptr_WlOutputInfo(&windowWl(self)->outputs);
 

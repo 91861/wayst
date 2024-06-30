@@ -268,6 +268,8 @@ static inline bool Window_maybe_swap(struct WindowBase* self, bool do_swap)
 
 static inline void Window_destroy(struct WindowBase* self)
 {
+    memset(&self->callbacks, 0, sizeof(self->callbacks));
+
     free(self->output_name);
     self->output_name = NULL;
 
