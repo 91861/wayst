@@ -9,7 +9,6 @@ BLD_DIR = build
 TGT_DIR = .
 
 ifeq ($(shell uname -s),FreeBSD)
-	CC?= gcc
 	INCLUDES = -I/usr/local/include/freetype2/
 	INCLUDES += -I/usr/local/include
 	LDLIBS = -lGL -lfreetype -lfontconfig -lutil -L/usr/local/lib -lm
