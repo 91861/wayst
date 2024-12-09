@@ -1,5 +1,6 @@
 #include "config_parser.h"
 
+#include <ctype.h>
 #include <stdbool.h>
 
 static inline bool call_on_syntax_error_helper(

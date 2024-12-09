@@ -2,19 +2,20 @@
 
 #include "monitor.h"
 
+#include <errno.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <sys/wait.h>
+
 #ifdef __FreeBSD__
 #include <utmpx.h>
 #else
 #include <utmp.h>
 #endif
 
-#include <errno.h>
-#include <stdbool.h>
-#include <stdint.h>
-
+#include "settings.h"
 #include "vector.h"
 
 typedef struct
@@ -39,7 +40,7 @@ void sighandler(int sig)
             }
             if (info->child_pid == p) {
                 if (status) {
-                    WRN("Child process \'%s\' (pid: %d) exited with status code %d\n",
+                    WRN("Child process \'%s\' (pid: %d) exited with code %d\n",
                         settings.shell.str,
                         p,
                         status);

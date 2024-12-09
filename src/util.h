@@ -4,8 +4,8 @@
 
 #define _GNU_SOURCE
 
-#include <ctype.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -450,7 +450,7 @@ bool streq_glob(const char* restrict str, const char* restrict pattern);
 
 /**
  * Get hostname. Caller should free() */
-char* get_hostname();
+__attribute__((warn_unused_result)) char* get_hostname();
 
 int spawn_process(const char* opt_work_directory,
                   const char* command,
@@ -491,6 +491,31 @@ static inline bool strtob2(const char* restrict str, bool* opt_fail)
     }
 
     return false;
+}
+
+static inline intmax_t strtoint(const char* restrict str)
+{
+    if (!str) {
+        return false;
+    }
+    errno = 0;
+    return strtoimax(str, NULL, 10);
+}
+
+static inline intmax_t strtoint2(const char* restrict str, bool* opt_fail)
+{
+    if (!str) {
+        return false;
+    }
+
+    errno          = 0;
+    intmax_t value = strtoimax(str, NULL, 10);
+
+    if (errno && opt_fail) {
+        *opt_fail = true;
+    }
+
+    return value;
 }
 
 static inline bool unicode_is_combining(char32_t codepoint)
@@ -536,7 +561,7 @@ static inline bool is_in_tmp_dir(const char* path)
 
 /**
  * Get full path to this binary file. Caller should free() */
-static inline char* get_running_binary_path()
+__attribute__((warn_unused_result)) static inline char* get_running_binary_path()
 {
     return realpath("/proc/self/exe", 0);
 }

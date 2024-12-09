@@ -1,17 +1,15 @@
 /* See LICENSE for license information. */
 
 #define _GNU_SOURCE
-#include <unistd.h>
 
 #include "colors.h"
+#include "settings.h"
 #include "timing.h"
-
+#include "util.h"
 #include "vt.h"
+#include "vt_img_proto.h"
 #include "vt_private.h"
 #include "vt_shell.h"
-
-#include "settings.h"
-#include "util.h"
 
 #include <fcntl.h>
 #include <limits.h>
@@ -24,8 +22,7 @@
 #include <sys/wait.h>
 #include <termios.h>
 #include <uchar.h>
-
-#include "vt_img_proto.h"
+#include <unistd.h>
 
 static void Vt_shift_global_line_index_refs(Vt* self, size_t point, int64_t change, bool refs_only);
 static inline size_t Vt_top_line(const Vt* const self);
@@ -2830,13 +2827,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                                             break;
 
                                         case 1: /* ...from start to cursor */
-                                            if (Vt_scroll_region_not_default(self) ||
-                                                Vt_alt_buffer_enabled(self)) {
-                                                Vt_clear_above(self);
-                                            } else {
-                                                Vt_clear_above(self);
-                                                // Vt_scroll_out_above(self);
-                                            }
+                                            Vt_clear_above(self);
                                             break;
 
                                         case 3: /* ...whole display + scrollback buffer */
@@ -3934,8 +3925,9 @@ static void Vt_handle_APC(Vt* self, char c)
                         format = atoi(arg + 2);
                     } else if (strstr(arg, "i=")) {
                         long tmp = atol(arg + 2);
-                        if (tmp > 0)
+                        if (tmp > 0) {
                             id = MIN(tmp, UINT32_MAX);
+                        }
                     } else if (strstr(arg, "s=")) {
                         image_width = atoi(arg + 2);
                     } else if (strstr(arg, "v=")) {
@@ -4123,7 +4115,7 @@ static void Vt_handle_APC(Vt* self, char c)
                                   display_args.anchor_offset_y + Vt_top_line(self) - 1))
                             } break;
 
-                            /* Delete all  on given z-layer (z=) */
+                            /* Delete all on given z-layer (z=) */
                             case 'z':
                             case 'Z': {
                                 L_DELETE_IMG_VIEWS_FILTERED(view->z_layer == display_args.z_layer)
@@ -5192,9 +5184,8 @@ static inline void Vt_scroll_out_above(Vt* self)
 
 static inline void Vt_clear_above(Vt* self)
 {
-    for (size_t i = Vt_visual_top_line(self); i < self->cursor.row; ++i) {
+    for (size_t i = Vt_top_line(self); i < self->cursor.row; ++i) {
         self->lines.buf[i].data.size = 0;
-        Vt_empty_line_fill_bg(self, i);
         Vt_sixel_clear_line(self, i);
     }
     Vt_clear_left(self);

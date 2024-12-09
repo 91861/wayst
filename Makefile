@@ -11,11 +11,11 @@ TGT_DIR = .
 ifeq ($(shell uname -s),FreeBSD)
 	INCLUDES = -I/usr/local/include/freetype2/
 	INCLUDES += -I/usr/local/include
-	LDLIBS = -lGL -lfreetype -lfontconfig -lutil -L/usr/local/lib -lm
+	LDLIBS = -lfreetype -lfontconfig -lutil -L/usr/local/lib -lm
 else
 	CC?= cc
 	INCLUDES = -I/usr/include/freetype2/
-	LDLIBS = -lGL -lfreetype -lfontconfig -lutil -L/usr/lib -lm
+	LDLIBS = -lfreetype -lfontconfig -lutil -L/usr/lib -lm
 endif
 
 ifeq ($(mode),sanitized)
@@ -33,6 +33,9 @@ else ifeq ($(mode),debugoptimized)
 	CFLAGS = -std=c18 -MD -g -O2 -fno-omit-frame-pointer -mtune=generic -ffast-math -fshort-enums -DDEBUG
 	LDFLAGS = -O2 -g
 	LDLIBS += -lGLU
+else ifeq ($(mode),quick)
+	CFLAGS = -std=c18 -MD -fshort-enums
+	LDFLAGS =
 else
 	CFLAGS = -std=c18 -MD -O2 -mtune=generic -ffast-math -fshort-enums -flto=auto
 	LDFLAGS = -O2 -flto=auto
@@ -99,7 +102,7 @@ cleanall:
 	$(RM) -f $(EXEC) $(OBJ) $(OBJ:.o=.d)
 
 install:
-	@cp $(EXEC) $(INSTALL_DIR)/
+	cp $(EXEC) $(INSTALL_DIR)/
 
 uninstall:
 	$(RM) $(INSTALL_DIR)/$(EXEC)

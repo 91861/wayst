@@ -1,5 +1,6 @@
 #include "base64.h"
 #include "util.h"
+
 #include <ctype.h>
 #include <stdint.h>
 

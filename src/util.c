@@ -1,5 +1,8 @@
 #include "util.h"
 
+#include <ctype.h>
+
+
 /** check string equality case insensitive */
 bool strneqci(const char* restrict s1, const char* restrict s2, const size_t n)
 {

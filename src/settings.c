@@ -1,12 +1,13 @@
 /* See LICENSE for license information. */
+#define _GNU_SOURCE
 
 #include "colors.h"
-#define _GNU_SOURCE
+#include <stdlib.h>
+#include <sys/types.h>
 
 #include <errno.h>
 #include <getopt.h>
 #include <locale.h>
-#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -1228,7 +1229,7 @@ static void handle_option(const char opt, const int array_index, const char* val
         case OPT_DEBUG_VT_IDX:
             settings.debug_vt = true;
             if (value) {
-                settings.vt_debug_delay_usec = atoi(value);
+                settings.vt_debug_delay_usec = strtol(value, NULL, 10);
             }
             break;
 
@@ -1298,7 +1299,7 @@ static void handle_option(const char opt, const int array_index, const char* val
                 case 0:
                     if (buf.size > 1 && *buf.buf != '0' &&
                         buf.size - 1 == strspn(buf.buf, "0123456789")) {
-                        prefs.output_index = atoi(buf.buf);
+                        prefs.output_index = strtoul(buf.buf, NULL, 10);
                     } else {
                         prefs.output_name = strdup(buf.buf);
                     }

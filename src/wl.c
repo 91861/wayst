@@ -437,7 +437,15 @@ static void primary_selection_source_listener_handle_send(
 
     if (w->primary_source_text && is_supported_mime) {
         LOG("writing \'%s\' to fd\n", w->primary_source_text);
-        write(fd, w->primary_source_text, strlen(w->primary_source_text));
+        size_t len = strlen(w->primary_source_text);
+        if (len <= SSIZE_MAX) {
+            ssize_t bytes = write(fd, w->primary_source_text, len);
+            if (bytes != (ssize_t)len) {
+                WRN("could not write to pipe %s\n", strerror(errno))
+            }
+        } else {
+            WRN("could not write to pipe buffer too large");
+        }
     }
 
     close(fd);
@@ -2256,7 +2264,15 @@ static void data_source_handle_send(void*                  data,
 
     if (w->data_source_text && is_supported_mime) {
         LOG("writing \'%s\' to fd\n", w->data_source_text);
-        write(fd, w->data_source_text, strlen(w->data_source_text));
+        size_t len = strlen(w->data_source_text);
+        if (len <= SSIZE_MAX) {
+            ssize_t bytes = write(fd, w->data_source_text, len);
+            if (bytes != (ssize_t)len) {
+                WRN("could not write to pipe %s\n", strerror(errno))
+            }
+        } else {
+            WRN("could not write to pipe buffer too large");
+        }
     }
 
     close(fd);

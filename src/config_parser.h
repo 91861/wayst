@@ -2,7 +2,6 @@
 
 #include <stdarg.h>
 
-#include "util.h"
 #include "vector.h"
 
 DEF_VECTOR(char, NULL)

@@ -12,8 +12,8 @@
  */
 
 #define _GNU_SOURCE
-#include "timing.h"
 #include "gfx.h"
+#include "timing.h"
 #include "util.h"
 #include "window.h"
 #include <stdint.h>
@@ -36,10 +36,10 @@
 #include "freetype.h"
 #include "html.h"
 #include "key.h"
+#include "monitor.h"
 #include "settings.h"
 #include "ui.h"
 #include "vt.h"
-#include "monitor.h"
 
 #ifndef DOUBLE_CLICK_DELAY_MS
 #define DOUBLE_CLICK_DELAY_MS 300
@@ -389,7 +389,7 @@ static void App_init(App* self)
     Pair_uint32_t cell_dims = { .first  = pixels.first / settings.cols,
                                 .second = pixels.second / settings.rows };
 
-    pixels.first  += settings.padding * 2;
+    pixels.first += settings.padding * 2;
     pixels.second += settings.padding * 2;
 
     App_create_window(self, pixels, cell_dims);
@@ -526,6 +526,16 @@ static void App_run(App* self)
         App_maybe_resize(self, Window_size(self->win));
         TimerManager_update(&self->timer_manager);
         App_update_cursor(self);
+
+        if (self->ui.hovered_link.active) {
+            App_update_hover(self,
+                             CLAMP(self->win->pointer_x - self->ui.pixel_offset_x,
+                                   0,
+                                   (int32_t)self->resolution.first),
+                             CLAMP(self->win->pointer_y - self->ui.pixel_offset_y,
+                                   0,
+                                   (int32_t)self->resolution.second));
+        }
 
         if (self->gfx->has_blinking_text) {
             if (!self->tex_blink_animation_should_play) {
@@ -733,7 +743,7 @@ static Pair_uint32_t App_get_char_size(void* self)
         res.second -= (UI_CSD_TITLEBAR_HEIGHT_PX);
     }
 
-    res.first  -= settings.padding * 2;
+    res.first -= settings.padding * 2;
     res.second -= settings.padding * 2;
 
     return Gfx_get_char_size(app->gfx, res);

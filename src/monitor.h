@@ -1,4 +1,3 @@
-
 #pragma once
 
 #define _GNU_SOURCE
@@ -15,7 +14,6 @@
 
 #include <poll.h>
 
-#include "settings.h"
 #include "util.h"
 
 #ifndef MONITOR_INPUT_BUFFER_SZ
@@ -24,16 +22,17 @@
 
 #define MONITOR_WRITE_WOULD_BLOCK (-1)
 
+#define CHILD_FD_IDX 0
+#define EXTRA_FD_IDX 1
+
 typedef struct
 {
     int           child_fd, parent_fd, extra_fd;
     struct pollfd pollfds[2];
-#define CHILD_FD_IDX 0
-#define EXTRA_FD_IDX 1
-    bool  read_info_up_to_date;
-    pid_t child_pid;
-    bool  child_is_dead;
-    char  input_buffer[MONITOR_INPUT_BUFFER_SZ];
+    bool          read_info_up_to_date;
+    pid_t         child_pid;
+    bool          child_is_dead;
+    char          input_buffer[MONITOR_INPUT_BUFFER_SZ];
 
     struct MonitorCallbacks
     {

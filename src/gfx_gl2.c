@@ -1,6 +1,7 @@
 /* See LICENSE for license information. */
 
 #include "vt.h"
+#include <stdint.h>
 #define _GNU_SOURCE
 
 #include "gfx_gl2_boxdraw_page.h"
@@ -1295,14 +1296,18 @@ static void GfxOpenGL2_draw_line_quads(GfxOpenGL2*   gfx,
 {
     if (likely(vt_line->proxy.data[PROXY_INDEX_TEXTURE] ||
                (vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK]))) {
-        uint8_t tidx = PROXY_INDEX_TEXTURE;
-        if (unlikely(vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK] && !ui->draw_text_blinking)) {
-            tidx = PROXY_INDEX_TEXTURE_BLINK;
-        }
 
-        GLuint tex_id = vt_line->proxy.data[tidx];
-        glBindTexture(GL_TEXTURE_2D, tex_id);
-        glDrawArrays(QUAD_DRAW_MODE, quad_index * QUAD_V_SZ, QUAD_V_SZ);
+        if (vt_line->data.size) {
+            uint8_t tidx = PROXY_INDEX_TEXTURE;
+            if (unlikely(vt_line->proxy.data[PROXY_INDEX_TEXTURE_BLINK] &&
+                         !ui->draw_text_blinking)) {
+                tidx = PROXY_INDEX_TEXTURE_BLINK;
+            }
+
+            GLuint tex_id = vt_line->proxy.data[tidx];
+            glBindTexture(GL_TEXTURE_2D, tex_id);
+            glDrawArrays(QUAD_DRAW_MODE, quad_index * QUAD_V_SZ, QUAD_V_SZ);
+        }
     }
 }
 
@@ -1330,26 +1335,37 @@ typedef struct
     line_render_subpass_args_t* prepared_subpass;
     line_render_pass_args_t     args;
     line_render_subpass_args_t  subpass_args[2];
-    GLuint                      final_texture;
-    GLuint                      final_depthbuffer;
-    uint32_t                    texture_width;
-    uint32_t                    texture_height;
-    uint16_t                    length;
-    uint8_t                     n_queued_subpasses;
-    bool                        has_blinking_chars;
-    bool                        has_underlined_chars;
-    bool                        is_reusing;
+
+    GLuint final_texture;
+    GLuint final_depthbuffer;
+
+    uint32_t texture_width;
+    uint32_t texture_height;
+
+    /* number of cells that should be painted over. May be larger than damage and render range */
+    uint32_t clear_cell_count;
+
+    uint16_t length;
+    uint8_t  n_queued_subpasses;
+    bool     has_blinking_chars;
+    bool     has_underlined_chars;
+
+    /* reusing texture from a previous frame - may contain out of date pixels */
+    bool is_reusing;
 } line_render_pass_t;
 
-static void line_render_pass_run(line_render_pass_t* self);
+static void line_render_pass_run(line_render_pass_t* self, uint8_t buffer_age);
 
-static bool should_create_line_render_pass(const line_render_pass_args_t* args)
+static bool should_create_line_render_pass(const line_render_pass_args_t* args, uint8_t buffer_age)
 {
     vt_line_damage_t* dmg = OR(args->damage, &args->vt_line->damage);
-    return !likely(!(args->vt_line &&
-                     (args->vt_line->data.size || (args->vt_line->graphic_attachments &&
-                                                   args->vt_line->graphic_attachments->sixels))) ||
-                   (dmg->type == VT_LINE_DAMAGE_NONE));
+
+    bool has_sixels =
+      (args->vt_line->graphic_attachments && args->vt_line->graphic_attachments->sixels);
+
+    bool has_content = (args->vt_line->data.size || has_sixels);
+
+    return !likely(!(has_content) || (dmg->type == VT_LINE_DAMAGE_NONE));
 }
 
 static line_render_pass_t create_line_render_pass(const line_render_pass_args_t* args)
@@ -1418,10 +1434,12 @@ static void line_render_pass_try_to_recover_proxies(line_render_pass_t* self)
 #endif
 }
 
-static void line_render_pass_set_up_subpasses(line_render_pass_t* self)
+static void line_render_pass_set_up_subpasses(line_render_pass_t* self, uint8_t buffer_age)
 {
-#define CURSOR_OVERPAINT_FWD  3
-#define CURSOR_OVERPAINT_BACK 4
+    const uint16_t CURSOR_OVERPAINT_FWD  = 3;
+    const uint16_t CURSOR_OVERPAINT_BACK = 4;
+
+    self->clear_cell_count = 0;
 
     if (self->args.is_for_cursor) {
         uint16_t range_begin_idx = self->args.cnd_cursor_column;
@@ -1466,7 +1484,7 @@ static void line_render_pass_set_up_subpasses(line_render_pass_t* self)
                     range_begin_idx = 0;
                 }
 
-                while (range_end_idx < self->args.vt_line->data.size && range_end_idx) {
+                while (range_end_idx < ln->data.size && range_end_idx) {
                     Rune this_rune = ln->data.buf[range_end_idx].rune;
                     Rune prev_rune = ln->data.buf[range_end_idx - 1].rune;
                     ++range_end_idx;
@@ -1474,6 +1492,20 @@ static void line_render_pass_set_up_subpasses(line_render_pass_t* self)
                     if (Rune_is_blank(this_rune) && Rune_width_spill(prev_rune) < 2) {
                         break;
                     }
+                }
+
+                uint32_t n_lines = self->args.gl2->line_damage.n_lines;
+                uint32_t ix      = self->args.visual_index + 1 * n_lines + (buffer_age * n_lines);
+                uint16_t previous_frame_length = self->args.gl2->line_damage.line_length[ix];
+                uint16_t previous_frame_id = self->args.gl2->line_damage.proxy_color_component[ix];
+
+                /* This line contains garbage beyond the damaged region that needs to be cleared. */
+                if (previous_frame_id != ln->proxy.data[PROXY_INDEX_TEXTURE]) {
+                    range_end_idx          = ln->data.size;
+                    self->clear_cell_count = Vt_col(self->args.vt);
+                } else if (previous_frame_length > range_end_idx) {
+                    range_end_idx          = ln->data.size;
+                    self->clear_cell_count = previous_frame_length;
                 }
 
                 self->subpass_args[0] = (line_render_subpass_args_t){
@@ -1487,6 +1519,18 @@ static void line_render_pass_set_up_subpasses(line_render_pass_t* self)
             case VT_LINE_DAMAGE_SHIFT:
                 // TODO:
             case VT_LINE_DAMAGE_FULL: {
+
+                uint32_t n_lines = self->args.gl2->line_damage.n_lines;
+                uint32_t ix      = self->args.visual_index + 1 * n_lines + (buffer_age * n_lines);
+                uint16_t previous_frame_length = self->args.gl2->line_damage.line_length[ix];
+                uint16_t previous_frame_id = self->args.gl2->line_damage.proxy_color_component[ix];
+
+                if (previous_frame_id != ln->proxy.data[PROXY_INDEX_TEXTURE]) {
+                    self->clear_cell_count = Vt_col(self->args.vt);
+                } else if (previous_frame_length > self->length) {
+                    self->clear_cell_count = previous_frame_length;
+                }
+
                 self->subpass_args[0] = (line_render_subpass_args_t){
                     .render_range_begin = 0,
                     .render_range_end   = self->length,
@@ -2129,8 +2173,8 @@ static void line_render_pass_run_cell_subpass(line_render_pass_t*    pass,
                         }
 
                     } // end for each block with the same color
-                }     // end for each char
-            }         // end for each block with the same bg
+                } // end for each char
+            } // end for each block with the same bg
 
             bg_pixels_begin = (idx_each_rune + extra_width) * pass->args.gl2->glyph_width_pixels;
 
@@ -2440,10 +2484,13 @@ static void line_render_pass_run_line_subpass(const line_render_pass_t* pass,
             line_color = nc;
         }
     }
+
+#undef L_SET_BOUNDS_BEGIN
 }
 
 static void line_render_subpass_run_clear_stage(const line_render_pass_t* self,
-                                                line_render_subpass_t*    subpass)
+                                                line_render_subpass_t*    subpass,
+                                                uint8_t                   buffer_age)
 {
     glViewport(0, 0, self->texture_width, self->texture_height);
     glBindTexture(GL_TEXTURE_2D, 0);
@@ -2475,9 +2522,12 @@ static void line_render_subpass_run_clear_stage(const line_render_pass_t* self,
 
     if (self->args.damage->type == VT_LINE_DAMAGE_RANGE) {
         glEnable(GL_SCISSOR_TEST);
-        size_t begin_px = self->args.gl2->glyph_width_pixels * self->args.damage->front;
-        size_t width_px = ((self->args.damage->end + 1) - self->args.damage->front) *
-                          self->args.gl2->glyph_width_pixels;
+
+        uint16_t width_cells = MAX(subpass->args.render_range_end, self->clear_cell_count);
+        size_t   begin_px = self->args.gl2->glyph_width_pixels * subpass->args.render_range_begin;
+        size_t   width_px =
+          (width_cells - subpass->args.render_range_begin) * self->args.gl2->glyph_width_pixels;
+
         glScissor(begin_px, 0, width_px, self->texture_height);
     } else {
         glDisable(GL_SCISSOR_TEST);
@@ -2496,9 +2546,11 @@ static void line_render_subpass_run_clear_stage(const line_render_pass_t* self,
 #endif
 }
 
-static void line_render_pass_run_subpass(line_render_pass_t* pass, line_render_subpass_t* subpass)
+static void line_render_pass_run_subpass(line_render_pass_t*    pass,
+                                         line_render_subpass_t* subpass,
+                                         uint8_t                buffer_age)
 {
-    line_render_subpass_run_clear_stage(pass, subpass);
+    line_render_subpass_run_clear_stage(pass, subpass, buffer_age);
     line_render_pass_run_cell_subpass(pass, subpass);
 
     if (pass->has_underlined_chars) {
@@ -2512,14 +2564,14 @@ static void line_render_pass_run_subpass(line_render_pass_t* pass, line_render_s
     }
 }
 
-static void line_render_pass_run_initial_setup(line_render_pass_t* self)
+static void line_render_pass_run_initial_setup(line_render_pass_t* self, uint8_t buffer_age)
 {
     line_render_pass_try_to_recover_proxies(self);
     line_render_pass_set_up_framebuffer(self);
-    line_render_pass_set_up_subpasses(self);
+    line_render_pass_set_up_subpasses(self, buffer_age);
 }
 
-static Pair_uint16_t line_render_pass_run_subpasses(line_render_pass_t* self)
+static Pair_uint16_t line_render_pass_run_subpasses(line_render_pass_t* self, uint8_t buffer_age)
 {
     Pair_uint16_t retval = { .first = self->args.vt_line->data.size - 1, .second = 0 };
 
@@ -2529,23 +2581,24 @@ static Pair_uint16_t line_render_pass_run_subpasses(line_render_pass_t* self)
         retval.first  = MIN(retval.first, sub.args.render_range_begin);
         retval.second = MAX(retval.second, sub.args.render_range_end);
 
-        line_render_pass_run_subpass(self, &sub);
+        line_render_pass_run_subpass(self, &sub, buffer_age);
     }
 
     return retval;
 }
 
-static void line_render_pass_run(line_render_pass_t* self)
+static void line_render_pass_run(line_render_pass_t* self, uint8_t buffer_age)
 {
-    line_render_pass_run_initial_setup(self);
-    line_render_pass_run_subpasses(self);
+    line_render_pass_run_initial_setup(self, buffer_age);
+    line_render_pass_run_subpasses(self, buffer_age);
 }
 
 static void _GfxOpenGL2_draw_block_cursor(GfxOpenGL2* gfx,
                                           Vt*         vt,
                                           const Ui*   ui,
                                           ColorRGBA   clr,
-                                          size_t      row)
+                                          size_t      row,
+                                          uint8_t     buffer_age)
 {
     ((vt_line_damage_t*)&ui->cursor_damage)->type = VT_LINE_DAMAGE_FULL;
     VtLine* vt_line                               = Vt_line_at(vt, ui->cursor->row);
@@ -2565,18 +2618,18 @@ static void _GfxOpenGL2_draw_block_cursor(GfxOpenGL2* gfx,
         .is_for_blinking   = false,
     };
 
-    if (vt_line && should_create_line_render_pass(&rp_args)) {
+    if (vt_line && should_create_line_render_pass(&rp_args, buffer_age)) {
         gfx->bound_resources  = BOUND_RESOURCES_NONE;
         line_render_pass_t rp = create_line_render_pass(&rp_args);
 
-        line_render_pass_run(&rp);
+        line_render_pass_run(&rp, buffer_age);
 
         if (rp.has_blinking_chars) {
             gfxBase(gfx)->has_blinking_text = true;
             rp_args.is_for_blinking         = true;
             gfx->bound_resources            = BOUND_RESOURCES_NONE;
             line_render_pass_t rp_b         = create_line_render_pass(&rp_args);
-            line_render_pass_run(&rp_b);
+            line_render_pass_run(&rp_b, buffer_age);
             rp_b.has_blinking_chars = true;
             line_render_pass_finalize(&rp_b);
             rp_args.is_for_blinking = false;
@@ -2664,7 +2717,7 @@ static void _GfxOpenGL2_draw_block_cursor(GfxOpenGL2* gfx,
 #endif
 }
 
-static void GfxOpenGL2_draw_cursor(GfxOpenGL2* gfx, Vt* vt, const Ui* ui)
+static void GfxOpenGL2_draw_cursor(GfxOpenGL2* gfx, Vt* vt, const Ui* ui, uint8_t buffer_age)
 {
     if (!ui || !ui->cursor) {
         return;
@@ -2793,7 +2846,7 @@ static void GfxOpenGL2_draw_cursor(GfxOpenGL2* gfx, Vt* vt, const Ui* ui)
                      gfx->vec_vertex_buffer.size);
         ARRAY_BUFFER_ORPHAN(gfx->flex_vbo.size);
     } else {
-        _GfxOpenGL2_draw_block_cursor(gfx, vt, ui, clr, row);
+        _GfxOpenGL2_draw_block_cursor(gfx, vt, ui, clr, row, buffer_age);
     }
 
     glDisable(GL_SCISSOR_TEST);
@@ -3071,12 +3124,12 @@ static void GfxOpenGL2_draw_hovered_link(GfxOpenGL2* self, const Vt* vt, const U
     ARRAY_BUFFER_ORPHAN(self->flex_vbo.size);
 }
 
-static void GfxOpenGL2_draw_overlays(GfxOpenGL2* self, Vt* vt, const Ui* ui)
+static void GfxOpenGL2_draw_overlays(GfxOpenGL2* self, Vt* vt, const Ui* ui, uint8_t buffer_age)
 {
     if (vt->unicode_input.active) {
         GfxOpenGL2_draw_unicode_input(self, vt);
     } else {
-        GfxOpenGL2_draw_cursor(self, vt, ui);
+        GfxOpenGL2_draw_cursor(self, vt, ui, buffer_age);
     }
 
     if (ui->scrollbar.visible) {
@@ -3883,7 +3936,7 @@ window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, Vt* vt, Ui* ui, uint8_
             .is_for_blinking = false,
         };
 
-        bool should_repaint = should_create_line_render_pass(&rp_args);
+        bool should_repaint = should_create_line_render_pass(&rp_args, buffer_age);
         if (rp_args.visual_index < gfx->line_damage.n_lines) {
             gfx->line_damage.damage_history[rp_args.visual_index] = should_repaint;
         }
@@ -3891,9 +3944,9 @@ window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, Vt* vt, Ui* ui, uint8_
         if (should_repaint) {
             gfx->bound_resources  = BOUND_RESOURCES_NONE;
             line_render_pass_t rp = create_line_render_pass(&rp_args);
-            line_render_pass_run_initial_setup(&rp);
+            line_render_pass_run_initial_setup(&rp, buffer_age);
 
-            Pair_uint16_t damage = line_render_pass_run_subpasses(&rp);
+            Pair_uint16_t damage = line_render_pass_run_subpasses(&rp, buffer_age);
 
             uint16_t dam_len = (damage.second < damage.first) ? (uint16_t)i->data.size
                                                               : (damage.second - damage.first) + 1;
@@ -3924,7 +3977,7 @@ window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, Vt* vt, Ui* ui, uint8_
                 gfx->bound_resources    = BOUND_RESOURCES_NONE;
                 rp_args.is_for_blinking = true;
                 line_render_pass_t rp_b = create_line_render_pass(&rp_args);
-                line_render_pass_run(&rp_b);
+                line_render_pass_run(&rp_b, buffer_age);
                 rp_b.has_blinking_chars = true;
                 line_render_pass_finalize(&rp_b);
                 rp_args.is_for_blinking = false;
@@ -3987,7 +4040,7 @@ window_partial_swap_request_t* GfxOpenGL2_draw(Gfx* self, Vt* vt, Ui* ui, uint8_
     }
 
     GfxOpenGL2_draw_images(gfx, vt, false);
-    GfxOpenGL2_draw_overlays(gfx, vt, ui);
+    GfxOpenGL2_draw_overlays(gfx, vt, ui, buffer_age);
 
     if (ui->flash_fraction != 0.0) {
         retval = NULL;
