@@ -828,7 +828,6 @@ static WindowBase* WindowX11_new(uint32_t  w,
     }
 
     XSync(globalX11->display, False);
-    XMapWindow(globalX11->display, windowX11(win)->window);
     glXMakeCurrent(globalX11->display, windowX11(win)->window, windowX11(win)->glx_context);
 
     if (init_globals) {
@@ -926,9 +925,20 @@ static WindowBase* WindowX11_new(uint32_t  w,
                         1);
     }
 
+    WindowX11_set_wm_name(win,
+                          OR(settings.user_app_id, APPLICATION_NAME),
+                          OR(settings.user_app_id_2, NULL));
+
+    WindowX11_set_title(win, settings.title.str);
+    WindowX11_set_decoration_theme_hint(win, settings.decoration_theme);
+
+    // TODO: WM_COMMAND(STRING) = { "wayst", "--foo", "bar" }
+
+    XMapWindow(globalX11->display, windowX11(win)->window);
+
     WindowX11_update_monitors_info(win);
     WindowX11_update_monitor_placement(win);
-    WindowX11_set_decoration_theme_hint(win, settings.decoration_theme);
+
     XFlush(globalX11->display);
 
     return win;
@@ -1001,19 +1011,6 @@ WindowBase* Window_new_x11(Pair_uint32_t res, Pair_uint32_t cell_dims, gfx_api_t
 {
     WindowBase* win =
       WindowX11_new(res.first, res.second, cell_dims.first, cell_dims.second, gfx_api, ui);
-
-    if (!win) {
-        return NULL;
-    }
-
-    win->title = NULL;
-    WindowX11_set_wm_name(win,
-                          OR(settings.user_app_id, APPLICATION_NAME),
-                          OR(settings.user_app_id_2, NULL));
-
-    WindowX11_set_title(win, settings.title.str);
-
-    // TODO: WM_COMMAND(STRING) = { "wayst", "--foo", "bar" }
 
     return win;
 }
