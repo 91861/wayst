@@ -700,9 +700,16 @@ typedef struct
         void (*destroy_sixel_proxy)(void*, VtSixelSurfaceProxy*);
     } callbacks;
 
-    uint32_t last_click_x;
-    uint32_t last_click_y;
-    double   pixels_per_cell_x, pixels_per_cell_y;
+    struct PointerReportHistory
+    {
+        uint16_t click_x;
+        uint16_t click_y;
+
+        uint16_t motion_x;
+        uint16_t motion_y;
+    } pointer_report_hisotry;
+
+    double pixels_per_cell_x, pixels_per_cell_y;
 
     bool   scrolling_visual;
     size_t visual_scroll_top;

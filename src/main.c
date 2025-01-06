@@ -2355,13 +2355,18 @@ static void App_motion_handler(void* self, uint32_t button, int32_t x, int32_t y
     if (button) {
         if (!App_scrollbar_consume_drag(self, button, x, y) &&
             !App_consume_drag(self, button, x, y)) {
-            Vt_handle_motion(&app->vt, button, x, y);
+            if (Vt_reports_mouse(&app->vt)) {
+                Vt_handle_motion(&app->vt, button, x, y);
+            }
         }
         if (app->selection_dragging_left) {
             Window_set_pointer_style(app->win, MOUSE_POINTER_I_BEAM);
         }
     } else {
         App_update_hover(app, x, y);
+        if (Vt_reports_mouse(&app->vt)) {
+            Vt_handle_motion(&app->vt, button, x, y);
+        }
     }
 }
 

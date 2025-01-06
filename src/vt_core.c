@@ -6365,6 +6365,31 @@ void Vt_start_unicode_input(Vt* self)
     self->defered_events.repaint = true;
 }
 
+static bool Vt_pointer_within_window(Vt* self, int32_t x_pixel, int32_t y_pixel)
+{
+    return x_pixel >= 0 && x_pixel <= self->ws.ws_xpixel && y_pixel >= 0 &&
+           y_pixel <= self->ws.ws_ypixel;
+}
+
+typedef enum
+{
+    MOTION_INDICATOR_NO  = 0,
+    MOTION_INDICATOR_YES = 32,
+} xterm_motion_indicator;
+
+// Get reported motion indicator for an event in a given cell position
+static xterm_motion_indicator Vt_get_xterm_pointer_event_motion_indicator(Vt*      self,
+                                                                          uint16_t cell_x,
+                                                                          uint16_t cell_y)
+{
+    if (self->pointer_report_hisotry.motion_x != cell_x ||
+        self->pointer_report_hisotry.motion_y != cell_y) {
+        return MOTION_INDICATOR_YES;
+    }
+
+    return MOTION_INDICATOR_NO;
+}
+
 void Vt_handle_button(void*    _self,
                       uint32_t button,
                       bool     state,
@@ -6373,57 +6398,67 @@ void Vt_handle_button(void*    _self,
                       int32_t  ammount,
                       uint32_t mods)
 {
-    Vt*  self        = _self;
-    bool in_window   = x >= 0 && x <= self->ws.ws_xpixel && y >= 0 && y <= self->ws.ws_ypixel;
+    Vt* self = _self;
+
+    bool in_window   = Vt_pointer_within_window(self, x, y);
     bool btn_reports = Vt_reports_mouse(self);
 
-    if (btn_reports && in_window) {
-        if (!self->scrolling_visual) {
-            self->last_click_x = (double)x / self->pixels_per_cell_x;
-            self->last_click_y = (double)y / self->pixels_per_cell_y;
+    if (btn_reports && in_window && !self->scrolling_visual) {
+        const uint16_t cell_x = (double)x / self->pixels_per_cell_x;
+        const uint16_t cell_y = (double)y / self->pixels_per_cell_y;
 
-            if (self->modes.x10_mouse_compat) {
-                button += (FLAG_IS_SET(mods, MODIFIER_SHIFT) ? 4 : 0) +
-                          (FLAG_IS_SET(mods, MODIFIER_ALT) ? 8 : 0) +
-                          (FLAG_IS_SET(mods, MODIFIER_CONTROL) ? 16 : 0);
-            }
-            if (self->modes.extended_report) {
-                Vt_output_formated(self,
-                                   "\e[<%u;%d;%d%c",
-                                   button - 1,
-                                   self->last_click_x + 1,
-                                   self->last_click_y + 1,
-                                   state ? 'M' : 'm');
-            } else if (self->modes.mouse_btn_report) {
-                Vt_output_formated(self,
-                                   "\e[M%c%c%c",
-                                   32 + button - 1 + !state * 3,
-                                   (char)(32 + self->last_click_x + 1),
-                                   (char)(32 + self->last_click_y + 1));
-            }
+        const int32_t motion_indicator =
+          Vt_get_xterm_pointer_event_motion_indicator(self, cell_x, cell_y);
+
+        self->pointer_report_hisotry.click_x  = cell_x;
+        self->pointer_report_hisotry.click_y  = cell_y;
+        self->pointer_report_hisotry.motion_x = cell_x;
+        self->pointer_report_hisotry.motion_y = cell_y;
+
+        if (self->modes.x10_mouse_compat) {
+            button += (FLAG_IS_SET(mods, MODIFIER_SHIFT) ? 4 : 0) +
+                      (FLAG_IS_SET(mods, MODIFIER_ALT) ? 8 : 0) +
+                      (FLAG_IS_SET(mods, MODIFIER_CONTROL) ? 16 : 0);
+        }
+
+        if (self->modes.extended_report) {
+            Vt_output_formated(self,
+                               "\e[<%u;%d;%d%c",
+                               button - 1,
+                               cell_x + 1,
+                               cell_y + 1,
+                               state ? 'M' : 'm');
+        } else if (self->modes.mouse_btn_report) {
+            Vt_output_formated(self,
+                               "\e[M%c%c%c",
+                               motion_indicator + button - 1 + !state * 3,
+                               (char)(32 + cell_x + 1),
+                               (char)(32 + cell_y + 1));
         }
     }
 }
 
 void Vt_handle_motion(void* _self, uint32_t button, int32_t x, int32_t y)
 {
-    Vt* self = _self;
+    Vt*  self      = _self;
+    bool in_window = Vt_pointer_within_window(self, x, y);
 
-    if (self->modes.extended_report) {
-        if (!self->scrolling_visual) {
-            x              = CLAMP(x, 0, self->ws.ws_xpixel);
-            y              = CLAMP(y, 0, self->ws.ws_ypixel);
-            size_t click_x = (double)x / self->pixels_per_cell_x;
-            size_t click_y = (double)y / self->pixels_per_cell_y;
-            if (click_x != self->last_click_x || click_y != self->last_click_y) {
-                self->last_click_x = click_x;
-                self->last_click_y = click_y;
-                Vt_output_formated(self,
-                                   "\e[<%d;%zu;%zuM",
-                                   (int)button - 1 + 32,
-                                   click_x + 1,
-                                   click_y + 1);
-            }
+    if (in_window && self->modes.mouse_motion_report && !self->scrolling_visual) {
+        const uint16_t cell_x = (double)x / self->pixels_per_cell_x;
+        const uint16_t cell_y = (double)y / self->pixels_per_cell_y;
+
+        const int32_t motion_indicator =
+          Vt_get_xterm_pointer_event_motion_indicator(self, cell_x, cell_y);
+
+        if (motion_indicator != MOTION_INDICATOR_NO) {
+            self->pointer_report_hisotry.motion_x = cell_x;
+            self->pointer_report_hisotry.motion_y = cell_y;
+
+            Vt_output_formated(self,
+                               "\e[M%c%c%c",
+                               motion_indicator + button - 1,
+                               (char)(motion_indicator + cell_x + 1),
+                               (char)(motion_indicator + cell_y + 1));
         }
     }
 }
