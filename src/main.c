@@ -100,13 +100,14 @@ typedef struct
         SELECT_DRAG_RIGHT_BACK
     } selection_dragging_right;
 
-    float   scrollbar_drag_position;
-    uint8_t click_count;
-    bool    selection_dragging_left;
-    bool    keyboard_select_mode;
-    bool    last_scrolling;
-    bool    autoselect;
-    bool    exit;
+    float    scrollbar_drag_position;
+    uint8_t  click_count;
+    bool     selection_dragging_left;
+    bool     keyboard_select_mode;
+    bool     last_scrolling;
+    bool     autoselect;
+    bool     exit;
+    uint32_t keyboard_mods_state;
 
     /* we are in a time period after kbd input when the cursor should blink */
     bool cursor_blink_animation_should_play;
@@ -1788,6 +1789,9 @@ void App_key_handler(void* self, uint32_t key, uint32_t rawkey, uint32_t mods)
 {
     if (!App_maybe_handle_application_key(self, key, rawkey, mods)) {
         App* app = self;
+
+        app->keyboard_mods_state = mods;
+
         switch (app->vt.gui_pointer_mode) {
             case VT_GUI_POINTER_MODE_FORCE_HIDE:
             case VT_GUI_POINTER_MODE_HIDE:
@@ -2083,16 +2087,16 @@ static bool App_maybe_consume_click(App*     self,
         }
     }
 
-    if (vt->modes.x10_mouse_compat) {
+    if (vt->modes.mouse_x10) {
         return false;
     }
 
-    bool no_left_report = (!(vt->modes.extended_report || vt->modes.mouse_btn_report ||
-                             vt->modes.mouse_motion_on_btn_report) ||
-                           FLAG_IS_SET(mods, MODIFIER_SHIFT));
+    bool no_left_report =
+      (!(vt->modes.mouse_sgr || vt->modes.mouse_vt200 || vt->modes.mouse_button_event) ||
+       FLAG_IS_SET(mods, MODIFIER_SHIFT));
 
     bool no_middle_report =
-      (!(vt->modes.mouse_btn_report || vt->modes.mouse_motion_on_btn_report) ||
+      (!(vt->modes.mouse_vt200 || vt->modes.mouse_button_event) ||
        (FLAG_IS_SET(mods, MODIFIER_CONTROL) || FLAG_IS_SET(mods, MODIFIER_SHIFT)));
 
     if (button == MOUSE_BTN_LEFT && no_left_report) {
@@ -2356,7 +2360,7 @@ static void App_motion_handler(void* self, uint32_t button, int32_t x, int32_t y
         if (!App_scrollbar_consume_drag(self, button, x, y) &&
             !App_consume_drag(self, button, x, y)) {
             if (Vt_reports_mouse(&app->vt)) {
-                Vt_handle_motion(&app->vt, button, x, y);
+                Vt_handle_motion(&app->vt, button, app->keyboard_mods_state, x, y);
             }
         }
         if (app->selection_dragging_left) {
@@ -2365,7 +2369,7 @@ static void App_motion_handler(void* self, uint32_t button, int32_t x, int32_t y
     } else {
         App_update_hover(app, x, y);
         if (Vt_reports_mouse(&app->vt)) {
-            Vt_handle_motion(&app->vt, button, x, y);
+            Vt_handle_motion(&app->vt, button, app->keyboard_mods_state, x, y);
         }
     }
 }

@@ -572,12 +572,14 @@ typedef struct
     uint8_t bracketed_paste : 1;
     uint8_t del_sends_del : 1;
     uint8_t no_alt_sends_esc : 1;
-    uint8_t x10_mouse_compat : 1;
-    uint8_t mouse_btn_report : 1;
-    uint8_t mouse_motion_on_btn_report : 1;
-    uint8_t mouse_motion_report : 1;
-    uint8_t window_focus_events_report : 1;
-    uint8_t extended_report : 1;
+    uint8_t mouse_x10 : 1;
+    uint8_t mouse_vt200 : 1;
+    uint8_t mouse_vt200_highlight : 1;
+    uint8_t mouse_button_event : 1;
+    uint8_t mouse_any_event : 1;
+    uint8_t mouse_focus_event : 1;
+    uint8_t mouse_sgr : 1;
+    uint8_t mouse_sgr_pixels : 1;
     uint8_t video_reverse : 1;
     uint8_t auto_repeat : 1;
     uint8_t application_keypad : 1;
@@ -702,11 +704,8 @@ typedef struct
 
     struct PointerReportHistory
     {
-        uint16_t click_x;
-        uint16_t click_y;
-
-        uint16_t motion_x;
-        uint16_t motion_y;
+        uint16_t x;
+        uint16_t y;
     } pointer_report_hisotry;
 
     double pixels_per_cell_x, pixels_per_cell_y;
@@ -1340,7 +1339,7 @@ void Vt_handle_button(void*    self,
 /**
  * Respond to pointer motion event
  * @param button - button being held down */
-void Vt_handle_motion(void* self, uint32_t button, int32_t x, int32_t y);
+void Vt_handle_motion(void* self, uint32_t button, uint32_t mods, int32_t x, int32_t y);
 
 /**
  * Is the alternate screen buffer beeing displayed */
@@ -1531,8 +1530,8 @@ void Vt_select_end(Vt* self);
  * Terminal listens for scroll wheel or button presses */
 static bool Vt_reports_mouse(Vt* self)
 {
-    return self->modes.extended_report || self->modes.mouse_motion_on_btn_report ||
-           self->modes.mouse_btn_report;
+    return self->modes.mouse_x10 || self->modes.mouse_button_event || self->modes.mouse_vt200 ||
+           self->modes.mouse_any_event || self->modes.mouse_sgr;
 }
 
 /**
@@ -1730,8 +1729,8 @@ static inline ColorRGB Vt_rune_final_fg(const Vt*     self,
 
 static inline bool Vt_is_reporting_mouse(const Vt* self)
 {
-    return self->modes.mouse_btn_report || self->modes.mouse_motion_report ||
-           self->modes.mouse_motion_on_btn_report || self->modes.extended_report;
+    return self->modes.mouse_vt200 || self->modes.mouse_any_event ||
+           self->modes.mouse_button_event || self->modes.mouse_sgr;
 }
 
 /**

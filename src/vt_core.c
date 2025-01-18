@@ -1560,6 +1560,9 @@ static inline void Vt_report_dec_mode(Vt* self, int code)
         case 8:
             value = self->modes.auto_repeat;
             break;
+        case 9:
+            value = self->modes.mouse_x10;
+            break;
         case 12:
         case 13:
             value = self->cursor.blinking;
@@ -1572,19 +1575,25 @@ static inline void Vt_report_dec_mode(Vt* self, int code)
             value = !self->modes.no_sixel_scrolling;
             break;
         case 1000:
-            value = self->modes.mouse_btn_report;
+            value = self->modes.mouse_vt200;
+            break;
+        case 1001:
+            value = self->modes.mouse_vt200_highlight;
             break;
         case 1002:
-            value = self->modes.mouse_motion_on_btn_report;
+            value = self->modes.mouse_button_event;
             break;
         case 1003:
-            value = self->modes.mouse_motion_report;
+            value = self->modes.mouse_any_event;
             break;
         case 1004:
-            value = self->modes.window_focus_events_report;
+            value = self->modes.mouse_focus_event;
             break;
         case 1006:
-            value = self->modes.extended_report;
+            value = self->modes.mouse_sgr;
+            break;
+        case 1016:
+            value = self->modes.mouse_sgr_pixels;
             break;
         case 1037:
             value = self->modes.del_sends_del;
@@ -1709,6 +1718,11 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
             self->modes.auto_repeat = on;
             break;
 
+        /* mouse event reporting X10 compatibility mode */
+        case 9:
+            self->modes.mouse_x10 = on;
+            break;
+
         /* Show toolbar (rxvt) */
         case 10:
             break;
@@ -1783,26 +1797,27 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
 
         /* X11 xterm mouse protocol. */
         case 1000:
-            self->modes.mouse_btn_report = on;
+            self->modes.mouse_vt200 = on;
             break;
 
         /* Highlight mouse tracking, xterm */
         case 1001:
-            STUB("Highlight mouse tracking");
+            self->modes.mouse_vt200_highlight = on;
             break;
 
         /* xterm cell motion mouse tracking */
         case 1002:
-            self->modes.mouse_motion_on_btn_report = on;
+            self->modes.mouse_button_event = on;
             break;
 
         /* xterm all motion tracking */
         case 1003:
-            self->modes.mouse_motion_report = on;
+            self->modes.mouse_any_event = on;
             break;
 
+        /* TODO: When set, it causes xterm to send CSI I and CSI O when it loses focus*/
         case 1004:
-            self->modes.window_focus_events_report = on;
+            self->modes.mouse_focus_event = on;
             break;
 
         /* utf8 Mouse Mode */
@@ -1810,14 +1825,20 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
             STUB("utf8 mouse mode");
             break;
 
-        /* SGR mouse mode */
+        /* SGR mouse mode: The normal mouse response is altered to use CSI < */
         case 1006:
-            self->modes.extended_report = on;
+            self->modes.mouse_sgr = on;
             break;
 
         /* urxvt mouse mode */
         case 1015:
             STUB("urxvt mouse mode");
+            break;
+
+        /* SGR pixels mouse mode: Use the same mouse response format as the 1006 control, but report
+         * position in pixels rather than character cells */
+        case 1016:
+            self->modes.mouse_sgr_pixels = on;
             break;
 
         case 1034:
@@ -6382,12 +6403,47 @@ static xterm_motion_indicator Vt_get_xterm_pointer_event_motion_indicator(Vt*   
                                                                           uint16_t cell_x,
                                                                           uint16_t cell_y)
 {
-    if (self->pointer_report_hisotry.motion_x != cell_x ||
-        self->pointer_report_hisotry.motion_y != cell_y) {
+    if (self->pointer_report_hisotry.x != cell_x || self->pointer_report_hisotry.y != cell_y) {
         return MOTION_INDICATOR_YES;
     }
 
     return MOTION_INDICATOR_NO;
+}
+
+static int32_t Vt_pointer_button_code(uint32_t button, bool state)
+{
+    /* The low two bits of Cb encode button information: 0=MB1 pressed, 1=MB2 pressed, 2=MB3
+     * pressed, 3=release */
+    if (state) {
+        if (button == 1 || button == 2 || button == 3) {
+            return button - 1;
+        } else if (button == 4 || button == 5) {
+            /* Wheel mice may return buttons 4 and 5. Those buttons are represented by the
+             * same event codes as buttons 1 and 2 respectively, except that 64 is added to
+             * the event code. */
+            return button - 4 + 64;
+        } else if (button == 6 || button == 7) {
+            /* Additional buttons are encoded like the wheel mice by adding 64 (for buttons
+             * 6 and 7) */
+            return button - 6 + 64;
+        } else if (8 <= button && button <= 11) {
+            /* Additional buttons are encoded like the wheel mice by adding 128 (for buttons
+             * 8 through 11)*/
+            return button - 8 + 128;
+        }
+        /* Past button 11, the encoding is ambiguous because the same code may correspond to
+         * different button/modifier com- binations. */
+        return button;
+    } else {
+        /* release event */
+        return 3;
+    }
+}
+
+static uint8_t Vt_button_mod_mask(uint32_t mods)
+{
+    return (FLAG_IS_SET(mods, MODIFIER_SHIFT) ? 4 : 0) + (FLAG_IS_SET(mods, MODIFIER_ALT) ? 8 : 0) +
+           (FLAG_IS_SET(mods, MODIFIER_CONTROL) ? 16 : 0);
 }
 
 void Vt_handle_button(void*    _self,
@@ -6400,66 +6456,133 @@ void Vt_handle_button(void*    _self,
 {
     Vt* self = _self;
 
-    bool in_window   = Vt_pointer_within_window(self, x, y);
-    bool btn_reports = Vt_reports_mouse(self);
+    if (!Vt_reports_mouse(self) || !Vt_pointer_within_window(self, x, y) ||
+        self->scrolling_visual) {
+        return;
+    }
 
-    if (btn_reports && in_window && !self->scrolling_visual) {
-        const uint16_t cell_x = (double)x / self->pixels_per_cell_x;
-        const uint16_t cell_y = (double)y / self->pixels_per_cell_y;
+    const uint16_t cell_x = (double)x / self->pixels_per_cell_x;
+    const uint16_t cell_y = (double)y / self->pixels_per_cell_y;
 
-        const int32_t motion_indicator =
-          Vt_get_xterm_pointer_event_motion_indicator(self, cell_x, cell_y);
+    if (self->modes.mouse_sgr_pixels) {
+        Vt_output_formated(self,
+                           "\e[<%u;%d;%d%c",
+                           button - 1 + Vt_button_mod_mask(mods),
+                           x + 1,
+                           y + 1,
+                           state ? 'M' : 'm');
+        self->pointer_report_hisotry.x = cell_x;
+        self->pointer_report_hisotry.y = cell_y;
+    } else if (self->modes.mouse_sgr) {
+        Vt_output_formated(self,
+                           "\e[<%u;%d;%d%c",
+                           button - 1 + Vt_button_mod_mask(mods),
+                           cell_x + 1,
+                           cell_y + 1,
+                           state ? 'M' : 'm');
+        self->pointer_report_hisotry.x = cell_x;
+        self->pointer_report_hisotry.y = cell_y;
+    } else if (self->modes.mouse_vt200 || self->modes.mouse_button_event ||
+               self->modes.mouse_any_event) {
+        int32_t regular_button_code = Vt_pointer_button_code(button, state);
 
-        self->pointer_report_hisotry.click_x  = cell_x;
-        self->pointer_report_hisotry.click_y  = cell_y;
-        self->pointer_report_hisotry.motion_x = cell_x;
-        self->pointer_report_hisotry.motion_y = cell_y;
-
-        if (self->modes.x10_mouse_compat) {
-            button += (FLAG_IS_SET(mods, MODIFIER_SHIFT) ? 4 : 0) +
-                      (FLAG_IS_SET(mods, MODIFIER_ALT) ? 8 : 0) +
-                      (FLAG_IS_SET(mods, MODIFIER_CONTROL) ? 16 : 0);
-        }
-
-        if (self->modes.extended_report) {
-            Vt_output_formated(self,
-                               "\e[<%u;%d;%d%c",
-                               button - 1,
-                               cell_x + 1,
-                               cell_y + 1,
-                               state ? 'M' : 'm');
-        } else if (self->modes.mouse_btn_report) {
+        if (regular_button_code >= 0) {
             Vt_output_formated(self,
                                "\e[M%c%c%c",
-                               motion_indicator + button - 1 + !state * 3,
-                               (char)(32 + cell_x + 1),
-                               (char)(32 + cell_y + 1));
+                               32 + regular_button_code + Vt_button_mod_mask(mods),
+                               32 + cell_x + 1,
+                               32 + cell_y + 1);
+
+            self->pointer_report_hisotry.x = cell_x;
+            self->pointer_report_hisotry.y = cell_y;
+        }
+    }
+
+    /* X10 compatibility mode sends an escape sequence only on button press, encoding the location
+     * and the mouse button pressed. It is enabled by specifying parameter 9 to DECSET. On button
+     * press, xterm sends CSI M CbCxCy (6 char- acters).
+     * - Cb is button−1, where button is 1, 2 or 3.
+     * - Cx and Cy are the x and y coordinates of the mouse when the button was pressed
+     * */
+    if (self->modes.mouse_x10) {
+        if (button <= 3 && state) {
+            if (cell_x <= 222 && cell_y <= 222) {
+                Vt_output_formated(self, "\e[%d%c%c", button, 32 + cell_x + 1, 32 + cell_y + 1);
+            } else {
+                // TODO: utf-8 extended coordinates mode (1005)
+            }
         }
     }
 }
 
-void Vt_handle_motion(void* _self, uint32_t button, int32_t x, int32_t y)
+void Vt_handle_motion(void* _self, uint32_t button, uint32_t mods, int32_t x, int32_t y)
 {
-    Vt*  self      = _self;
-    bool in_window = Vt_pointer_within_window(self, x, y);
+    Vt* self = _self;
 
-    if (in_window && self->modes.mouse_motion_report && !self->scrolling_visual) {
-        const uint16_t cell_x = (double)x / self->pixels_per_cell_x;
-        const uint16_t cell_y = (double)y / self->pixels_per_cell_y;
+    if (!Vt_reports_mouse(self) || !Vt_pointer_within_window(self, x, y) ||
+        self->scrolling_visual) {
+        return;
+    }
 
-        const int32_t motion_indicator =
-          Vt_get_xterm_pointer_event_motion_indicator(self, cell_x, cell_y);
+    const uint16_t cell_x = (double)x / self->pixels_per_cell_x;
+    const uint16_t cell_y = (double)y / self->pixels_per_cell_y;
 
-        if (motion_indicator != MOTION_INDICATOR_NO) {
-            self->pointer_report_hisotry.motion_x = cell_x;
-            self->pointer_report_hisotry.motion_y = cell_y;
+    const int32_t motion_indicator =
+      Vt_get_xterm_pointer_event_motion_indicator(self, cell_x, cell_y);
 
+    if (motion_indicator == MOTION_INDICATOR_NO) {
+        return;
+    }
+
+    bool state = !!button;
+
+    /* SRG modes should not be enabled when no button is pressed(?). Not documented anywhere but
+     * emacs gets confused when this is sent on just motion */
+    if (self->modes.mouse_sgr_pixels && state) {
+        int32_t button_code = button - 1 + motion_indicator + Vt_button_mod_mask(mods);
+        Vt_output_formated(self, "\e[<%d;%d;%d%c", button_code, x + 1, y + 1, state ? 'M' : 'm');
+    } else if (self->modes.mouse_sgr && state) {
+        int32_t button_code = button - 1 + motion_indicator + Vt_button_mod_mask(mods);
+
+        Vt_output_formated(self,
+                           "\e[<%d;%d;%d%c",
+                           button_code,
+                           cell_x + 1,
+                           cell_y + 1,
+                           state ? 'M' : 'm');
+
+        self->pointer_report_hisotry.x = cell_x;
+        self->pointer_report_hisotry.y = cell_y;
+    } else if ((self->modes.mouse_button_event || self->modes.mouse_any_event) && state) {
+        /* Button-event tracking is essentially the same as normal tracking, but xterm also reports
+         * button-motion events. Motion events are reported only if the mouse pointer has moved to a
+         * different character cell. It is enabled by specifying parameter 1002 to DECSET. On button
+         * press or release, xterm sends the same codes used by normal tracking mode.
+         * On button-motion events, xterm adds 32 to the event code */
+        int32_t regular_button_code = Vt_pointer_button_code(button, state);
+
+        if (regular_button_code >= 0) {
             Vt_output_formated(self,
                                "\e[M%c%c%c",
-                               motion_indicator + button - 1,
-                               (char)(motion_indicator + cell_x + 1),
-                               (char)(motion_indicator + cell_y + 1));
+                               32 + regular_button_code + motion_indicator +
+                                 Vt_button_mod_mask(mods),
+                               32 + cell_x + 1,
+                               32 + cell_y + 1);
+
+            self->pointer_report_hisotry.x = cell_x;
+            self->pointer_report_hisotry.y = cell_y;
         }
+    } else if (self->modes.mouse_any_event) {
+        /* Any-event mode is the same as button-event mode, except that all motion events are
+         * reported, even if no mouse button is down. */
+        Vt_output_formated(self,
+                           "\e[M%c%c%c",
+                           32 + 3 + motion_indicator, /* 3 for released */
+                           32 + cell_x + 1,
+                           32 + cell_y + 1);
+
+        self->pointer_report_hisotry.x = cell_x;
+        self->pointer_report_hisotry.y = cell_y;
     }
 }
 

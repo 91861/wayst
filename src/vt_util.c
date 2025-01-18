@@ -635,17 +635,17 @@ __attribute__((cold)) void Vt_dump_info(Vt* self)
     printf("  don't send esc on alt:            " BOOL_FMT "\n",
            BOOL_AP(self->modes.no_alt_sends_esc));
     printf("  extended reporting:               " BOOL_FMT "\n",
-           BOOL_AP(self->modes.extended_report));
+           BOOL_AP(self->modes.mouse_sgr));
     printf("  window focus events reporting:    " BOOL_FMT "\n",
-           BOOL_AP(self->modes.window_focus_events_report));
+           BOOL_AP(self->modes.mouse_focus_event));
     printf("  mouse button reporting:           " BOOL_FMT "\n",
-           BOOL_AP(self->modes.mouse_btn_report));
+           BOOL_AP(self->modes.mouse_vt200));
     printf("  motion on mouse button reporting: " BOOL_FMT "\n",
-           BOOL_AP(self->modes.mouse_motion_on_btn_report));
+           BOOL_AP(self->modes.mouse_button_event));
     printf("  mouse motion reporting:           " BOOL_FMT "\n",
-           BOOL_AP(self->modes.mouse_motion_report));
+           BOOL_AP(self->modes.mouse_any_event));
     printf("  x10 compat mouse reporting:       " BOOL_FMT "\n",
-           BOOL_AP(self->modes.x10_mouse_compat));
+           BOOL_AP(self->modes.mouse_x10));
     printf("  no auto wrap:                     " BOOL_FMT "\n",
            BOOL_AP(self->modes.no_wraparound));
     printf("  reverse auto wrap:                " BOOL_FMT "\n",
