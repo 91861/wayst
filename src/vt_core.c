@@ -1578,7 +1578,7 @@ static inline void Vt_report_dec_mode(Vt* self, int code)
             value = self->modes.mouse_vt200;
             break;
         case 1001:
-            value = self->modes.mouse_vt200_highlight;
+            value = false;
             break;
         case 1002:
             value = self->modes.mouse_button_event;
@@ -1802,7 +1802,8 @@ static inline void Vt_handle_dec_mode(Vt* self, int code, bool on)
 
         /* Highlight mouse tracking, xterm */
         case 1001:
-            self->modes.mouse_vt200_highlight = on;
+            STUB("VT200 highlight mode");
+            // self->modes.mouse_vt200_highlight = on;
             break;
 
         /* xterm cell motion mouse tracking */
@@ -6583,6 +6584,13 @@ void Vt_handle_motion(void* _self, uint32_t button, uint32_t mods, int32_t x, in
 
         self->pointer_report_hisotry.x = cell_x;
         self->pointer_report_hisotry.y = cell_y;
+    }
+}
+
+void Vt_focus_changed(Vt* self, bool current_state)
+{
+    if (self->modes.mouse_focus_event) {
+        Vt_output(self, current_state ? "\e[I" : "\e[O", 3);
     }
 }
 

@@ -11,6 +11,7 @@
  *   we can add a SpliterWidget:IWidget nesting other widgets and forwarding mouse/kbd events etc.
  */
 
+#include "vt_private.h"
 #define _GNU_SOURCE
 #include "gfx.h"
 #include "timing.h"
@@ -1599,6 +1600,7 @@ static bool App_maybe_handle_application_key(App*     self,
     } else if (KeyCommand_is_active(&cmd[KCMD_FONT_SHRINK], key, rawkey, mods)) {
         if (settings.font_size > 1) {
             --settings.font_size;
+            Vt_end_synchronized_update(vt);
             Vt_clear_all_proxies(vt);
             Gfx_destroy_proxy(self->gfx, self->ui.cursor_proxy.data);
             App_reload_font(self);
@@ -1611,6 +1613,7 @@ static bool App_maybe_handle_application_key(App*     self,
         return true;
     } else if (KeyCommand_is_active(&cmd[KCMD_FONT_ENLARGE], key, rawkey, mods)) {
         ++settings.font_size;
+        Vt_end_synchronized_update(vt);
         Vt_clear_all_proxies(vt);
         Gfx_destroy_proxy(self->gfx, self->ui.cursor_proxy.data);
         App_reload_font(self);
@@ -2437,6 +2440,8 @@ static void App_focus_changed(void* self, bool current_state)
             Vector_destroy_char(&txt);
         }
     }
+
+    Vt_focus_changed(&app->vt, current_state);
 }
 
 static void App_csd_changed(void* self, ui_csd_mode_e csd_mode)
@@ -2623,6 +2628,7 @@ static void App_primary_output_changed(void*         self,
         Freetype_reload_fonts_with_output_type(
           &app->freetype,
           output_texture_type_from_lcd_filter(settings.lcd_filter));
+        Vt_end_synchronized_update(&app->vt);
         App_reload_font(app);
 
         INFO("Window moved to output %u '%s' " LCD_FILTER_FMT ", %u(%u) dpi.",

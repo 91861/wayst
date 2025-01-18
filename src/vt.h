@@ -574,7 +574,6 @@ typedef struct
     uint8_t no_alt_sends_esc : 1;
     uint8_t mouse_x10 : 1;
     uint8_t mouse_vt200 : 1;
-    uint8_t mouse_vt200_highlight : 1;
     uint8_t mouse_button_event : 1;
     uint8_t mouse_any_event : 1;
     uint8_t mouse_focus_event : 1;
@@ -1657,6 +1656,10 @@ void Vt_shrink_scrollback(Vt* self);
 
 void Vt_clear_scrollback(Vt* self);
 
+/**
+ * Notify that the terminal widget focus state changed */
+void Vt_focus_changed(Vt* self, bool current_state);
+
 Vector_char Vt_command_to_string(const Vt* self, const VtCommand* command, size_t opt_limit_lines);
 
 static bool Vt_ImageSurfaceView_is_visual_visible(const Vt* self, VtImageSurfaceView* view)
@@ -1730,7 +1733,7 @@ static inline ColorRGB Vt_rune_final_fg(const Vt*     self,
 static inline bool Vt_is_reporting_mouse(const Vt* self)
 {
     return self->modes.mouse_vt200 || self->modes.mouse_any_event ||
-           self->modes.mouse_button_event || self->modes.mouse_sgr;
+           self->modes.mouse_button_event || self->modes.mouse_sgr || self->modes.mouse_sgr_pixels;
 }
 
 /**
