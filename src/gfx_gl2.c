@@ -1,6 +1,7 @@
 /* See LICENSE for license information. */
 
 #include "vt.h"
+#include <GL/gl.h>
 #include <stdint.h>
 #define _GNU_SOURCE
 
@@ -2455,7 +2456,10 @@ static void line_render_pass_run_line_subpass(const line_render_pass_t* pass,
                                          pass->args.gl2->flex_vbo.size,
                                          new_size);
 
+                glEnable(GL_BLEND);
+				glBlendFuncSeparate_(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
                 glDrawArrays(QUAD_DRAW_MODE, 0, pass->args.gl2->vec_vertex_buffer2.size / 2);
+				glDisable(GL_BLEND);
                 ARRAY_BUFFER_ORPHAN(pass->args.gl2->flex_vbo.size);
             }
 
