@@ -6,13 +6,13 @@
 #include "vt.h"
 #include "vt_sixel.h"
 
-static void                              Vt_line_feed(Vt* self);
-static inline void                       Vt_move_cursor(Vt* self, uint16_t column, uint16_t rows);
-__attribute__((hot, flatten)) void       Vt_handle_literal(Vt* self, char c);
-__attribute__((cold)) const char* control_char_get_pretty_string(const char c);
-__attribute__((cold)) char*              pty_string_prettyfy(const char* str, int32_t max);
-void                                     Vt_start_synchronized_update(Vt* self);
-void                                     Vt_end_synchronized_update(Vt* self);
+static void                        Vt_line_feed(Vt* self);
+static inline void                 Vt_move_cursor(Vt* self, uint16_t column, uint16_t rows);
+__attribute__((hot, flatten)) void Vt_handle_literal(Vt* self, char c);
+__attribute__((cold)) const char*  control_char_get_pretty_string(const char c);
+__attribute__((cold)) char*        pty_string_prettyfy(const char* str, int32_t max);
+void                               Vt_start_synchronized_update(Vt* self);
+
 static void Vt_clear_line_sixel_proxies(Vt* self, VtLine* ln);
 
 static inline void Vt_output(Vt* self, const char* buf, size_t len)
@@ -22,9 +22,11 @@ static inline void Vt_output(Vt* self, const char* buf, size_t len)
 
 #define Vt_output_formated(vt, fmt, ...)                                                           \
     {                                                                                              \
-        char _tmp[256];                                                                            \
-        int  _len = snprintf(_tmp, sizeof(_tmp), fmt, __VA_ARGS__);                                \
-        Vt_output((vt), _tmp, _len);                                                               \
+        do {                                                                                       \
+            char _tmp[256];                                                                        \
+            int  _len = snprintf(_tmp, sizeof(_tmp), fmt, __VA_ARGS__);                            \
+            Vt_output((vt), _tmp, _len);                                                           \
+        } while (0);                                                                               \
     }
 
 static inline void Vt_mark_line_proxy_fully_damaged(Vt* self, VtLine* line)

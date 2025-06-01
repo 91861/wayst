@@ -694,6 +694,7 @@ typedef struct
         void (*on_cursor_blink_state_changed)(void*, bool new_state);
         const char* (*on_application_hostname_requested)(void*);
         void (*on_visual_scroll_params_changed)(void*);
+        void (*on_progressbar_state_changed)(void*);
 
         void (*destroy_proxy)(void*, VtLineProxy*);
         void (*destroy_image_proxy)(void*, VtImageSurfaceProxy*);
@@ -845,6 +846,7 @@ typedef struct
         bool repaint;
         bool cursor_blink;
         bool visual_scroll_params_changed;
+        bool progress_bar_state_changed;
     } defered_events;
 
     vt_gui_pointer_mode_t gui_pointer_mode;
@@ -871,6 +873,20 @@ typedef struct
         graphic_color_registers_t global_graphic_color_registers;
 
     } colors;
+
+    struct progress_bar_t
+    {
+        enum vt_progressbar_state
+        {
+            VT_PROGRESS_BAR_STATE_NONE,
+            VT_PROGRESS_BAR_STATE_DISPLAY,
+            VT_PROGRESS_BAR_STATE_ERROR,
+            VT_PROGRESS_BAR_STATE_INDETERMINATE,
+            VT_PROGRESS_BAR_STATE_PAUSED,
+        } state;
+
+        uint8_t progress_precent; // value to show when state is display
+    } progress_bar;
 
     /**
      * Character set is composed of C0 (7-bit control characters), C1 (8-bit control characters), GL
@@ -1524,6 +1540,10 @@ void Vt_select_set_end_cell(Vt* self, int32_t x, int32_t y);
 /**
  * End selection */
 void Vt_select_end(Vt* self);
+
+/**
+ * End synchronized update and display the current cell grid state instead of a previous snapshot */
+void Vt_end_synchronized_update(Vt* self);
 
 /**
  * Terminal listens for scroll wheel or button presses */

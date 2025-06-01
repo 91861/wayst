@@ -11,7 +11,6 @@
  *   we can add a SpliterWidget:IWidget nesting other widgets and forwarding mouse/kbd events etc.
  */
 
-#include "vt_private.h"
 #define _GNU_SOURCE
 #include "gfx.h"
 #include "timing.h"
@@ -109,6 +108,7 @@ typedef struct
     bool     autoselect;
     bool     exit;
     uint32_t keyboard_mods_state;
+    bool     previous_progress_bar_state;
 
     /* we are in a time period after kbd input when the cursor should blink */
     bool cursor_blink_animation_should_play;
@@ -2648,6 +2648,37 @@ static void App_visual_scroll_params_changed_handler(void* self)
     App_notify_content_change(self);
 }
 
+static bool progress_bar_shown(enum vt_progressbar_state state)
+{
+    switch (state) {
+        case VT_PROGRESS_BAR_STATE_NONE:
+        case VT_PROGRESS_BAR_STATE_ERROR:
+            return false;
+            break;
+        case VT_PROGRESS_BAR_STATE_DISPLAY:
+        case VT_PROGRESS_BAR_STATE_INDETERMINATE:
+        case VT_PROGRESS_BAR_STATE_PAUSED:
+            return true;
+            break;
+    }
+
+    ASSERT_UNREACHABLE
+}
+
+static void App_progress_bar_state_changed_handler(void* self)
+{
+    App* app = self;
+
+    if (progress_bar_shown(app->previous_progress_bar_state) &&
+        progress_bar_shown(app->vt.progress_bar.state) && !Window_is_focused(app->win)) {
+        Window_set_urgent(app->win);
+    }
+
+	// TODO: add graphics for this
+
+    app->previous_progress_bar_state = app->vt.progress_bar.state;
+}
+
 static void App_set_callbacks(App* self)
 {
     self->vt.callbacks.user_data                           = self;
@@ -2684,6 +2715,7 @@ static void App_set_callbacks(App* self)
     self->vt.callbacks.on_gui_pointer_mode_changed         = App_gui_pointer_mode_change_handler;
     self->vt.callbacks.on_cursor_blink_state_changed       = App_cursor_blink_change_handler;
     self->vt.callbacks.on_visual_scroll_reset              = App_visual_scroll_reset_handler;
+    self->vt.callbacks.on_progressbar_state_changed        = App_progress_bar_state_changed_handler;
     self->vt.callbacks.on_visual_scroll_params_changed = App_visual_scroll_params_changed_handler;
 
     self->win->callbacks.user_data               = self;

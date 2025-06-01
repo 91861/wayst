@@ -4385,9 +4385,10 @@ static void Vt_handle_OSC(Vt* self, char c)
             Vector_pop_char(&self->parser.active_sequence);
         }
         Vector_push_char(&self->parser.active_sequence, '\0');
-        char*    seq  = self->parser.active_sequence.buf;
-        uint32_t arg  = 0;
-        char*    text = seq;
+        char*    seq     = self->parser.active_sequence.buf;
+        char*    seq_end = Vector_last_char(&self->parser.active_sequence);
+        uint32_t arg     = 0;
+        char*    text    = seq;
 
         if (*seq > 0 && isdigit(*seq)) {
             arg = strtoul(seq, &text, 10);
@@ -4397,7 +4398,7 @@ static void Vt_handle_OSC(Vt* self, char c)
                 ++text;
             }
         } else {
-            WRN("no numerical argument in OSC \'%s\'\n", seq);
+            WRN("No argument in OSC \'%s\'\n", seq);
         }
 
         switch (arg) {
@@ -4414,7 +4415,7 @@ static void Vt_handle_OSC(Vt* self, char c)
             case 3:
                 // TODO: CALL(self->callbacs.on_xproperty_set, self->callbacks.user_data, seq +2,
                 // strstr(seq+2,"=") + 1);
-                WRN("OSC 3 not implemented\n");
+                STUB("OSC 3");
                 break;
 
             /* Modify regular color palette
@@ -4426,26 +4427,29 @@ static void Vt_handle_OSC(Vt* self, char c)
              */
             case 4: {
                 seq += 2;
-                char *arg_idx, *arg_clr;
-                while ((arg_idx = strsep(&seq, ";")) && (arg_clr = strsep(&seq, ";"))) {
-                    uint32_t index = atoi(arg_idx);
-                    if (index >= ARRAY_SIZE(self->colors.palette_256)) {
-                        continue;
+                if (seq < seq_end) {
+                    char *arg_idx, *arg_clr;
+                    while ((arg_idx = strsep(&seq, ";")) && (arg_clr = strsep(&seq, ";"))) {
+                        uint32_t index = atoi(arg_idx);
+                        if (index >= ARRAY_SIZE(self->colors.palette_256)) {
+                            continue;
+                        }
+                        if (*arg_clr == '?') {
+                            ColorRGB color = self->colors.palette_256[index];
+                            Vt_output_formated(self,
+                                               "\e]4;%u;rgb:%x/%x/%x\a",
+                                               index,
+                                               color.r,
+                                               color.g,
+                                               color.b);
+                        } else {
+                            set_rgb_color_from_xterm_string(&self->colors.palette_256[index],
+                                                            arg_clr);
+                        }
                     }
-                    if (*arg_clr == '?') {
-                        ColorRGB color = self->colors.palette_256[index];
-                        Vt_output_formated(self,
-                                           "\e]4;%u;rgb:%x/%x/%x\a",
-                                           index,
-                                           color.r,
-                                           color.g,
-                                           color.b);
-                    } else {
-                        set_rgb_color_from_xterm_string(&self->colors.palette_256[index], arg_clr);
-                    }
+                    Vt_clear_all_proxies(self);
+                    self->defered_events.repaint = true;
                 }
-                Vt_clear_all_proxies(self);
-                self->defered_events.repaint = true;
             } break;
 
             /* 104 ; c Reset Color Number
@@ -4456,20 +4460,22 @@ static void Vt_handle_OSC(Vt* self, char c)
              */
             case 104: {
                 seq += 3;
-                if (!*seq) {
-                    Vt_init_color_palette(self);
-                } else {
-                    ++seq;
-                    for (char* index; (index = strsep(&seq, ";"));) {
-                        uint32_t idx = atoi(index);
-                        if (idx >= ARRAY_SIZE(self->colors.palette_256)) {
-                            continue;
+                if (seq < seq_end) {
+                    if (!*seq) {
+                        Vt_init_color_palette(self);
+                    } else {
+                        ++seq;
+                        for (char* index; (index = strsep(&seq, ";"));) {
+                            uint32_t idx = atoi(index);
+                            if (idx >= ARRAY_SIZE(self->colors.palette_256)) {
+                                continue;
+                            }
+                            Vt_reset_color_palette_entry(self, idx);
                         }
-                        Vt_reset_color_palette_entry(self, idx);
                     }
+                    Vt_clear_all_proxies(self);
+                    self->defered_events.repaint = true;
                 }
-                Vt_clear_all_proxies(self);
-                self->defered_events.repaint = true;
             } break;
 
             /* Modify special color palette */
@@ -4499,19 +4505,22 @@ static void Vt_handle_OSC(Vt* self, char c)
                 free(self->work_dir);
                 free(self->client_host);
                 char* uri = seq + 2; // 7;
-                if (streq_glob(uri, "file:*") && strnlen(uri, 8) == 8) {
-                    uri += 6; // skip 'file://'
-                    char* host = uri;
-                    while (*uri && *uri != '/')
-                        ++uri;
-                    ptrdiff_t s                            = uri - host;
-                    self->client_host                      = _malloc(s + 1);
-                    strncpy(self->client_host, host, s)[s] = '\0';
-                    self->work_dir                         = strdup(uri + 1 /* skip second '/' */);
-                    LOG("Vt::osc7{ host: %s, pwd: %s }\n", self->client_host, self->work_dir);
-                } else {
-                    self->work_dir = self->client_host = NULL;
-                    WRN("Bad URI \'%s\', scheme is not \'file\'\n", uri);
+
+                if (uri < seq_end) {
+                    if (streq_glob(uri, "file:*") && strnlen(uri, 8) == 8) {
+                        uri += 6; // skip 'file://'
+                        char* host = uri;
+                        while (*uri && *uri != '/')
+                            ++uri;
+                        ptrdiff_t s                            = uri - host;
+                        self->client_host                      = _malloc(s + 1);
+                        strncpy(self->client_host, host, s)[s] = '\0';
+                        self->work_dir = strdup(uri + 1 /* skip second '/' */);
+                        LOG("Vt::osc7{ host: %s, pwd: %s }\n", self->client_host, self->work_dir);
+                    } else {
+                        self->work_dir = self->client_host = NULL;
+                        WRN("Bad URI \'%s\', scheme is not \'file\'\n", uri);
+                    }
                 }
             } break;
 
@@ -4530,13 +4539,102 @@ static void Vt_handle_OSC(Vt* self, char c)
                 }
             } break;
 
-            /* Send Growl(some kind of notification daemon for OSX) notification (iTerm2) */
-            case 9:
-                CALL(self->callbacks.on_desktop_notification_sent,
-                     self->callbacks.user_data,
-                     NULL,
-                     seq + 2 /* 9; */);
-                break;
+            /* ConEmu specific OSC (used by WindowsTerminal)
+               also Send Growl notification (iTerm2) (not used) */
+            case 9: {
+                char* arg_char0 = seq + 2;
+                char* arg_char1 = seq + 2 + 1;
+                char* arg_char2 = seq + 2 + 2;
+
+                if (arg_char2 < seq_end) {
+                    if (*arg_char0 == '1' && *arg_char1 == ';') {
+                        /* ESC ] 9 ; 1 ; ms ST
+                         * Sleep. ms - number, milliseconds. (?!) */
+                        STUB("ConEmu sleep command");
+                    } else if (*arg_char0 == '2' && *arg_char1 == ';') {
+                        /* ESC ] 9 ; 2 ; ”txt“ ST - Show GUI MessageBox (txt) for any purposes. */
+                        STUB("ConEmu GUI MessageBox");
+                    } else if (*arg_char0 == '3' && *arg_char1 == ';') {
+                        /* ESC ] 9 ; 3 ; ”txt“ ST - Change ConEmu Tab to txt. Set empty string to
+                         * return original Tab text. */
+                        STUB("ConEmu rename tab");
+                    } else if (*arg_char0 == '4' && *arg_char1 == ';') {
+                        /* ESC ] 9 ; 4 ; st ; pr ST
+                           Set progress state on Windows 7 taskbar and ConEmu title. When st is 0:
+                           remove progress. When st is 1: set progress value to pr (number, 0-100).
+                           When st is 2: set error state in progress on Windows 7 taskbar, pr is
+                           optional. When st is 3: set indeterminate state. When st is 4: set paused
+                           state, pr is optional. */
+                        char* st = arg_char1 + 1;
+                        char* pr = st + 1;
+                        if (pr < seq_end) {
+                            switch (*st) {
+                                case '0': {
+                                    self->progress_bar.state = VT_PROGRESS_BAR_STATE_NONE;
+                                    self->defered_events.progress_bar_state_changed = true;
+                                } break;
+
+                                case '1': {
+                                    self->progress_bar.state = VT_PROGRESS_BAR_STATE_DISPLAY;
+                                    self->progress_bar.state = atoi(pr);
+                                    self->defered_events.progress_bar_state_changed = true;
+                                } break;
+
+                                case '2': {
+                                    self->progress_bar.state = VT_PROGRESS_BAR_STATE_ERROR;
+                                    self->defered_events.progress_bar_state_changed = true;
+                                } break;
+
+                                case '3': {
+                                    self->progress_bar.state = VT_PROGRESS_BAR_STATE_INDETERMINATE;
+                                    self->defered_events.progress_bar_state_changed = true;
+                                } break;
+
+                                case '4': {
+                                    self->progress_bar.state = VT_PROGRESS_BAR_STATE_PAUSED;
+                                    self->defered_events.progress_bar_state_changed = true;
+                                } break;
+
+                                default: {
+                                    WRN("Invalid OSC 9\n");
+                                }
+                            }
+                        }
+                    } else if (*arg_char0 == '5' && *arg_char1 == ';') {
+                        /* ESC ] 9 ; 5 ST */
+                        settings.hold_after_child_process_exit = true;
+                    } else if (*arg_char0 == '6' && *arg_char1 == ';') {
+                        /* ESC ] 9 ; 6 ; ”txt“ ST */
+                        STUB("ConEmu GUI macro");
+                    } else if (*arg_char0 == '7' && *arg_char1 == ';') {
+                        /* ESC ] 9 ; 7 ; ”cmd“ ST
+                         * Run process with arguments. (seems really unsafe) */
+                        STUB("ConEmu cmd");
+                    } else if (*arg_char0 == '8' && *arg_char1 == ';') {
+                        /* ESC ] 9 ; 8 ; “env” ST - Output value of environment variable. */
+                        STUB("ConEmu env");
+                    } else if (*arg_char0 == '9' && *arg_char1 == ';') {
+                        /* Inform ConEmu about shell current working directory. */
+                        free(self->work_dir);
+						self->work_dir = strdup(arg_char1 + 1);
+                    } else if (*arg_char0 == '1' && *arg_char1 == '0' && *arg_char2 == ';') {
+                        /* ESC ] 9 ; 10 ST - Request xterm keyboard and output emulation. */
+                        /* ESC ] 9 ; 10 ; n ST - When n is 0 turn off xterm keyboard and output
+                         * emulation. When n is 1 turn on xterm keyboard and output emulation. When
+                         * n is 2 turn off xterm output emulation. When n is 3 turn on xterm output
+                         * emulation. */
+                        STUB("ConEmu xterm keyboard emulation");
+                    } else if (*arg_char0 == '1' && *arg_char1 == '1' && *arg_char2 == ';') {
+                        /* ESC ] 9 ; 11; “txt” ST - Just a ‘comment’, skip it. */
+                    } else if (*arg_char0 == '1' && *arg_char1 == '2' && *arg_char2 == ';') {
+                        /* ESC ] 9 ; 12 ST - Treat current cursor position as prompt start. */
+                        // TODO: shell integration
+                        STUB("ConEmu shell prompt mark");
+                    } else {
+                        WRN("Invalid OSC 9\n");
+                    }
+                }
+            } break;
 
             /* Set title for tab (konsole extension) */
             case 30:
@@ -6341,6 +6439,10 @@ inline void Vt_interpret(Vt* self, char* buf, size_t bytes)
 
     if (unlikely(self->defered_events.visual_scroll_params_changed)) {
         TRY_CALL(self->callbacks.on_visual_scroll_params_changed, self->callbacks.user_data);
+    }
+
+    if (unlikely(self->defered_events.progress_bar_state_changed)) {
+        TRY_CALL(self->callbacks.on_progressbar_state_changed, self->callbacks.user_data);
     }
 
     if (self->lines.size > settings.scrollback * 2) {

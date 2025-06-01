@@ -2824,6 +2824,7 @@ static void GfxOpenGL2_draw_cursor(GfxOpenGL2* gfx, Vt* vt, const Ui* ui, uint8_
         if (settings.animate_cursor_blink && drawing_with_transparency && ui->window_in_focus) {
             Shader_use(&gfx->line_shader_alpha);
             glEnable(GL_BLEND);
+			glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
             glUniform4f_(gfx->line_shader_alpha.uniforms[1].location,
                          ColorRGBA_get_float(clr, 0),
                          ColorRGBA_get_float(clr, 1),
@@ -3755,6 +3756,7 @@ GfxOpenGL2_maybe_draw_titlebar(Gfx* self, Ui* ui, window_partial_swap_request_t*
             }
 
             glDisable(GL_BLEND);
+			glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
             Shader_use(&gfx->circle_shader);
             glUniform4f_(gfx->circle_shader.uniforms[0].location,
                          this_btn_clr[0] + L_TINT,
@@ -3786,6 +3788,7 @@ GfxOpenGL2_maybe_draw_titlebar(Gfx* self, Ui* ui, window_partial_swap_request_t*
             switch (i->type) {
                 case UI_CSD_TITLEBAR_BUTTON_CLOSE: {
                     glEnable(GL_BLEND);
+					glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
                     glViewport(xoffset_px + (vp_w - gfx->csd_close_button_texture.w) / 2,
                                yoffset_px + (vp_h - gfx->csd_close_button_texture.h) / 2,
