@@ -102,7 +102,7 @@ cleanall:
 	$(RM) -f $(EXEC) $(OBJ) $(OBJ:.o=.d)
 
 install:
-	cp $(EXEC) $(INSTALL_DIR)/
+	cp $(EXEC) $(DESTDIR)$(INSTALL_DIR)/
 
 uninstall:
 	$(RM) $(INSTALL_DIR)/$(EXEC)
