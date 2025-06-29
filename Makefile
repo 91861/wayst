@@ -1,5 +1,5 @@
 EXEC = wayst
-INSTALL_DIR = /usr/local/bin
+INSTALL_DIR ?= /usr/local/bin
 
 ARGS =
 
