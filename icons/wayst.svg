@@ -496,54 +496,40 @@
        style="display:inline;opacity:1;fill:#150f22;fill-opacity:1;stroke:none;stroke-width:0;stroke-linecap:round;stroke-miterlimit:5.1;stroke-dasharray:none;stroke-opacity:1;paint-order:fill markers stroke"
        inkscape:label="screen" />
     <g
-       id="g4921"
-       inkscape:label="content"
-       style="fill:#faffd5;fill-opacity:1"
-       transform="matrix(1.4757138,0,0,1.4757138,-2.2525336,-12.120471)"
-       sodipodi:insensitive="true">
+       id="g9"
+       inkscape:label="content">
       <g
-         id="g943"
-         inkscape:label="shadow"
-         style="opacity:0.0670289;fill:#ffffff;fill-opacity:1;filter:url(#filter1127)"
-         transform="translate(0.36038759,0.68120122)">
-        <text
-           xml:space="preserve"
+         id="g8"
+         inkscape:label="shadow">
+        <path
+           d="M 7.8693036,19.265501 H 11.496365 V 18.606035 H 7.8693036 Z"
            id="text5979"
-           style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:8.67718px;line-height:1.25;font-family:'Fira Sans Condensed';-inkscape-font-specification:'Fira Sans Condensed, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;letter-spacing:0px;word-spacing:0px;white-space:pre;shape-inside:url(#rect5981);fill:#ffffff;fill-opacity:1;stroke:none;"
-           transform="matrix(3.6739685,0,0,4.0744579,-7.028731,-43.893561)"
-           inkscape:label="promptText2"><tspan
-             x="7.7304688"
-             y="18.050695"><tspan
-               style="fill:#ffffff;fill-opacity:1">_</tspan></tspan></text>
-        <text
-           sodipodi:insensitive="true"
-           inkscape:label="promptText"
-           transform="matrix(4.2091674,0,0,4.0744579,-26.206934,-38.620223)"
-           style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:8.67718px;line-height:1.25;font-family:'Fira Sans Condensed';-inkscape-font-specification:'Fira Sans Condensed, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;letter-spacing:0px;word-spacing:0px;white-space:pre;shape-inside:url(#rect920);fill:#ffffff;fill-opacity:1;stroke:none;"
+           style="font-size:8.67718px;line-height:1.25;font-family:'Fira Sans Condensed';-inkscape-font-specification:'Fira Sans Condensed, Normal';letter-spacing:0px;word-spacing:0px;white-space:pre;display:inline;opacity:0.0670289;fill:#ffffff;filter:url(#filter1127)"
+           inkscape:label="promptText2"
+           transform="matrix(5.421726,0,0,6.0127338,-12.0931,-75.889547)"
+           aria-label="_" />
+        <path
+           d="m 8.3725801,13.330309 -0.2950241,0.590048 2.455642,1.240837 -2.455642,1.258191 0.2950241,0.581371 2.7766979,-1.457766 v -0.763592 z"
            id="text918"
-           xml:space="preserve"><tspan
-             x="7.7304688"
-             y="18.050695"><tspan
-               style="fill:#ffffff;fill-opacity:1">&gt;</tspan></tspan></text>
+           style="font-size:8.67718px;line-height:1.25;font-family:'Fira Sans Condensed';-inkscape-font-specification:'Fira Sans Condensed, Normal';letter-spacing:0px;word-spacing:0px;white-space:pre;display:inline;opacity:0.0670289;fill:#ffffff;filter:url(#filter1127)"
+           inkscape:label="promptText"
+           transform="matrix(6.2115264,0,0,6.0127338,-40.394639,-68.107609)"
+           aria-label="&gt;" />
       </g>
-      <text
-         xml:space="preserve"
+      <path
+         d="M 7.8693036,19.265501 H 11.496365 V 18.606035 H 7.8693036 Z"
          id="text928"
-         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:8.67718px;line-height:1.25;font-family:'Fira Sans Condensed';-inkscape-font-specification:'Fira Sans Condensed, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;letter-spacing:0px;word-spacing:0px;white-space:pre;shape-inside:url(#rect934);fill:#ffffff;fill-opacity:1;stroke:none;"
-         transform="matrix(3.6739685,0,0,4.0744579,-7.028731,-43.893561)"
+         style="font-size:8.67718px;line-height:1.25;font-family:'Fira Sans Condensed';-inkscape-font-specification:'Fira Sans Condensed, Normal';letter-spacing:0px;word-spacing:0px;white-space:pre;display:inline;fill:#ffffff"
          inkscape:label="promptText2"
-         sodipodi:insensitive="true"><tspan
-           x="7.7304688"
-           y="18.050695"><tspan>_</tspan></tspan></text>
-      <text
-         sodipodi:insensitive="true"
-         inkscape:label="promptText"
-         transform="matrix(4.2091674,0,0,4.0744579,-26.206934,-38.620223)"
-         style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:8.67718px;line-height:1.25;font-family:'Fira Sans Condensed';-inkscape-font-specification:'Fira Sans Condensed, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;letter-spacing:0px;word-spacing:0px;white-space:pre;shape-inside:url(#rect937);fill:#ffffff;fill-opacity:1;stroke:none;"
+         transform="matrix(5.421726,0,0,6.0127338,-12.624929,-76.894805)"
+         aria-label="_" />
+      <path
+         d="m 8.3725801,13.330309 -0.2950241,0.590048 2.455642,1.240837 -2.455642,1.258191 0.2950241,0.581371 2.7766979,-1.457766 v -0.763592 z"
          id="text932"
-         xml:space="preserve"><tspan
-           x="7.7304688"
-           y="18.050695"><tspan>&gt;</tspan></tspan></text>
+         style="font-size:8.67718px;line-height:1.25;font-family:'Fira Sans Condensed';-inkscape-font-specification:'Fira Sans Condensed, Normal';letter-spacing:0px;word-spacing:0px;white-space:pre;display:inline;fill:#ffffff"
+         inkscape:label="promptText"
+         transform="matrix(6.2115264,0,0,6.0127338,-40.926468,-69.112867)"
+         aria-label="&gt;" />
     </g>
   </g>
 </svg>
