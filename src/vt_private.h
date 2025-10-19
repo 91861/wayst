@@ -60,7 +60,7 @@ static inline void Vt_mark_proxy_damaged_cell(Vt* self, size_t line, size_t rune
         } break;
 
         case VT_LINE_DAMAGE_SHIFT: {
-
+            ASSERT_UNREACHABLE;
         } break;
 
         default:

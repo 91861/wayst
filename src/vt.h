@@ -458,7 +458,7 @@ typedef enum
      * update state. vt_line_damage_t.front contains the index into synchronized_update_state.lines
      * where the original proxy is now stored.
      *
-     * A line with this danage model should never be presented for rendering by
+     * A line with this damage model should never be presented for rendering by
      * Vt_get_visible_lines() */
     VT_LINE_DAMAGE_PROXIES_MOVED_TO_CLONE,
 } vt_line_damage_type_e;

@@ -1068,6 +1068,7 @@ void GfxOpenGL2_resize(Gfx* self, uint32_t w, uint32_t h, Pair_uint32_t cells)
 
     GfxOpenGL2_realloc_damage_record(gl2, cells.second);
     GfxOpenGL2_regenerate_line_quad_vbo(gl2, cells.second);
+    GfxOpenGL2_external_framebuffer_damage(self);
     gl2->line_damage.n_lines = cells.second;
 }
 
@@ -1360,6 +1361,8 @@ static void line_render_pass_run(line_render_pass_t* self, uint8_t buffer_age);
 static bool should_create_line_render_pass(const line_render_pass_args_t* args, uint8_t buffer_age)
 {
     vt_line_damage_t* dmg = OR(args->damage, &args->vt_line->damage);
+
+    assert(dmg->type != VT_LINE_DAMAGE_PROXIES_MOVED_TO_CLONE);
 
     bool has_sixels =
       (args->vt_line->graphic_attachments && args->vt_line->graphic_attachments->sixels);
@@ -2457,9 +2460,9 @@ static void line_render_pass_run_line_subpass(const line_render_pass_t* pass,
                                          new_size);
 
                 glEnable(GL_BLEND);
-				glBlendFuncSeparate_(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
+                glBlendFuncSeparate_(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
                 glDrawArrays(QUAD_DRAW_MODE, 0, pass->args.gl2->vec_vertex_buffer2.size / 2);
-				glDisable(GL_BLEND);
+                glDisable(GL_BLEND);
                 ARRAY_BUFFER_ORPHAN(pass->args.gl2->flex_vbo.size);
             }
 
@@ -2824,7 +2827,7 @@ static void GfxOpenGL2_draw_cursor(GfxOpenGL2* gfx, Vt* vt, const Ui* ui, uint8_
         if (settings.animate_cursor_blink && drawing_with_transparency && ui->window_in_focus) {
             Shader_use(&gfx->line_shader_alpha);
             glEnable(GL_BLEND);
-			glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
             glUniform4f_(gfx->line_shader_alpha.uniforms[1].location,
                          ColorRGBA_get_float(clr, 0),
                          ColorRGBA_get_float(clr, 1),
@@ -3756,7 +3759,7 @@ GfxOpenGL2_maybe_draw_titlebar(Gfx* self, Ui* ui, window_partial_swap_request_t*
             }
 
             glDisable(GL_BLEND);
-			glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
             Shader_use(&gfx->circle_shader);
             glUniform4f_(gfx->circle_shader.uniforms[0].location,
                          this_btn_clr[0] + L_TINT,
@@ -3788,7 +3791,7 @@ GfxOpenGL2_maybe_draw_titlebar(Gfx* self, Ui* ui, window_partial_swap_request_t*
             switch (i->type) {
                 case UI_CSD_TITLEBAR_BUTTON_CLOSE: {
                     glEnable(GL_BLEND);
-					glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+                    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
                     glViewport(xoffset_px + (vp_w - gfx->csd_close_button_texture.w) / 2,
                                yoffset_px + (vp_h - gfx->csd_close_button_texture.h) / 2,

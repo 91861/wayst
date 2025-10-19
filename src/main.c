@@ -116,7 +116,7 @@ typedef struct
     /* do vt modes allow cursor blinking */
     bool cursor_blink_animation_should_play_vt;
 
-    bool tex_blink_animation_should_play;
+    bool text_blink_animation_should_play;
     bool csd_mode_changed_before_resize;
     bool did_paint_in_sync_update_mode;
 
@@ -420,7 +420,7 @@ static void App_init(App* self)
     self->ui.draw_cursor_blinking               = true;
     self->cursor_blink_animation_should_play    = false;
     self->cursor_blink_animation_should_play_vt = true;
-    self->tex_blink_animation_should_play       = true;
+    self->text_blink_animation_should_play      = true;
     self->ui.cursor_fade_fraction               = 1.0;
 
     /* We may have gotten some events before callbacks were connected. We can ignore everything
@@ -540,15 +540,15 @@ static void App_run(App* self)
         }
 
         if (self->gfx->has_blinking_text) {
-            if (!self->tex_blink_animation_should_play) {
-                self->tex_blink_animation_should_play = true;
+            if (!self->text_blink_animation_should_play) {
+                self->text_blink_animation_should_play = true;
                 TimerManager_schedule_point(
                   &self->timer_manager,
                   self->text_blink_switch_timer,
                   TimePoint_ms_from_now(settings.cursor_blink_interval_ms));
             }
-        } else if (self->tex_blink_animation_should_play) {
-            self->tex_blink_animation_should_play = false;
+        } else if (self->text_blink_animation_should_play) {
+            self->text_blink_animation_should_play = false;
             TimerManager_cancel(&self->timer_manager, self->text_blink_switch_timer);
         }
 
@@ -2674,7 +2674,7 @@ static void App_progress_bar_state_changed_handler(void* self)
         Window_set_urgent(app->win);
     }
 
-	// TODO: add graphics for this
+    // TODO: add graphics for this
 
     app->previous_progress_bar_state = app->vt.progress_bar.state;
 }

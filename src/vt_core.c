@@ -73,8 +73,8 @@ static vt_line_damage_t VtLine_diff_to_damage(VtLine*           line_a,
 
     size_t max_size        = MAX(line_a->data.size, line_b->data.size);
     size_t min_size        = MIN(line_a->data.size, line_b->data.size);
-    size_t dmg_range_begin = 0;
-    size_t dmg_range_end   = min_size != max_size ? max_size : 0;
+    size_t dmg_range_begin = min_size;
+    size_t dmg_range_end   = 0;
     bool   has_cell_diff   = false;
 
     for (size_t i = 0; i < min_size; ++i) {
@@ -82,6 +82,18 @@ static vt_line_damage_t VtLine_diff_to_damage(VtLine*           line_a,
         VtRune* rune_b = &line_b->data.buf[i];
 
         if (memcmp(rune_a, rune_b, sizeof(VtRune))) {
+            dmg_range_begin = MIN(dmg_range_begin, i);
+            dmg_range_end   = MAX(dmg_range_end, i);
+            has_cell_diff   = true;
+        }
+    }
+
+    VtLine* longer_line = line_a->data.size > line_b->data.size ? line_a : line_b;
+
+    for (size_t i = min_size; i < max_size; ++i) {
+        VtRune* rune = &longer_line->data.buf[i];
+
+        if (!Rune_is_blank(rune->rune) || !VtRune_bg_is_default(rune)) {
             dmg_range_begin = MIN(dmg_range_begin, i);
             dmg_range_end   = MAX(dmg_range_end, i);
             has_cell_diff   = true;
@@ -99,11 +111,15 @@ static vt_line_damage_t VtLine_diff_to_damage(VtLine*           line_a,
         default:;
     }
 
-    if (has_cell_diff || damage->type != VT_LINE_DAMAGE_NONE) {
+    if (has_cell_diff) {
         return (vt_line_damage_t){
             .type  = VT_LINE_DAMAGE_RANGE,
             .front = dmg_range_begin,
             .end   = dmg_range_end,
+        };
+    } else if (damage->type != VT_LINE_DAMAGE_NONE) {
+        return (vt_line_damage_t){
+            .type = VT_LINE_DAMAGE_FULL,
         };
     } else {
         return (vt_line_damage_t){
@@ -3897,7 +3913,7 @@ static void Vt_handle_APC(Vt* self, char c)
                 uint32_t                      image_width  = 0;
                 uint32_t                      image_height = 0;
                 bool                          complete     = true;
-                char delete                                = 'a';
+                char                          delete       = 'a';
                 int quiet_level = 0; // 1 - supress ok, 2 - supress ok and failure messages
 
                 vt_image_proto_display_args_t display_args = {
@@ -4616,7 +4632,7 @@ static void Vt_handle_OSC(Vt* self, char c)
                     } else if (*arg_char0 == '9' && *arg_char1 == ';') {
                         /* Inform ConEmu about shell current working directory. */
                         free(self->work_dir);
-						self->work_dir = strdup(arg_char1 + 1);
+                        self->work_dir = strdup(arg_char1 + 1);
                     } else if (*arg_char0 == '1' && *arg_char1 == '0' && *arg_char2 == ';') {
                         /* ESC ] 9 ; 10 ST - Request xterm keyboard and output emulation. */
                         /* ESC ] 9 ; 10 ; n ST - When n is 0 turn off xterm keyboard and output
@@ -4880,8 +4896,7 @@ static void Vt_handle_OSC(Vt* self, char c)
 
                     /* COMMAND_FINISHED */
                     case 'D':
-                        if (Vt_alt_buffer_enabled(self) &&
-                            Vt_shell_integration_get_active_command(self)) {
+                        if (Vt_shell_integration_get_active_command(self)) {
                             Vt_shell_integration_end_execution(
                               self,
                               strnlen(seq, 6) >= 6 ? seq + 6 : NULL /* 133;D; */);
@@ -5326,6 +5341,8 @@ static inline void Vt_clear_display_and_scrollback(Vt* self)
 
     Vector_clear_RcPtr_VtImageSurfaceView(&self->image_views);
     Vector_clear_RcPtr_VtImageSurface(&self->images);
+    Vector_clear_RcPtr_VtCommand(&self->shell_commands);
+    self->shell_integration_state = VT_SHELL_INTEG_STATE_NONE;
 
     Vt_maybe_emit_visual_scroll_change(self);
 }
@@ -5382,7 +5399,6 @@ static void Vt_overwrite_char_at(Vt* self, size_t col, size_t row, VtRune c)
  * Insert character literal at cursor position, deal with reaching column limit */
 __attribute__((hot)) static void Vt_insert_char_at_cursor(Vt* self, VtRune c)
 {
-
     self->defered_events.repaint = true;
 
     if (self->wrap_next && !self->modes.no_wraparound) {
@@ -6327,20 +6343,15 @@ static void Vt_remove_scrollback(Vt* self, size_t lines)
 
     lines = MIN(lines, (self->lines.size - Vt_row(self)));
     Vector_remove_at_VtLine(&self->lines, 0, lines);
+
+    for (size_t i = 0; i < self->shell_commands.size; ++i) {
+        VtCommand* cmd = RcPtr_get_VtCommand(Vector_at_RcPtr_VtCommand(&self->shell_commands, i));
+        if (!cmd || cmd->command_start_row < lines) {
+            Vector_remove_at_RcPtr_VtCommand(&self->shell_commands, i, 1);
+        }
+    }
+
     Vt_shift_global_line_index_refs(self, lines, -(int64_t)lines, false);
-
-    for (RcPtr_VtCommand* rpp = NULL;
-         (rpp = Vector_iter_RcPtr_VtCommand(&self->shell_commands, rpp));) {
-        VtCommand* cmd = RcPtr_get_VtCommand(rpp);
-
-        if (cmd->command_start_row < (size_t)lines)
-            RcPtr_destroy_VtCommand(rpp);
-    }
-
-    while (self->shell_commands.size && (!RcPtr_get_VtCommand(self->shell_commands.buf) ||
-                                         RcPtr_is_unique_VtCommand(self->shell_commands.buf))) {
-        Vector_remove_at_RcPtr_VtCommand(&self->shell_commands, 0, 1);
-    }
 
     while (self->image_views.size) {
         bool removed = false;

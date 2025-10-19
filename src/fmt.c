@@ -400,10 +400,10 @@ __attribute__((sentinel)) char* fmt_new_interpolated(const char* fmt,
                 Map_insert_size_t_fmt_arg_t(&vars, (size_t)a->name, *a);
 
 #ifdef DEBUG
-#endif
                 char* vf = fmt_to_string(a);
                 LOG(" %s:%s", a->name, vf);
                 free(vf);
+#endif
             }
         } while (a);
         va_end(ap);

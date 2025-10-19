@@ -88,7 +88,7 @@ typedef struct
     VtLineProxy      cursor_proxy;
     vt_line_damage_t cursor_damage;
 
-    /* client-size window decoratons on wayland */
+    /* client-side window decoratons on wayland */
     struct ui_csd_data_t
     {
         uint16_t                             titlebar_height_px;
