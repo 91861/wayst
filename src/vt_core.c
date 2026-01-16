@@ -12,6 +12,7 @@
 #include "vt_shell.h"
 
 #include <fcntl.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <stdint.h>
 #include <string.h>
@@ -2911,7 +2912,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                             case 'r': {
                                 int64_t top = 0, bottom = Vt_row(self) - 1;
                                 if (*seq != 'r') {
-                                    if (sscanf(seq, "%ld;%ld", &top, &bottom) == EOF) {
+                                    if (sscanf(seq, "%"PRId64";%"PRId64, &top, &bottom) == EOF) {
                                         WRN("invalid CSI(DECSTBM) sequence %s\n", seq);
                                         break;
                                     }
@@ -3964,7 +3965,7 @@ static void Vt_handle_APC(Vt* self, char c)
                     } else if (strstr(arg, "i=")) {
                         long tmp = atol(arg + 2);
                         if (tmp > 0) {
-                            id = MIN(tmp, UINT32_MAX);
+                            id = MIN(tmp, (long)UINT32_MAX);
                         }
                     } else if (strstr(arg, "s=")) {
                         image_width = atoi(arg + 2);

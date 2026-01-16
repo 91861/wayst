@@ -17,6 +17,7 @@
 #include "util.h"
 #include "window.h"
 #include <stdint.h>
+#include <inttypes.h>
 
 #include <stdio.h>
 #include <time.h>
@@ -1538,7 +1539,7 @@ static void App_do_extern_pipe(App* self)
 
         int64_t window_id = Window_get_window_id(self->win);
         if (window_id >= 0) {
-            snprintf(tmp[ti], sizeof(tmp[ti]), "--x-window-id=%ld", window_id);
+            snprintf(tmp[ti], sizeof(tmp[ti]), "--x-window-id=%"PRId64, window_id);
             argv[argc++] = tmp[ti++];
         }
 

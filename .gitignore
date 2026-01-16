@@ -16,3 +16,5 @@ src/.cache/*
 gmon.out
 prof_output
 perf_graph*.png
+vgcore.*
+.ccls-cache

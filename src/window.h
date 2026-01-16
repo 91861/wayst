@@ -70,7 +70,8 @@ typedef struct
 typedef struct
 {
     double target_frame_time_ms;
-    alignas(alignof(void*)) uint8_t extend_data;
+
+    uint8_t extend_data __attribute__((__aligned__));
 } WindowStatic;
 
 typedef struct
@@ -135,7 +136,7 @@ struct IWindow
     int64_t (*get_window_id)(struct WindowBase* self);
     void (*notify_initialization_complete)(struct WindowBase*     self,
                                            WindowSystemLaunchEnv* launch_env);
-    WindowStatic* (*get_static_ptr)();
+    WindowStatic* (*get_static_ptr)(struct WindowBase* self);
 };
 
 typedef struct WindowBase
@@ -194,7 +195,7 @@ typedef struct WindowBase
 
     struct IWindow* interface;
 
-    alignas(alignof(void*)) uint8_t extend_data;
+    uint8_t extend_data __attribute__((__aligned__));
 
 } WindowBase;
 
@@ -332,7 +333,7 @@ static inline int64_t Window_get_window_id(struct WindowBase* self)
 
 static inline WindowStatic* Window_get_static_ptr(struct WindowBase* self)
 {
-    return self->interface->get_static_ptr();
+    return self->interface->get_static_ptr(self);
 }
 
 static inline void Window_notify_initialization_complete(struct WindowBase*     self,
