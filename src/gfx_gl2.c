@@ -1526,13 +1526,17 @@ static void line_render_pass_set_up_subpasses(line_render_pass_t* self, uint8_t 
 
                 uint32_t n_lines = self->args.gl2->line_damage.n_lines;
                 uint32_t ix      = self->args.visual_index + 1 * n_lines + (buffer_age * n_lines);
-                uint16_t previous_frame_length = self->args.gl2->line_damage.line_length[ix];
-                uint16_t previous_frame_id = self->args.gl2->line_damage.proxy_color_component[ix];
 
-                if (previous_frame_id != ln->proxy.data[PROXY_INDEX_TEXTURE]) {
+                if ((buffer_age + 1) < MAX_TRACKED_FRAME_DAMAGE) {
+                    uint16_t prev_frame_len = self->args.gl2->line_damage.line_length[ix];
+                    uint16_t prev_frame_id  = self->args.gl2->line_damage.proxy_color_component[ix];
+                    if (prev_frame_id != ln->proxy.data[PROXY_INDEX_TEXTURE]) {
+                        self->clear_cell_count = Vt_col(self->args.vt);
+                    } else if (prev_frame_len > self->length) {
+                        self->clear_cell_count = prev_frame_len;
+                    }
+                } else {
                     self->clear_cell_count = Vt_col(self->args.vt);
-                } else if (previous_frame_length > self->length) {
-                    self->clear_cell_count = previous_frame_length;
                 }
 
                 self->subpass_args[0] = (line_render_subpass_args_t){
