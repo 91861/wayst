@@ -148,7 +148,7 @@ void Vt_select_set_front_cell(Vt* self, int32_t x, int32_t y)
     }
 }
 
-static void Vt_select_clamp_to_buffer(Vt* self)
+void Vt_select_clamp_to_buffer(Vt* self)
 {
     self->selection.begin_line = MIN(self->selection.begin_line, self->lines.size - 1);
     self->selection.end_line   = MIN(self->selection.end_line, self->lines.size - 1);
@@ -159,7 +159,6 @@ void Vt_select_end(Vt* self)
     if (self->selection.mode) {
         Vt_mark_proxies_damaged_in_selected_region(self);
     }
-    Vt_select_clamp_to_buffer(self);
     self->selection.mode = SELECT_MODE_NONE;
     CALL(self->callbacks.on_select_end, self->callbacks.user_data);
     self->defered_events.repaint = true;

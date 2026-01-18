@@ -14,6 +14,7 @@ __attribute__((cold)) char*        pty_string_prettyfy(const char* str, int32_t 
 void                               Vt_start_synchronized_update(Vt* self);
 
 static void Vt_clear_line_sixel_proxies(Vt* self, VtLine* ln);
+void        Vt_select_clamp_to_buffer(Vt* self);
 
 static inline void Vt_output(Vt* self, const char* buf, size_t len)
 {
@@ -100,12 +101,14 @@ static inline void Vt_clear_proxies_in_region(Vt* self, size_t begin, size_t end
 
 static inline void Vt_mark_proxies_damaged_in_selected_region(Vt* self)
 {
+    Vt_select_clamp_to_buffer(self);
     Vt_mark_proxies_damaged_in_region(self, self->selection.begin_line, self->selection.end_line);
 }
 
 static inline void Vt_mark_proxies_damaged_in_selected_region_and_scroll_region(Vt* self)
 {
     if (self->selection.mode) {
+        Vt_select_clamp_to_buffer(self);
         size_t selection_lo      = MIN(self->selection.begin_line, self->selection.end_line);
         size_t selection_hi      = MAX(self->selection.begin_line, self->selection.end_line);
         size_t scroll_global_top = Vt_get_scroll_region_top(self);
