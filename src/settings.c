@@ -834,7 +834,7 @@ static void settings_make_default()
         .general_lcd_filter = LCD_FILTER_H_RGB,
 
         .bg        = { .r = 0,   .g = 0,   .b = 0,   .a = 240 },
-        .bghl      = { .r = 50,  .g = 50,  .b = 50,  .a = 240 },
+        .bghl      = { .r = 50,  .g = 50,  .b = 50,  .a = 255 },
         .cursor_bg = { .r = 255, .g = 255, .b = 255, .a = 255 },
         .cursor_fg = { .r =   0, .g =   0, .b =   0 },
         .fg        = { .r = 255, .g = 255, .b = 255 },
