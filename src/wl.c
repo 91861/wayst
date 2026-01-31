@@ -12,12 +12,12 @@
 #include "util.h"
 #include "vector.h"
 
+#include <limits.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <limits.h>
 
 #include <errno.h>
 #include <fcntl.h>
@@ -2402,6 +2402,38 @@ static struct wl_registry_listener registry_listener = {
 /* End registry listener */
 
 /* cursor */
+__attribute__((sentinel)) static struct wl_cursor*
+cursor_theme_get_cursor(struct wl_cursor_theme* theme, const char* names, ...)
+{
+    struct wl_cursor* cursor;
+    const char*       name;
+
+    va_list args;
+    va_start(args, names);
+    for (;;) {
+        name = va_arg(args, char*);
+
+        if (!name) {
+            break;
+        }
+
+        cursor = wl_cursor_theme_get_cursor(theme, name);
+
+        if (cursor) {
+            break;
+        } else {
+            LOG("cursor `%s` not found\n", name);
+        }
+    }
+    va_end(args);
+
+    if (!cursor) {
+        WRN("failed to load cursor `%s`\n", names);
+    }
+
+    return cursor;
+}
+
 static void setup_cursor(struct WindowBase* self)
 {
     char* ssize = getenv("XCURSOR_SIZE");
@@ -2416,28 +2448,40 @@ static void setup_cursor(struct WindowBase* self)
         return;
     }
 
-    globalWl->cursor_arrow    = wl_cursor_theme_get_cursor(globalWl->cursor_theme, "left_ptr");
-    globalWl->cursor_beam     = wl_cursor_theme_get_cursor(globalWl->cursor_theme, "xterm");
-    globalWl->cursor_hand     = wl_cursor_theme_get_cursor(globalWl->cursor_theme, "hand1");
-    globalWl->cursor_top_side = wl_cursor_theme_get_cursor(globalWl->cursor_theme, "top_side");
-    globalWl->cursor_bottom_side =
-      wl_cursor_theme_get_cursor(globalWl->cursor_theme, "bottom_side");
-    globalWl->cursor_left_side  = wl_cursor_theme_get_cursor(globalWl->cursor_theme, "left_side");
-    globalWl->cursor_right_side = wl_cursor_theme_get_cursor(globalWl->cursor_theme, "right_side");
-    globalWl->cursor_top_left_corner =
-      wl_cursor_theme_get_cursor(globalWl->cursor_theme, "top_left_corner");
-    globalWl->cursor_top_right_corner =
-      wl_cursor_theme_get_cursor(globalWl->cursor_theme, "top_right_corner");
-    globalWl->cursor_bottom_left_corner =
-      wl_cursor_theme_get_cursor(globalWl->cursor_theme, "bottom_left_corner");
-    globalWl->cursor_bottom_right_corner =
-      wl_cursor_theme_get_cursor(globalWl->cursor_theme, "bottom_right_corner");
-    globalWl->cursor_move = wl_cursor_theme_get_cursor(globalWl->cursor_theme, "fleur");
+    globalWl->cursor_arrow =
+      cursor_theme_get_cursor(globalWl->cursor_theme, "default", "left_ptr", NULL);
 
-    if (!globalWl->cursor_arrow || !globalWl->cursor_beam) {
-        WRN("Failed to load cursor image");
-        return;
-    }
+    globalWl->cursor_beam = cursor_theme_get_cursor(globalWl->cursor_theme, "text", "xterm", NULL);
+
+    globalWl->cursor_hand =
+      cursor_theme_get_cursor(globalWl->cursor_theme, "pointer", "hand1", NULL);
+
+    globalWl->cursor_top_side =
+      cursor_theme_get_cursor(globalWl->cursor_theme, "n-resize", "top_side", NULL);
+
+    globalWl->cursor_bottom_side =
+      cursor_theme_get_cursor(globalWl->cursor_theme, "s-resize", "bottom_side", NULL);
+
+    globalWl->cursor_left_side =
+      cursor_theme_get_cursor(globalWl->cursor_theme, "w-resize", "left_side", NULL);
+
+    globalWl->cursor_right_side =
+      cursor_theme_get_cursor(globalWl->cursor_theme, "e-resize", "right_side", NULL);
+
+    globalWl->cursor_top_left_corner =
+      cursor_theme_get_cursor(globalWl->cursor_theme, "nw-resize", "top_left_corner", NULL);
+
+    globalWl->cursor_top_right_corner =
+      cursor_theme_get_cursor(globalWl->cursor_theme, "ne-resize", "top_right_corner", NULL);
+
+    globalWl->cursor_bottom_left_corner =
+      cursor_theme_get_cursor(globalWl->cursor_theme, "sw-resize", "bottom_left_corner", NULL);
+
+    globalWl->cursor_bottom_right_corner =
+      cursor_theme_get_cursor(globalWl->cursor_theme, "se-resize", "bottom_right_corner", NULL);
+
+    globalWl->cursor_move =
+      cursor_theme_get_cursor(globalWl->cursor_theme, "all-scroll", "fleur", NULL);
 
     globalWl->cursor_surface = wl_compositor_create_surface(globalWl->compositor);
 }
@@ -2451,6 +2495,10 @@ static void cursor_set(struct wl_cursor* what, uint32_t serial)
     globalWl->serial = serial;
 
     if (!globalWl->pointer) {
+        return;
+    }
+
+    if (!globalWl->cursor_arrow) {
         return;
     }
 
@@ -2968,7 +3016,9 @@ static void WindowWl_destroy(struct WindowBase* self)
     wl_pointer_release(globalWl->pointer);
 
     if (globalWl->cursor_theme) {
-        wl_surface_destroy(globalWl->cursor_surface);
+        if (globalWl->cursor_surface) {
+            wl_surface_destroy(globalWl->cursor_surface);
+        }
         wl_cursor_theme_destroy(globalWl->cursor_theme);
     }
 
