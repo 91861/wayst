@@ -2912,7 +2912,7 @@ __attribute__((hot)) static inline void Vt_handle_CSI(Vt* self, char c)
                             case 'r': {
                                 int64_t top = 0, bottom = Vt_row(self) - 1;
                                 if (*seq != 'r') {
-                                    if (sscanf(seq, "%"PRId64";%"PRId64, &top, &bottom) == EOF) {
+                                    if (sscanf(seq, "%" PRId64 ";%" PRId64, &top, &bottom) == EOF) {
                                         WRN("invalid CSI(DECSTBM) sequence %s\n", seq);
                                         break;
                                     }
@@ -4226,7 +4226,8 @@ static void Vt_handle_DCS(Vt* self, char c)
                 }
                 return;
             default: {
-                char *graphic_data, *fst_non_arg = (char*)seq;
+                const char* graphic_data;
+                char*       fst_non_arg = (char*)seq;
 
                 while ((isdigit(*fst_non_arg) || *fst_non_arg == ';')) {
                     ++fst_non_arg;
