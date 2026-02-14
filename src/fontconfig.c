@@ -21,24 +21,27 @@ FontconfigContext FontconfigContext_new()
     return self;
 }
 
-char* FontconfigContext_get_file(FontconfigContext*   self,
+char* FontconfigContext_get_file(FontconfigContext* self,
                                  const char* restrict opt_family,
                                  const char* restrict opt_style,
-                                 uint32_t             opt_size,
-                                 bool*                opt_out_is_bitmap,
-                                 bool*                opt_out_is_exact)
+                                 uint32_t opt_size,
+                                 bool*    opt_out_is_bitmap,
+                                 bool*    opt_out_is_exact)
 {
     ASSERT(self && self->cfg, "config loaded");
 
     char*       retval                 = NULL;
     Vector_char pattern_string_builder = Vector_new_char();
     opt_family                         = OR(opt_family, "");
+
     Vector_pushv_char(&pattern_string_builder, opt_family, strlen(opt_family));
+
     if (opt_size) {
         char tmp[64];
         int  len = snprintf(tmp, sizeof(tmp), "-%u", opt_size);
         Vector_pushv_char(&pattern_string_builder, tmp, len);
     }
+
     if (opt_style) {
         Vector_push_char(&pattern_string_builder, ':');
         Vector_pushv_char(&pattern_string_builder, opt_style, strlen(opt_style) + 1);
@@ -51,15 +54,27 @@ char* FontconfigContext_get_file(FontconfigContext*   self,
     }
 
     FcPattern* pattern = FcNameParse((FcChar8*)pattern_string_builder.buf);
-    FcConfigSubstitute(self->cfg, pattern, FcMatchPattern);
+
+    if (FcConfigSubstitute(self->cfg, pattern, FcMatchPattern) == FcFalse) {
+        ERR("FcConfigSubstitute failed");
+    }
+
     FcDefaultSubstitute(pattern);
+
     FcFontSet* font_set = FcFontSetCreate();
     FcResult   result;
+
+    // should be called only after FcConfigSubstitute and FcDefaultSubstitute have been called for
+    // pattern
     FcPattern* match = FcFontMatch(self->cfg, pattern, &result);
+
     FcPatternDestroy(pattern);
 
     if (match && result == FcResultMatch) {
-        FcFontSetAdd(font_set, match);
+        // the pattern is not copied
+        if (FcFontSetAdd(font_set, match) == FcFalse) {
+            ERR("FcFontSetAdd failed");
+        }
     }
 
     if (font_set) {
@@ -83,10 +98,11 @@ char* FontconfigContext_get_file(FontconfigContext*   self,
             FcPatternDestroy(filtered); // frees file
         }
     }
-    FcPatternDestroy(match);
+
     if (font_set) {
-        FcFontSetDestroy(font_set);
+        FcFontSetDestroy(font_set); // destroys referenced patterns
     }
+
     Vector_destroy_char(&pattern_string_builder);
 
     if (unlikely(settings.debug_font)) {
