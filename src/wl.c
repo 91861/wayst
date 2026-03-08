@@ -1485,10 +1485,14 @@ static void keyboard_handle_keymap(void*               data,
         ERR("Failed to create keyboard state");
 
     ASSERT(settings.locale.str, "locale string is NULL")
-    const char* compose_file_name = getenv("XCOMPOSEFILE");
-    FILE*       compose_file      = NULL;
+    const char* compose_file_name  = getenv("XCOMPOSEFILE");
+    FILE*       compose_file       = NULL;
+    bool        using_compose_file = false;
+
     if (compose_file_name && *compose_file_name && (compose_file = fopen(compose_file_name, "r"))) {
-        LOG("using XCOMPOSEFILE = %s\n", compose_file_name);
+        using_compose_file = true;
+        LOG("using XCOMPOSEFILE \'%s\'\n", compose_file_name);
+
         globalWl->xkb.compose_table = xkb_compose_table_new_from_file(globalWl->xkb.ctx,
                                                                       compose_file,
                                                                       settings.locale.str,
@@ -1503,16 +1507,20 @@ static void keyboard_handle_keymap(void*               data,
     }
 
     if (!globalWl->xkb.compose_table) {
-        ERR("Failed to generate keyboard compose table, is locale \'%s\' "
-            "correct?",
-            settings.locale.str);
-    }
+        if (using_compose_file) {
+            WRN("Failed to generate keyboard compose table from XCOMPOSEFILE \'%s\'\n",
+                compose_file_name);
+        } else {
+            WRN("Failed to generate keyboard compose table from locale \'%s\'\n",
+                settings.locale.str);
+        }
+    } else {
+        globalWl->xkb.compose_state =
+          xkb_compose_state_new(globalWl->xkb.compose_table, XKB_COMPOSE_STATE_NO_FLAGS);
 
-    globalWl->xkb.compose_state =
-      xkb_compose_state_new(globalWl->xkb.compose_table, XKB_COMPOSE_STATE_NO_FLAGS);
-
-    if (!globalWl->xkb.compose_state) {
-        ERR("Failed to create compose state");
+        if (!globalWl->xkb.compose_state) {
+            WRN("Failed to create keyboard compose state");
+        }
     }
 
     globalWl->xkb.ctrl_mask  = 1 << xkb_keymap_mod_get_index(globalWl->xkb.keymap, "Control");
