@@ -2451,7 +2451,9 @@ static void setup_cursor(struct WindowBase* self)
         size = WL_DEFAULT_CURSOR_SIZE;
     }
 
-    if (!(globalWl->cursor_theme = wl_cursor_theme_load(NULL, size, globalWl->shm))) {
+    if (!(globalWl->cursor_theme = wl_cursor_theme_load(getenv("XCURSOR_THEME"),
+                                                        size,
+                                                        globalWl->shm))) {
         WRN("Failed to load cursor theme\n");
         return;
     }
