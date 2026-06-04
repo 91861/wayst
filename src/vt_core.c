@@ -3751,6 +3751,11 @@ __attribute__((hot)) static void Vt_handle_single_argument_SGR(Vt*     self,
             r->strikethrough = false;
             break;
 
+        /* Not overlined (widely supported extension) */
+        case 55:
+            r->overline = false;
+            break;
+
         /* Set foreground color to default, ECMA-48 3rd */
         case 39:
             Vt_set_fg_color_default(self, opt_target);
