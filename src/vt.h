@@ -1071,17 +1071,32 @@ static inline ColorRGB Vt_rune_ln_clr(const Vt* self, const VtRune* rune)
 
 static inline ColorRGB Vt_rune_cursor_fg(const Vt* self, const VtRune* rune)
 {
-    return (settings.cursor_color_static_fg || !rune)
-             ? settings.cursor_fg
-             : ColorRGB_from_RGBA(rune ? Vt_rune_bg(self, rune) : self->colors.bg);
+    if (settings.cursor_color_static_fg) {
+        return settings.cursor_fg;
+    }
+
+    if (rune) {
+        return ColorRGB_from_RGBA(Vt_rune_bg(self, rune));
+    }
+
+    return ColorRGB_from_RGBA(self->colors.bg);
 }
 
 static inline ColorRGBA Vt_rune_cursor_bg(const Vt* self, const VtRune* rune)
 {
-    return self->colors.cursor.enabled ? self->colors.cursor.bg
-           : (settings.cursor_color_static_bg || !rune)
-             ? settings.cursor_bg
-             : ColorRGBA_from_RGB(Vt_rune_fg(self, rune));
+    if (self->colors.cursor.enabled) {
+        return self->colors.cursor.bg;
+    }
+
+    if (settings.cursor_color_static_bg) {
+        return settings.cursor_bg;
+    }
+
+    if (rune) {
+        return ColorRGBA_from_RGB(Vt_rune_fg(self, rune));
+    }
+
+    return ColorRGBA_from_RGB(self->colors.fg);
 }
 
 static ColorRGB Vt_rune_cursor_ln_clr(const Vt* self, const VtRune* rune)
