@@ -3,7 +3,7 @@
 #
 #  This file format uses ini-like key-value syntax.
 #
-#  All options are equivalent to coresponding command line options (except for lower precedence).
+#  All options are equivalent to corresponding command line options (except for lower precedence).
 #  To get a list of all options run `wayst --help`.
 
 
@@ -379,12 +379,12 @@
 ## Close terminal
 #bind-key-quit=C+S+q
 
-## Print debuging information to stderr
+## Print debugging information to stderr
 #bind-key-debug=C+S+slash
 
 
 
-#=======================================[ DEBUGING OPTIONS ]========================================
+#=======================================[ DEBUGGING OPTIONS ]=======================================
 
 ## Output pty communication to stderr
 #debug-pty = true
