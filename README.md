@@ -58,7 +58,7 @@ To target OpenGL ES 2.0 instead of OpenGL 2.1 set ```renderer=gles20```.
 
 To build without libutf8proc set ```libutf8proc=off```.
 
-To build with debuging symbols set ```mode=debug``` or ```mode=debugoptimized```.
+To build with debugging symbols set ```mode=debug``` or ```mode=debugoptimized```.
 
 
 ## Installation from AUR
